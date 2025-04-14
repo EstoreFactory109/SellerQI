@@ -1,0 +1,115 @@
+const mongoose = require("mongoose");
+
+const userSchema = new mongoose.Schema(
+    {
+      firstName: {
+        type: String,
+        required: [true, "First name is required"],
+        trim: true,
+        minlength: [2, "First name must be at least 2 characters"],
+        maxlength: [50, "First name must not exceed 50 characters"],
+      },
+      lastName: {
+        type: String,
+        required: [true, "Last name is required"],
+        trim: true,
+        minlength: [2, "Last name must be at least 2 characters"],
+        maxlength: [50, "Last name must not exceed 50 characters"],
+      },
+      phone: {
+        type: String,
+        required: [true, "Phone number is required"],
+        unique: true,
+        match: [/^\d{10}$/, "Phone number must be a valid 10-digit number"],
+      },
+      whatsapp: {
+        type: String,
+        required: [true, "WhatsApp number is required"],
+        match: [/^\d{10}$/, "WhatsApp number must be a valid 10-digit number"],
+      },
+      email: {
+        type: String,
+        required: [true, "Email is required"],
+        unique: true,
+        trim: true,
+        lowercase: true,
+        match: [
+          /^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/,
+          "Please enter a valid email address",
+        ],
+      },
+
+      password: {
+        type: String,
+        required: [true, "Password is required"],
+        minlength: [8, "Password must be at least 8 characters long"],
+        select: false, // Prevents returning password in queries
+      },
+      appRefreshToken: {
+        type: String,
+        required: false,
+      },
+      spiRefreshToken: {
+        type: String,
+        required: false,
+      },
+      spiAccessToken: {
+        type: String,
+        required: false,
+      },
+      sellerCentral:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'Seller',
+        require:false
+      },
+      OTP: {
+        type: String,
+        required: false,
+      },
+      isVerified: {
+        type: Boolean,
+        default: false,
+      },
+      listFinancialEvents: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ListFinancialEvents",
+        required: false,
+      },
+      competitivePricing: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "CompetitivePricing",
+        required: false,
+      },
+      numberOfProductReviews: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "NumberOfProductReviews",
+        required: false,
+      },
+      restockInventoryRecommendations: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "RestockInventoryRecommendations",
+        required: false,
+      },
+      GET_FBA_INVENTORY_PLANNING_DATA: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "GET_FBA_INVENTORY_PLANNING_DATA",
+        required: false,
+      },
+      GET_V2_SELLER_PERFORMANCE_REPORT: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "GET_V2_SELLER_PERFORMANCE_REPORT",
+        required: false,
+      },
+      APlusContent:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"APlusContent",
+        require:true
+      }
+    },
+    {
+      timestamps: true, // Adds createdAt and updatedAt fields
+    }
+  );
+
+const User = mongoose.model("User", userSchema);
+module.exports = User;

@@ -1,0 +1,67 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+#dashboard-main {
+  width: 100%;
+  min-height: 93vh;
+  background-color: #eeeeee;
+  padding: 1.5rem;
+  overflow-y: auto;
+  margin-top: 8vh;
+}
+
+#dashboard-stats {
+  display: grid;
+  grid-template-rows: auto;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  grid-template-areas: "a" "b" "b" "c" "d" "e" "f" "g";
+}
+
+#account-health {
+  grid-area: a;
+}
+
+#product-checker {
+  grid-area: b;
+}
+
+#total-sales {
+  grid-area: c;
+}
+
+#expected-reimburstment {
+  grid-area: d;
+}
+
+#amazon-ready-products {
+  grid-area: e;
+}
+
+#products-to-replenish {
+  grid-area: f;
+}
+
+#products-without-buybox {
+  grid-area: g;
+}
+
+@media (min-width: 1024px) {
+  #dashboard-main {
+    height: 90vh;
+    margin-top: 2px;
+  }
+  #dashboard-stats {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: 
+    "a a b b" 
+    "a a b b" 
+    "c c b b" 
+    "c c d e" 
+    "c c f g";
+  }
+}/*# sourceMappingURL=dashboard.css.map */

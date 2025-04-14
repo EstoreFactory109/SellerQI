@@ -1,0 +1,83 @@
+const UserModel = require("../../models/userModel.js");
+const { ApiError } = require("../../utils/ApiError.js");
+const { hashPassword } = require("../../utils/HashPassword.js");
+const logger = require("../../utils/Logger.js");
+
+
+const createUser = async (firstname, lastname, phone, whatsapp, email, password,otp) => {
+
+    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp){
+        logger.error(new ApiError(404,"Details and credentials are missing"));
+        return false;
+    }
+
+    try {
+        const hashedPassword = await hashPassword(password);
+        const user = new UserModel({
+            firstName: firstname,
+            lastName: lastname,
+            phone: phone,
+            whatsapp: whatsapp,
+            email: email,
+            password: hashedPassword,
+            OTP:otp
+        });
+        return await user.save();
+    } catch (error) {
+        logger.error(`Error in registering user: ${error}`);
+        return false;
+    }
+}
+
+const getUserByEmail =async(email)=>{
+    
+    if(!email){
+        logger.error(new ApiError(404,"Email is missing"));
+        return false;
+    }
+    return await UserModel.findOne({ email }).select('+password');
+
+    
+}
+
+const getUserById =async(id)=>{
+    if(!id){
+        logger.error(new ApiError(404,"Id is missing"));
+        return false;
+    }
+    return await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email");
+}
+
+
+const verify=async(email,otp)=>{
+    if(!email || !otp){
+        logger.error(new ApiError(404,"Email or OTP is missing"));
+        return false;
+    }
+    try {
+        const user=await UserModel.findOne({
+            email:email,
+        })
+        if(!user){
+            logger.error(new ApiError(404,"User not found"));
+            return false;
+        }
+
+        if(user.OTP!==otp){
+            logger.error(new ApiError(400,"Invalid OTP"));
+            return false;
+        }
+
+        user.OTP=null;
+        user.isVerified=true;
+        return await user.save();
+    } catch (error) {
+        logger.error(`Error in verifying user: ${error}`);
+        return false;
+    }
+    
+}
+
+
+module.exports = { createUser,getUserByEmail,verify,getUserById }
+

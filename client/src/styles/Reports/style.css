@@ -1,0 +1,14 @@
+#issues {
+  display: grid;
+  grid-template-areas: "a a b" "a a b" "a a c";
+  gap: 20px;
+}
+#issues #all-issues {
+  grid-area: a;
+}
+#issues #bars {
+  grid-area: b;
+}
+#issues #amazon-daily-products {
+  grid-area: c;
+}/*# sourceMappingURL=style.css.map */

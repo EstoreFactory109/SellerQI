@@ -1,0 +1,53 @@
+const mongoose = require("mongoose");
+
+
+// Define the schema
+const listFinancialEventsSchema = new mongoose.Schema(
+  {
+    User:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        require:true
+    },
+    region:{
+        type:String,
+        require:true
+    },
+    country:{
+        type:String,
+        require:true
+    },
+    Gross_Profit:{
+        type:String,
+        required:true
+    },
+    ProductAdsPayment:{
+        type:String,
+        required:true
+    },
+    FBA_Fees:{
+        type:String,
+        required:true
+    },
+    Amazon_Charges:{
+       type:String,
+       required:true
+   },
+   Refunds:{
+    type:String,
+    required:true
+   },
+   Storage:{
+    type:String,
+    required:true
+   }
+  },
+  { timestamps: true } // CreatedAt & UpdatedAt automatically managed
+);
+
+// **🛡️ Hash Refresh Token Before Storing**
+
+// Create the model
+const Seller = mongoose.model("ListFinancialEvents", listFinancialEventsSchema);
+
+module.exports = Seller;
