@@ -29,6 +29,7 @@ const AnalysingAccount = () => {
 
                 const getSPAPIData = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/info/getSpApiData`, { withCredentials: true });
 
+                
                 if (getSPAPIData && getSPAPIData.status === 200) {
 
                     const response = await axios.get(

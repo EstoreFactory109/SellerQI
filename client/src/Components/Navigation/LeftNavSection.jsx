@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 
-import DashboardIcon from '../../assets/Icons/Dashboard.png';
-import activeDashboardIcon from '../../assets/Icons/ActiveDashboard.png';
+import DashboardIcon from '../../assets/Icons/dashboard.png';
+import activeDashboardIcon from '../../assets/Icons/active-dashboard.png';
 import IssuesIcon from '../../assets/Icons/error.png';
-import activeIssueIcon from '../../assets/Icons/issuesActive.png';
+import activeIssueIcon from '../../assets/Icons/issues-active.png';
 import ReportsIcon from '../../assets/Icons/reports.png';
-import activeReportsIcon from '../../assets/Icons/activeReports.png';
-import HistoryIcon from '../../assets/Icons/History.png';
-import activeHistoryIcon from '../../assets/Icons/activeHistory.png';
-import SettingsIcon from '../../assets/Icons/Settings.png';
-import activeSettingsIcon from '../../assets/Icons/ActiveSettings.png';
-import LogoutIcon from '../../assets/Icons/Logout.png';
+import activeReportsIcon from '../../assets/Icons/active-reports.png';
+import HistoryIcon from '../../assets/Icons/history.png';
+import activeHistoryIcon from '../../assets/Icons/active-history.png';
+import LogoutIcon from '../../assets/Icons/logout.png';
+
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import axios from 'axios';

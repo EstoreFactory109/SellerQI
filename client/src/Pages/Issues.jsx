@@ -5,7 +5,7 @@ import OverView from "../Components/Issues_pages/OverView.jsx";
 import Category from "../Components/Issues_pages/Category.jsx";
 import Products from "../Components/Issues_pages/Products.jsx";
 import Account from "../Components/Issues_pages/Account.jsx";
-import DropDown from '../assets/Icons/DropDown.png'
+import DropDown from '../assets/Icons/drop-down.png'
 import { useNavigate } from "react-router-dom";
 
 

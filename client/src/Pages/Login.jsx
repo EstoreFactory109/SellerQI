@@ -6,6 +6,8 @@ import Right from '../Components/Forms/Right'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import BeatLoader from "react-spinners/BeatLoader";
+import {useDispatch} from 'react-redux';
+import { loginSuccess } from '../redux/slices/authSlice.js'
 
 
 const Login = () => {
@@ -15,6 +17,10 @@ const Login = () => {
     const [errors, setErrors] = useState({ email: false, password: false });
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const dispatch = useDispatch();
+
+    
+
 
     const changePasswordStatus = () => {
         setPasswordStatus(prev => prev === "password" ? "text" : "password");
@@ -49,16 +55,19 @@ const Login = () => {
 
         try {
             const response = await axios.post(
-                'http://localhost:4000/app/login',
+                `${import.meta.env.VITE_BASE_URI}/app/login`,
                 { email, password },
                 { withCredentials: true }
             );
 
             if (response.status === 200) {
+                dispatch(loginSuccess(response.data.data));
                 setLoading(false);
                 setEmail("");
                 setPassword("");
-                navigate("/seller-central-checker/dashboard");
+                //console.log(response.data.data)
+                
+                window.location.href = "/seller-central-checker/dashboard";
             }
             // You can dispatch or navigate here
         } catch (error) {

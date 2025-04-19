@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
-import { set } from "mongoose";
+
 
 const OtpVerification = () => {
   const [otp, setOtp] = useState(["", "", "", "", ""]);
@@ -10,7 +10,6 @@ const OtpVerification = () => {
   const location = useLocation();
   const { email } = location.state || {};
   const [loading, setLoading] = useState(false);
-
   const one = useRef(null);
   const two = useRef(null);
   const three = useRef(null);
@@ -45,7 +44,7 @@ const OtpVerification = () => {
     }
     setLoading(true);
     try {
-      const response = await axios.post("http://localhost:4000/app/verify-user", {
+      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/verify-user`, {
         email,
         otp: otp.join(""),
       },{withCredentials:true});

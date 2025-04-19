@@ -14,7 +14,7 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
                 reportType: "GET_FBA_INVENTORY_PLANNING_DATA",
-                marketplaceIds: ["ATVPDKIKX0DER"], 
+                marketplaceIds: [marketplaceIds], 
                 dataStartTime: StartTime.toISOString(),
                 dataEndTime: EndTime.toISOString()
             },
@@ -34,11 +34,11 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
-const checkReportStatus = async (accessToken, reportId) => {
+const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/${reportId}`,
+            `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
             {
                 headers: { "x-amz-access-token": accessToken },
             }
@@ -84,10 +84,10 @@ const checkReportStatus = async (accessToken, reportId) => {
     }
 };
 
-const getReportLink = async (accessToken, reportDocumentId) => {
+const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/${reportDocumentId}`,
+            `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
             { headers: { "x-amz-access-token": accessToken } }
         );
 

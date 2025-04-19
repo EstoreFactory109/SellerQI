@@ -22,10 +22,10 @@ const productSchema=new mongoose.Schema({
           type: String,
           required: true
       }],
-      video_url:[{
+      video_url:{
         type: String,
         required: true
-      }],
+      },
       product_num_ratings:{
        type:String,
        require:true

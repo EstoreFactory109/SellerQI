@@ -1,7 +1,7 @@
 import React, { useState,useEffect,useRef } from 'react';
 import { useSelector } from "react-redux";
 import { useParams } from 'react-router-dom';
-import DropDown from '../assets/Icons/DropDown.png';
+import DropDown from '../assets/Icons/drop-down.png';
 import noImage from '../assets/Icons/no-image.png';
 import { useNavigate } from 'react-router-dom';
 // Reusable component for conversion issues

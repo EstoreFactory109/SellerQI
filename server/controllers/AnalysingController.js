@@ -14,7 +14,7 @@ const restockInventoryRecommendationsModel = require('../models/GET_RESTOCK_INVE
 const TotalSalesModel = require('../models/TotalSalesModel.js');
 const ShipmentModel=require('../models/ShipmentModel.js');
 const ProductWiseSalesModel=require('../models/ProductWiseSalesModel.js');
-const { replenishmentQty } = require('../Services/Calculations/Sales.js');
+const { replenishmentQty } = require('../Services/Calculations/Inventory_.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Services/Calculations/AccountHealth.js');
 const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Services/Calculations/Rankings.js');
 const {

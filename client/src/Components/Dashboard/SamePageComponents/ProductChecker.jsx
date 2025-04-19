@@ -5,6 +5,7 @@ import { useSelector } from 'react-redux';
 
 const ProductChecker = () => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
+   console.log(info)
     const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount]);
   const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Advertising", "Fulfillment", "Inventory"])
  const [productErrors, setProductErrors] = useState([]);
@@ -114,9 +115,9 @@ const ProductChecker = () => {
         <ul className='mt-3 border-2 border-gray-300 h-[85%] flex flex-col justify-center gap-2  px-2'>
           {
             productErrors.map((item, index) => {
-              return <li className='text-xs  flex items-center justify-between' key={index}>
-                <p className='w-[80%]'>{item.asin} | {item.name}</p>
-                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full'>{item.errors} issues</div>
+              return item &&<li className='text-xs  flex items-center justify-between' key={index}>
+                <p className='w-[80%]'>{item?.asin} | {item?.name}</p>
+                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full'>{item?.errors} issues</div>
               </li>
             })
           }

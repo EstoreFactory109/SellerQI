@@ -75,7 +75,7 @@ const SignUp = () => {
     if (!validateForm()) return;
     setLoading(true);
     try {
-      const response = await axios.post('http://localhost:4000/app/register', formData, { withCredentials: true });
+      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formData, { withCredentials: true });
       if (response.status === 201) {
         setLoading(false);
         navigate('/verify-email', { state: { email: formData.email } });

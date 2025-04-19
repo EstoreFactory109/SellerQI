@@ -23,14 +23,13 @@ import analyseData from './operations/analyse.js';
 import { setDashboardInfo } from './redux/slices/DashboardSlice.js';
 import { setHistoryInfo } from './redux/slices/HistorySlice.js';
 import { loginSuccess } from './redux/slices/authSlice.js'
-import { useNavigate } from 'react-router-dom';
 
 const App = () => {
   const user= useSelector((state) => state.Auth.user);
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const dispatch = useDispatch();
   const location = useLocation();
-  const navigate=useNavigate();
+
   const isSellerCheckerRoute = location.pathname.startsWith('/seller-central-checker');
 
   const [showLoader, setShowLoader] = useState(isSellerCheckerRoute); // Start loader if on dashboard
@@ -48,7 +47,7 @@ const App = () => {
           dispatch(loginSuccess(response.data.data));
         }
       } catch (error) {
-        navigate('/')
+        throw new Error(error)
       }
     })()
 
@@ -119,7 +118,7 @@ const App = () => {
     if (user&&isSellerCheckerRoute && (!info || Object.keys(info).length === 0)) {
       fetchData();
     }
-  }, [user,isSellerCheckerRoute, dispatch,info]);
+  }, [user,isSellerCheckerRoute, dispatch]);
 
   useEffect(() => {
     // Hide loader only when info is available

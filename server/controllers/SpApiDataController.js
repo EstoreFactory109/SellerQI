@@ -19,8 +19,8 @@ const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API
 const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
 const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
 const { getContentDocument } = require('../Services/Sp_API/APlusContent.js');
-const TotalSales=require('../Services/Sp_API/WeeklySales.js');
-const getshipment=require('../Services/Sp_API/shipment.js');
+const TotalSales = require('../Services/Sp_API/WeeklySales.js');
+const getshipment = require('../Services/Sp_API/shipment.js');
 
 
 
@@ -48,7 +48,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const Base_URI = URIs[Region];
     const Marketplace_Id = marketplaceConfig[Country];
 
-   
+
 
 
     const credentials = await getTemporaryCredentials(spapiRegions[Region]);
@@ -86,11 +86,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
     }
 
-    
-    const asinArray=[];
-    const skuArray=[];
 
-     asinArray.push(...merchantListingsData.sellerAccount[merchantListingsData.sellerAccount.length - 1].products.map(e => e.asin));
+    const asinArray = [];
+    const skuArray = [];
+
+    asinArray.push(...merchantListingsData.sellerAccount[merchantListingsData.sellerAccount.length - 1].products.map(e => e.asin));
     skuArray.push(...merchantListingsData.sellerAccount[merchantListingsData.sellerAccount.length - 1].products.map(e => e.sku));
     console.log(asinArray);
 
@@ -110,134 +110,132 @@ const getSpApiData = asyncHandler(async (req, res) => {
         SellerId: sellerId
     };
 
-   
-    
-        const [v2data, v1data] = await Promise.all([
-            GET_V2_SELLER_PERFORMANCE_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
-            GET_V1_SELLER_PERFORMANCE_REPORT(AccessToken, Marketplace_Id, userId, Base_URI, Country, Region),
-            
-        ]);
-
-        const [financeData, competitivePriceData]=await Promise.all([
-            listFinancialEventsMethod(dataToSend, userId, Base_URI, Country, Region),
-            getCompetitivePricing(dataToSend, userId, Base_URI, Country, Region),
-           
-        ])
 
 
+    const [v2data, v1data] = await Promise.all([
+        GET_V2_SELLER_PERFORMANCE_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+        GET_V1_SELLER_PERFORMANCE_REPORT(AccessToken, Marketplace_Id, userId, Base_URI, Country, Region),
+
+    ]);
+
+    const [financeData, competitivePriceData] = await Promise.all([
+        listFinancialEventsMethod(dataToSend, userId, Base_URI, Country, Region),
+        getCompetitivePricing(dataToSend, userId, Base_URI, Country, Region),
+
+    ])
 
 
-        const [RestockinventoryData 
-           ,productReview
-        ]=await Promise.all([
-             GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
-            addReviewDataTODatabase(asinArray, Country, userId, Region),
-             
-        ])
-        
-        const [WeeklySales,shipment]=await Promise.all([
-            TotalSales(dataToSend, userId, Base_URI, Country, Region),
-            getshipment(dataToSend, userId, Base_URI, Country, Region)
-        ])
 
-        
-    
-        const contentDocumentData=await getContentDocument(dataToSend, userId, Base_URI, Country, Region);
 
-        function delay(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-          }
-          
-          const tasks = skuArray.map((sku, index) => {
-            return limit(async () => {
-              try {
+    const [//RestockinventoryData, 
+         productReview
+    ] = await Promise.all([
+       // GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+        addReviewDataTODatabase(asinArray, Country, userId, Region)
+
+    ])
+
+    const [WeeklySales, shipment] = await Promise.all([
+        TotalSales(dataToSend, userId, Base_URI, Country, Region),
+        getshipment(dataToSend, userId, Base_URI, Country, Region)
+    ])
+
+
+
+    const contentDocumentData = await getContentDocument(dataToSend, userId, Base_URI, Country, Region);
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    const tasks = skuArray.map((sku, index) => {
+        return limit(async () => {
+            try {
                 await delay(1000); // Delay each request a bit more than the previous (200ms gap)
-          
-                const ListingItem = await GetListingItem(dataToSend, sku, asinArray[index], userId, Base_URI,Country, Region);
-          
+
+                const ListingItem = await GetListingItem(dataToSend, sku, asinArray[index], userId, Base_URI, Country, Region);
+
                 if (!ListingItem) {
-                  logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
+                    logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
                 } else {
-                  console.log(`✅ Success for SKU: ${sku}`);
+                    console.log(`✅ Success for SKU: ${sku}`);
                 }
-              } catch (err) {
+            } catch (err) {
                 logger.error(new ApiError(500, `❌ Error for SKU: ${sku} - ${err.message}`));
-              }
-            });
-          });
-          
-          await Promise.all(tasks);
+            }
+        });
+    });
+
+    await Promise.all(tasks);
 
 
-        if (!v2data) {
-            logger.error(new ApiError(500, "Failed to fetch V2 seller performance report"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V2 seller performance report"));
-        }
-        
-        if (!v1data) {
-            logger.error(new ApiError(500, "Failed to fetch V1 seller performance report"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V1 seller performance report"));
-        }
-        
-        if (!financeData) {
-            logger.error(new ApiError(500, "Failed to fetch financial event data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch financial event data"));
-        }
-        
-        if (!competitivePriceData) {
-            logger.error(new ApiError(500, "Failed to fetch competitive pricing data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch competitive pricing data"));
-        }
+    if (!v2data) {
+        logger.error(new ApiError(500, "Failed to fetch V2 seller performance report"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V2 seller performance report"));
+    }
 
-        if (!WeeklySales) {
-            logger.error(new ApiError(500, "Failed to fetch sales data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch sales data"));
-        }
-        
-        if (!RestockinventoryData) {
-            logger.error(new ApiError(500, "Failed to fetch restock inventory recommendations"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch restock inventory recommendations"));
-        }
-       
-        if (!productReview) {
-            console.log("productReview",productReview);
-            logger.error(new ApiError(500, "Failed to fetch product review data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch product review data"));
-        }
+    if (!v1data) {
+        logger.error(new ApiError(500, "Failed to fetch V1 seller performance report"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V1 seller performance report"));
+    }
 
-        if (!shipment) {
-            logger.error(new ApiError(500, "Failed to fetch shipment data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch shipment data"));
-        }
-    
-   
-        if (!contentDocumentData) {
-            logger.error(new ApiError(500, "Failed to fetch A+ content document data"));
-            return res.status(500).json(new ApiResponse(500, "", "Failed to fetch A+ content document data"));
-        }
-    
-      
-        const result = {
-            MerchantlistingData: merchantListingsData,
-            v2data: v2data,
-            v1data: v1data,
-            financeData: financeData,
-            competitivePriceData: competitivePriceData,
-            RestockinventoryData: RestockinventoryData,
-           productReview: productReview,
-            contentDocumentData: contentDocumentData,
-            WeeklySales:WeeklySales,
-            shipment:shipment
-        }
-    
- 
+    if (!financeData) {
+        logger.error(new ApiError(500, "Failed to fetch financial event data"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch financial event data"));
+    }
 
-   
+    if (!competitivePriceData) {
+        logger.error(new ApiError(500, "Failed to fetch competitive pricing data"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch competitive pricing data"));
+    }
+
+    if (!WeeklySales) {
+        logger.error(new ApiError(500, "Failed to fetch sales data"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch sales data"));
+    }
+    /*     
+          if (!RestockinventoryData) {
+              logger.error(new ApiError(500, "Failed to fetch restock inventory recommendations"));
+              return res.status(500).json(new ApiResponse(500, "", "Failed to fetch restock inventory recommendations"));
+          }
+      */   
+          if (!productReview) {
+              console.log("productReview",productReview);
+              logger.error(new ApiError(500, "Failed to fetch product review data"));
+              return res.status(500).json(new ApiResponse(500, "", "Failed to fetch product review data"));
+          }
+
+    if (!shipment) {
+        logger.error(new ApiError(500, "Failed to fetch shipment data"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch shipment data"));
+    }
 
 
-    return res.status(200).json(new ApiResponse(200,result, "Data has been fetched successfully"));
-    
-    
+    if (!contentDocumentData) {
+        logger.error(new ApiError(500, "Failed to fetch A+ content document data"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch A+ content document data"));
+    }
+
+
+    const result = {
+        MerchantlistingData: merchantListingsData,
+        v2data: v2data,
+        v1data: v1data,
+        financeData: financeData,
+        competitivePriceData: competitivePriceData,
+       // RestockinventoryData: RestockinventoryData,
+        productReview: productReview,
+        contentDocumentData: contentDocumentData,
+        WeeklySales: WeeklySales,
+        shipment: shipment
+    }
+
+
+
+
+
+
+    return res.status(200).json(new ApiResponse(200, result, "Data has been fetched successfully"));
 
 
 

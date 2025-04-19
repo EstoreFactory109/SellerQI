@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import calenderIcon from '../assets/Icons/Calender.png'
-import Download from '../assets/Icons/Download.png'
+import Download from '../assets/Icons/download.png'
 import "../styles/Reports/style.css"
 import RowOne from '../Components/Reports/Reports_First_Row.jsx'
 import Health from '../Components/Reports/Reports_Third_Row/Health.jsx'

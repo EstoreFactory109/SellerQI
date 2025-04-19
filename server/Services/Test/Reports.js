@@ -18,7 +18,7 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
             },
             {
                 headers: {
-                    "x-amz-access-token":"Atza|IwEBIP7AE4MqcZTzAqNmolvArTWaF-4yOKANdUctTH8XzFQCz3Qr0GreqG4Xbmi_jW0E_dcWRL0aXl4Ie75Sfq_TvJGTPC-vOVfSNf4oO8wtjXvd0B4LGglUdtJBIiufRtyVLPIFgVZKpwi9nZg67_A63ieeFWoGZrIntCykpCwxXV2FGJoBiek4uHiPpZDkOZUwFIEk0ReEGGrhUPJfxwsIMwiJVHYcZn9JqqF4o2pOpcdL3vfF6jfBtTV8gBqOBV2RETW_VqitQMJcffnzWmMdN5OYn7hehfSTwhWbeBq4UTfNT1QVlH__q7CguCv9T0MmivQcTnuEAZqbZbL7hTJm00axxwjeyRhmBMAb0C1HmUMPOw",
+                    "x-amz-access-token":accessToken,
                     "Content-Type": "application/json",
                 },
             }
@@ -37,7 +37,7 @@ const checkReportStatus = async (accessToken, reportId, baseURI) => {
         const response = await axios.get(
             `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/${reportId}`,
             {
-                headers: { "x-amz-access-token": "Atza|IwEBIP7AE4MqcZTzAqNmolvArTWaF-4yOKANdUctTH8XzFQCz3Qr0GreqG4Xbmi_jW0E_dcWRL0aXl4Ie75Sfq_TvJGTPC-vOVfSNf4oO8wtjXvd0B4LGglUdtJBIiufRtyVLPIFgVZKpwi9nZg67_A63ieeFWoGZrIntCykpCwxXV2FGJoBiek4uHiPpZDkOZUwFIEk0ReEGGrhUPJfxwsIMwiJVHYcZn9JqqF4o2pOpcdL3vfF6jfBtTV8gBqOBV2RETW_VqitQMJcffnzWmMdN5OYn7hehfSTwhWbeBq4UTfNT1QVlH__q7CguCv9T0MmivQcTnuEAZqbZbL7hTJm00axxwjeyRhmBMAb0C1HmUMPOw" },
+                headers: { "x-amz-access-token": accessToken },
             }
         );
 
@@ -79,7 +79,7 @@ const getReportLink = async (accessToken, reportDocumentId, baseURI) => {
     try {
         const response = await axios.get(
             `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/${reportDocumentId}`,
-            { headers: { "x-amz-access-token": "Atza|IwEBIP7AE4MqcZTzAqNmolvArTWaF-4yOKANdUctTH8XzFQCz3Qr0GreqG4Xbmi_jW0E_dcWRL0aXl4Ie75Sfq_TvJGTPC-vOVfSNf4oO8wtjXvd0B4LGglUdtJBIiufRtyVLPIFgVZKpwi9nZg67_A63ieeFWoGZrIntCykpCwxXV2FGJoBiek4uHiPpZDkOZUwFIEk0ReEGGrhUPJfxwsIMwiJVHYcZn9JqqF4o2pOpcdL3vfF6jfBtTV8gBqOBV2RETW_VqitQMJcffnzWmMdN5OYn7hehfSTwhWbeBq4UTfNT1QVlH__q7CguCv9T0MmivQcTnuEAZqbZbL7hTJm00axxwjeyRhmBMAb0C1HmUMPOw" } }
+            { headers: { "x-amz-access-token": accessToken } }
         );
 
         if (!response.data.url) {
@@ -114,7 +114,7 @@ const getReport = async (accessToken, marketplaceIds, baseURI) => {
 
         while (!reportDocumentId && retries > 0) {
             logger.info(`⏳ Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000));
+            await new Promise((resolve) => setTimeout(resolve, 50000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
             if (reportDocumentId === false) {
                 return false;
