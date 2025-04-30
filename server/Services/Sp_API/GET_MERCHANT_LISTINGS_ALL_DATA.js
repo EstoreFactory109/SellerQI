@@ -33,6 +33,7 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
 };
 
 const checkReportStatus = async (accessToken, reportId, baseURI) => {
+    console.log(baseURI)
     try {
         const response = await axios.get(
             `https://${baseURI}/reports/2021-06-30/reports/${reportId}`,
@@ -102,11 +103,12 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         return false;
     }
 
-    console.log(marketplaceIds)
+    console.log(baseURI)
 
     try {
         logger.info("📄 Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds, baseURI);
+        
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
@@ -115,6 +117,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         let reportDocumentId = null;
         let retries = 30;
 
+        
         while (!reportDocumentId && retries > 0) {
             logger.info(`⏳ Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));

@@ -1,4 +1,5 @@
 const analyseData = (data) => {
+    console.log(data)
     const TotalProducts = data.TotalProducts;
     const accountHealthPercentage = data.AccountData.getAccountHealthPercentge;
     const accountFinance = data.FinanceData;
@@ -44,6 +45,7 @@ const analyseData = (data) => {
         productStarRatingResultError.length +
         productsWithOutBuyboxError.length;
 
+        //THis is for getting conversion error for each product
     const getConversionErrors = (asin) => {
         let errorCount = 0;
         const data = { asin };
@@ -71,6 +73,8 @@ const analyseData = (data) => {
     let TotalRankingerrors = 0;
     let index=0;
 
+    console.log(data.RankingsData.RankingResultArray)
+
     data.RankingsData.RankingResultArray.forEach(elm => {
         const asin = elm.asin;
         if (seenAsins.has(asin)) return;
@@ -83,7 +87,11 @@ const analyseData = (data) => {
 
         const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
 
+        console.log("ranking total errors: ",elm.asin,elm.data.TotalErrors)
+        console.log("conversion total errors: ",conversionErrors)
+
         let productwiseTotalError = elm.data.TotalErrors + conversionErrors;
+        console.log("productwiseTotalError: ",productwiseTotalError)
         if (elm.data.TotalErrors > 0) {
             TotalRankingerrors += elm.data.TotalErrors;
         }
@@ -113,8 +121,10 @@ const analyseData = (data) => {
         index++;
     });
 
+
+
     // Backend keyword errors
-    data.RankingsData.BackendKeywordResultArray.forEach(elm => {
+   data.RankingsData.BackendKeywordResultArray.forEach(elm => {
         const asin = elm.asin;
         if (elm.data.NumberOfErrors > 0) {
             TotalRankingerrors += elm.data.NumberOfErrors;
@@ -149,24 +159,27 @@ const analyseData = (data) => {
         }
     });
 
+    console.log("Product Wise Error: ",productWiseError)
     // Top ranking error products
-    const uniqueRankingData = Array.from(
-        new Map(data.RankingsData.RankingResultArray.map(obj => [obj.asin, obj])).values()
-    ).sort((a, b) => b.data.TotalErrors - a.data.TotalErrors);
+    const UniqueProductWisError = Array.from(
+        new Map(productWiseError.map(obj => [obj.asin, obj])).values()
+    ).sort((a, b) => b.errors - a.errors);
+
+    console.log(UniqueProductWisError)
 
     const getTopErrorProduct = (data, index) =>
         data[index]
             ? {
                 asin: data[index].asin,
-                name: data[index].data.Title?.substring(0, 50) || "N/A",
-                errors: data[index].data.TotalErrors,
+                name: data[index].name?.substring(0, 50) || "N/A",
+                errors: data[index].errors,
             }
             : null;
 
-    const first = getTopErrorProduct(uniqueRankingData, 0);
-    const second = getTopErrorProduct(uniqueRankingData, 1);
-    const third = getTopErrorProduct(uniqueRankingData, 2);
-    const fourth = getTopErrorProduct(uniqueRankingData, 3);
+    const first = getTopErrorProduct(UniqueProductWisError, 0);
+    const second = getTopErrorProduct(UniqueProductWisError, 1);
+    const third = getTopErrorProduct(UniqueProductWisError, 2);
+    const fourth = getTopErrorProduct(UniqueProductWisError, 3);
 
     // Add backend keyword errors to top 4 if applicable
     const uniqueBackendKeywordData = Array.from(

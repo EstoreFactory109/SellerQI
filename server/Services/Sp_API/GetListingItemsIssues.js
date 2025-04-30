@@ -1,8 +1,6 @@
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const aws4 = require('aws4');
-const ListingItems = require('../../models/GetListingItemsModel.js');
-const User = require('../../models/userModel.js');
 const logger = require('../../utils/Logger.js');
 const ApiError = require('../../utils/ApiError.js'); // If you're using custom ApiError
 
@@ -70,30 +68,6 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       marketplace_id: keywordData.marketplace_id
     };
 
-    // ✅ Save to DB
-    const createListingItemData = await ListingItems.create({
-      User: userId,
-      region: Region,
-      country: Country,
-      GenericKeyword: generic_Keyword
-    });
-
-    if (!createListingItemData) {
-      logger.error(new ApiError(400, "Error in creating listing item"));
-      return false;
-    }
-
-    // ✅ Update user
-    const user = await User.findById(userId);
-    if (!user) {
-      logger.error(new ApiError(404, "User not found"));
-      return false;
-    }
-
-    user.ListingItem = createListingItemData._id;
-    await user.save();
-
-    console.log(`✅ ${sku}: ${generic_Keyword.value}`);
     return generic_Keyword;
 
   } catch (error) {

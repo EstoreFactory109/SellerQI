@@ -2,10 +2,11 @@ import React from 'react'
 import issue from '../../../assets/Icons/error.png';
 import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
+import {useNavigate} from 'react-router-dom'
+
 const AccountHealth = () => {
 const info = useSelector(state => state.Dashboard?.DashBoardInfo)
- 
-console.log(info)
+const navigatie = useNavigate()
 
   const options = {
     chart: {
@@ -49,6 +50,11 @@ console.log(info)
 
   const series = [info?.accountHealthPercentage?.Percentage];
 
+  const viewFullReport=(e)=>{
+    e.preventDefault();
+    navigatie('/seller-central-checker/reports')
+  }
+
   return (
     <div className='min-h-[35vh] bg-white p-3 border-2 border-gray-200 rounded-md pb-4'>
       <div className='w-full flex items-center justify-between'>
@@ -56,7 +62,7 @@ console.log(info)
           <h2 className='text-sm'>ACCOUNT HEALTH</h2>
           <img src={issue} alt='' className='w-4 h-4' />
         </div>
-        <button className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
+        <button onClick={viewFullReport} className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
           View Full Report
         </button>
       </div>

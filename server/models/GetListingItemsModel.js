@@ -30,7 +30,7 @@ const ListingItemsSchema = new mongoose.Schema(
       type:String,
       require:true
   },
-    GenericKeyword:generic_Keyword
+    GenericKeyword:[generic_Keyword]
   },
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );

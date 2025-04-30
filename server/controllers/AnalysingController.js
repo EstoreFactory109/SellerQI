@@ -95,7 +95,7 @@ const Analyse= async(userId,country,region)=>{
         financeModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-        ListingAllItems.find({ User: userId, country, region }).sort({ createdAt: -1 }),
+        ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         competitivePricingModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }), 
         TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -133,7 +133,7 @@ const Analyse= async(userId,country,region)=>{
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));
     const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(getCompetitiveData.Products).presentAsin);
     const productReviewsAsins = new Set(numberOfProductReviews.Products.map(p => p.asin));
-    const listingAllAsins = new Set(listingAllItems.map(p => p.GenericKeyword.asin));
+    const listingAllAsins = new Set(listingAllItems.GenericKeyword.map(p => p.GenericKeyword.asin));
 
     const productReviewsDefaulters = [], listingAllItemsDefaulters = [], ProductwithoutBuyboxDefaulters = [];
     asinSet.forEach(asin => {
@@ -171,7 +171,9 @@ const Analyse= async(userId,country,region)=>{
         }
     });
 
-    listingAllItems.forEach(item => {
+    console.log(listingAllItems.length)
+
+    listingAllItems.GenericKeyword.forEach(item => {
         const asin = item.GenericKeyword.asin;
         if (!DefaulterList.ListingAllItems.includes(asin)) {
             const keywordStatus = BackendKeyWordOrAttributesStatus(item.GenericKeyword.value);
@@ -231,6 +233,7 @@ const Analyse= async(userId,country,region)=>{
         message:result
     };
 }
+
 
 
 

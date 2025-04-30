@@ -2,10 +2,12 @@ import React, { useState,useEffect } from 'react';
 import issue from '../../../assets/Icons/error.png';
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 
 const ProductChecker = () => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
    console.log(info)
+   const navigate = useNavigate()
     const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount]);
   const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Advertising", "Fulfillment", "Inventory"])
  const [productErrors, setProductErrors] = useState([]);
@@ -46,6 +48,19 @@ const ProductChecker = () => {
     },
   });
 
+  const navigateToIssue=(e)=>{
+    e.preventDefault();
+    navigate('/seller-central-checker/issues')
+  }
+
+  const navigateToProductWithIssuesPage=(asin)=>{
+    if(asin){
+      navigate(`/seller-central-checker/issues/${asin}`)
+    }
+  }
+
+  console.log("productErrors: ",productErrors)
+
   return (
     <div className='h-[62vh] lg:h-[55vh] bg-white p-3 border-2 border-gray-200 rounded-md'>
       <div className='w-full h-[58%] '>
@@ -54,7 +69,7 @@ const ProductChecker = () => {
             <h2 className='text-sm'>PRODUCT CHECKER</h2>
             <img src={issue} alt='' className='w-4 h-4' />
           </div>
-          <button className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
+          <button onClick={navigateToIssue} className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
             View Full Report
           </button>
         </div>
@@ -116,8 +131,8 @@ const ProductChecker = () => {
           {
             productErrors.map((item, index) => {
               return item &&<li className='text-xs  flex items-center justify-between' key={index}>
-                <p className='w-[80%]'>{item?.asin} | {item?.name}</p>
-                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full'>{item?.errors} issues</div>
+                <p className='w-[80%] hover:underline cursor-pointer' onClick={()=>navigateToProductWithIssuesPage(item?.asin)}>{item?.asin} | {item?.name}</p>
+                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full cursor-pointer active:scale-95 transition-all ease-in-out' onClick={()=>navigateToProductWithIssuesPage(item?.asin)}>{item?.errors} issues</div>
               </li>
             })
           }

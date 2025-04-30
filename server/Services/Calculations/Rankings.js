@@ -112,66 +112,81 @@ const checkTitle = (str) => {
 
 const checkBulletPoints = (arr) => {
     let result = {};
-    let errorCount = 0;
-    let pointCounter = 0;
+    
+    let charLimErrCount=0;
+    let RestictedWordsErrCount=0;
+    let SpecialCharactersErrCount=0;
+    let AllRestrictedWords=[];
+    let AllSpecialCharacters=[];
+
 
     arr.forEach((str) => {
-        pointCounter++;
+        
 
         if (str.length < 150) {
-            errorCount++;
-            result.charLim = {
-                status: "Error",
-                Message: "The bullet point is under 150 characters, which may reduce its effectiveness in communicating key product features to customers.",
-                HowTOSolve: "Enhance your bullet point to at least 150 characters. Clearly highlight the product's features, benefits, and value propositions.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.charLim = {
-                status: "Success",
-                Message: "Great job! Your bullet points are detailed and informative.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
-        }
+            charLimErrCount++;
+        } 
         let RestictedWords=containsRestrictedWords(str)
+        
         if (RestictedWords.length>0) {
-            errorCount++;
-            result.RestictedWords = {
-                status: "Error",
-                Message: `Your bullet points contain restricted or banned words according to Amazon's guidelines. This may result in your listing being suppressed. The Words used are: ${RestictedWords.join(', ')}`,
-                HowTOSolve: "Review the bullet points and remove restricted words. Follow Amazon’s content policies to avoid suppression.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.RestictedWords = {
-                status: "Success",
-                Message: "Excellent! Your bullet points are free from restricted or banned words.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
-        }
+           RestictedWordsErrCount++; 
+           AllRestrictedWords.push(RestictedWords[0]);
+        } 
 
         const SpecialCharacters=checkSpecialCharacters(str)
         if (SpecialCharacters.length>0) {
-            errorCount++;
-            result.checkSpecialCharacters = {
-                status: "Error",
-                Message: `Your bullet points include special characters that are restricted by Amazon's guidelines. The Characters used are: ${SpecialCharacters.join(', ')}`,
-                HowTOSolve: "Remove restricted special characters. Refer to Amazon’s official style guide to ensure compliance.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.checkSpecialCharacters = {
-                status: "Success",
-                Message: "Well done! Your bullet points do not contain restricted special characters.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
-        }
+          SpecialCharactersErrCount++; 
+          AllSpecialCharacters.push(SpecialCharacters[0]);
+        } 
     });
 
-    result.NumberOfErrors = errorCount;
+    
+    result.NumberOfErrors = charLimErrCount+RestictedWordsErrCount+SpecialCharactersErrCount;
+    
+    let FinalRestrictedWords=[...new Set(AllRestrictedWords)];
+    let FinalSpecialCharacters=[...new Set(AllSpecialCharacters)];
+
+    
+
+    if(charLimErrCount>0){
+        result.charLim={
+            status:"Error",
+            Message:"Your bullet points are under 150 characters. Short bullet points may not provide enough detail to effectively communicate the features and benefits of your products, potentially affecting customer interest and conversion rates.",
+            HowTOSolve:"Enhance your bullet points to be at least 150 characters long, focusing on key features, benefits, and differentiators of your product. Use this space to clearly articulate why customers should choose your product, including any unique selling propositions.."
+        }
+    }else{
+        result.charLim={
+            status:"Success",
+            Message:"Great job! Your bullet points are adequately detailed, providing valuable information to customers and effectively enhancing your product’s appeal.",
+            HowTOSolve:""
+        }
+    }
+    if(RestictedWordsErrCount>0){
+        result.RestictedWords={
+            status:"Error",
+            Message:`Your bullet points contain words that are restricted or banned by Amazon's guidelines. Using such words can lead to your product being blocked or your listing being suppressed. The words Used are: ${FinalRestrictedWords.join(', ')}`,
+            HowTOSolve:"Review the bullet points and remove all restricted or banned words. Consult the most current Amazon selling policies and style guides to ensure your listing complies with all content regulations. Updating your bullet points accordingly will help avoid suppression or blocking of your listing."
+        }
+    }else{
+        result.RestictedWords={
+            status:"Success",
+            Message:"Excellent! Your bullet points are in full compliance with Amazon's guidelines, free of any restricted or banned words, ensuring your listing stays active and visible.",
+            HowTOSolve:""
+        }
+    }
+    if(SpecialCharactersErrCount>0){
+        result.checkSpecialCharacters={
+            status:"Error",
+            Message:`Your bullet points contain special characters that are restricted by Amazon's guidelines. Using these characters can lead to issues with listing compliance and may prevent your listing from being properly displayed. The special characters used are: ${FinalSpecialCharacters.join(', ')}`,
+            HowTOSolve:"Review your bullet points and remove all restricted special characters. Refer to Amazon’s official style guide to ensure your content adheres to their formatting requirements. This will help maintain your listing's visibility and prevent potential suppression."
+        }
+    }else{
+        result.checkSpecialCharacters={
+            status:"Success",
+            Message:"Well done! Your bullet points comply with Amazon's guidelines, avoiding any restricted special characters, ensuring your listing remains clear and effective.",
+            HowTOSolve:""
+        }
+    }
     return result;
 }
 
@@ -294,6 +309,7 @@ const BackendKeyWordOrAttributesStatus = (str) => {
 }
 
 const getRankings = (ProductDetails) => {
+    console.log(ProductDetails.product_title)
     const titleResult = checkTitle(ProductDetails.product_title);
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);

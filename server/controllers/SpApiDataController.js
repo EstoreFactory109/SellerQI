@@ -9,6 +9,7 @@ const UserModel = require('../models/userModel.js');
 const Seller = require('../models/sellerCentralModel.js')
 const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js')
 
+const ListingItemsModel = require('../models/GetListingItemsModel.js');
 
 const GET_MERCHANT_LISTINGS_ALL_DATA = require('../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/V2_Seller_Performance_Report.js');
@@ -42,8 +43,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the seller data"));
     }
 
-    const Region = getSellerData.sellerAccount[getSellerData.sellerAccount.length - 1].region;
-    const Country = getSellerData.sellerAccount[getSellerData.sellerAccount.length - 1].country;
+    const Region = getSellerData.sellerAccount[0].region;
+    const Country = getSellerData.sellerAccount[0].country;
+
 
     const Base_URI = URIs[Region];
     const Marketplace_Id = marketplaceConfig[Country];
@@ -76,6 +78,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
 
     const sellerId = getSellerData.selling_partner_id;
+
 
 
 
@@ -127,10 +130,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
 
 
-    const [//RestockinventoryData, 
+    const [RestockinventoryData, 
          productReview
     ] = await Promise.all([
-       // GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+       GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
         addReviewDataTODatabase(asinArray, Country, userId, Region)
 
     ])
@@ -144,21 +147,27 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     const contentDocumentData = await getContentDocument(dataToSend, userId, Base_URI, Country, Region);
 
+
     function delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+
+
+    let genericKeyWordArray=[];
     const tasks = skuArray.map((sku, index) => {
+        
         return limit(async () => {
             try {
                 await delay(1000); // Delay each request a bit more than the previous (200ms gap)
 
                 const ListingItem = await GetListingItem(dataToSend, sku, asinArray[index], userId, Base_URI, Country, Region);
 
+                console.log(ListingItem)
                 if (!ListingItem) {
                     logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
                 } else {
-                    console.log(`✅ Success for SKU: ${sku}`);
+                   genericKeyWordArray.push(ListingItem)
                 }
             } catch (err) {
                 logger.error(new ApiError(500, `❌ Error for SKU: ${sku} - ${err.message}`));
@@ -168,7 +177,24 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     await Promise.all(tasks);
 
+    (async()=>{
+        if(genericKeyWordArray.length>0){
+            const saveGenericKeyword=await ListingItemsModel.create({
+                User:userId,
+                region:Region,
+                country:Country,
+                genericKeyword:genericKeyWordArray
+            })
 
+            console.log(saveGenericKeyword)
+            if(!saveGenericKeyword){
+                logger.error(new ApiError(500, "Failed to save generic keyword"));
+                return res.status(500).json(new ApiResponse(500, "", "Failed to save generic keyword"));
+            }
+        }
+    })()
+
+/*
     if (!v2data) {
         logger.error(new ApiError(500, "Failed to fetch V2 seller performance report"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V2 seller performance report"));
@@ -193,12 +219,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.error(new ApiError(500, "Failed to fetch sales data"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch sales data"));
     }
-    /*     
+        
           if (!RestockinventoryData) {
               logger.error(new ApiError(500, "Failed to fetch restock inventory recommendations"));
               return res.status(500).json(new ApiResponse(500, "", "Failed to fetch restock inventory recommendations"));
           }
-      */   
+        
           if (!productReview) {
               console.log("productReview",productReview);
               logger.error(new ApiError(500, "Failed to fetch product review data"));
@@ -223,7 +249,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         v1data: v1data,
         financeData: financeData,
         competitivePriceData: competitivePriceData,
-       // RestockinventoryData: RestockinventoryData,
+       RestockinventoryData: RestockinventoryData,
         productReview: productReview,
         contentDocumentData: contentDocumentData,
         WeeklySales: WeeklySales,
@@ -238,7 +264,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, result, "Data has been fetched successfully"));
 
 
+*/
 
+
+return res.status(200).json(new ApiResponse(200, genericKeyWordArray, "Data has been fetched successfully"));
 
 })
 

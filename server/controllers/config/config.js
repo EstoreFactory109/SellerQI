@@ -1,6 +1,6 @@
 const URIs = {
     "NA": process.env.AMAZON_BASE_URI_NA,  // North America
-    "EU": process.envAMAZON_BASE_URI_EU,  // Europe
+    "EU": process.env.AMAZON_BASE_URI_EU,  // Europe
     "FE": process.env.AMAZON_BASE_URI_FE   // Far East
   };
 
