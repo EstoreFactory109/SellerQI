@@ -46,6 +46,49 @@ const SaveAllDetails=asyncHandler(async(req,res)=>{
 })
 
 
+const saveDetailsOfOtherAccounts=asyncHandler(async(req,res)=>{
+    const {region,country}=req.body;
+    const userId=req.userId;
+    if(!country || !region){
+        return res.status(400).json(new ApiResponse(400,"","Credentials are missing"));
+    }
+    const sellerCentral=await Seller.findOne({User:userId});
+    if(!sellerCentral){
+        return res.status(404).json(new ApiResponse(404,"","Seller central not found"));
+    }
+    sellerCentral.sellerAccount.push({country:country,region:region});
+    await sellerCentral.save();
+    const locationToken=await createLocationToken(country,region);
+    if(!locationToken){
+        logger.error(new ApiError(500,"Error in creating location token")); 
+        return res.status(500).json(new ApiError(500,"Error in creating location token"));
+    }
+    return res.status(201)
+    .cookie("IBEXLocationToken",locationToken,{httpOnly:true,secure:true})
+    .json(new ApiResponse(201,"","New account added successfully"));
+})
+
+const addNewAccount=asyncHandler(async(req,res)=>{
+    const {region,country}=req.body;
+    const userId=req.userId;
+    if(!country || !region){
+        return res.status(400).json(new ApiResponse(400,"","Credentials are missing"));
+    }
+    const sellerCentral=await Seller.findOne({User:userId});
+    if(!sellerCentral){
+        return res.status(404).json(new ApiResponse(404,"","Seller central not found"));
+    }
+    sellerCentral.sellerAccount.push({region:region,country:country});
+    await sellerCentral.save();
+    const locationToken=await createLocationToken(country,region);
+    if(!locationToken){
+        logger.error(new ApiError(500,"Error in creating location token")); 
+        return res.status(500).json(new ApiError(500,"Error in creating location token"));
+    }
+    return res.status(201)
+    .cookie("IBEXLocationToken",locationToken,{httpOnly:true,secure:true})
+    .json(new ApiResponse(201,"","New account added successfully"));
+})
 
 
 const generateSPAPITokens=asyncHandler(async(req,res)=>{
@@ -75,4 +118,4 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
 })
 
 
-module.exports={generateSPAPITokens,SaveAllDetails}
+module.exports={generateSPAPITokens,SaveAllDetails,addNewAccount,saveDetailsOfOtherAccounts}

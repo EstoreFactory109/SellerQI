@@ -27,21 +27,54 @@ const {
 } = require('../Services/Calculations/Conversion.js');
 const calculateTotalReimbursement=require('../Services/Calculations/Reimburstment.js');
 
-const analysingController = asyncHandler(async (req, res) => {
-    const  userId=req.userId;
-    const country=req.country;
-    const region  = req.region;
 
-    
 
-    if (!userId) return res.status(400).json(new ApiError(400, "User id is missing"));
-    if(!country || !region) return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+const Analyse= async(userId,country,region)=>{
+    if (!userId){
+        logger.error(new ApiError(400, "User id is missing"));
+        return {
+            status:404,
+            message:"User id is missing"
+        }
+    }
+    if(!country || !region) {
+        logger.error(new ApiError(400, "Country or Region is missing"));
+        return {
+            status:404,
+            message:"Country or Region is missing"
+        }
+    }
 
     const sellerCentral = await Seller.findOne({ User: userId });
-    if (!sellerCentral) return res.status(404).json(new ApiError(404, "SellerCentral not found"));
+    if (!sellerCentral){
+        logger.error(new ApiError(404, "Seller central not found"));
+        return {
+            status:404,
+            message:"Seller central not found"
+        }
+    }
 
-    const SellerAccount = sellerCentral.sellerAccount.find(item => item.country === country && item.region === region);
-    if (!SellerAccount) return res.status(404).json(new ApiError(404, "SellerAccount not found"));
+    const allSellerAccounts=[]
+    let SellerAccount=null;
+
+    sellerCentral.sellerAccount.forEach(item=>{
+        allSellerAccounts.push({
+            country:item.country,
+            region:item.region,
+            NoOfProducts:item.products.length
+        })
+        if(item.country === country && item.region === region){
+            SellerAccount=item;
+        }
+    })
+
+    if (!SellerAccount) {
+        logger.error(new ApiError(404, "Seller account not found"));
+        return {
+            status:404,
+            message:"Seller account not found"
+        }
+    }
 
 
     const [
@@ -75,10 +108,14 @@ const analysingController = asyncHandler(async (req, res) => {
 
     if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, listingAllItems, getCompetitiveData, aplusResponse,TotalSales,saleByProduct].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
-        return res.status(404).json(new ApiError(404, "Required data not found"));
+        return {
+            status:404,
+            message:"Required data not found"
+        }
     }
 
     const result = {
+        AllSellerAccounts:allSellerAccounts,
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {
@@ -179,17 +216,31 @@ const analysingController = asyncHandler(async (req, res) => {
 
     if(!reimburstmentData){
         logger.error(new ApiError(500, "Failed to fetch reimburstment data"));
-        return res.status(404).json(new ApiError(404, "Required data not found in reimburstment"));
+        return {
+            status: 500,
+            message: "Failed to fetch reimburstment data",
+        }
     }
 
-    console.log("reimburstmentData",reimburstmentData)
 
      result.Reimburstment=reimburstmentData
     result.SalesByProducts=saleByProduct.productWiseSales
 
-  
+    return {
+        status: 200,
+        message:result
+    };
+}
 
-    res.status(200).json(new ApiResponse(200, result, "Data is fetched successfully"));
+
+
+
+const analysingController = asyncHandler(async (req, res) => {
+    const  userId=req.userId;
+    const country=req.country;
+    const region  = req.region;
+    const result=await Analyse(userId,country,region);
+    res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
 });
 
 module.exports = { analysingController };

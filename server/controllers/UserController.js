@@ -1,4 +1,4 @@
-const {createUser,getUserByEmail,verify,getUserById } = require('../Services/User/userServices.js');
+const {createUser,getUserByEmail,verify,getUserById,updateInfo } = require('../Services/User/userServices.js');
 const { ApiError } = require('../utils/ApiError.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const asyncHandler = require('../utils/AsyncHandler.js');
@@ -9,6 +9,7 @@ const {generateOTP}=require('../utils/OTPGenerator.js');
 const {sendEmail}=require('../Services/Email/SendOtp.js');
 const UserModel = require('../models/userModel.js');
 const SellerCentralModel=require('../models/sellerCentralModel.js');
+const {uploadToCloudinary}=require('../Services/Cloudinary/Cloudinary.js');
 
 
 const registerUser=asyncHandler(async(req,res)=>{
@@ -230,4 +231,50 @@ const logoutUser=asyncHandler(async(req,res)=>{
     res.status(200).json(new ApiResponse(200,"","User logged out successfully"));
 })
 
-module.exports = { registerUser,verifyUser,loginUser,profileUser,logoutUser };
+const updateProfilePic=asyncHandler(async(req,res)=>{
+    const  userId=req.userId;
+    console.log(userId)
+    const avatar=req.file?.path;
+    console.log(avatar)
+    if(!userId || !avatar){
+        logger.error(new ApiError(400,"User id or avater is missing"));
+        return res.status(400).json(new ApiResponse(400,"","User id is missing"));
+    }
+    const profilePicUrl=await uploadToCloudinary(avatar);
+
+    if(!profilePicUrl){
+        logger.error(new ApiError(500,"Internal server error in uploading profile pic"));
+        return res.status(500).json(new ApiResponse(500,"","Internal server error in uploading profile pic"));
+    }
+
+    const getUser=await UserModel.findById(userId);
+    if(!getUser){
+        logger.error(new ApiError(404,"User not found"));
+        return res.status(404).json(new ApiResponse(404,"","User not found"));
+    }
+
+    getUser.profilePic=profilePicUrl;
+    await getUser.save();
+
+    res.status(200).json(new ApiResponse(200,{profilePicUrl:profilePicUrl},"Profile pic updated successfully"));
+})
+
+const updateDetails=asyncHandler(async(req,res)=>{
+    const  userId=req.userId;
+    const {firstName,lastName,phone,whatsapp,email}=req.body;
+    
+    if(!userId || !firstName || !lastName || !phone || !whatsapp || !email){
+        logger.error(new ApiError(400,"User id or details are missing"));
+        return res.status(400).json(new ApiResponse(400,"","User id is missing"));
+    }
+    
+    const UpdateInfo=await updateInfo(userId,firstName,lastName,phone,whatsapp,email);
+
+    if(!UpdateInfo){
+        logger.error(new ApiError(500,"Internal server error in updating details"));
+        return res.status(500).json(new ApiResponse(500,"","Internal server error in updating details"));
+    }
+    res.status(200).json(new ApiResponse(200,{UpdateInfo},"Details updated successfully"));
+})
+
+module.exports = { registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails };

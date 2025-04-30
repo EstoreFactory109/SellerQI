@@ -1,11 +1,11 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const FbaInventoryPlanningData = require("../../models/GET_FBA_INVENTORY_PLANNING_DATA_Model.js"); 
+const FbaInventoryPlanningData = require("../../models/GET_FBA_INVENTORY_PLANNING_DATA_Model.js");
 const UserModel = require("../../models/userModel.js");
 
-const generateReport = async (accessToken, marketplaceIds,baseuri) => {
-    
+const generateReport = async (accessToken, marketplaceIds, baseuri) => {
+    console.log(baseuri)
     try {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
@@ -14,7 +14,7 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
                 reportType: "GET_FBA_INVENTORY_PLANNING_DATA",
-                marketplaceIds: [marketplaceIds], 
+                marketplaceIds: [marketplaceIds],
                 dataStartTime: StartTime.toISOString(),
                 dataEndTime: EndTime.toISOString()
             },
@@ -34,9 +34,9 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
-const checkReportStatus = async (accessToken, reportId,baseuri) => {
+const checkReportStatus = async (accessToken, reportId, baseuri) => {
     try {
-        
+
         const response = await axios.get(
             `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
             {
@@ -84,7 +84,7 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
     }
 };
 
-const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
+const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
     try {
         const response = await axios.get(
             `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
@@ -102,26 +102,26 @@ const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, userId) => {
+const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, Region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     try {
         console.log("📄 Generating Report...");
-        const reportId = await generateReport(accessToken, marketplaceIds);
+        const reportId = await generateReport(accessToken, marketplaceIds, baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
         }
 
         let reportDocumentId = null;
-        let retries = 30; 
+        let retries = 30;
 
         while (!reportDocumentId && retries > 0) {
             console.log(`⏳ Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
-            reportDocumentId = await checkReportStatus(accessToken, reportId);
+            reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
                 return {
                     success: false,
@@ -142,7 +142,7 @@ const getReport = async (accessToken, marketplaceIds, userId) => {
         console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
 
         console.log("📥 Downloading Report...");
-        const reportUrl = await getReportLink(accessToken, reportDocumentId);
+        const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
 
         const fullReport = await axios({
             method: "GET",
@@ -155,7 +155,7 @@ const getReport = async (accessToken, marketplaceIds, userId) => {
         }
 
         const refinedData = convertTSVToJson(fullReport.data);
-        
+
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return {
@@ -164,59 +164,36 @@ const getReport = async (accessToken, marketplaceIds, userId) => {
             };
         }
 
-        return refinedData;
+        const result = [];
 
-        let result=[]
-        refinedData.forEach((data)=>{
-            const val={
-                asin:data.asin,
-                quantity_to_be_charged_ais_181_210_days:data["quantity-to-be-charged-ais-181-210-days"],
-                quantity_to_be_charged_ais_211_240_days:data["quantity-to-be-charged-ais-211-240-days"],
-                quantity_to_be_charged_ais_241_270_days:data["quantity-to-be-charged-ais-241-270-days"],
-                quantity_to_be_charged_ais_271_300_days:data["quantity-to-be-charged-ais-271-300-days"],
-                quantity_to_be_charged_ais_301_330_days:data["quantity-to-be-charged-ais-301-330-days"],
-                quantity_to_be_charged_ais_331_365_days:data["quantity-to-be-charged-ais-331-365-days"],
-                quantity_to_be_charged_ais_365_plus_days:data["quantity-to-be-charged-ais-365-plus-days"],
-                unfulfillable_quantity:data["unfulfillable-quantity"]
-            }
-            result.push(val);
+        refinedData.forEach((item) => {
+            result.push({
+                asin: item.asin,
+                quantity_to_be_charged_ais_181_210_days: item["quantity-to-be-charged-ais-181-210-days"],
+                quantity_to_be_charged_ais_211_240_days: item["quantity-to-be-charged-ais-211-240-days"],
+                quantity_to_be_charged_ais_241_270_days: item["quantity-to-be-charged-ais-241-270-days"],
+                quantity_to_be_charged_ais_271_300_days: item["quantity-to-be-charged-ais-271-300-days"],
+                quantity_to_be_charged_ais_301_330_days: item["quantity-to-be-charged-ais-301-330-days"],
+                quantity_to_be_charged_ais_331_365_days: item["quantity-to-be-charged-ais-331-365-days"],
+                quantity_to_be_charged_ais_365_plus_days: item["quantity-to-be-charged-ais-365-plus-days"],
+                unfulfillable_quantity: item["unfulfillable-quantity"],
+            });
+        });
+
+
+
+
+
+        const createReport = await FbaInventoryPlanningData.create({
+            User: userId,
+            region: Region,
+            country: Country,
+            data: result
         })
-
-        return result;
-
-        return {
-            "quantity-to-be-charged-ais-181-210-days": refinedData[0]["quantity-to-be-charged-ais-181-210-days"],
-            "quantity-to-be-charged-ais-211-240-days": refinedData[0]["quantity-to-be-charged-ais-211-240-days"],
-            "quantity-to-be-charged-ais-241-270-days": refinedData[0]["quantity-to-be-charged-ais-241-270-days"],
-            "quantity-to-be-charged-ais-271-300-days": refinedData[0]["quantity-to-be-charged-ais-271-300-days"],
-            "quantity-to-be-charged-ais-301-330-days": refinedData[0]["quantity-to-be-charged-ais-301-330-days"],
-            "quantity-to-be-charged-ais-331-365-days": refinedData[0]["quantity-to-be-charged-ais-331-365-days"],
-            "quantity-to-be-charged-ais-365-plus-days": refinedData["quantity-to-be-charged-ais-365-plus-days"],
-            "unfulfillable-quantity": refinedData["unfulfillable-quantity"],
-        };
-
-        const createReport= await FbaInventoryPlanningData.create({
-            User:userId,
-            quantity_to_be_charged_ais_181_210_days: refinedData[0]["quantity-to-be-charged-ais-181-210-days"],
-            quantity_to_be_charged_ais_211_240_days: refinedData[0]["quantity-to-be-charged-ais-211-240-days"],
-            quantity_to_be_charged_ais_241_270_days: refinedData[0]["quantity-to-be-charged-ais-241-270-days"],
-            quantity_to_be_charged_ais_271_300_days: refinedData[0]["quantity-to-be-charged-ais-271-300-days"],
-            quantity_to_be_charged_ais_301_330_days: refinedData[0]["quantity-to-be-charged-ais-301-330-days"],
-            quantity_to_be_charged_ais_331_365_days: refinedData[0]["quantity-to-be-charged-ais-331-365-days"],
-            quantity_to_be_charged_ais_365_plus_days: refinedData["quantity-to-be-charged-ais-365-plus-days"],
-            unfulfillable_quantity: refinedData["unfulfillable-quantity"],
-        })
-        if(!createReport){
-            logger.error(new ApiError(500,"Internal server error in generating the report"));
-            return false;
-        }_
-        const getUser=await UserModel.findById(userId);
-        if(!getUser){
-            logger.error(new ApiError(404,"User not found"));
+        if (!createReport) {
+            logger.error(new ApiError(500, "Internal server error in generating the report"));
             return false;
         }
-        getUser.GET_FBA_INVENTORY_PLANNING_DATA=createReport._id;
-        await getUser.save();
 
         return createReport;
 
@@ -235,7 +212,7 @@ function convertTSVToJson(tsvBuffer) {
     const jsonData = rows.slice(1).map(row => {
         const values = row.split("\t");
         return headers.reduce((obj, header, index) => {
-            obj[header] = values[index] || ""; 
+            obj[header] = values[index] || "";
             return obj;
         }, {});
     });

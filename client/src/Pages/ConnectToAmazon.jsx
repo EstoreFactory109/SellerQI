@@ -30,7 +30,7 @@ const AmazonConnect = () => {
 
       if (response.status === 201) {
         setLoading(false);
-        alert("Data saved successfully");
+       
       }
 
     } catch (error) {
@@ -123,7 +123,7 @@ const AmazonConnect = () => {
 
           {/* Submit Button */}
           <button className="w-full h-12 mt-6 bg-gray-800 text-white font-semibold rounded-md hover:bg-gray-700" onClick={handleSubmit}>
-            {loading ? <BeatLoader color="#ffffff" size={10} /> : <p>Reset Password</p>}
+            {loading ? <BeatLoader color="#ffffff" size={10} /> : <p>Connect To Amazon</p>}
           </button>
         </form>
       </section>

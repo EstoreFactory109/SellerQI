@@ -78,7 +78,7 @@ export default function Dashboard() {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  })
+  },[])
   return (
     <div className="bg-[#eeeeee] p-6 space-y-6 lg:h-[90vh] lg:mt-0 mt-[10vh] overflow-y-auto">
       <p className="text-sm">ISSUES</p>

@@ -10,7 +10,8 @@ import activeReportsIcon from '../../assets/Icons/active-reports.png';
 import HistoryIcon from '../../assets/Icons/history.png';
 import activeHistoryIcon from '../../assets/Icons/active-history.png';
 import LogoutIcon from '../../assets/Icons/logout.png';
-
+import settingsIcon from '../../assets/Icons/settings.png'; 
+import activeSettingsIcon from '../../assets/Icons/active-settings.png';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import axios from 'axios';
@@ -116,7 +117,7 @@ const LeftNavSection = () => {
 
             <hr className="w-11/12 mx-auto" />
 
-           {/* <div className="w-full pt-5 pl-2">
+           {<div className="w-full pt-5 pl-2">
                 <p className="font-light mb-4">HELP</p>
                 <NavLink
                     to="/seller-central-checker/settings"
@@ -128,12 +129,12 @@ const LeftNavSection = () => {
                 >
                     {({ isActive }) => (
                         <>
-                            <img src={isActive ? activeSettingsIcon : SettingsIcon} alt="Settings" className="w-4 h-4" />
+                            <img src={isActive ? activeSettingsIcon : settingsIcon} alt="Settings" className="w-4 h-4" />
                             <p className="font-medium text-xs">Settings</p>
                         </>
                     )}
                 </NavLink>
-            </div>*/}
+            </div>}
 
             <div className="w-full pt-5 pl-2 absolute bottom-6">
                 <button className='flex items-center gap-2 p-2' onClick={(e)=>logoutUser(e)}>

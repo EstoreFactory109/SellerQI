@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { motion } from "framer-motion"; // Only motion, NO AnimatePresence here
 import RingLoader from "react-spinners/RingLoader";
 
-const Loader = ({ isVisible }) => {
+const Loader = () => {
   const [showAccessText, setShowAccessText] = useState(true);
 
   useEffect(() => {
@@ -16,8 +16,9 @@ const Loader = ({ isVisible }) => {
     <motion.div
       className="w-full h-[100vh] fixed z-[99] flex flex-col justify-center items-center bg-white"
       initial={{ y: 0 }}
-      animate={{ y: isVisible ? 0 : -1000 }}
-      transition={{ duration: 1, ease: 'easeInOut' }}
+      animate={{ y: 0 }}
+      exit={{ y: "-100%", transition: { duration: 1, ease: "easeInOut" } }}
+      transition={{ duration: 1, ease: "easeInOut" }}
     >
       <RingLoader color="#5c5e92" size={100} />
       <div className="mt-4 text-center">

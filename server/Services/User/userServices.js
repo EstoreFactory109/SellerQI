@@ -45,7 +45,21 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    return await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email");
+    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic");
+    if(!user){
+        logger.error(new ApiError(404,"User not found"));
+        return false;
+    }
+
+    
+    return {
+        firstName : user.firstName,
+        lastName : user.lastName ,
+        phone:user.phone ,
+        whatsapp:user.whatsapp ,
+        email:user.email ,
+        profilePic:user.profilePic
+    };
 }
 
 
@@ -78,6 +92,39 @@ const verify=async(email,otp)=>{
     
 }
 
+const updateInfo=async(userId,firstName,lastName,phone,whatsapp,email)=>{
+    if(!userId){
+        logger.error(new ApiError(404,"User id is missing"));
+        return false;
+    }
 
-module.exports = { createUser,getUserByEmail,verify,getUserById }
+    try {
+        const getUser=await UserModel.findById(userId).select("firstname lastname phone whatsapp email");
+        if(!getUser){
+            logger.error(new ApiError(404,"User not found"));
+            return false;
+        }
+
+        getUser.firstName=firstName;
+        getUser.lastName=lastName;
+        getUser.phone=phone;
+        getUser.whatsapp=whatsapp;
+        getUser.email=email;
+        await getUser.save();
+
+        return {
+           firstName: getUser.firstName,
+           lastName:getUser.lastName,
+           phone:getUser.phone,
+           whatsapp:getUser.whatsapp,
+           email:getUser.email
+        };
+    } catch (error) {
+        logger.error(`Error in updating user info: ${error}`);
+        return false;
+    }
+}
+
+
+module.exports = { createUser,getUserByEmail,verify,getUserById ,updateInfo}
 

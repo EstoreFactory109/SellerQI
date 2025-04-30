@@ -1,0 +1,42 @@
+.custom-range {
+  -webkit-appearance: none;
+  width: 20rem;
+  height: 4px; /* thickness of the line */
+  background: #ddd;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* Track for Chrome/Safari */
+.custom-range::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #ddd;
+  border-radius: 2px;
+}
+
+/* Thumb for Chrome/Safari */
+.custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 16px;
+  width: 16px;
+  background: #333651;
+  border-radius: 50%;
+  cursor: pointer;
+  margin-top: -6px; /* to center the thumb vertically */
+}
+
+/* Track for Firefox */
+.custom-range::-moz-range-track {
+  height: 4px;
+  background: #ddd;
+  border-radius: 2px;
+}
+
+/* Thumb for Firefox */
+.custom-range::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+  background: #333651;
+  border-radius: 50%;
+  cursor: pointer;
+}

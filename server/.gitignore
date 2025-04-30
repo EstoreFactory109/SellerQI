@@ -18,7 +18,7 @@ logs/
 # Build directories
 /dist
 /build
-/public
+
 
 # IDEs and Editors
 .vscode/

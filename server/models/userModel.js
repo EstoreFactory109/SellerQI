@@ -45,6 +45,11 @@ const userSchema = new mongoose.Schema(
         minlength: [8, "Password must be at least 8 characters long"],
         select: false, // Prevents returning password in queries
       },
+      profilePic:{
+        type: String,
+        required: false,
+        default:""
+      },
       appRefreshToken: {
         type: String,
         required: false,

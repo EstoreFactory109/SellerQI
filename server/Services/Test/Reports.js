@@ -11,7 +11,7 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
         const response = await axios.post(
             `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports`,
             {
-                reportType: "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA",
+                reportType: "GET_STRANDED_INVENTORY_UI_DATA",
                 marketplaceIds: ["ATVPDKIKX0DER"],
                 dataStartTime: "2025-01-10T00:00:00.000Z",
                 dataEndTime: "2025-03-10T23:59:59.999Z",

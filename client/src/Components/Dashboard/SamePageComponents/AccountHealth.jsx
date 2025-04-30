@@ -3,8 +3,9 @@ import issue from '../../../assets/Icons/error.png';
 import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
 const AccountHealth = () => {
-const info = useSelector(state => state.Dashboard.DashBoardInfo)
+const info = useSelector(state => state.Dashboard?.DashBoardInfo)
  
+console.log(info)
 
   const options = {
     chart: {
@@ -46,7 +47,7 @@ const info = useSelector(state => state.Dashboard.DashBoardInfo)
     labels: ["Progress"],
   };
 
-  const series = [info.accountHealthPercentage.Percentage];
+  const series = [info?.accountHealthPercentage?.Percentage];
 
   return (
     <div className='min-h-[35vh] bg-white p-3 border-2 border-gray-200 rounded-md pb-4'>
@@ -61,7 +62,7 @@ const info = useSelector(state => state.Dashboard.DashBoardInfo)
       </div>
       <div className='relative w-fit m-auto'>
         <Chart options={options} series={series} type="radialBar" height={250} />
-        <p className='absolute text-xs bottom-8 left-[40%] text-[#82b4a5]'>{info.accountHealthPercentage.status.toUpperCase()}</p>
+        <p className='absolute text-xs bottom-8 left-[40%] text-[#82b4a5]'>{info?.accountHealthPercentag?.status.toUpperCase()}</p>
         <p className='absolute text-xs text-[#82b4a5] bg-[#edfef0] px-1 rounded-full left-[40%] bottom-0'>+2.00%</p>
       </div>
     </div>
