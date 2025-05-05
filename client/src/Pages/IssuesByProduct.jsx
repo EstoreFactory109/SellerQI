@@ -1,9 +1,11 @@
-import React, { useState,useEffect,useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from "react-redux";
 import { useParams } from 'react-router-dom';
 import DropDown from '../assets/Icons/drop-down.png';
 import noImage from '../assets/Icons/no-image.png';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from "framer-motion";
+
 // Reusable component for conversion issues
 const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, toggleFunc }) => (
     <li className="mb-4">
@@ -23,7 +25,7 @@ const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, t
             className="bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out"
             style={
                 stateValue === solutionKey
-                    ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" }
+                    ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                     : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
             }
         >
@@ -35,9 +37,9 @@ const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, t
 const Dashboard = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const dropdownRef = useRef(null);
-    useEffect(()=>{
-        function handleClickOutside(e){
-            if(dropdownRef.current && !dropdownRef.current.contains(e.target)){
+    useEffect(() => {
+        function handleClickOutside(e) {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
                 setOpenSelector(false);
             }
         }
@@ -45,7 +47,7 @@ const Dashboard = () => {
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
         }
-    },[])
+    }, [])
 
     const { asin } = useParams();
     const product = info.productWiseError.find(item => item.asin === asin);
@@ -112,8 +114,8 @@ const Dashboard = () => {
             setAplusSolution(prev => prev === val ? "" : val);
         }
     };
-const [openSelector,setOpenSelector] = useState(false)
-const navigate=useNavigate();
+    const [openSelector, setOpenSelector] = useState(false)
+    const navigate = useNavigate();
     return (
         <div className="p-6 bg-gray-100 max-h-[90vh] overflow-y-auto text-gray-800 lg:mt-0 mt-[10vh]">
             {/* Header */}
@@ -121,7 +123,7 @@ const navigate=useNavigate();
                 <div className="flex items-center space-x-4">
                     <img src={product.MainImage || noImage} alt="Product" className="w-20 rounded-md mr-4" />
                     <div>
-                        <h2 className="text-xl font-semibold mb-4">{product.name}</h2>
+                        <h2 className="text-xl font-semibold mb-4">{product.name} ...</h2>
                         <p className="text-sm">ASIN: {product.asin}</p>
                         <p className="text-sm">SKU: {product.sku}</p>
                         <p className="text-sm">List Price: ${product.price}</p>
@@ -132,11 +134,31 @@ const navigate=useNavigate();
                         Download PDF
                     </button>
                     <div className="w-[9rem] bg-white flex justify-center items-center px-2 py-1 border-[1px] border-gray-300 rounded-md text-sm text-gray-400 gap-3 cursor-pointer" onClick={() => setOpenSelector(!openSelector)} ><p>Switch Product</p><img src={DropDown} /></div>
-                    {openSelector && <ul className="w-[9rem] z-[99] bg-white absolute right-0 top-12 py-1 px-1 border-[1px] border-gray-300 ">
-                        {
-                            info.productWiseError.map((item, index) => <li className=" flex justify-center items-center py-1 cursor-pointer hover:bg-[#333651] hover:text-white rounded-md text-sm" key={index} onClick={() => {navigate(`/seller-central-checker/issues/${item.asin}`); setOpenSelector(false)}}>{item.asin}</li>)
-                        }
-                    </ul>}
+                    <AnimatePresence>
+                        {openSelector && (
+                            <motion.ul
+                                initial={{ opacity: 0, scaleY: 0 }}
+                                animate={{ opacity: 1, scaleY: 1 }}
+                                exit={{ opacity: 0, scaleY: 0 }}
+                                transition={{ duration: 0.3, ease: "easeInOut" }}
+                                style={{ transformOrigin: "top" }}
+                                className="w-[30rem] h-[30rem] overflow-x-hidden overflow-y-auto z-[99] bg-white absolute right-0 top-12 py-2 px-2 border-[1px] border-gray-300 shadow-md origin-top"
+                            >
+                                {info.productWiseError.map((item, index) => (
+                                    <li
+                                        key={index}
+                                        className="flex justify-center items-center py-2 px-2 cursor-pointer hover:bg-[#333651] hover:text-white rounded-md text-sm"
+                                        onClick={() => {
+                                            navigate(`/seller-central-checker/issues/${item.asin}`);
+                                            setOpenSelector(false);
+                                        }}
+                                    >
+                                        {item.asin} | {item.name}...
+                                    </li>
+                                ))}
+                            </motion.ul>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
 
@@ -171,7 +193,7 @@ const navigate=useNavigate();
                                             </button>
                                         </div>
                                         <div className=' bg-gray-200 mt-2 flex justify-center items-center' style={TitleSolution === "charLim"
-                                            ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" }
+                                            ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                             : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
                                         }>{product.rankingErrors.data.TitleResult.charLim?.HowTOSolve}</div>
                                     </li>
@@ -190,7 +212,7 @@ const navigate=useNavigate();
                                         <div
                                             className='bg-gray-200 mt-2 justify-center items-center transition-all duration-700 ease-in-out'
                                             style={TitleSolution === "RestrictedWords"
-                                                ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" }
+                                                ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                                 : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
                                             }
                                         >
@@ -210,7 +232,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center  transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.TitleResult.checkSpecialCharacters?.HowTOSolve}</div>
+                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center  transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.TitleResult.checkSpecialCharacters?.HowTOSolve}</div>
                                     </li>
                                 )
                             }
@@ -231,7 +253,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.charLim?.HowTOSolve}</div>
+                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.charLim?.HowTOSolve}</div>
                                     </li>
                                 )
                             }
@@ -245,7 +267,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.RestictedWords?.HowTOSolve}</div>
+                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.RestictedWords?.HowTOSolve}</div>
                                     </li>
                                 )
                             }
@@ -259,7 +281,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.HowTOSolve}</div>
+                                        <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.HowTOSolve}</div>
                                     </li>
                                 )
                             }
@@ -279,7 +301,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.charLim?.HowTOSolve}</p></div>
+                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.charLim?.HowTOSolve}</p></div>
                                     </li>
                                 )
                             }
@@ -293,7 +315,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.RestictedWords?.HowTOSolve}</p></div>
+                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.RestictedWords?.HowTOSolve}</p></div>
                                     </li>
                                 )
                             }
@@ -307,7 +329,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.checkSpecialCharacters?.HowTOSolve}</p></div>
+                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.checkSpecialCharacters?.HowTOSolve}</p></div>
                                     </li>
                                 )
                             }
@@ -328,7 +350,7 @@ const navigate=useNavigate();
                                                 <img src={DropDown} className='w-[7px] h-[7px]' />
                                             </button>
                                         </div>
-                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.charLim?.HowTOSolve}</p></div>
+                                        <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.charLim?.HowTOSolve}</p></div>
                                     </li>
                                 )
                             }
@@ -412,6 +434,8 @@ const navigate=useNavigate();
                     </div>
                 </div>
             )}
+            {/*Empty div*/}
+            <div className='py-2w-full h-5'></div>
         </div>
     );
 };

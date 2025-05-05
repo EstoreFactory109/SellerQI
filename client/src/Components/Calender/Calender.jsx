@@ -1,9 +1,159 @@
-import React from 'react'
+import React, { useState } from 'react';
+import { DateRange } from 'react-date-range';
+import 'react-date-range/dist/styles.css';
+import 'react-date-range/dist/theme/default.css';
 
-const Calender = () => {
+
+import {
+  subDays,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  sub,
+} from 'date-fns';
+
+export default function DateFilter() {
+  const [selectedRange, setSelectedRange] = useState({
+    startDate: subDays(new Date(), 30),
+    endDate: subDays(new Date(), 1),
+    key: 'selection',
+  });
+
+  const [sevenDaysActive,setSevenDaysActive]=useState(false);
+  const [thirtyDaysActive,setThirtyDaysActive]=useState(true);
+  const [thisMonthActive,setThisMonthActive]=useState(false);
+  const [lastMonthActive,setLastMonthActive]=useState(false);
+  const [customActive,setCustomActive]=useState(false);
+
+  const handleActive=(btnValue)=>{
+    switch(btnValue){
+      case 'last7':
+        setSevenDaysActive(true);
+        setThirtyDaysActive(false);
+        setThisMonthActive(false);
+        setLastMonthActive(false);
+        setCustomActive(false);
+        break;
+      case 'last30':
+        setSevenDaysActive(false);
+        setThirtyDaysActive(true);
+        setThisMonthActive(false);
+        setLastMonthActive(false);
+        setCustomActive(false);
+        break;
+      case 'thisMonth':
+        setSevenDaysActive(false);
+        setThirtyDaysActive(false);
+        setThisMonthActive(true);
+        setLastMonthActive(false);
+        setCustomActive(false);
+        break;    
+      case 'lastMonth':
+        setSevenDaysActive(false);
+        setThirtyDaysActive(false);
+        setThisMonthActive(false);
+        setLastMonthActive(true);
+        setCustomActive(false);
+        break;
+      case 'custom':
+        setSevenDaysActive(false);
+        setThirtyDaysActive(false);
+        setThisMonthActive(false);
+        setLastMonthActive(false);
+        setCustomActive(true);
+        break;
+      default:
+        setSevenDaysActive(false);
+        setThirtyDaysActive(false);
+        setThisMonthActive(false);
+        setLastMonthActive(false);
+        setCustomActive(false);
+        break;
+    }
+  }
+
+  const handlePreset = (type) => {
+    const today = new Date();// hide calendar unless 'custom' is selected
+
+    switch (type) {
+      case 'last7':
+        handleActive('last7');
+        setSelectedRange({
+          startDate: subDays(today, 7),
+          endDate: subDays(today, 1),
+          key: 'selection',
+        });
+        break;
+      case 'last30':
+        handleActive('last30');
+        setSelectedRange({
+          startDate: subDays(today, 30),
+          endDate: subDays(today, 1),
+          key: 'selection',
+        });
+        break;
+      case 'thisMonth':
+        handleActive('thisMonth');
+        setSelectedRange({
+          startDate: startOfMonth(today),
+          endDate: subDays(today, 1),
+          key: 'selection',
+        });
+        break;
+      case 'lastMonth':
+        handleActive('lastMonth');
+        const lastMonth = subMonths(today, 1);
+        setSelectedRange({
+          startDate: startOfMonth(lastMonth),
+          endDate: endOfMonth(lastMonth),
+          key: 'selection',
+        });
+        break;
+      case 'custom':
+        handleActive('custom');
+        setSelectedRange({
+          startDate:new Date(),
+          endDate: new Date(),
+          key: 'selection',
+        })
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
-    <div>Calender</div>
-  )
-}
+    <div className="p-6  max-w-xl mx-auto bg-white shadow-md rounded absolute right-0 top-[130%] z-[99] flex gap-4 border-[2px] border-gray-300">
+  
 
-export default Calender
+      <div className="flex flex-wrap gap-3">
+        <button onClick={() => handlePreset('last7')} className={`w-[10rem] px-4 py-2 text-sm ${ sevenDaysActive?`bg-[#333651] text-white`:`bg-gray-200`} rounded hover:scale-105 transition-all ease-in-out duration-300`}>
+          Last 7 Days
+        </button>
+        <button onClick={() => handlePreset('last30')} className={`w-[10rem] px-4 py-2 text-sm ${ thirtyDaysActive?`bg-[#333651] text-white`:`bg-gray-200`} rounded hover:scale-105 transition-all ease-in-out duration-300`}>
+          Last 30 Days
+        </button>
+        <button onClick={() => handlePreset('thisMonth')} className={`w-[10rem] px-4 py-2 text-sm ${ thisMonthActive?`bg-[#333651] text-white`:`bg-gray-200`} rounded hover:scale-105 transition-all ease-in-out duration-300`}>
+          This Month
+        </button>
+        <button onClick={() => handlePreset('lastMonth')} className={`w-[10rem] px-4 py-2 text-sm ${ lastMonthActive?`bg-[#333651] text-white`:`bg-gray-200`} rounded hover:scale-105 transition-all ease-in-out duration-300`}>
+          Last Month
+        </button>
+        <button onClick={() => handlePreset('custom')} className={`w-[10rem] px-4 py-2 text-sm ${ customActive?`bg-[#333651] text-white`:`bg-gray-200`} rounded hover:scale-105 transition-all ease-in-out duration-300`}>
+          Custom Range
+        </button>
+      </div>
+    <div className='flex flex-col items-end' >
+      <DateRange
+          ranges={[selectedRange]}
+          onChange={(item) => setSelectedRange(item.selection)}
+          moveRangeOnFirstSelection={false}
+          editableDateInputs={true}
+          rangeColors={['#333651']}
+          color="#333651"
+        />
+        <button className='bg-[#333651] text-white px-4 py-2 rounded active:scale-95 transition-all ease-in-out duration-200'>Apply</button>
+      </div>
+    </div>
+  );
+}

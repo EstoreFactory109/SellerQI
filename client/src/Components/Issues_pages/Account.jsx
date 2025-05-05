@@ -7,28 +7,11 @@ import { useSelector } from 'react-redux';
 export default function AccountHealthDashboard() {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
 
-    const issueData = [
-      {
-        issue: "Negative Seller Feedback",
-        solution:info.AccountErrors.negativeFeedbacks.HowTOSolve.length===0?info.AccountErrors.negativeFeedbacks.Message:info.AccountErrors.negativeFeedbacks.HowTOSolve
-      },
-      {
-        issue: "Policy Violations",
-        solution:info.AccountErrors.PolicyViolations.HowTOSolve.length===0?info.AccountErrors.PolicyViolations.Message:info.AccountErrors.PolicyViolations.HowTOSolve
-      },
-      {
-        issue: "Late Shipment Count",
-        solution:info.AccountErrors.lateShipmentCount.HowTOSolve.length===0?info.AccountErrors.lateShipmentCount.Message:info.AccountErrors.lateShipmentCount.HowTOSolve
-      },
-      {
-        issue:"Account Status",
-        solution:info.AccountErrors.accountStatus.HowTOSolve.length===0?info.AccountErrors.accountStatus.Message:info.AccountErrors.accountStatus.HowTOSolve
-      },
-      {
-        issue:"Response Under 24 Hours",
-        solution:info.AccountErrors.responseUnder24HoursCount.HowTOSolve.length===0?info.AccountErrors.responseUnder24HoursCount.Message:info.AccountErrors.responseUnder24HoursCount.HowTOSolve
-      }
-    ];
+    const AccountErrors=info.AccountErrors
+ 
+    console.log(AccountErrors)
+    console.log(AccountErrors.validTrackingRateStatus.HowTOSolve.length)
+
 
 
   const totalSales = info.TotalSales.slice(-10);
@@ -120,19 +103,113 @@ export default function AccountHealthDashboard() {
         <table className="min-w-full table-auto text-sm text-left">
           <thead>
             <tr className="border-b bg-[#333651] text-white">
+              <th className="p-2 font-semibold">Category</th>
               <th className="p-2 font-semibold">Issue</th>
               <th className="p-2 font-semibold">How to solve</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {
-             issueData.map((issue, idx) => (
-              <tr key={idx}>
-                <td className="p-2 align-top w-1/3 font-medium">{issue.issue}</td>
-                <td className="p-2 whitespace-pre-line">{issue.solution}</td>
+             
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                  Account Status
+                </td>
+                <td className="p-2 whitespace-pre-line text-justify" style={AccountErrors.accountStatus.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.accountStatus.Message}</td>
+                <td className="p-2 whitespace-pre-line text-justify">
+                  {AccountErrors.accountStatus.HowTOSolve.length>0?AccountErrors.accountStatus.HowTOSolve:"N/A"}
+                </td>
               </tr>
-            ))
-            }
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Negative Seller Feedback
+                </td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.negativeFeedbacks.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.negativeFeedbacks.Message}</td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.negativeFeedbacks.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.negativeFeedbacks.HowTOSolve.length>0?AccountErrors.negativeFeedbacks.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                NCX - Negative Customer Experience
+                </td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.NCX.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.NCX.Message}</td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.NCX.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.NCX.HowTOSolve.length>0?AccountErrors.NCX.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Policy Violations
+                </td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.PolicyViolations.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.PolicyViolations.Message}</td>
+                <td className="p-2 whitespace-pre-line  " style={AccountErrors.PolicyViolations.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.PolicyViolations.HowTOSolve.length>0?AccountErrors.PolicyViolations.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Valid Tracking Rate
+                </td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.validTrackingRateStatus.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.validTrackingRateStatus.Message}</td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.validTrackingRateStatus.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.validTrackingRateStatus.HowTOSolve.length>0?AccountErrors.validTrackingRateStatus.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Order Defect Rate
+                </td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.orderWithDefectsStatus.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.orderWithDefectsStatus.Message}</td>
+                <td className="p-2 whitespace-pre-line " style={AccountErrors.orderWithDefectsStatus.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.orderWithDefectsStatus.HowTOSolve.length>0?AccountErrors.orderWithDefectsStatus.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Late Shipment Rate
+                </td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.lateShipmentRateStatus.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.lateShipmentRateStatus.Message}</td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.lateShipmentRateStatus.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.lateShipmentRateStatus.HowTOSolve.length>0?AccountErrors.lateShipmentRateStatus.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                A-Z Guarantee Claim
+                </td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.a_z_claims.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.a_z_claims.Message}</td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.a_z_claims.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.a_z_claims.HowTOSolve.length>0?AccountErrors.a_z_claims.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Cancellation Rate (CR)
+                </td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.CancellationRate.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.accountStatus.Message}</td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.CancellationRate.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.CancellationRate.HowTOSolve.length>0?AccountErrors.CancellationRate.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+
+              <tr>
+                <td className="p-2 align-top w-1/3 font-medium">
+                Customer Response Time (More than 24 Hours)
+                </td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.responseUnder24HoursCount.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.responseUnder24HoursCount.Message}</td>
+                <td className="p-2 whitespace-pre-line" style={AccountErrors.responseUnder24HoursCount.status!=="Error" &&{textAlign:"center"}}>
+                  {AccountErrors.responseUnder24HoursCount.HowTOSolve.length>0?AccountErrors.responseUnder24HoursCount.HowTOSolve:"N/A"}
+                </td>
+              </tr>
+            
           </tbody>
         </table>
       </div>

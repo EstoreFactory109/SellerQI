@@ -3,6 +3,7 @@ import issue from '../../../assets/Icons/error.png';
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
+import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 
 const ProductChecker = () => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
@@ -59,7 +60,8 @@ const ProductChecker = () => {
     }
   }
 
-  console.log("productErrors: ",productErrors)
+  const [tooltipForProductChecker,setToolTipForProductChecker] = useState(false) 
+  const [tooltipForProductWithIssues,setToolTipForProductWithIssues] = useState(false)
 
   return (
     <div className='h-[62vh] lg:h-[55vh] bg-white p-3 border-2 border-gray-200 rounded-md'>
@@ -67,7 +69,13 @@ const ProductChecker = () => {
         <div className='w-full flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <h2 className='text-sm'>PRODUCT CHECKER</h2>
-            <img src={issue} alt='' className='w-4 h-4' />
+            <div className='relative fit-content'>
+              <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
+              onMouseEnter={() => setToolTipForProductChecker(true)}
+              onMouseLeave={() => setToolTipForProductChecker(false)}
+              />
+              {tooltipForProductChecker && <TooltipBox Information='Quick overview of product issues categorized by ranking, conversion, and account impact to assist you in prioritizing fixes efficiently.' />}
+            </div>
           </div>
           <button onClick={navigateToIssue} className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
             View Full Report
@@ -125,14 +133,20 @@ const ProductChecker = () => {
       <div className='w-full h-[40%] '>
         <div className='flex items-center gap-3'>
           <h2 className='text-sm'>TOP PRODUCTS TO OPTIMIZE</h2>
-          <img src={issue} alt='' className='w-4 h-4' />
+          <div className='relative fit-content'>
+          <img src={issue}  className='w-4 h-4 cursor-pointer' 
+          onMouseEnter={() => setToolTipForProductWithIssues(true)}
+          onMouseLeave={() => setToolTipForProductWithIssues(false)}
+          />
+              {tooltipForProductWithIssues &&<TooltipBox Information='Top 4 products with the most issues, allowing you to focus on optimizing the listings that require the most attention.' />}
+          </div>
         </div>
         <ul className='mt-3 border-2 border-gray-300 h-[85%] flex flex-col justify-center gap-2  px-2'>
           {
             productErrors.map((item, index) => {
               return item &&<li className='text-xs  flex items-center justify-between' key={index}>
                 <p className='w-[80%] hover:underline cursor-pointer' onClick={()=>navigateToProductWithIssuesPage(item?.asin)}>{item?.asin} | {item?.name}</p>
-                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full cursor-pointer active:scale-95 transition-all ease-in-out' onClick={()=>navigateToProductWithIssuesPage(item?.asin)}>{item?.errors} issues</div>
+                <div className='text-[#d6737c] text-[10px] font-bold bg-[#fef1f3] px-2 py-1 rounded-full cursor-pointer active:scale-95 transition-all ease-in-out duration-300 hover:scale-110  ' onClick={()=>navigateToProductWithIssuesPage(item?.asin)}>{item?.errors} issues</div>
               </li>
             })
           }

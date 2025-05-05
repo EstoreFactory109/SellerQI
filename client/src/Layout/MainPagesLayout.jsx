@@ -51,7 +51,7 @@ const MainPagesLayout = () => {
     <div className='flex min-h-screen'>
         <LeftNavSection  />
         <LeftNavSectionForTablet/>
-        <section className='w-full h-[100vh] '>
+        <section className='w-full h-[100vh] overflow-hidden'>
             <TopNav name={name}/>
             <Outlet/>
         </section>

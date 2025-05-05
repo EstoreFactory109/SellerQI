@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useRef,useState,useEffect } from 'react'
 import calenderIcon from '../assets/Icons/Calender.png'
 import Download from '../assets/Icons/download.png'
 import "../styles/Reports/style.css"
@@ -7,24 +7,55 @@ import Health from '../Components/Reports/Reports_Third_Row/Health.jsx'
 import AllIssues from '../Components/Reports/Reports_Third_Row/AllIssues.jsx'
 import RowFour from '../Components/Reports/Reports_Fourth_Row.jsx'
 import TopSalesChart from '../Components/Reports/Reports_Second_Row.jsx'
+import Calender from '../Components/Calender/Calender.jsx'
+import { AnimatePresence, motion } from 'framer-motion';
+
 
 
 
 const Reports = () => {
-  
+   const [openCalender, setOpenCalender] = useState(false)
+    const CalenderRef = useRef(null);
 
- 
+   useEffect(() => {
+     const handleClickOutside = (event) => {
+       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
+         setOpenCalender(false);
+       }
+     };
+     document.addEventListener('mousedown', handleClickOutside);
+     return () => {
+       document.removeEventListener('mousedown', handleClickOutside);
+     };
+   }, [])
 
   return (
     <div className='bg-[#eeeeee] w-full h-auto lg:h-[90vh] p-6 overflow-y-auto lg:mt-0 mt-[10vh]'>
       <div className='w-full flex flex-wrap items-center justify-between cursor-pointer mb-4'>
         <p className='text-sm'>REPORTS</p>
         <div className='flex gap-4 flex-wrap'>
-          <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200'>
-            <p className='font-semibold text-xs'>Last 30 Days</p>
+        <div className='fit-content relative ' ref={CalenderRef}>
+          <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200  cursor-pointer' onClick={() => setOpenCalender(!openCalender)}>
+            <p className='font-semi-bold text-xs'>Last 30 Days</p>
             <img src={calenderIcon} alt='' className='w-4 h-4' />
           </div>
-          <button className='flex items-center text-xs bg-[#333651] text-white gap-2 px-3 py-2 rounded-md'>
+          <AnimatePresence>
+            {openCalender && (
+              <motion.div
+
+                initial={{ opacity: 0, scaleY: 0 }}
+                animate={{ opacity: 1, scaleY: 1 }}
+                exit={{ opacity: 0, scaleY: 0 }}
+                transition={{ duration: 0.3 }}
+                className="absolute top-full right-0 z-50 bg-white shadow-md rounded-md origin-top"
+              >
+                <Calender />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </div>
+          <button className='flex items-center text-xs bg-[#333651] text-white gap-2 px-3 py-1 rounded-md'>
             Download PDF
             <img src={Download} className='w-4 h-4' />
           </button>

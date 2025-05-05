@@ -1,29 +1,25 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 
 const ITEMS_PER_PAGE = 10;
 
 const AccountSnapshotTable = () => {
-
-  const info = useSelector(state => state.History.HistoryInfo);
-
-  console.log(info)
-
-
+  const info = useSelector(state => state.History.HistoryInfo || []);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // 🔹 Generate dummy test data (105 entries)
- 
+  const totalPages = Math.max(1, Math.ceil(info.length / ITEMS_PER_PAGE));
 
-  const totalPages = Math.ceil(info.length / ITEMS_PER_PAGE);
-
-  // 🔹 Get only items for current page
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return info.slice(start, start + ITEMS_PER_PAGE);
   }, [currentPage, info]);
 
-  // 🔹 Pagination buttons logic
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [info.length]);
+
   const getPaginationGroup = () => {
     const group = [];
     const maxButtons = 5;
@@ -48,8 +44,12 @@ const AccountSnapshotTable = () => {
     return group;
   };
 
+  if (!Array.isArray(info) || info.length === 0) {
+    return <div className="text-center text-gray-500">No data available.</div>;
+  }
+
   return (
-    <div className="bg-white p-6 rounded-2xl shadow">
+    <div>
       <h2 className="text-lg font-semibold mb-4">ACCOUNT SNAPSHOT HISTORY</h2>
       <div className="overflow-x-auto">
         <table className="min-w-full border divide-y divide-gray-200">
@@ -65,7 +65,13 @@ const AccountSnapshotTable = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedData.map((item, index) => (
               <tr key={index}>
-                <td className="px-4 py-3 text-sm text-gray-700">{new Date(item.Date).toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' }).replace(/^(\d+)(?= )/, d => d + (['th','st','nd','rd'][((d = +d) % 100 >> 3 ^ 1) && d % 10] || 'th'))}</td>
+                <td className="px-4 py-3 text-sm text-gray-700">
+                  {new Date(item.Date).toLocaleDateString("en-GB", {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                  }).replace(/^(\d+)(?= )/, d => d + (['th','st','nd','rd'][((d = +d) % 100 >> 3 ^ 1) && d % 10] || 'th'))}
+                </td>
                 <td className="px-4 py-3 text-sm text-gray-700">{item.HealthScore}</td>
                 <td className="px-4 py-3 text-sm text-gray-700">{item.TotalProducts}</td>
                 <td className="px-4 py-3 text-sm text-gray-700">{item.ProductsWithIssues}</td>
@@ -74,13 +80,15 @@ const AccountSnapshotTable = () => {
             ))}
           </tbody>
         </table>
+      </div>
 
-        {/* Pagination */}
+      {/* Pagination */}
+      {totalPages > 1 && (
         <div className="flex justify-between items-center mt-4">
           <button
-            className="text-sm text-gray-600 cursor-pointer"
+            className="text-sm text-gray-600 cursor-pointer disabled:text-gray-400"
             disabled={currentPage === 1}
-            onClick={() => setCurrentPage(prev => prev - 1)}
+            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
           >
             &lt; Previous
           </button>
@@ -90,7 +98,7 @@ const AccountSnapshotTable = () => {
               <button
                 key={page}
                 onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-gray-800 text-white' : 'text-gray-600'}`}
+                className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-[#333751] text-white' : 'text-gray-600'}`}
               >
                 {page}
               </button>
@@ -107,14 +115,17 @@ const AccountSnapshotTable = () => {
           </div>
 
           <button
-            className="text-sm text-gray-600 cursor-pointer"
+            className="text-sm text-gray-600 cursor-pointer disabled:text-gray-400"
             disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(prev => prev + 1)}
+            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
           >
             Next &gt;
           </button>
         </div>
-      </div>
+      )}
+
+      {/* Bottom padding so pagination is never clipped */}
+      <div className="h-6" />
     </div>
   );
 };

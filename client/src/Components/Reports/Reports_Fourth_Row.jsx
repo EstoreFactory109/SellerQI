@@ -1,9 +1,15 @@
-import React from 'react';
+import React,{useState} from 'react';
 import issue from "../../assets/Icons/error.png";
 import { useSelector } from 'react-redux';
+import ToolTipBoxForTotalIssues from '../ToolTipBox/ToolTipTopLeft.jsx'
+import ToolTipBoxForPotentialReimburstments from '../ToolTipBox/TootTipBoxTop.jsx'
+import ToolTipBoxForAmazonReadyProducts from '../ToolTipBox/ToolTipBoxRight.jsx'
 
 const Reports_Fourth_Row = () => {
   const info = useSelector(state => state.Dashboard.DashBoardInfo)
+  const [openTooltipForTotalIssues,setOpenTooltipForTotalIssues]=useState(false)
+  const [openTooltipForPotentialReimburstments,setOpenTooltipForPotentialReimburstments]=useState(false)
+  const [openToolTipForAmzonReadyProducts,setOpenToolTipForAmazonReadyProducts]=useState(false)
   
 
   return (
@@ -11,7 +17,10 @@ const Reports_Fourth_Row = () => {
         <div className='h-full w-full lg:w-[33%] p-2 '>
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Total Issues</p>
-            <img src={issue} className='w-3 h-3' />
+            <div className='relative fit-content'>
+            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenTooltipForTotalIssues(true)} onMouseLeave={() => setOpenTooltipForTotalIssues(false)} />
+            { openTooltipForTotalIssues && <ToolTipBoxForTotalIssues Information='A total number of issues in all products and the Amazon account that required attention.​ '/>}
+            </div>
           </div>
           <div className='flex items-center w-full justify-between mt-3'>
             <p className='font-bold'>{info.TotalRankingerrors+info.totalErrorInConversion+info.totalErrorInAccount}</p>
@@ -22,7 +31,10 @@ const Reports_Fourth_Row = () => {
         <div className='h-full w-full lg:w-1/3 p-2'>
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Potential Reimburstments</p>
-            <img src={issue} className='w-3 h-3' />
+            <div className='relative fit-content'>
+            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenTooltipForPotentialReimburstments(true)} onMouseLeave={() => setOpenTooltipForPotentialReimburstments(false)}/>
+            { openTooltipForPotentialReimburstments && <ToolTipBoxForPotentialReimburstments Information='The estimated amount you may be eligible to recover from Amazon for lost, damaged, or overcharged items.'/>}
+            </div>
           </div>
           <div className='flex items-center w-full justify-between mt-3'>
             <p className='font-bold'>${info.reimbustment.totalReimbursement}</p>
@@ -33,7 +45,10 @@ const Reports_Fourth_Row = () => {
         <div className='h-full w-full lg:w-1/3 p-2'>
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Amazon Ready Products</p>
-            <img src={issue} className='w-3 h-3' />
+            <div className='relative fit-content'>
+            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenToolTipForAmazonReadyProducts(true)} onMouseLeave={() => setOpenToolTipForAmazonReadyProducts(false)} />
+            { openToolTipForAmzonReadyProducts && <ToolTipBoxForAmazonReadyProducts Information='Number of products with no issues or improvement needed.'/>}
+            </div>
           </div>
           <div className='flex items-center w-full justify-between mt-3'>
             <p className='font-bold'>{info.amazonReadyProducts.length}/{info.TotalProduct.length}</p>

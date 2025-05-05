@@ -140,8 +140,15 @@ const checkBulletPoints = (arr) => {
         } 
     });
 
-    
-    result.NumberOfErrors = charLimErrCount+RestictedWordsErrCount+SpecialCharactersErrCount;
+    if(charLimErrCount>0||RestictedWordsErrCount>0||SpecialCharactersErrCount>0){
+        result.NumberOfErrors=1;
+    }else if((charLimErrCount>0&&RestictedWordsErrCount>0)||(charLimErrCount>0&&SpecialCharactersErrCount>0)||(RestictedWordsErrCount>0&&SpecialCharactersErrCount>0)){
+        result.NumberOfErrors=2; 
+    }else if((charLimErrCount>0&&RestictedWordsErrCount>0&&SpecialCharactersErrCount>0)){
+        result.NumberOfErrors=3;
+    }else{
+        result.NumberOfErrors=0;
+    }
     
     let FinalRestrictedWords=[...new Set(AllRestrictedWords)];
     let FinalSpecialCharacters=[...new Set(AllSpecialCharacters)];

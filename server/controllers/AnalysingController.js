@@ -127,7 +127,6 @@ const Analyse= async(userId,country,region)=>{
         TotalSales:TotalSales.totalSales
     };
 
-    
 
 
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));
@@ -171,7 +170,7 @@ const Analyse= async(userId,country,region)=>{
         }
     });
 
-    console.log(listingAllItems.length)
+
 
     listingAllItems.GenericKeyword.forEach(item => {
         const asin = item.GenericKeyword.asin;

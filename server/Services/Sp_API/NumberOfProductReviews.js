@@ -158,6 +158,7 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
     );
 
     const products = await Promise.all(tasks);
+    console.log("products: ", products);
     const filteredProducts = products.filter(product => product !== null);
 
     if (filteredProducts.length === 0) {

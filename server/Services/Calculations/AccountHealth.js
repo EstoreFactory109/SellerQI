@@ -37,7 +37,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         result.accountStatus={
             status:"Error",
             Message:"Your account status is not in normal standing. This can impact your ability to sell, restrict your listings, or even lead to account suspension if not addressed promptly.",
-            HowTOSolve:"Your account is in good standing! Maintaining a healthy account status helps ensure uninterrupted selling and long-term success on Amazon."
+            HowTOSolve:"Check your Account Health Dashboard in Seller Central to identify any performance issues, policy violations, or pending actions. Address any flagged concerns, such as order defect rate (ODR), late shipments, or intellectual property complaints. If action is required, respond promptly to Amazon’s notifications and provide necessary documentation to resolve the issue."
         }
     }else{
         result.accountStatus={
@@ -57,7 +57,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         }
     }else{
         result.PolicyViolations={
-            status:"Error",
+            status:"Success",
             Message:"Excellent! You have no listing policy violations, ensuring your products remain active and compliant with Amazon’s marketplace guidelines.",
             HowTOSolve:""
         }
@@ -65,13 +65,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     //valid tracking rate
     if(v2Data.validTrackingRateStatus!=='GOOD'){
         errorCounter++;
-        result.PolicyViolations={
+        result.validTrackingRateStatus={
             status:"Error",
             Message:"Your Valid Tracking Rate (VTR) is below Amazon's required threshold. A low VTR can result in warnings, restrictions on self-fulfilled shipping methods, and a negative impact on your seller performance metrics.",
             HowTOSolve:"Ensure that every order you fulfill includes valid tracking information from an Amazon-approved carrier. Double-check that tracking numbers are correctly entered and active. Use Amazon’s Buy Shipping service to automatically provide valid tracking. Regularly monitor your VTR in Account Health and take corrective actions if discrepancies arise."
         }
     }else{
-        result.PolicyViolations={
+        result.validTrackingRateStatus={
             status:"Success",
             Message:"Great job! Your Valid Tracking Rate is in good standing, helping you maintain strong seller performance and ensuring a smooth shipping experience for customers.",
             HowTOSolve:""
@@ -80,13 +80,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     //order defect rate
     if(v2Data.orderWithDefectsStatus!=='GOOD'){
         errorCounter++;
-        result.PolicyViolations={
+        result.orderWithDefectsStatus={
             status:"Error",
             Message:"Your Order Defect Rate (ODR) is above Amazon's acceptable threshold. A high ODR can lead to listing deactivation, loss of Buy Box eligibility, or even account suspension if not addressed.",
             HowTOSolve:"Analyze the root causes of defects, such as negative feedback, A-to-Z claims, or chargebacks. Address customer complaints promptly, improve product quality, and ensure accurate product descriptions to set the right expectations. If you receive unjustified negative feedback, request Amazon to remove it. Maintain excellent customer service and fulfillment reliability to lower your ODR over time."
         }
     }else{
-        result.PolicyViolations={
+        result.orderWithDefectsStatus={
             status:"Success",
             Message:"Great job! Your Order Defect Rate is within Amazon's acceptable range, ensuring better account health and maintaining strong seller performance.",
             HowTOSolve:""
@@ -97,13 +97,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
 
     if(v2Data.lateShipmentRateStatus!=='GOOD'){
         errorCounter++;
-        result.PolicyViolations={
+        result.lateShipmentRateStatus={
             status:"Error",
             Message:"Your Late Shipment Rate (LSR) is above Amazon’s acceptable threshold. A high LSR can lead to restrictions on your ability to offer seller-fulfilled shipping options and negatively impact your account health.",
             HowTOSolve:"Ensure all orders are shipped on or before the expected ship date. Use Amazon’s Buy Shipping service to access reliable carriers and ensure accurate tracking. Optimize your fulfillment process by improving warehouse efficiency, updating handling times accurately, and using faster shipping methods when necessary. Monitor your shipping performance regularly in Account Health and adjust logistics strategies accordingly."
         }
     }else{
-        result.PolicyViolations={
+        result.lateShipmentRateStatus={
             status:"Success",
             Message:"Great job! Your Late Shipment Rate is within Amazon’s acceptable range, ensuring smooth order fulfillment and a strong seller performance record.",
             HowTOSolve:""
@@ -114,13 +114,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
 
     if(v2Data.CancellationRate!=='GOOD'){
         errorCounter++;
-        result.PolicyViolations={
+        result.CancellationRate={
             status:"Error",
             Message:"Some customer messages have not been responded to within 24 hours. Delayed responses can negatively impact your seller metrics, customer satisfaction, and account health.",
             HowTOSolve:"Ensure that all customer inquiries are responded to within 24 hours, including weekends and holidays. Use Amazon’s Buyer-Seller Messaging Service to track and manage messages efficiently. Set up automated responses acknowledging inquiries and follow up with a detailed reply as soon as possible. If needed, consider using a virtual assistant or customer support software to handle messages faster."
         }
     }else{
-        result.PolicyViolations={
+        result.CancellationRate={
             status:"Success",
             Message:"Great job! You are responding to customer messages within 24 hours, maintaining high customer satisfaction and a strong seller performance record.",
             HowTOSolve:""
@@ -148,13 +148,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     const NCX=Number(v1Data.lateShipmentCount.count)+Number(v1Data.preFulfillmentCancellationCount.count)+Number(v1Data.refundsCount.count);
     if(NCX>0){
         errorCounter++;
-        result.lateShipmentCount={
+        result.NCX={
             status:"Error",
             Message:"Your NCX (Negative Customer Experience) score is above 0. A high NCX rate can lead to suppressed listings, reduced visibility, and a decline in customer trust, potentially impacting sales and account health.",
             HowTOSolve:"Analyze the root causes of negative customer experiences through Seller Central. Identify common complaints related to product quality, description accuracy, late shipments, or customer service issues. Address these concerns by improving product listings, ensuring accurate descriptions, enhancing quality control, and optimizing fulfillment processes. Take proactive measures such as responding to negative feedback and improving post-purchase support."
         }
     }else{
-        result.lateShipmentCount={
+        result.NCX={
             status:"Success",
             Message:"Excellent! Your NCX score is at 0, which means customers are having a positive experience with your products, helping to maintain strong account health and sales performance.",
             HowTOSolve:""
@@ -163,13 +163,13 @@ const checkAccountHealth=(v2Data,v1Data)=>{
 
     if(Number(v1Data.a_z_claims.count)!=0){
         errorCounter++;
-        result.lateShipmentCount={
+        result.a_z_claims={
             status:"Error",
             Message:"An A-to-Z Guarantee Claim has been filed against your order. Unresolved claims can negatively impact your Order Defect Rate (ODR) and may lead to account restrictions if frequent claims occur.",
             HowTOSolve:"Review the claim details in Seller Central > Performance > A-to-Z Guarantee Claims. If the claim is valid, work with the customer to resolve the issue promptly by issuing a refund or replacement. If you believe the claim is unjustified, submit an appeal with supporting evidence, such as tracking details, delivery confirmation, or proof of product quality. Prevent future claims by improving order accuracy, shipping reliability, and customer communication."
         }
     }else{
-        result.lateShipmentCount={
+        result.a_z_claims={
             status:"Success",
             Message:"Excellent! You have no open A-to-Z Guarantee Claims, which helps maintain a strong Order Defect Rate and ensures a positive experience for your customers.",
             HowTOSolve:""

@@ -1,11 +1,14 @@
-import React from 'react'
+import React,{useState} from 'react'
 import issue from '../../../assets/Icons/error.png';
 import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
 import {useNavigate} from 'react-router-dom'
+import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 
 const AccountHealth = () => {
 const info = useSelector(state => state.Dashboard?.DashBoardInfo)
+const [tooltip,setToolTip] = useState(false)  
+console.log(info)
 const navigatie = useNavigate()
 
   const options = {
@@ -50,17 +53,26 @@ const navigatie = useNavigate()
 
   const series = [info?.accountHealthPercentage?.Percentage];
 
+
   const viewFullReport=(e)=>{
     e.preventDefault();
     navigatie('/seller-central-checker/reports')
   }
 
+  
+
   return (
-    <div className='min-h-[35vh] bg-white p-3 border-2 border-gray-200 rounded-md pb-4'>
+    <div className='min-h-[35vh] bg-white p-3 border-2 border-gray-200 rounded-md pb-4 overflow-visible relative'>
       <div className='w-full flex items-center justify-between'>
         <div className='flex items-center gap-3'>
           <h2 className='text-sm'>ACCOUNT HEALTH</h2>
-          <img src={issue} alt='' className='w-4 h-4' />
+         <div className='relative fit-content '> 
+          {tooltip && <TooltipBox Information='Overall account health score reflects key performance metrics such as feedback, policy compliance, shipping reliability, and customer service responsiveness.​ ' />}
+          <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
+            onMouseEnter={() => setToolTip(true)}
+            onMouseLeave={() => setToolTip(false)}
+          />
+         </div>
         </div>
         <button onClick={viewFullReport} className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
           View Full Report
@@ -68,7 +80,7 @@ const navigatie = useNavigate()
       </div>
       <div className='relative w-fit m-auto'>
         <Chart options={options} series={series} type="radialBar" height={250} />
-        <p className='absolute text-xs bottom-8 left-[40%] text-[#82b4a5]'>{info?.accountHealthPercentag?.status.toUpperCase()}</p>
+        <p className='absolute text-xs bottom-8 left-[40%] text-[#82b4a5]'>{info?.accountHealthPercentage?.status.toUpperCase()}</p>
         <p className='absolute text-xs text-[#82b4a5] bg-[#edfef0] px-1 rounded-full left-[40%] bottom-0'>+2.00%</p>
       </div>
     </div>

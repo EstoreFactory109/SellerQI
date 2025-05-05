@@ -1,6 +1,8 @@
 import React,{useState} from 'react'
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
+import issue from "../../assets/Icons/error.png";
+import TooltipBox from '../ToolTipBox/ToolTipBoxBottomLeft';
 
 const IssuesSummery = () => {
   const info = useSelector(state => state.Dashboard.DashBoardInfo)
@@ -34,13 +36,22 @@ const IssuesSummery = () => {
           ],
         },
       });
+
+      const [tooltipForProductChecker, setToolTipForProductChecker] = useState(false);
   return (
    <>
-     <div className='lg:w-[45vw] w-full h-[25vh] bg-white p-3  rounded-md'>
+     <div className='lg:w-[45vw] w-full h-[30vh] bg-white p-3  rounded-md'>
           <div className='w-full h-[58%] '>
-            <div className='w-full flex items-center justify-between'>
-              
+          <div className='flex items-center gap-3 my-2'>
+            <h2 className='text-sm'>ALL ISSUES</h2>
+            <div className='relative fit-content'>
+              <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
+              onMouseEnter={() => setToolTipForProductChecker(true)}
+              onMouseLeave={() => setToolTipForProductChecker(false)}
+              />
+              {tooltipForProductChecker && <TooltipBox Information='A total number of issues in all products and the Amazon account that required attention.​ ' />}
             </div>
+          </div>
             <div className='w-full flex  justify-between'>
               <Chart options={chartData.options} series={chartData.series} type="donut" width={200} />
               <ul className='w-[50%]  py-4 pr-3'>

@@ -1,5 +1,4 @@
 const analyseData = (data) => {
-    console.log(data)
     const TotalProducts = data.TotalProducts;
     const accountHealthPercentage = data.AccountData.getAccountHealthPercentge;
     const accountFinance = data.FinanceData;
@@ -73,7 +72,7 @@ const analyseData = (data) => {
     let TotalRankingerrors = 0;
     let index=0;
 
-    console.log(data.RankingsData.RankingResultArray)
+    
 
     data.RankingsData.RankingResultArray.forEach(elm => {
         const asin = elm.asin;
@@ -87,11 +86,9 @@ const analyseData = (data) => {
 
         const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
 
-        console.log("ranking total errors: ",elm.asin,elm.data.TotalErrors)
-        console.log("conversion total errors: ",conversionErrors)
+
 
         let productwiseTotalError = elm.data.TotalErrors + conversionErrors;
-        console.log("productwiseTotalError: ",productwiseTotalError)
         if (elm.data.TotalErrors > 0) {
             TotalRankingerrors += elm.data.TotalErrors;
         }
@@ -159,13 +156,13 @@ const analyseData = (data) => {
         }
     });
 
-    console.log("Product Wise Error: ",productWiseError)
+  
     // Top ranking error products
     const UniqueProductWisError = Array.from(
         new Map(productWiseError.map(obj => [obj.asin, obj])).values()
     ).sort((a, b) => b.errors - a.errors);
 
-    console.log(UniqueProductWisError)
+
 
     const getTopErrorProduct = (data, index) =>
         data[index]

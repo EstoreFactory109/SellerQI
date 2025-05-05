@@ -33,7 +33,7 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
 };
 
 const checkReportStatus = async (accessToken, reportId, baseURI) => {
-    console.log(baseURI)
+
     try {
         const response = await axios.get(
             `https://${baseURI}/reports/2021-06-30/reports/${reportId}`,
@@ -103,7 +103,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         return false;
     }
 
-    console.log(baseURI)
+  
 
     try {
         logger.info("📄 Generating Report...");

@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mui/styled-engine": "^7.0.2",
     "@reduxjs/toolkit": "^2.6.1",
     "apexcharts": "^4.5.0",
     "axios": "^1.8.3",
