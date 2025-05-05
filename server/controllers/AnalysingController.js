@@ -114,8 +114,21 @@ const Analyse= async(userId,country,region)=>{
         }
     }
 
+    const createdDate=financeData.createdAt;
+    const ThirtyDaysAgo=new Date(createdDate);
+    ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate()-30);
+    
+    function formatDate(date){
+        const dte=new Date(date);
+        const Day=String(dte.getDate()).padStart(2,'0');
+        const Month=dte.toLocaleString('default', { month: 'short' })
+        return `${Day} ${Month}`
+    }
+
     const result = {
         AllSellerAccounts:allSellerAccounts,
+        startDate:formatDate(ThirtyDaysAgo),
+        endDate:formatDate(createdDate),
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {

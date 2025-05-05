@@ -167,6 +167,7 @@ const Dashboard = () => {
                 {[
                     { label: 'Unit Sold', value: product.quantity },
                     { label: 'Sales', value: `$${product.sales}` },
+                    {label:'Duration', value:`${info?.startDate} - ${info?.endDate}`},
                 ].map((metric, idx) => (
                     <div key={idx} className="bg-white p-4 rounded-lg shadow">
                         <p className="text-sm text-gray-500">{metric.label}</p>

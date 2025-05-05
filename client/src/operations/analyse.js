@@ -215,7 +215,9 @@ const analyseData = (data) => {
         productWiseError: productWiseError,
         rankingProductWiseErrors: rankingProductWiseErrors,
         conversionProductWiseErrors: conversionProductWiseErrors,
-        AccountErrors: data.AccountData.accountHealth
+        AccountErrors: data.AccountData.accountHealth,
+        startDate:data.startDate,
+        endDate:data.endDate
     };
 
     return { dashboardData };

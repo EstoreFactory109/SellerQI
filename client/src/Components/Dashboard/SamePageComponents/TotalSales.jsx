@@ -9,6 +9,7 @@ const TotalSales = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
+  console.log(info)
 
   const labelData = [
     "Gross Profit",
@@ -77,16 +78,16 @@ const TotalSales = () => {
             ${Number(info?.TotalWeeklySale || 0).toFixed(2)}
           </h2>
           <p className="text-xs sm:text-sm bg-[#edfef9] text-[#4f997e] px-2 py-1 rounded-full">
-            +6.78%
+            {info?.startDate} - {info?.endDate}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <h2 className="text-xl sm:text-2xl font-bold">
             ${grossProfitRaw}
           </h2>
-          <p className="text-xs sm:text-sm bg-[#edfef9] text-[#4f997e] px-2 py-1 rounded-full">
-            -2%
-          </p>
+          <div className="  px-2 py-1">
+            
+          </div>
         </div>
       </div>
 
