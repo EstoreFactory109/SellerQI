@@ -17,11 +17,12 @@ const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/GET_V1_SELL
 const { listFinancialEventsMethod } = require('../Services/Sp_API/Finance.js');
 const { getCompetitivePricing } = require('../Services/Sp_API/CompetitivePrices.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
-const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
+const { addReviewDataToDatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
 const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
 const { getContentDocument } = require('../Services/Sp_API/APlusContent.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
+const CompetitivePricing= require('../models/CompetitivePricingModel.js');
 
 
 
@@ -59,12 +60,16 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     const credentials = await getTemporaryCredentials(spapiRegions[Region]);
 
+
+
     if (!credentials) {
         logger.error(new ApiError(500, "Internal server error in generation the temporary credentials"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in generation the temporary credentials"));
     }
+    
 
     const User = await UserModel.findById(userId).select("spiRefreshToken");
+
 
     const RefreshToken = User.spiRefreshToken;
 
@@ -130,38 +135,69 @@ const getSpApiData = asyncHandler(async (req, res) => {
     };
 
 
-
+/*
 
 
 
     const [v2data,
         v1data
     ] = await Promise.all([
-        GET_V2_SELLER_PERFORMANCE_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+       GET_V2_SELLER_PERFORMANCE_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
         GET_V1_SELLER_PERFORMANCE_REPORT(AccessToken, Marketplace_Id, userId, Base_URI, Country, Region),
 
     ]);
 
-    const [financeData, competitivePriceData] = await Promise.all([
-        listFinancialEventsMethod(dataToSend, userId, Base_URI, Country, Region),
-        getCompetitivePricing(dataToSend, userId, Base_URI, Country, Region),
-
-    ])
 
 
+        let competitivePriceData=[]
+
+        if (asinArray.length > 0) {
+            let start = 0;
+            let end = 20;
+        
+            while (start < asinArray.length) {
+                const asinArrayChunk = asinArray.slice(start, end);
+        
+                const competitiveResponseData = await getCompetitivePricing(
+                    asinArrayChunk, dataToSend, userId, Base_URI, Country, Region
+                );
+        
+                if (competitiveResponseData) {
+                    competitivePriceData.push(...competitiveResponseData);
+                }
+        
+                start = end;
+                end = Math.min(end + 20, asinArray.length);
+                console.log(`Processed indices ${start} to ${end}`);
+            }
+        }else{
+            const competitiveResponseData = await getCompetitivePricing(
+                asinArray, dataToSend, userId, Base_URI, Country, Region
+            );
+    
+            if (competitiveResponseData) {
+                competitivePriceData.push(...competitiveResponseData);
+            }
+        }
+        const CreateCompetitivePricing= await CompetitivePricing.create({User:userId,region:Region,country:Country,Products:competitivePriceData});
+        
+
+*/
 
 
-    const [RestockinventoryData,
+
+    const [//RestockinventoryData,
         productReview
     ] = await Promise.all([
-        GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
-        addReviewDataTODatabase(asinArray, Country, userId, Region)
+       //GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+       addReviewDataToDatabase(asinArray, Country, userId, Region)
 
     ])
-
-    const [WeeklySales, shipment] = await Promise.all([
+/*
+    const [WeeklySales, shipment,financeData] = await Promise.all([
         TotalSales(dataToSend, userId, Base_URI, Country, Region),
-        getshipment(dataToSend, userId, Base_URI, Country, Region)
+        getshipment(dataToSend, userId, Base_URI, Country, Region),
+        listFinancialEventsMethod(dataToSend, userId, Base_URI, Country, Region)
     ])
 
 
@@ -184,7 +220,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
                 const ListingItem = await GetListingItem(dataToSend, sku, asinArray[index], userId, Base_URI, Country, Region);
 
-                console.log(ListingItem)
+                
                 if (!ListingItem) {
                     logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
                 } else {
@@ -195,8 +231,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
         });
     });
-
     await Promise.all(tasks);
+
+   
 
     (async () => {
         if (genericKeyWordArray.length > 0) {
@@ -204,10 +241,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 User: userId,
                 region: Region,
                 country: Country,
-                genericKeyword: genericKeyWordArray
+                GenericKeyword: genericKeyWordArray
             })
 
-            console.log(saveGenericKeyword)
+            console.log("Data saved in db",saveGenericKeyword)
             if (!saveGenericKeyword) {
                 logger.error(new ApiError(500, "Failed to save generic keyword"));
                 return res.status(500).json(new ApiResponse(500, "", "Failed to save generic keyword"));
@@ -216,12 +253,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
     })()
 
 
-    if (!v2data) {
+   if (!v2data) {
         logger.error(new ApiError(500, "Failed to fetch V2 seller performance report"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V2 seller performance report"));
     }
 
-    if (!v1data) {
+   if (!v1data) {
         logger.error(new ApiError(500, "Failed to fetch V1 seller performance report"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch V1 seller performance report"));
     }
@@ -231,7 +268,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch financial event data"));
     }
 
-    if (!competitivePriceData) {
+    if (!CreateCompetitivePricing) {
         logger.error(new ApiError(500, "Failed to fetch competitive pricing data"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to fetch competitive pricing data"));
     }
@@ -266,7 +303,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     const result = {
         MerchantlistingData: merchantListingsData,
-        v2data: v2data,
+       // v2data: v2data,
         v1data: v1data,
         financeData: financeData,
         competitivePriceData: competitivePriceData,
@@ -278,11 +315,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
 
+*/
 
 
 
-
-    return res.status(200).json(new ApiResponse(200, result, "Data has been fetched successfully"));
+    return res.status(200).json(new ApiResponse(200, productReview, "Data has been fetched successfully"));
 
 
 

@@ -10,7 +10,7 @@ const generateReport=async(accessToken, marketplaceIds,baseuri)=> {
     try {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const StartTime = new Date(EndTime.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days before end
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
@@ -121,14 +121,14 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
             logger.error(new ApiError(408,"Report did not complete within 5 minutes"));
             return false;
         }
-
+        await new Promise((resolve) => setTimeout(resolve, 180000));
         // ⏳ Step 2: Check Report Status with Retry Logic
         let reportDocumentId = null;
-        let retries = 30; // 30 retries (total 5 minutes)
+        let retries = 15; // 30 retries (total 5 minutes)
 
         while (!reportDocumentId && retries > 0) {
             logger.info(`⏳ Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait 20 sec before retrying
+            await new Promise((resolve) => setTimeout(resolve, 90000)); // Wait 20 sec before retrying
             reportDocumentId = await checkReportStatus(accessToken, reportId,baseuri);
             if(reportDocumentId===false){
                 return {

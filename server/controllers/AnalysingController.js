@@ -54,6 +54,7 @@ const Analyse= async(userId,country,region)=>{
         }
     }
 
+    console.log(sellerCentral.sellerAccount);
     const allSellerAccounts=[]
     let SellerAccount=null;
 
@@ -83,7 +84,7 @@ const Analyse= async(userId,country,region)=>{
         financeData,
         restockInventoryRecommendationsData,
         numberOfProductReviews,
-        listingAllItems,
+        GetlistingAllItems,
         getCompetitiveData,
         aplusResponse,
         TotalSales,
@@ -106,7 +107,7 @@ const Analyse= async(userId,country,region)=>{
     
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, listingAllItems, getCompetitiveData, aplusResponse,TotalSales,saleByProduct].every(Boolean)) {
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse,TotalSales,saleByProduct].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status:404,
@@ -141,11 +142,11 @@ const Analyse= async(userId,country,region)=>{
     };
 
 
-
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));
     const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(getCompetitiveData.Products).presentAsin);
     const productReviewsAsins = new Set(numberOfProductReviews.Products.map(p => p.asin));
-    const listingAllAsins = new Set(listingAllItems.GenericKeyword.map(p => p.GenericKeyword.asin));
+    const listingAllAsins = new Set((GetlistingAllItems.GenericKeyword || []).map(p => p.asin));
+    console.log("setof Listing asins: ",ListingAllItems)
 
     const productReviewsDefaulters = [], listingAllItemsDefaulters = [], ProductwithoutBuyboxDefaulters = [];
     asinSet.forEach(asin => {
@@ -183,12 +184,11 @@ const Analyse= async(userId,country,region)=>{
         }
     });
 
-
-
-    listingAllItems.GenericKeyword.forEach(item => {
-        const asin = item.GenericKeyword.asin;
+    
+    GetlistingAllItems.GenericKeyword.forEach(item => {
+        const asin = item.asin;
         if (!DefaulterList.ListingAllItems.includes(asin)) {
-            const keywordStatus = BackendKeyWordOrAttributesStatus(item.GenericKeyword.value);
+            const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
             if (keywordStatus.NumberOfErrors === 0) AmazonReadyProductsSet.add(asin);
             else AmazonReadyProductsSet.delete(asin);
             BackendKeywordResultArray.push({ asin, data: keywordStatus });

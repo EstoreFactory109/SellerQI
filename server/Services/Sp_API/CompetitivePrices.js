@@ -3,14 +3,15 @@ const aws4 = require('aws4');
 const CompetitivePricing= require('../../models/CompetitivePricingModel.js');
 const UserModel= require('../../models/userModel.js');
 
-const getCompetitivePricing= async (dataToReceive,UserId,baseuri,country,region) => {
+const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,country,region) => {
     const host = baseuri;  // Correct SP-API host
+    console.log("asin-block: ",asinArray)
 
     // ✅ Fixed API Path & Required Params
 
     const queryParams = new URLSearchParams({
         MarketplaceId: dataToReceive.marketplaceId,
-        Asins: dataToReceive.ASIN,   // Provide ASINs as a list
+        Asins: asinArray,   // Provide ASINs as a list
         ItemType: "Asin" // REQUIRED! Must be "Asin" or "Sku"
     }).toString();
   
@@ -51,12 +52,14 @@ const getCompetitivePricing= async (dataToReceive,UserId,baseuri,country,region)
         response.data.payload.forEach(element => {
             
             if(element.Product.CompetitivePricing.CompetitivePrices.length===0){
+            console.log(element.Product.CompetitivePricing.CompetitivePrices)
             console.log(element.Product.CompetitivePricing.CompetitivePrices.length)
                 Products.push({
                 asin: element.ASIN,
                 belongsToRequester:false
             })
             }else{
+                console.log(element.Product.CompetitivePricing.CompetitivePrices)
                  Products.push({
                 asin: element.ASIN,
                 belongsToRequester:element.Product?.CompetitivePricing.CompetitivePrices[0].belongsToRequester
@@ -64,30 +67,8 @@ const getCompetitivePricing= async (dataToReceive,UserId,baseuri,country,region)
         }
             
         })
+        return Products
 
-        console.log("competitive pricing: ",Products)
-       
-    
-        
-        const CreateCompetitivePricing= await CompetitivePricing.create({User:UserId,region:region,country:country,Products:Products});
-        console.log(CreateCompetitivePricing)
-
-        if(!CreateCompetitivePricing){
-            return false;
-        }
-
-
-        const getUser=await UserModel.findById(UserId);
-        if(!getUser){
-            return false;
-        }
-
-        console.log(getUser)
-
-        getUser.competitivePricing=CreateCompetitivePricing._id;
-        await getUser.save();
-        
-        return CreateCompetitivePricing;
     } catch (error) {
         console.error("❌ Error Fetching Catalog:", error.response?.data || error.message);
         return false;

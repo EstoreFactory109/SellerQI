@@ -27,7 +27,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     includedData: dataToReceive.includedData
   }).toString();
 
-  const path = `/listings/2021-08-01/items/A2MS927NNLJTSX/${sku}?${queryParams}`;
+  const path = `/listings/2021-08-01/items/${dataToReceive.SellerId}/${sku}?${queryParams}`;
   const fullUrl = `https://${host}${path}`;
 
   let request = {
