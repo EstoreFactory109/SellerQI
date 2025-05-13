@@ -115,7 +115,7 @@ export default function AccountHealthDashboard() {
                   Account Status
                 </td>
                 <td className="p-2 whitespace-pre-line text-justify" style={AccountErrors.accountStatus.status==="Error"?{color:"red",fontWeight:"bold"}:{color:"green"}}>{AccountErrors.accountStatus.Message}</td>
-                <td className="p-2 whitespace-pre-line text-justify">
+                <td className="p-2 whitespace-pre-line text-justify" style={AccountErrors.accountStatus.status !== "Error" && { textAlign: "center" }}>
                   {AccountErrors.accountStatus.HowTOSolve.length>0?AccountErrors.accountStatus.HowTOSolve:"N/A"}
                 </td>
               </tr>

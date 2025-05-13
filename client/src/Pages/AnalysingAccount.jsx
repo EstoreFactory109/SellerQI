@@ -29,43 +29,46 @@ const AnalysingAccount = () => {
 
                 const getSPAPIData = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/info/getSpApiData`, { withCredentials: true });
 
-                
-                if (getSPAPIData && getSPAPIData.status === 200) {
-
-                    const response = await axios.get(
-                        `${import.meta.env.VITE_BASE_URI}/app/analyse/getData`, { withCredentials: true }
-                    );
-                    let dashboardData = null;
-                    if (response && response.status === 200) {
-                        console.log("✅ Raw API Response:", response.data.data);
-
-                        dashboardData = analyseData(response.data.data).dashboardData;
-                        console.log(dashboardData)
-                        dispatch(setDashboardInfo(dashboardData));
-
-                    }
-
-
-                    const currentDate = new Date();
-                    const expireDate = new Date();
-                    expireDate.setDate(currentDate.getDate() + 7);
-                    const HistoryData = {
-                        Date: currentDate,
-                        HealthScore: dashboardData.accountHealthPercentage.Percentage,
-                        TotalProducts: dashboardData.TotalProduct.length,
-                        ProductsWithIssues: dashboardData.productWiseError.length,
-                        TotalNumberOfIssues: dashboardData.TotalRankingerrors + dashboardData.totalErrorInConversion + dashboardData.totalErrorInAccount,
-                        expireDate: expireDate
-                    }
-
-                    const CreateAccountHistory = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/accountHistory/addAccountHistory`, HistoryData, { withCredentials: true });
-
-                    console.log(CreateAccountHistory);
-                    if (CreateAccountHistory && CreateAccountHistory.status === 201) {
-                        dispatch(setHistoryInfo(CreateAccountHistory.data.data));
-                    }
-                    navigate("/seller-central-checker/dashboard");
+                if (!getSPAPIData && !getSPAPIData.status === 200) {
+                    navigate(`/error/${getSPAPIData.status}`)
                 }
+
+
+
+                const response = await axios.get(
+                    `${import.meta.env.VITE_BASE_URI}/app/analyse/getData`, { withCredentials: true }
+                );
+                let dashboardData = null;
+                if (response && response.status === 200) {
+                    console.log("✅ Raw API Response:", response.data.data);
+
+                    dashboardData = analyseData(response.data.data).dashboardData;
+                    console.log(dashboardData)
+                    dispatch(setDashboardInfo(dashboardData));
+
+                }
+
+
+                const currentDate = new Date();
+                const expireDate = new Date();
+                expireDate.setDate(currentDate.getDate() + 7);
+                const HistoryData = {
+                    Date: currentDate,
+                    HealthScore: dashboardData.accountHealthPercentage.Percentage,
+                    TotalProducts: dashboardData.TotalProduct.length,
+                    ProductsWithIssues: dashboardData.productWiseError.length,
+                    TotalNumberOfIssues: dashboardData.TotalRankingerrors + dashboardData.totalErrorInConversion + dashboardData.totalErrorInAccount,
+                    expireDate: expireDate
+                }
+
+                const CreateAccountHistory = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/accountHistory/addAccountHistory`, HistoryData, { withCredentials: true });
+
+                console.log(CreateAccountHistory);
+                if (CreateAccountHistory && CreateAccountHistory.status === 201) {
+                    dispatch(setHistoryInfo(CreateAccountHistory.data.data));
+                }
+                navigate("/seller-central-checker/dashboard");
+
             } catch (error) {
                 console.log("❌ Error while fetching data:", error);
             }

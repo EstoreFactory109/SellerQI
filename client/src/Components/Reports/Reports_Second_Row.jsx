@@ -7,6 +7,7 @@ const TopSalesChart = () => {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
 
   const totalSales = info.TotalSales;
+  console.log(totalSales)
 
   const chartData = {
     series: [

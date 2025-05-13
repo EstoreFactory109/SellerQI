@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import DashboardIcon from '../../assets/Icons/dashboard.png';
-import activeDashboardIcon from '../../assets/Icons/active-dashboard.png';
-import IssuesIcon from '../../assets/Icons/error.png';
-import activeIssueIcon from '../../assets/Icons/issues-active.png';
-import ReportsIcon from '../../assets/Icons/reports.png';
-import activeReportsIcon from '../../assets/Icons/active-reports.png';
-import HistoryIcon from '../../assets/Icons/history.png';
-import activeHistoryIcon from '../../assets/Icons/active-history.png';
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import axios from 'axios';
@@ -61,7 +54,7 @@ const LeftNavSection = () => {
                     >
                         {({ isActive }) => (
                             <>
-                                <img src={isActive ? activeDashboardIcon : DashboardIcon} alt="Dashboard" className="w-4 h-4" />
+                                <LayoutDashboard className="w-4 h-4" />
                                 <p className="font-medium text-xs">Dashboard</p>
                             </>
                         )}
@@ -77,7 +70,7 @@ const LeftNavSection = () => {
                     >
                         {({ isActive }) => (
                             <>
-                                <img src={isActive ? activeIssueIcon : IssuesIcon} alt="Issues" className="w-4 h-4" />
+                                <BadgeAlert className="w-4 h-4" />
                                 <p className="font-medium text-xs">Issues</p>
                             </>
                         )}
@@ -93,7 +86,7 @@ const LeftNavSection = () => {
                     >
                         {({ isActive }) => (
                             <>
-                                <img src={isActive ? activeReportsIcon : ReportsIcon} alt="Reports" className="w-4 h-4" />
+                                <ClipboardPlus className="w-4 h-4" />
                                 <p className="font-medium text-xs">Reports</p>
                             </>
                         )}
@@ -109,7 +102,7 @@ const LeftNavSection = () => {
                     >
                         {({ isActive }) => (
                             <>
-                                <img src={isActive ? activeHistoryIcon : HistoryIcon} alt="Account History" className="w-4 h-4" />
+                                <Clock8 className="w-4 h-4" />
                                 <p className="font-medium text-xs">Accounts History</p>
                             </>
                         )}
@@ -119,7 +112,7 @@ const LeftNavSection = () => {
 
             <hr className="w-11/12 mx-auto" />
 
-           {/* <div className="w-full pt-5 pl-2">
+            <div className="w-full pt-5 pl-2">
                 <p className="font-light mb-4">HELP</p>
                 <NavLink
                     to="/seller-central-checker/settings"
@@ -131,12 +124,12 @@ const LeftNavSection = () => {
                 >
                     {({ isActive }) => (
                         <>
-                            <img src={isActive ? activeSettingsIcon : SettingsIcon} alt="Settings" className="w-4 h-4" />
+                            <Settings className="w-4 h-4" />
                             <p className="font-medium text-xs">Settings</p>
                         </>
                     )}
                 </NavLink>
-            </div>*/}
+            </div>
 
             <div className="w-full pt-5 pl-2 absolute bottom-6">
                 <button className='flex items-center gap-2 p-2' onClick={(e)=>logoutUser(e)}>

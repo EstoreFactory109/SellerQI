@@ -2,7 +2,11 @@ import React, { useState } from 'react';
 import { DateRange } from 'react-date-range';
 import 'react-date-range/dist/styles.css';
 import 'react-date-range/dist/theme/default.css';
-
+import axios from 'axios'
+import {useDispatch} from 'react-redux'
+import {UpdateDashboardInfo} from '../../redux/slices/DashboardSlice.js'
+import PulseLoader from "react-spinners/PulseLoader";
+import { useNavigate } from 'react-router-dom';
 
 import {
   subDays,
@@ -12,7 +16,10 @@ import {
   sub,
 } from 'date-fns';
 
-export default function DateFilter() {
+export default function DateFilter({setOpenCalender}) {
+  const navigate=useNavigate();
+  const dispatch=useDispatch()
+  const [Loader,setLoader]=useState(false);
   const [selectedRange, setSelectedRange] = useState({
     startDate: subDays(new Date(), 30),
     endDate: subDays(new Date(), 1),
@@ -69,6 +76,41 @@ export default function DateFilter() {
         setLastMonthActive(false);
         setCustomActive(false);
         break;
+    }
+  }
+
+
+  const submitdateRange= async(e)=>{
+    e.preventDefault();
+    setLoader(true)
+      let startDate=selectedRange.startDate;
+      let endDate=selectedRange.endDate
+    
+
+    try {
+      const dateResponse=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${startDate}&endDate=${endDate}`,{withCredentials:true})
+
+      if(dateResponse.status!==200){
+        navigate(`/error/${dateResponse.status}`)
+      }
+
+      
+       
+        dispatch(UpdateDashboardInfo({
+          startDate:dateResponse.data.data.endDate,
+          endDate:dateResponse.data.data.startDate,
+          financeData:dateResponse.data.data.FinanceData,
+          reimburstmentData:dateResponse.data.data.reimburstmentData,
+          WeeklySales:dateResponse.data.data.TotalSales.totalSales,
+         TotalSales:dateResponse.data.data.TotalSales.dateWiseSales
+         
+      }))
+      
+    } catch (error) {
+      navigate('/error/500')
+    }finally{
+      setLoader(false)
+      setOpenCalender(false)
     }
   }
 
@@ -152,7 +194,10 @@ export default function DateFilter() {
           rangeColors={['#333651']}
           color="#333651"
         />
-        <button className='bg-[#333651] text-white px-4 py-2 rounded active:scale-95 transition-all ease-in-out duration-200'>Apply</button>
+        <button className='bg-[#333651] text-white px-4 py-2 rounded active:scale-95 transition-all ease-in-out duration-200' onClick={submitdateRange}>{
+          Loader?<PulseLoader color="#ffffff" size={7}/>:"Apply"
+          }
+          </button>
       </div>
     </div>
   );

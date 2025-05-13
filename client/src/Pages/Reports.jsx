@@ -49,7 +49,7 @@ const Reports = () => {
                 transition={{ duration: 0.3 }}
                 className="absolute top-full right-0 z-50 bg-white shadow-md rounded-md origin-top"
               >
-                <Calender />
+                <Calender setOpenCalender={setOpenCalender}/>
               </motion.div>
             )}
           </AnimatePresence>

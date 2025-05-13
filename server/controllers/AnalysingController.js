@@ -12,8 +12,8 @@ const financeModel = require('../models/listFinancialEventsModel.js');
 const competitivePricingModel = require('../models/CompetitivePricingModel.js');
 const restockInventoryRecommendationsModel = require('../models/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
 const TotalSalesModel = require('../models/TotalSalesModel.js');
-const ShipmentModel=require('../models/ShipmentModel.js');
-const ProductWiseSalesModel=require('../models/ProductWiseSalesModel.js');
+const ShipmentModel = require('../models/ShipmentModel.js');
+const ProductWiseSalesModel = require('../models/ProductWiseSalesModel.js');
 const { replenishmentQty } = require('../Services/Calculations/Inventory_.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Services/Calculations/AccountHealth.js');
 const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Services/Calculations/Rankings.js');
@@ -25,55 +25,53 @@ const {
     checkAPlus,
     checkProductWithOutBuyBox
 } = require('../Services/Calculations/Conversion.js');
-const calculateTotalReimbursement=require('../Services/Calculations/Reimburstment.js');
+const calculateTotalReimbursement = require('../Services/Calculations/Reimburstment.js');
 
 
 
-const Analyse= async(userId,country,region)=>{
-    if (!userId){
+const Analyse = async (userId, country, region) => {
+    if (!userId) {
         logger.error(new ApiError(400, "User id is missing"));
         return {
-            status:404,
-            message:"User id is missing"
+            status: 404,
+            message: "User id is missing"
         }
     }
-    if(!country || !region) {
+    if (!country || !region) {
         logger.error(new ApiError(400, "Country or Region is missing"));
         return {
-            status:404,
-            message:"Country or Region is missing"
+            status: 404,
+            message: "Country or Region is missing"
         }
     }
 
     const sellerCentral = await Seller.findOne({ User: userId });
-    if (!sellerCentral){
+    if (!sellerCentral) {
         logger.error(new ApiError(404, "Seller central not found"));
         return {
-            status:404,
-            message:"Seller central not found"
+            status: 404,
+            message: "Seller central not found"
         }
     }
+    const allSellerAccounts = []
+    let SellerAccount = null;
 
-    console.log(sellerCentral.sellerAccount);
-    const allSellerAccounts=[]
-    let SellerAccount=null;
-
-    sellerCentral.sellerAccount.forEach(item=>{
+    sellerCentral.sellerAccount.forEach(item => {
         allSellerAccounts.push({
-            country:item.country,
-            region:item.region,
-            NoOfProducts:item.products.length
+            country: item.country,
+            region: item.region,
+            NoOfProducts: item.products.length
         })
-        if(item.country === country && item.region === region){
-            SellerAccount=item;
+        if (item.country === country && item.region === region) {
+            SellerAccount = item;
         }
     })
 
     if (!SellerAccount) {
         logger.error(new ApiError(404, "Seller account not found"));
         return {
-            status:404,
-            message:"Seller account not found"
+            status: 404,
+            message: "Seller account not found"
         }
     }
 
@@ -98,38 +96,38 @@ const Analyse= async(userId,country,region)=>{
         numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         competitivePricingModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-        APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }), 
+        APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
     ]);
-    
-    
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse,TotalSales,saleByProduct].every(Boolean)) {
+
+
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
-            status:404,
-            message:"Required data not found"
+            status: 404,
+            message: "Required data not found"
         }
     }
 
-    const createdDate=financeData.createdAt;
-    const ThirtyDaysAgo=new Date(createdDate);
-    ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate()-30);
-    
-    function formatDate(date){
-        const dte=new Date(date);
-        const Day=String(dte.getDate()).padStart(2,'0');
-        const Month=dte.toLocaleString('default', { month: 'short' })
+    const createdDate = financeData.createdAt;
+    const ThirtyDaysAgo = new Date(createdDate);
+    ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
+
+    function formatDate(date) {
+        const dte = new Date(date);
+        const Day = String(dte.getDate()).padStart(2, '0');
+        const Month = dte.toLocaleString('default', { month: 'short' })
         return `${Day} ${Month}`
     }
 
     const result = {
-        AllSellerAccounts:allSellerAccounts,
-        startDate:formatDate(ThirtyDaysAgo),
-        endDate:formatDate(createdDate),
+        AllSellerAccounts: allSellerAccounts,
+        startDate: formatDate(ThirtyDaysAgo),
+        endDate: formatDate(createdDate),
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {
@@ -138,7 +136,7 @@ const Analyse= async(userId,country,region)=>{
         },
         FinanceData: financeData,
         replenishmentQty: replenishmentQty(restockInventoryRecommendationsData.Products),
-        TotalSales:TotalSales.totalSales
+        TotalSales: TotalSales.totalSales
     };
 
 
@@ -146,7 +144,7 @@ const Analyse= async(userId,country,region)=>{
     const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(getCompetitiveData.Products).presentAsin);
     const productReviewsAsins = new Set(numberOfProductReviews.Products.map(p => p.asin));
     const listingAllAsins = new Set((GetlistingAllItems.GenericKeyword || []).map(p => p.asin));
-    console.log("setof Listing asins: ",ListingAllItems)
+    console.log("setof Listing asins: ", ListingAllItems)
 
     const productReviewsDefaulters = [], listingAllItemsDefaulters = [], ProductwithoutBuyboxDefaulters = [];
     asinSet.forEach(asin => {
@@ -184,7 +182,7 @@ const Analyse= async(userId,country,region)=>{
         }
     });
 
-    
+
     GetlistingAllItems.GenericKeyword.forEach(item => {
         const asin = item.asin;
         if (!DefaulterList.ListingAllItems.includes(asin)) {
@@ -226,9 +224,9 @@ const Analyse= async(userId,country,region)=>{
 
     result.Defaulters = DefaulterList;
 
-    const reimburstmentData=calculateTotalReimbursement(shipmentdata.shipmentData,sellerCentral.products)
+    const reimburstmentData = calculateTotalReimbursement(shipmentdata.shipmentData, sellerCentral.products)
 
-    if(!reimburstmentData){
+    if (!reimburstmentData) {
         logger.error(new ApiError(500, "Failed to fetch reimburstment data"));
         return {
             status: 500,
@@ -237,25 +235,196 @@ const Analyse= async(userId,country,region)=>{
     }
 
 
-     result.Reimburstment=reimburstmentData
-    result.SalesByProducts=saleByProduct.productWiseSales
+    result.Reimburstment = reimburstmentData
+    result.SalesByProducts = saleByProduct.productWiseSales
 
     return {
         status: 200,
-        message:result
+        message: result
+    };
+}
+
+const getDataFromDateRange = async (userId, country, region, startDate, endDate) => {
+    if (!userId) {
+        logger.error(new ApiError(400, "User id is missing"));
+        return {
+            status: 404,
+            message: "User id is missing"
+        }
+    }
+    if (!country || !region) {
+        logger.error(new ApiError(400, "Country or Region is missing"));
+        return {
+            status: 404,
+            message: "Country or Region is missing"
+        }
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const sellerCentral = await Seller.findOne({ User: userId });
+    if (!sellerCentral) {
+        logger.error(new ApiError(404, "Seller central not found"));
+        return {
+            status: 404,
+            message: "Seller central not found"
+        }
+    }
+    const allSellerAccounts = []
+    let SellerAccount = null;
+
+    sellerCentral.sellerAccount.forEach(item => {
+        allSellerAccounts.push({
+            country: item.country,
+            region: item.region,
+            NoOfProducts: item.products.length
+        })
+        if (item.country === country && item.region === region) {
+            SellerAccount = item;
+        }
+    })
+
+    if (!SellerAccount) {
+        logger.error(new ApiError(404, "Seller account not found"));
+        return {
+            status: 404,
+            message: "Seller account not found"
+        }
+    }
+
+
+    const [
+        financeData,
+        restockInventoryRecommendationsData,
+        getCompetitiveData,
+        TotalSales,
+        shipmentdata,
+    ] = await Promise.all([
+        financeModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
+        restockInventoryRecommendationsModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
+        competitivePricingModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
+        TotalSalesModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
+        ShipmentModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
+
+    ]);
+
+
+
+
+    if (![ financeData, restockInventoryRecommendationsData, getCompetitiveData, TotalSales].every(Boolean)) {
+        logger.error(new ApiError(404, "Required data not found"));
+        return {
+            status: 404,
+            message: "Required data not found"
+        }
+    }
+
+    function formatDate(date) {
+        const dte = new Date(date);
+        const Day = String(dte.getDate()).padStart(2, '0');
+        const Month = dte.toLocaleString('default', { month: 'short' })
+        return `${Day} ${Month}`
+    }
+
+
+
+    const result = {
+        startDate: formatDate(end),
+        endDate: formatDate(start),
+        Country: country,
+    };
+
+    function getTotalFinancialData(data){
+        Gross_Profit=0
+        ProductAdsPayment=0
+        FBA_Fees=0
+        Storage=0
+        Amazon_Charges=0
+        Refunds=0
+        data.forEach(item=>{
+            Gross_Profit+=Number(item.Gross_Profit)
+            ProductAdsPayment+=Number(item.ProductAdsPayment)
+            FBA_Fees+=Number(item.FBA_Fees)
+            Storage+=Number(item.Storage)
+            Amazon_Charges+=Number(item.Amazon_Charges)
+            Refunds+=Number(item.Refunds)
+        })
+
+        return {
+            Gross_Profit,
+            ProductAdsPayment,
+            FBA_Fees,
+            Storage,
+            Amazon_Charges,
+            Refunds
+        }
+    }
+
+    function getTotalReimbursement(data){
+        let totalReimburstment=0;
+        data.forEach(item=>{
+           totalReimburstment+= calculateTotalReimbursement(item.shipmentData, sellerCentral.products).totalReimbursement
+        })
+
+        console.log(totalReimburstment)
+        return totalReimburstment
+    }
+
+function calculateTotalSales(data){
+    let totalSales=0;
+    let dateWiseSales=[];
+    data.forEach((item) => {
+        item.totalSales.forEach((sale) => {
+           if(dateWiseSales.length===0){
+               dateWiseSales.push(sale);
+               totalSales+=sale.TotalAmount
+           }else{
+            let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
+            if(!containsInterval){
+                dateWiseSales.push(sale);
+                totalSales+=sale.TotalAmount;
+            }
+           }
+        })
+    })
+
+    return {
+        totalSales,
+        dateWiseSales
+    }
+}
+
+    result.FinanceData = getTotalFinancialData(financeData)
+    result.reimburstmentData = getTotalReimbursement(shipmentdata)
+    result.TotalSales = calculateTotalSales(TotalSales)
+
+
+
+    return {
+        status: 200,
+        message: result
     };
 }
 
 
 
-
-
 const analysingController = asyncHandler(async (req, res) => {
-    const  userId=req.userId;
-    const country=req.country;
-    const region  = req.region;
-    const result=await Analyse(userId,country,region);
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const result = await Analyse(userId, country, region);
     res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
 });
 
-module.exports = { analysingController };
+const getDataFromDate = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const startDate = req.query?.startDate;
+    const endDate = req.query?.endDate;
+    const result = await getDataFromDateRange(userId, country, region, startDate, endDate);
+    res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
+})
+
+module.exports = { analysingController, getDataFromDate };

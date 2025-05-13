@@ -1,7 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import React from 'react';
+import { Routes, Route } from 'react-router-dom';
 
 import Signup from './Pages/SignUp.jsx';
 import Login from './Pages/Login.jsx';
@@ -17,7 +15,7 @@ import Reports from './Pages/Reports.jsx';
 import AccountHistory from './Pages/Account.jsx';
 import Settings from './Pages/Settings.jsx';
 import IssuesByProducts from './Pages/IssuesByProduct.jsx';
-
+import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
 
@@ -50,6 +48,7 @@ const App = () => {
             <Route path='settings' element={<Settings />} />
           </Route>
         </Route>
+        <Route path='/error/:status' element={<Error />} />
         </Routes>
       
     </>

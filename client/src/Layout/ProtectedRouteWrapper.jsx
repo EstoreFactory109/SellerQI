@@ -36,7 +36,7 @@ const ProtectedRouteWrapper = ({ children }) => {
 
           setAuthChecked(true);
 
-          await fetchData(); 
+          await fetchData();
         } else {
           navigate("/");
         }
@@ -48,7 +48,6 @@ const ProtectedRouteWrapper = ({ children }) => {
 
     const fetchData = async () => {
       try {
-        console.log("🟡 Fetching Dashboard & History Data...");
 
         const response = await axios.get(
           `${import.meta.env.VITE_BASE_URI}/app/analyse/getData`,
@@ -56,11 +55,16 @@ const ProtectedRouteWrapper = ({ children }) => {
         );
 
         let dashboardData = null;
-        if (response?.status === 200 && response.data?.data) {
-          dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
-          dashboardData = analyseData(response.data.data).dashboardData;
-          dispatch(setDashboardInfo(dashboardData));
+
+
+
+        if (response?.status !== 200) {
+          navigate(`/error/${response?.status}`);
         }
+
+        dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
+        dashboardData = analyseData(response.data.data).dashboardData;
+        dispatch(setDashboardInfo(dashboardData));
 
         const historyResponse = await axios.get(
           `${import.meta.env.VITE_BASE_URI}/app/accountHistory/getAccountHistory`,
@@ -102,7 +106,7 @@ const ProtectedRouteWrapper = ({ children }) => {
           }
         }
       } catch (error) {
-        console.error("❌ Error fetching dashboard/history:", error);
+        navigate("/error/500")
       }
     };
 
