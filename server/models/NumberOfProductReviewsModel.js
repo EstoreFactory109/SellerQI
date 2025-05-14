@@ -2,30 +2,36 @@ const mongoose = require("mongoose");
 
 const productSchema=new mongoose.Schema({
     asin: {
-        type: String
-        
+        type: String,
+        required: true,
       },
       product_title: {
-        type: String
-        
+        type: String,
+        required: true,
       },
       about_product: {
-        type: [String]
+        type: [String],
+        required: true,
       },
       product_description: {
-        type: [String]
+        type: [String],
+        required: true, 
       },
       product_photos:[
         {
-          type: String
+          type: String,
+          required: true
       }],
-      video_url:{
-        type: String
-      },
+      video_url:[{
+        type: String,
+        required: true
+      }],
       product_num_ratings:{
-       type:String
+       type:String,
+       require:true
       },product_star_ratings:{
-       type:String
+       type:String,
+       require:true
       }
 })
 // Define the schema

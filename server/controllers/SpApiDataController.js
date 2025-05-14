@@ -17,7 +17,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/GET_V1_SELL
 const { listFinancialEventsMethod } = require('../Services/Sp_API/Finance.js');
 const { getCompetitivePricing } = require('../Services/Sp_API/CompetitivePrices.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
-const { addReviewDataToDatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
+const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
 const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
 const { getContentDocument } = require('../Services/Sp_API/APlusContent.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
@@ -110,8 +110,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
 
-    asinArray.push(...SellerAccount.products.map(e => e.asin));
-    skuArray.push(...SellerAccount.products.map(e => e.sku));
+    asinArray.push(...SellerAccount.products.map(e => e.status==="Active" && e.asin));
+    skuArray.push(...SellerAccount.products.map(e => e.status==="Active" && e.sku));
 
 
 
@@ -135,7 +135,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     };
 
 
-/*
+
 
 
 
@@ -182,18 +182,18 @@ const getSpApiData = asyncHandler(async (req, res) => {
         const CreateCompetitivePricing= await CompetitivePricing.create({User:userId,region:Region,country:Country,Products:competitivePriceData});
         
 
-*/
 
 
 
-    const [//RestockinventoryData,
+
+    const [RestockinventoryData,
         productReview
     ] = await Promise.all([
-       //GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
-       addReviewDataToDatabase(asinArray, Country, userId, Region)
+       GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region),
+       addReviewDataTODatabase(asinArray, Country, userId, Region)
 
     ])
-/*
+
     const [WeeklySales, shipment,financeData] = await Promise.all([
         TotalSales(dataToSend, userId, Base_URI, Country, Region),
         getshipment(dataToSend, userId, Base_URI, Country, Region),
@@ -303,7 +303,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     const result = {
         MerchantlistingData: merchantListingsData,
-       // v2data: v2data,
+        v2data: v2data,
         v1data: v1data,
         financeData: financeData,
         competitivePriceData: competitivePriceData,
@@ -315,11 +315,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
 
-*/
 
 
 
-    return res.status(200).json(new ApiResponse(200, productReview, "Data has been fetched successfully"));
+
+    return res.status(200).json(new ApiResponse(200, result, "Data has been fetched successfully"));
 
 
 

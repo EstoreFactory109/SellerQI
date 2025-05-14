@@ -18,7 +18,7 @@ const checkNumberOfImages=(imageArr)=>{
 
 
 const checkIfVideoExists=(video)=>{
-    if(video===""){
+    if(video.length===0){
         return {
             status:"Error",
             Message:"Your product listing does not include a video. Missing a video may reduce the opportunity to fully engage potential buyers and demonstrate the product's features effectively, potentially impacting conversion rates.",
