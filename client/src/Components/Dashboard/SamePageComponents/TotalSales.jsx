@@ -9,7 +9,6 @@ const TotalSales = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
-  console.log(info)
 
   const labelData = [
     "Gross Profit",
@@ -122,8 +121,8 @@ const TotalSales = () => {
                   index === 0 ? info.accountFinance?.Gross_Profit :
                     saleValues[index]
                 }</p>
-                <p className="bg-[#fff7eb] text-[#dcb084] px-2 rounded-full text-xs sm:text-sm">
-                  {Math.round((saleValues[index] / 10000) * 100)}%
+                <p className="bg-[#fff7eb] text-[#dcb084] w-9 flex items-center justify-center rounded-full text-xs sm:text-[10px]">
+                  {Math.round((saleValues[index] / info?.TotalWeeklySale) * 100)}%
                 </p>
               </div>
             </li>

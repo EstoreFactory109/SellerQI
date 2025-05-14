@@ -1,4 +1,5 @@
 const analyseData = (data) => {
+    console.log(data)
     const TotalProducts = data.TotalProducts;
     const accountHealthPercentage = data.AccountData.getAccountHealthPercentge;
     const accountFinance = data.FinanceData;
@@ -18,9 +19,6 @@ const analyseData = (data) => {
         if (elm.status === "Active") activeProducts.push(elm.asin);
     });
 
-    // Total weekly sale
-    let totalWeeklySale = 0;
-    data.TotalSales.forEach(elm => totalWeeklySale += elm.TotalAmount);
 
     // Conversion error arrays
     const aplusError = data.ConversionData.aPlusResult.filter(p => p.data.status === "Error");
@@ -209,7 +207,7 @@ const analyseData = (data) => {
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
-        TotalWeeklySale: totalWeeklySale,
+        TotalWeeklySale: data.FinanceData.Total_Sales,
         TotalSales: data.TotalSales,
         reimbustment: data.Reimburstment,
         productWiseError: productWiseError,

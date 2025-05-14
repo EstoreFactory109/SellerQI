@@ -51,6 +51,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
             User: userId,
             region: region,
             country: country,
+            Total_Sales: dataObj.Total_Sales,
             Gross_Profit: dataObj.Gross_Profit,
             ProductAdsPayment: dataObj.ProductAdsPayment,
             FBA_Fees: dataObj.FBA_Fees,
@@ -146,6 +147,7 @@ const calculateAmazonFees = (dataArray) => {
     totalGrossProfit = totalFBAFees + totalRefunds + ProductAdsPayment + Shipment + adjustment + AmazonFees + DebtRecovery + storage;
 
     return {
+        Total_Sales:Shipment.toFixed(2),
         Gross_Profit: totalGrossProfit.toFixed(2),
         ProductAdsPayment: Math.abs(ProductAdsPayment.toFixed(2)),
         FBA_Fees: Math.abs(totalFBAFees.toFixed(2)),

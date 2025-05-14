@@ -17,6 +17,10 @@ const listFinancialEventsSchema = new mongoose.Schema(
         type:String,
         require:true
     },
+    Total_Sales:{
+        type:String,
+        required:true
+    },
     Gross_Profit:{
         type:String,
         required:true
