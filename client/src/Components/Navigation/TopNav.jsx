@@ -8,7 +8,7 @@ import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
 
-const TopNav = ({ name }) => {
+const TopNav = () => {
     const navigate = useNavigate()
     const marketplaces = {
         US: "United States",
@@ -71,7 +71,7 @@ const TopNav = ({ name }) => {
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div className="lg:p-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
-                        <p>{name || user?.firstName} | {marketplaces[Country]}</p>
+                        <p>{ user?.firstName} | {marketplaces[Country]}</p>
                         <img src={Arrow} alt="" className='w-3 h-2 ' />
                     </div>
                     <AnimatePresence>
@@ -89,7 +89,7 @@ const TopNav = ({ name }) => {
                                             key={key}
                                             className="w-full h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md "
                                         >
-                                            {name || user?.firstName} | {marketplaces[elm.country]}
+                                            { user?.firstName} | {marketplaces[elm.country]}
                                         </div>
                                     )
                                 )}
