@@ -17,9 +17,10 @@ const LeftNavSection = () => {
         setLoader(true)
             try {
                 const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/logout`, {withCredentials:true});
-                if(response ){
+                if(response && response.status===200 ){
                     console.log(response.data.message)
                     dispatch(logout());
+                    localStorage.setItem("isAuth",false)
                     setLoader(false)
                     navigate('/')
                 }

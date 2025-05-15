@@ -50,6 +50,7 @@ const OtpVerification = () => {
       },{withCredentials:true});
       if (response.status === 200) {
         setLoading(false);
+        localStorage.setItem("isAuth",true)
         navigate("/connect-to-amazon");
       }
     } catch (error) {

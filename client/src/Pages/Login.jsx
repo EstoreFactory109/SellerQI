@@ -65,7 +65,7 @@ const Login = () => {
                 setLoading(false);
                 setEmail("");
                 setPassword("");
-                //console.log(response.data.data)
+                localStorage.setItem("isAuth",true)
                 
                 window.location.href = "/seller-central-checker/dashboard";
             }

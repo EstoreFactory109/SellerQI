@@ -25,6 +25,7 @@ const LeftNavSection = () => {
                     console.log(response.data.message)
                     dispatch(logout());
                     setLoader(false)
+                    ocalStorage.setItem("isAuth",false)
                     navigate('/')
                 }
             } catch (error) {

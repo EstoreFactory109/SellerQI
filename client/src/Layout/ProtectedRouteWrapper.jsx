@@ -37,6 +37,8 @@ const ProtectedRouteWrapper = ({ children }) => {
           setAuthChecked(true);
 
           await fetchData();
+
+          localStorage.setItem("isAuth",true)
         } else {
           navigate("/");
         }
