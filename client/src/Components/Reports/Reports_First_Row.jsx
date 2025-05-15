@@ -8,6 +8,7 @@ import ToolTipForReplenishment from '../ToolTipBox/ToolTipBottomRight'
 const Reports_First_Row = () => {
   const info = useSelector(state => state.Dashboard.DashBoardInfo)
 
+
   const [openToolTipForGrossProfit,setOpenToolTipForGrossProfit]=useState(false)
   const [openToolTipForTotalSales,setOpenToolTipForTotalSales]=useState(false)
   const [openTollTipForBuyBox,setOpenTollTipForBuyBox]=useState(false)
@@ -39,7 +40,7 @@ const Reports_First_Row = () => {
             </div>
           </div>
           <div className='flex items-center w-full justify-between mt-3'>
-            <p className='font-bold'>${info.TotalWeeklySale.toFixed(2)}</p>
+            <p className='font-bold'>${info.TotalWeeklySale}</p>
            {/* <p className='text-[10px] text-[#d87a81] bg-[#fef2ef] w-12 h-4 px-1 rounded-full'>-15.05%</p>*/}
           </div>
         </div>
