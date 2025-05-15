@@ -18,6 +18,8 @@ import IssuesByProducts from './Pages/IssuesByProduct.jsx';
 import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
+
 
 const App = () => {
 
@@ -56,6 +58,7 @@ const App = () => {
           </Route>
         </Route>
         <Route path='/error/:status' element={<Error />} />
+        <Route path='*' element={<Navigate to="/error/404"/>}/>
       </Routes>
 
     </>
