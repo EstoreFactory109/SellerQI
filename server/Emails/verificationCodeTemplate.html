@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Verify your email</title>
+  <style>
+    /* Base resets */
+    body, html { margin: 0; padding: 0; }
+    a { color: #3182ce; text-decoration: none; }
+    /* Container styles */
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 2.5rem 0;
+    }
+    .email-container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 0.5rem;
+      padding: 3rem;
+      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    }
+    .text-center { text-align: center; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-10 { margin-bottom: 2.5rem; }
+    .my-4 { margin: 1rem 0; }
+    .my-8 { margin: 2rem 0; }
+    .text-gray-800 { color: #2d3748; }
+    .text-gray-600 { color: #4a5568; }
+    .text-gray-500 { color: #a0aec0; }
+    .text-blue-700 { color: #2b6cb0; }
+    .bg-blue-50 { background-color: #ebf8ff; }
+    .padding-6 { padding: 1.5rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .tracking-wider { letter-spacing: 6px; }
+    h1 { margin: 0; font-size: 1.875rem; font-weight: bold; }
+    p { margin: 0; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    .code-block {
+      font-size: 2rem;
+      font-weight: 600;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="text-center mb-10">
+      <!-- Logo (optional) -->
+      <img src="{{logoUrl}}" alt="logo" width="120" class="mb-2" />
+      <h1 class="text-gray-800">Verify your email</h1>
+    </div>
+
+    <!-- Greeting -->
+    <p class="text-gray-600 my-4">
+      Hi <strong>{{userName}}</strong>,
+    </p>
+    <p class="text-gray-600 my-4">
+      Thanks for signing up with <strong>SellerQI</strong>. Please use the verification code below to complete your registration. The code will expire in 10 minutes.
+    </p>
+
+    <!-- Code Block -->
+    <div class="bg-blue-50 padding-6 rounded-lg text-center my-8">
+      <p class="code-block text-blue-700 tracking-wider">{{verificationCode}}</p>
+    </div>
+
+    <!-- Note -->
+    <p class="text-gray-600 my-4">
+      Didn’t request this code? You can safely ignore this email.
+    </p>
+
+    <hr />
+
+    <!-- Footer -->
+    <p class="text-gray-500 text-center">
+      Need help? Contact us at <a href="mailto:{{supportEmail}}">support@sellerqi.com</a>
+    </p>
+    <p class="text-gray-500 text-center">
+      © 2025 SellerQI. All rights reserved.
+    </p>
+  </div>
+</body>
+</html>

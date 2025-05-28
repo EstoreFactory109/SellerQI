@@ -3,6 +3,11 @@ const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
 const resolveMx = promisify(dns.resolveMx);
+const fs = require('fs');
+const path = require('path');
+
+let VerificationEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'verificationCodeTemplate.html'), 'utf8');
+
 
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,6 +26,10 @@ const checkEmailDomain = async (email) => {
 };
 
 const sendEmail = async (email,firstName ,otp) => {
+
+    let template = VerificationEmailTemplate
+    .replace('{{userName}}',firstName)
+    .replace('{{verificationCode}}', otp);
     try {
 
 
@@ -37,11 +46,11 @@ const sendEmail = async (email,firstName ,otp) => {
         }
 
         const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com",
+            host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
             secure: false, // Set to false for STARTTLS
             auth: {
-                user: process.env.ADMIN_EMAIL_ID, // Your Gmail address
+                user: process.env.ADMIN_USERNAME, // Your Gmail address
                 pass: process.env.APP_PASSWORD, // Your Gmail password or App Password
             },
         });
@@ -52,7 +61,7 @@ const sendEmail = async (email,firstName ,otp) => {
 
             Your One-Time Password (OTP) for verification is: ${otp}
 
-            This OTP is valid for the next [Time Duration] minutes. Please do not share it with anyone.
+            This OTP is valid for the next 10 minutes. Please do not share it with anyone.
 
             If you did not request this, please ignore this email.
 
@@ -60,58 +69,11 @@ const sendEmail = async (email,firstName ,otp) => {
             IBEX Team
             
             `;
-        const body = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                .container {
-                    font-family: Arial, sans-serif;
-                    max-width: 600px;
-                    margin: auto;
-                    padding: 20px;
-                    border: 1px solid #ddd;
-                    border-radius: 8px;
-                    background-color: #f9f9f9;
-                }
-                .otp {
-                    font-size: 24px;
-                    font-weight: bold;
-                    color: #333;
-                    text-align: center;
-                    background: #eee;
-                    padding: 10px;
-                    border-radius: 5px;
-                }
-                .footer {
-                    margin-top: 20px;
-                    font-size: 12px;
-                    color: #777;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h2>Your One-Time Password (OTP)</h2>
-                <p>Dear ${firstName},</p>
-                <p>Your OTP for verification is:</p>
-                <p class="otp">${otp}</p>
-                <p>This OTP is valid for the next <strong>2 minutes</strong>. Please do not share it with anyone.</p>
-                <p>If you did not request this, please ignore this email.</p>
-                <p class="footer">
-                    Regards, <br>
-                    <strong>[Your Company Name]</strong> <br>
-                    [Your Website URL] <br>
-                    [Your Support Email]
-                </p>
-            </div>
-        </body>
-        </html>
-        `
+        const body = template;
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: process.env.PROVIDER, // Sender address
+            from: process.env.ADMIN_EMAIL_ID, // Sender address
             to: email, // List of receivers
             subject: subject, // Subject line
             text: text, // Plain text body
@@ -120,6 +82,7 @@ const sendEmail = async (email,firstName ,otp) => {
 
         return info.messageId; // Return the message ID on success
     } catch (error) {
+        logger.error(`Failed to send email to ${email}:`, error);
         return false;
 
     }

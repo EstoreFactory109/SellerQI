@@ -12,6 +12,7 @@
   "dependencies": {
     "@lottiefiles/lottie-player": "^2.0.12",
     "@mui/styled-engine": "^7.0.2",
+    "@react-email/components": "^0.0.41",
     "@reduxjs/toolkit": "^2.6.1",
     "apexcharts": "^4.5.0",
     "axios": "^1.8.3",
