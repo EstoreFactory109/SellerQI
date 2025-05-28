@@ -50,6 +50,12 @@ const userSchema = new mongoose.Schema(
         required: false,
         default:""
       },
+      accessType: {
+        type: String,
+        required: [true, "Access type is required"],
+        enum: ["user", "superAdmin", "enterpriseAdmin"],
+        default: "user"
+      },
       appRefreshToken: {
         type: String,
         required: false,

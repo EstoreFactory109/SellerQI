@@ -29,7 +29,7 @@ const calculateTotalReimbursement = require('../Services/Calculations/Reimburstm
 
 
 
-const Analyse = async (userId, country, region) => {
+const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
         logger.error(new ApiError(400, "User id is missing"));
         return {
@@ -44,37 +44,83 @@ const Analyse = async (userId, country, region) => {
             message: "Country or Region is missing"
         }
     }
-
-    const sellerCentral = await Seller.findOne({ User: userId });
-    if (!sellerCentral) {
-        logger.error(new ApiError(404, "Seller central not found"));
-        return {
-            status: 404,
-            message: "Seller central not found"
-        }
-    }
     const allSellerAccounts = []
     let SellerAccount = null;
+    let sellerCentral = null
 
-    sellerCentral.sellerAccount.forEach(item => {
-        allSellerAccounts.push({
-            country: item.country,
-            region: item.region,
-            NoOfProducts: item.products.length
-        })
-        if (item.country === country && item.region === region) {
-            SellerAccount = item;
+
+    if (adminId !== null) {
+        const getAllSellerAccounts = await Seller.find({})
+        if (!getAllSellerAccounts) {
+            logger.error(new ApiError(404, "Seller central not found"));
+            return {
+                status: 404,
+                message: "Seller central not found"
+            }
         }
-    })
 
-    if (!SellerAccount) {
-        logger.error(new ApiError(404, "Seller account not found"));
-        return {
-            status: 404,
-            message: "Seller account not found"
+       // console.log(userId)
+        sellerCentral = getAllSellerAccounts.find(item => item.User.toString() === userId)
+
+        if (!sellerCentral) {
+            logger.error(new ApiError(404, "Seller central not found"));
+            return {
+                status: 404,
+                message: "Seller central not found"
+            }
+        }
+
+        getAllSellerAccounts.forEach(item => {
+            const userId = item.User;
+            const sellerId = item.selling_partner_id;
+
+            item.sellerAccount.forEach(Details => {
+                allSellerAccounts.push({
+                    userId,
+                    sellerId,
+                    country: Details.country,
+                    region: Details.region,
+                    NoOfProducts: Details.products.length
+                })
+
+                if (Details.country === country && Details.region === region) {
+                    SellerAccount = Details;
+                }
+            })
+        })
+        //console.log(allSellerAccounts)
+    } else {
+
+        sellerCentral = await Seller.findOne({ User: userId });
+        if (!sellerCentral) {
+            logger.error(new ApiError(404, "Seller central not found"));
+            return {
+                status: 404,
+                message: "Seller central not found"
+            }
+        }
+
+        sellerCentral.sellerAccount.forEach(item => {
+            allSellerAccounts.push({
+                country: item.country,
+                region: item.region,
+                NoOfProducts: item.products.length
+            })
+            if (item.country === country && item.region === region) {
+                SellerAccount = item;
+            }
+        })
+
+        if (!SellerAccount) {
+            logger.error(new ApiError(404, "Seller account not found"));
+            return {
+                status: 404,
+                message: "Seller account not found"
+            }
         }
     }
 
+    console.log("SellerAccount: ",SellerAccount)
 
     const [
         v2Data,
@@ -312,7 +358,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
 
 
 
-    if (![ financeData, restockInventoryRecommendationsData, getCompetitiveData, TotalSales].every(Boolean)) {
+    if (![financeData, restockInventoryRecommendationsData, getCompetitiveData, TotalSales].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status: 404,
@@ -335,20 +381,20 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
         Country: country,
     };
 
-    function getTotalFinancialData(data){
-        Gross_Profit=0
-        ProductAdsPayment=0
-        FBA_Fees=0
-        Storage=0
-        Amazon_Charges=0
-        Refunds=0
-        data.forEach(item=>{
-            Gross_Profit+=Number(item.Gross_Profit)
-            ProductAdsPayment+=Number(item.ProductAdsPayment)
-            FBA_Fees+=Number(item.FBA_Fees)
-            Storage+=Number(item.Storage)
-            Amazon_Charges+=Number(item.Amazon_Charges)
-            Refunds+=Number(item.Refunds)
+    function getTotalFinancialData(data) {
+        Gross_Profit = 0
+        ProductAdsPayment = 0
+        FBA_Fees = 0
+        Storage = 0
+        Amazon_Charges = 0
+        Refunds = 0
+        data.forEach(item => {
+            Gross_Profit += Number(item.Gross_Profit)
+            ProductAdsPayment += Number(item.ProductAdsPayment)
+            FBA_Fees += Number(item.FBA_Fees)
+            Storage += Number(item.Storage)
+            Amazon_Charges += Number(item.Amazon_Charges)
+            Refunds += Number(item.Refunds)
         })
 
         return {
@@ -361,39 +407,39 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
         }
     }
 
-    function getTotalReimbursement(data){
-        let totalReimburstment=0;
-        data.forEach(item=>{
-           totalReimburstment+= calculateTotalReimbursement(item.shipmentData, sellerCentral.products).totalReimbursement
+    function getTotalReimbursement(data) {
+        let totalReimburstment = 0;
+        data.forEach(item => {
+            totalReimburstment += calculateTotalReimbursement(item.shipmentData, sellerCentral.products).totalReimbursement
         })
 
         console.log(totalReimburstment)
         return totalReimburstment
     }
 
-function calculateTotalSales(data){
-    let totalSales=0;
-    let dateWiseSales=[];
-    data.forEach((item) => {
-        item.totalSales.forEach((sale) => {
-           if(dateWiseSales.length===0){
-               dateWiseSales.push(sale);
-               totalSales+=sale.TotalAmount
-           }else{
-            let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
-            if(!containsInterval){
-                dateWiseSales.push(sale);
-                totalSales+=sale.TotalAmount;
-            }
-           }
+    function calculateTotalSales(data) {
+        let totalSales = 0;
+        let dateWiseSales = [];
+        data.forEach((item) => {
+            item.totalSales.forEach((sale) => {
+                if (dateWiseSales.length === 0) {
+                    dateWiseSales.push(sale);
+                    totalSales += sale.TotalAmount
+                } else {
+                    let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
+                    if (!containsInterval) {
+                        dateWiseSales.push(sale);
+                        totalSales += sale.TotalAmount;
+                    }
+                }
+            })
         })
-    })
 
-    return {
-        totalSales,
-        dateWiseSales
+        return {
+            totalSales,
+            dateWiseSales
+        }
     }
-}
 
     result.FinanceData = getTotalFinancialData(financeData)
     result.reimburstmentData = getTotalReimbursement(shipmentdata)
@@ -413,7 +459,8 @@ const analysingController = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const country = req.country;
     const region = req.region;
-    const result = await Analyse(userId, country, region);
+    const adminId = req.adminId;
+    const result = await Analyse(userId, country, region, adminId);
     res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
 });
 

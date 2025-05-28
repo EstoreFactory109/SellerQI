@@ -84,7 +84,8 @@ const analyseData = (data) => {
 
         const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
 
-
+        // Find the product in TotalProducts by ASIN
+        const totalProduct = TotalProducts.find(p => p.asin === asin);
 
         let productwiseTotalError = elm.data.TotalErrors + conversionErrors;
         if (elm.data.TotalErrors > 0) {
@@ -100,13 +101,14 @@ const analyseData = (data) => {
                 : { asin, data: { Title: title } }
         );
 
+        console.log(index)
         
         productWiseError.push({
             asin,
-            sku:data.TotalProducts[index].sku,
+            sku: totalProduct?.sku || "N/A",
             name: title,
-            price:data.TotalProducts[index].price,
-            MainImage:data.ConversionData.imageResult.find(item=>item.asin===elm.asin).data.MainImage,
+            price: totalProduct?.price || 0,
+            MainImage: data.ConversionData.imageResult.find(item=>item.asin===elm.asin)?.data?.MainImage || null,
             errors: productwiseTotalError,
             rankingErrors: elm.data.TotalErrors > 0 ? elm : undefined,
             conversionErrors: conversionData,

@@ -7,6 +7,7 @@ import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
+import axios from 'axios'
 
 const TopNav = () => {
     const navigate = useNavigate()
@@ -37,12 +38,32 @@ const TopNav = () => {
 
 
     const user = useSelector((state) => state.Auth?.user);
+    console.log(user)
     const Country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country);
-    const sellerAccount = useSelector(state => state.AllAccounts?.AllAccounts)
+    const sellerAccount = useSelector(state => state.AllAccounts?.AllAccounts) || []
     const [openDropDown, setOpenDropDown] = useState(false);
     const dispatch = useDispatch();
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
+
+    console.log(sellerAccount)
+
+    const switchAccount = async (userId="",country,region) => {
+        try{
+            const data={
+                userId:userId,
+                country:country,
+                region:region
+            }
+           
+            const response=await axios.post(`http://localhost:8080/app/switch-account`,data,{withCredentials:true})
+            if(response.status===200){
+                window.location.href = "/seller-central-checker/dashboard";
+            }
+        }catch(error){
+            console.log(error)
+        }
+    }
 
     const handleHamburger = () => {
         dispatch(setPosition("0%"))
@@ -71,7 +92,7 @@ const TopNav = () => {
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div className="lg:p-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
-                        <p>{ user?.firstName} | {marketplaces[Country]}</p>
+                        <p>{user?.firstName || "Brand Name"} | {marketplaces[Country]}</p>
                         <img src={Arrow} alt="" className='w-3 h-2 ' />
                     </div>
                     <AnimatePresence>
@@ -81,15 +102,16 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99]"
+                                className="min-w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99]"
                             >
                                 {sellerAccount.map((elm, key) =>
-                                    elm.country !== Country && (
+                                    elm.region !== Country && (
                                         <div
                                             key={key}
-                                            className="w-full h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md "
+                                            className="w-full h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-sm"
+                                            onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                         >
-                                            { user?.firstName} | {marketplaces[elm.country]}
+                                            {"Brand Name"} | {marketplaces[elm.country]}
                                         </div>
                                     )
                                 )}
