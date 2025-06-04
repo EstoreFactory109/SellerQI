@@ -30,6 +30,10 @@ const Login = () => {
         navigate('/sign-up');
     };
 
+    const NavigateToverifyEmailForResetPassword = () => {
+        navigate('/verify-email-for-password-reset');
+    };
+
     const validateEmail = (email) => {
         // Basic email regex validation
         const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -135,7 +139,7 @@ const Login = () => {
                             <input type="checkbox" name="remember" id="remember" />
                             <label htmlFor="remember">Remember Me</label>
                         </div>
-                        <p className="text-sm cursor-pointer">Forgot Password?</p>
+                        <p className="text-sm cursor-pointer hover:underline" onClick={NavigateToverifyEmailForResetPassword}>Forgot Password?</p>
                     </div>
 
                     <button

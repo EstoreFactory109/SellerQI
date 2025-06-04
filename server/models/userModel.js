@@ -81,6 +81,10 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      resetPasswordCode: {
+        type: String,
+        required: false,
+      },
       listFinancialEvents: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "ListFinancialEvents",

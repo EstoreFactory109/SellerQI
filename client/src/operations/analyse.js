@@ -1,3 +1,7 @@
+import Profitiblity from "./Profitiblity";
+import calculateSponsoredAdsMetrics from "./sponserdAds";
+import {calculateNegativeKeywordsMetrics} from "./sponserdAds";
+
 const analyseData = (data) => {
     console.log(data)
     const TotalProducts = data.TotalProducts;
@@ -6,6 +10,13 @@ const analyseData = (data) => {
     const totalErrorInAccount = data.AccountData.accountHealth.TotalErrors;
     const replenishmentQty = data.replenishmentQty;
     const amazonReadyProducts = data.ConversionData.AmazonReadyproducts;
+    const profitibilityData = Profitiblity(data.SalesByProducts, data.ProductWiseSponsoredAds, data.ProductWiseFBAData);
+    const sponsoredAdsMetrics = calculateSponsoredAdsMetrics(data.ProductWiseSponsoredAds);
+    const negativeKeywordsMetrics = calculateNegativeKeywordsMetrics(data.negetiveKeywords, data.ProductWiseSponsoredAds);
+
+    console.log("negativeKeywordsMetrics: ",negativeKeywordsMetrics)
+
+    console.log("sponsoredAdsMetrics: ",sponsoredAdsMetrics)
 
     const activeProducts = [];
     const productWiseError = [];
@@ -217,7 +228,10 @@ const analyseData = (data) => {
         conversionProductWiseErrors: conversionProductWiseErrors,
         AccountErrors: data.AccountData.accountHealth,
         startDate:data.startDate,
-        endDate:data.endDate
+        endDate:data.endDate,
+        profitibilityData: profitibilityData,
+        sponsoredAdsMetrics: sponsoredAdsMetrics,
+        negativeKeywordsMetrics: negativeKeywordsMetrics
     };
 
     return { dashboardData };

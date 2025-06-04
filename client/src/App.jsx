@@ -19,6 +19,12 @@ import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
+import ProfitibilityDashboard from './Pages/ProfitibilityDashboard.jsx';
+import PPCDashboard from './Pages/PPCDashboard.jsx';
+import EmailVerificationForNewPassword from './Pages/EmailVerificationForNewPassword.jsx';
+import ResetPassword from './Pages/ResetPassword.jsx';
+import Home from './Pages/Home.jsx';
+import Pricing from './Pages/Pricing.jsx';
 
 
 const App = () => {
@@ -32,14 +38,17 @@ const App = () => {
             <Outlet />
           </ProtectedAuthRouteWrapper>
         }>
-          <Route path='/' element={<Login />} />
+          <Route path='/' element={<Home />} />
           <Route path='/sign-up' element={<Signup />} />
-
+          <Route path='/log-in' element={<Login />} />
+          <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/account-access' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
+        <Route path='/reset-password/:code' element={<ResetPassword />} />
+        <Route path='/pricing' element={<Pricing />} />
         <Route
           element={
             <ProtectedRouteWrapper>
@@ -47,9 +56,12 @@ const App = () => {
             </ProtectedRouteWrapper>
           }
         >
+          
           <Route path='/seller-central-checker' element={<MainLayout />}>
 
             <Route path='dashboard' element={<DashBoard />} />
+            <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
+            <Route path='ppc-dashboard' element={<PPCDashboard />} />
             <Route path='issues' element={<Issues />} />
             <Route path='issues/:asin' element={<IssuesByProducts />} />
             <Route path='reports' element={<Reports />} />

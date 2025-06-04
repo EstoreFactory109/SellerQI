@@ -26,8 +26,9 @@ const {
     checkProductWithOutBuyBox
 } = require('../Services/Calculations/Conversion.js');
 const calculateTotalReimbursement = require('../Services/Calculations/Reimburstment.js');
-
-
+const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
+const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
+const NegetiveKeywords = require('../models/NegetiveKeywords.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -133,7 +134,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
         aplusResponse,
         TotalSales,
         shipmentdata,
-        saleByProduct
+        saleByProduct,
+        ProductWiseSponsoredAds,
+        ProductWiseFBA,
+        negetiveKeywords
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -146,12 +150,17 @@ const Analyse = async (userId, country, region, adminId = null) => {
         TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        ProductWiseSponsoredAdsData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        ProductWiseFBAData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
 
+    //console.log("ProductWiseSponsoredAds: ",ProductWiseSponsoredAds)
+    console.log("ProductWiseFBA: ",ProductWiseFBA)
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct].every(Boolean)) {
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds,ProductWiseFBA,negetiveKeywords].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status: 404,
@@ -182,7 +191,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
         },
         FinanceData: financeData,
         replenishmentQty: replenishmentQty(restockInventoryRecommendationsData.Products),
-        TotalSales: TotalSales.totalSales
+        TotalSales: TotalSales.totalSales,
+        ProductWiseSponsoredAds: ProductWiseSponsoredAds.sponsoredAds,
+        ProductWiseFBAData: ProductWiseFBA.fbaData,
+        negetiveKeywords: negetiveKeywords.negetiveKeywordsData
     };
 
 
@@ -190,7 +202,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(getCompetitiveData.Products).presentAsin);
     const productReviewsAsins = new Set(numberOfProductReviews.Products.map(p => p.asin));
     const listingAllAsins = new Set((GetlistingAllItems.GenericKeyword || []).map(p => p.asin));
-    console.log("setof Listing asins: ", ListingAllItems)
+    //console.log("setof Listing asins: ", ListingAllItems)
 
     const productReviewsDefaulters = [], listingAllItemsDefaulters = [], ProductwithoutBuyboxDefaulters = [];
     asinSet.forEach(asin => {
@@ -413,7 +425,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
             totalReimburstment += calculateTotalReimbursement(item.shipmentData, sellerCentral.products).totalReimbursement
         })
 
-        console.log(totalReimburstment)
+        //console.log(totalReimburstment)
         return totalReimburstment
     }
 

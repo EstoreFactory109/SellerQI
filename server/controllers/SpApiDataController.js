@@ -194,7 +194,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     ])
 
-    const [WeeklySales, shipment,financeData] = await Promise.all([
+    const [
+       WeeklySales, 
+        shipment,
+        financeData] = await Promise.all([
         TotalSales(dataToSend, userId, Base_URI, Country, Region),
         getshipment(dataToSend, userId, Base_URI, Country, Region),
         listFinancialEventsMethod(dataToSend, userId, Base_URI, Country, Region)
@@ -318,6 +321,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
 
 
+    console.log("financeData: ",financeData)
+
+    if(financeData.length === 0){
+        logger.error(new ApiError(500, "No data found"));
+        return res.status(500).json(new ApiResponse(500, "", "No data found"));
+    }
 
     return res.status(200).json(new ApiResponse(200, result, "Data has been fetched successfully"));
 

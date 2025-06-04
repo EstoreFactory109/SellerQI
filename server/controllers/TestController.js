@@ -1,8 +1,18 @@
-const generateReport = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
+const generateReport = require('../Services/Sp_API/GetProductWiseFBAData.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
 const puppeteer = require("puppeteer");
+const { generateAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
+const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js');
+const { getPPCSpendsSalesUnitsSold } = require('../Services/AmazonAds/PPCSpendsSalesUnitsSold.js');
+const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
+const {CampaignPerformanceReport} = require('../Services/AmazonAds/Campaign Performance Report(High ACoS Campaigns).js');
+const {getAdGroups} = require('../Services/AmazonAds/GetAdGroups.js');
+const {getKeywords} = require('../Services/AmazonAds/GetKeywords.js');
+const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
+const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
+
 const testReport = async (req, res) => {
     const { accessToken, marketplaceIds } = req.body;
     console.log(accessToken, marketplaceIds)
@@ -10,7 +20,7 @@ const testReport = async (req, res) => {
         return res.status(400).json({ message: "Credentials are missing" })
     }
 
-    const report = await generateReport(accessToken, marketplaceIds, "67fab4e78a78bdc26ef2246c", "sellingpartnerapi-na.amazon.com","NA","US");
+    const report = await generateReport(accessToken, marketplaceIds, "681c63da2abd9848fbc2c6d2", "sellingpartnerapi-na.amazon.com","NA","US");
     if (!report) {
         return res.status(408).json({ message: "Report did not complete within 5 minutes" })
     }
@@ -129,10 +139,78 @@ const getReviewData = async (req, res) => {
 
 
 
+const testAmazonAds = async (req, res) => {
+    const { accessToken, region } = req.body;
+    const result = await getProfileById(accessToken, region);
+    return res.status(200).json({
+        data: result
+    })
+}
+
+const testPPCSpendsSalesUnitsSold = async (req, res) => {
+    const { accessToken,profileId, region,date } = req.body;
+    const result = await getPPCSpendsSalesUnitsSold(accessToken, profileId, date, region);
+    return res.status(200).json({
+        data: result
+    })
+}
 
 
+  const testGetCampaigns = async (req, res) => {
+    const { accessToken, region,profileId } = req.body;
+    const result = await getCampaign(accessToken,profileId,region);
+    return res.status(200).json({
+        data: result
+    })
+  }
 
 
+  const testCampaignPerformanceReport = async (req, res) => {
+    const { accessToken, region,profileId,date } = req.body;
+    const result = await CampaignPerformanceReport(accessToken,profileId,date,region);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
+  const testGetAdGroups = async (req, res) => {
+    const { accessToken, region,profileId,campaignIds } = req.body;
+    const result = await getAdGroups(accessToken,profileId,region,campaignIds);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
+  const testGetKeywords = async (req, res) => {
+    const { accessToken, region,profileId } = req.body;
+    const campaignId=["384401447418864","344856825901105","304447074514909"]
+    const adGroupId=["430568511470558","507081767760505","366695316274140"]
+    const result = await getKeywords(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region,campaignId,adGroupId);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
+  const testGetPPCSpendsBySKU = async (req, res) => {
+    const { accessToken, region,profileId } = req.body;
+   
+    const result = await getPPCSpendsBySKU(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
+  const testListFinancialEvents = async (req, res) => {
+   
+    const result = await listFinancialEventsMethod();
+    return res.status(200).json({
+        data: result
+    })
+  }
 
 
-module.exports = { testReport, getTotalSales, getReviewData }
+module.exports = { testReport, getTotalSales, 
+  getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
+   testGetCampaigns,testCampaignPerformanceReport,testGetAdGroups,
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents
+   }

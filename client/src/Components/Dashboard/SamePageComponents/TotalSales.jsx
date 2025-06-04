@@ -55,7 +55,7 @@ const TotalSales = () => {
       {/* Header Section */}
       <div className="w-full flex flex-wrap items-center justify-between pr-4">
         <div className="flex items-center gap-3">
-          <h2 className="text-sm sm:text-base">TOP SALES</h2>
+          <h2 className="text-sm sm:text-base">TOTAL SALES</h2>
           <div className="relative fit-content">
           <img src={issue} alt="" className="w-4 h-4 sm:w-5 sm:h-5 cursor-pointer" onMouseEnter={() => setOpenToolTipTopSales(true)} onMouseLeave={() => setOpenToolTipTopSales(false)} />
           {openToolTipTopSales && <ToolTipBoxLeft Information="Total revenue generated during the selected date range."/>}

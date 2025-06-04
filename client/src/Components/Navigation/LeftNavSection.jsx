@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -12,6 +12,7 @@ const LeftNavSection = () => {
     const dispatch = useDispatch();
     const navigate=useNavigate();
     const [loader,setLoader]=useState(false)
+    
     const logoutUser=async(e)=>{
         e.preventDefault();
         setLoader(true)
@@ -35,7 +36,7 @@ const LeftNavSection = () => {
     return (
         <aside className="h-screen w-2/5 lg:w-1/5 shadow-md p-2 border-r-[1px] border-gray-200 font-roboto bg-white hidden lg:block">
             <div className="w-full h-7 flex items-center pl-2 mt-4">
-                <p className="text-2xl font-semibold">iBEX</p>
+                <p className="text-2xl font-semibold">Seller QI</p>
             </div>
             <div className="w-full mt-5 pl-2 pb-5">
                 <p className="font-light mb-3 text-sm">MENU</p>
@@ -52,6 +53,37 @@ const LeftNavSection = () => {
                             <>
                                <LayoutDashboard className="w-4 h-4"/>
                                 <p className="font-medium text-xs">Dashboard</p>
+                            </>
+                        )}
+                    </NavLink>
+                    <NavLink
+                        to="/seller-central-checker/ppc-dashboard"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <LaptopMinimalCheck className="w-4 h-4"/>
+                                <p className="font-medium text-xs">Sponsored Ads</p>
+                            </>
+                        )}
+                    </NavLink>
+                    
+                    <NavLink
+                        to="/seller-central-checker/profitibility-dashboard"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <ChartLine className="w-4 h-4"/>
+                                <p className="font-medium text-xs">Profitibility</p>
                             </>
                         )}
                     </NavLink>

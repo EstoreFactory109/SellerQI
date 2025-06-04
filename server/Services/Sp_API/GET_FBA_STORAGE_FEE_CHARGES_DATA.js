@@ -1,8 +1,8 @@
 const axios = require("axios");
-const xml2js = require("xml2js");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_V1_SELLER_PERFORMANCE_REPORT = require('../../models/V1_Seller_Performance_Report_Model.js');
+const ProductWiseStorageFees = require('../../models/ProductWiseStorageFees');
+
 
 
 
@@ -10,15 +10,15 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     console.log(marketplaceIds);
     try {
         const now = new Date();
-        const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const EndTime = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours before now
+        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days before end
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
-                reportType: "GET_V1_SELLER_PERFORMANCE_REPORT",
-                marketplaceIds: [marketplaceIds], 
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime: EndTime.toISOString(),
+                reportType: "GET_FBA_STORAGE_FEE_CHARGES_DATA",
+                marketplaceIds: marketplaceIds, 
+                dataStartTime: "2025-04-01T00:00:00Z",
+                dataEndTime: "2025-04-30T23:59:59Z",
             },
             {
                 headers: {
@@ -121,7 +121,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
 
         while (!reportDocumentId && retries > 0) {
             console.log(`⏳ Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000));
+            await new Promise((resolve) => setTimeout(resolve, 60000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
                 return {
@@ -148,7 +148,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         const fullReport = await axios({
             method: "GET",
             url: reportUrl,
-            responseType: "text",  // Ensure response is in raw text format
+            responseType: "arraybuffer",  // Ensure response is in raw text format
         });
 
         if (!fullReport || !fullReport.data) {
@@ -156,79 +156,32 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         }
 
         // Convert XML to JSON
-        const xmlData = fullReport.data;
-        const jsonData = await convertXMLToJson(xmlData);
+        const refinedData = convertTSVToJson(fullReport.data);
 
-        let negativeFeedbacks=null;
-        let lateShipmentCount=null
-        let preFulfillmentCancellationCount=null
-        let refundsCount=null
-        let a_z_claims=null
-        
-        const sortedorderDefectMetricsMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.orderDefects.orderDefectMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-        const negetiveFeedbackData={
-            startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-            endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-            count:sortedorderDefectMetricsMetrics[0].negativeFeedbacks.count
-        }
-        negativeFeedbacks=negetiveFeedbackData
-
-        const a_z_claims_data={
-            startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-            endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-            count:sortedorderDefectMetricsMetrics[0].a_z_claims.count
-        }
-        a_z_claims=a_z_claims_data
-
-        
-        const sortedcustomerExperienceMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.customerExperience.customerExperienceMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-        const lateShipmentCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].lateShipment.count
-        }
-        lateShipmentCount=lateShipmentCount_data
-
-        const preFulfillmentCancellationCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].preFulfillmentCancellation.count
-        }
-        preFulfillmentCancellationCount=preFulfillmentCancellationCount_data
-
-        const refundsCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].refunds.count
-        }
-        refundsCount=refundsCount_data
-
-        let responseUnder24HoursCount=jsonData.sellerPerformanceReports.sellerPerformanceReport.buyerSellerContactResponseTimeMetrics.responseTimeMetrics.responseUnder24Hours;
-
-        const User=userId
-
-        const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
-            User,
-            region,
-            country,
-            negativeFeedbacks,
-            lateShipmentCount,
-            preFulfillmentCancellationCount,
-            refundsCount,
-            a_z_claims,
-            responseUnder24HoursCount
-        })
-
-        if(!createReportData){
-            logger.error(new ApiError(500, "Internal server error in generating the report"));
+        if (refinedData.length === 0) {
+            logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
         }
 
-        
+        const storageFees=[];
+        refinedData.forEach(item=>{
+            storageFees.push({
+                asin: item.asin,
+                storageFee: item["estimated_monthly_storage_fee"] || "0"
+            })
+        })
 
-        return createReportData;
+        const createProductWiseStorageFees = await ProductWiseStorageFees.create({
+            userId: userId,
+            country: country,
+            region: region,
+            storageFees: storageFees
+        })
+        if(createProductWiseStorageFees){
+            return false;
+        }
+
+        return createProductWiseStorageFees;
 
     } catch (error) {
         console.error("❌ Error in getReport:", error.message);
@@ -236,15 +189,17 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
     }
 };
 
-async function convertXMLToJson(xmlData) {
-    try {
-        const parser = new xml2js.Parser({ explicitArray: false });
-        const jsonResult = await parser.parseStringPromise(xmlData);
-        return jsonResult;
-    } catch (error) {
-        console.error("❌ Error converting XML to JSON:", error.message);
-        throw new Error("Failed to parse XML data");
-    }
+function convertTSVToJson(tsvBuffer) {
+    const tsv = tsvBuffer.toString("utf-8");
+    const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    const headers = rows[0].split("\t");
+    return rows.slice(1).map(row => {
+        const values = row.split("\t");
+        return headers.reduce((obj, header, index) => {
+            obj[header] = values[index] || "";
+            return obj;
+        }, {});
+    });
 }
 
 module.exports = getReport;

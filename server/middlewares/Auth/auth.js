@@ -7,7 +7,10 @@ const { ApiResponse } = require('../../utils/ApiResponse');
 const auth=asyncHandler(async(req,res,next)=>{
     const accesstoken=req.cookies.IBEXAccessToken;
     const adminToken=req.cookies.AdminToken;
-    console.log("adminToken: ",adminToken.length)
+    
+    if(adminToken) {
+        console.log("adminToken: ",adminToken.length)
+    }
     
     if(!accesstoken){
         logger.error(new ApiError(401,"Unauthorized"));
@@ -20,7 +23,7 @@ const auth=asyncHandler(async(req,res,next)=>{
         return res.status(400).json(new ApiResponse(400,"","Invalid access token"));
     }
 
-    if(adminToken.length!==0){
+    if(adminToken && adminToken.length!==0){
         const decodedAdmin=await verifyAccessToken(adminToken);
         if(!decodedAdmin){
             logger.error(new ApiError(400,"Invalid admin token"));

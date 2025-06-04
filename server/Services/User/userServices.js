@@ -125,6 +125,35 @@ const updateInfo=async(userId,firstName,lastName,phone,whatsapp,email)=>{
     }
 }
 
+const updatePassword = async (email, newPassword) => {
+    if (!email || !newPassword) {
+        logger.error(new ApiError(400, "Email or password is missing"));
+        return false;
+    }
 
-module.exports = { createUser,getUserByEmail,verify,getUserById ,updateInfo}
+    try {
+        const user = await UserModel.findOne({ email: email });
+        
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return false;
+        }
+
+        // Hash the new password
+        const hashedPassword = await hashPassword(newPassword);
+        
+        // Update the password and clear the reset code
+        user.password = hashedPassword;
+        user.resetPasswordCode = null;
+        
+        await user.save();
+        
+        return true;
+    } catch (error) {
+        logger.error(`Error in updating password: ${error}`);
+        return false;
+    }
+}
+
+module.exports = { createUser,getUserByEmail,verify,getUserById ,updateInfo, updatePassword}
 

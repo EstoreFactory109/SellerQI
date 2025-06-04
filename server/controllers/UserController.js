@@ -1,4 +1,4 @@
-const { createUser, getUserByEmail, verify, getUserById, updateInfo } = require('../Services/User/userServices.js');
+const { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassword } = require('../Services/User/userServices.js');
 const { ApiError } = require('../utils/ApiError.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const asyncHandler = require('../utils/AsyncHandler.js');
@@ -10,7 +10,9 @@ const { sendEmail } = require('../Services/Email/SendOtp.js');
 const UserModel = require('../models/userModel.js');
 const SellerCentralModel = require('../models/sellerCentralModel.js');
 const { uploadToCloudinary } = require('../Services/Cloudinary/Cloudinary.js');
-
+const { sendEmailResetLink } = require('../Services/Email/SendResetLink.js');
+const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, whatsapp, email, password } = req.body;
@@ -364,5 +366,139 @@ const switchAccount = asyncHandler(async (req, res) => {
 
 });
 
+const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount };
+    if (!email) {
+        logger.error(new ApiError(400, "Email is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Email is missing"));
+    }
+
+    const user = await getUserByEmail(email);
+
+    if (!user) {
+        logger.error(new ApiError(404, "User not found"));
+        return res.status(404).json(new ApiResponse(404, "", "User not found"));
+    }
+
+    const code = jwt.sign({ email:email,code:uuidv4() }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    user.resetPasswordCode = code;
+    await user.save();
+
+    const link=`${process.env.RESET_LINK_BASE_URI}/${code}`
+
+    console.log(link, email, user.firstName);
+
+    const emailSent = await sendEmailResetLink(email, user.firstName, link);
+
+    if (!emailSent) {
+        logger.error(new ApiError(500, "Internal server error in sending email"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+    }
+
+    return res.status(200).json(new ApiResponse(200, "", "Reset link sent successfully"));
+})
+
+const verifyResetPasswordCode = asyncHandler(async (req, res) => {
+    const { code } = req.body;
+
+    if (!code) {
+        logger.error(new ApiError(400, "Code is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Code is missing"));
+    }
+
+    try {
+        const decoded = jwt.verify(code, process.env.JWT_SECRET);
+
+        if (!decoded) {
+            logger.error(new ApiError(400, "Invalid code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid code"));
+        }
+
+        const user = await getUserByEmail(decoded.email);
+
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        if (user.resetPasswordCode !== code) {
+            logger.error(new ApiError(400, "Invalid code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid code"));
+        }
+
+
+        // If we reach here, the token is valid and not expired
+        return res.status(200).json(new ApiResponse(200, "", "Code verified successfully"));
+        
+    } catch (error) {
+        if (error.name === 'TokenExpiredError') {
+            logger.error(new ApiError(401, "Reset link has expired"));
+            return res.status(401).json(new ApiResponse(401, "", "Reset link has expired. Please request a new one."));
+        } else if (error.name === 'JsonWebTokenError') {
+            logger.error(new ApiError(400, "Invalid reset code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid reset code"));
+        } else {
+            logger.error(new ApiError(500, "Error verifying reset code"));
+            return res.status(500).json(new ApiResponse(500, "", "Error verifying reset code"));
+        }
+    }
+})
+
+const resetPassword = asyncHandler(async (req, res) => {
+    const { code, newPassword } = req.body;
+    console.log(code, newPassword);
+
+    if (!code || !newPassword) {
+        logger.error(new ApiError(400, "Code or new password is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Code or new password is missing"));
+    }
+
+    try {
+        // Verify the code first
+        const decoded = jwt.verify(code, process.env.JWT_SECRET);
+
+        if (!decoded) {
+            logger.error(new ApiError(400, "Invalid code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid code"));
+        }
+
+        // Check if user exists
+        const user = await getUserByEmail(decoded.email);
+
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        // Verify the reset code matches
+        if (user.resetPasswordCode !== code) {
+            logger.error(new ApiError(400, "Invalid reset code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid reset code"));
+        }
+
+        // Update the password
+        const passwordUpdated = await updatePassword(decoded.email, newPassword);
+
+        if (!passwordUpdated) {
+            logger.error(new ApiError(500, "Internal server error in updating password"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in updating password"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, "", "Password reset successfully"));
+
+    } catch (error) {
+        if (error.name === 'TokenExpiredError') {
+            logger.error(new ApiError(401, "Reset link has expired"));
+            return res.status(401).json(new ApiResponse(401, "", "Reset link has expired. Please request a new one."));
+        } else if (error.name === 'JsonWebTokenError') {
+            logger.error(new ApiError(400, "Invalid reset code"));
+            return res.status(400).json(new ApiResponse(400, "", "Invalid reset code"));
+        } else {
+            logger.error(new ApiError(500, "Error resetting password"));
+            return res.status(500).json(new ApiResponse(500, "", "Error resetting password"));
+        }
+    }
+})
+
+module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword };
