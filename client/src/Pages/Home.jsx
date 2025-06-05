@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import { LuFacebook } from "react-icons/lu";
 import { BsTwitterX } from "react-icons/bs";
 import { AiOutlineLinkedin } from "react-icons/ai";
-import Logo from "../assets/Icons/MainLogo.png"
 import { useNavigate } from 'react-router-dom';
 
 function ResultsPage({ asin, market }) {
@@ -386,7 +385,7 @@ export default function SellerQIHomepage() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
-              <img src={Logo} alt='SellerQI' className='w-28 h-9' />
+              <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png' alt='SellerQI' className='w-28 h-9' />
             </div>
             <nav className="hidden md:flex items-center space-x-8">
               <Link to="/pricing" className="text-gray-600 hover:text-gray-900">Pricing</Link>

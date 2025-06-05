@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
-import Logo from "../assets/Icons/MainLogo.png"
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 
@@ -42,7 +41,7 @@ export default function PricingPage() {
       <header className="border-b border-gray-200">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
         <div className="flex items-center">
-              <img src={Logo} alt='SellerQI' className='w-28 h-9' />
+              <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png' alt='SellerQI' className='w-28 h-9' />
             </div>
           <nav className="hidden md:flex items-center space-x-8">
             <Link to="/" className="text-gray-600 hover:text-gray-900 font-medium cursor-pointer" >Home</Link>
