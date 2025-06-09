@@ -4,6 +4,7 @@ import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,Lapt
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
+import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import BeatLoader from "react-spinners/BeatLoader";
@@ -16,20 +17,20 @@ const LeftNavSection = () => {
     const logoutUser=async(e)=>{
         e.preventDefault();
         setLoader(true)
-            try {
-                const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/logout`, {withCredentials:true});
-                if(response && response.status===200 ){
-                    console.log(response.data.message)
-                    dispatch(logout());
-                    localStorage.setItem("isAuth",false)
-                    setLoader(false)
-                    navigate('/')
-                }
-            } catch (error) {
+        try {
+            const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/logout`, {withCredentials:true});
+            if(response && response.status===200 ){
+                console.log(response.data.message)
+                dispatch(logout());
+                dispatch(clearCogsData());
+                localStorage.setItem("isAuth",false)
                 setLoader(false)
-                throw new Error(error)
+                navigate('/')
             }
-        
+        } catch (error) {
+            setLoader(false)
+            throw new Error(error)
+        }
     }
 
 

@@ -1,23 +1,25 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Check, AlertTriangle, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import { setCogsValue } from '../../redux/slices/cogsSlice';
+import { setProfitabilityErrors } from '../../redux/slices/DashboardSlice';
 
 const ProfitTable = ({ setSuggestionsData }) => {
     const [currentPage, setCurrentPage] = useState(1);
-    const [cogsValues, setCogsValues] = useState({});
+    const dispatch = useDispatch();
     const productsPerPage = 10;
     
     // Get profitability data from Redux store
     const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
     const totalProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
     
+    // Get COGs values from Redux store
+    const cogsValues = useSelector((state) => state.cogs.cogsValues);
+    
     // Handle COGS input change
     const handleCogsChange = (asin, value) => {
       const numValue = parseFloat(value) || 0;
-      setCogsValues(prev => ({
-        ...prev,
-        [asin]: numValue
-      }));
+      dispatch(setCogsValue({ asin, value: numValue }));
     };
     
     // Generate suggestions based on profitability metrics
@@ -112,6 +114,16 @@ const ProfitTable = ({ setSuggestionsData }) => {
         return productData;
       });
     }, [profitibilityData, cogsValues, totalProducts]);
+    
+    // Calculate total profitability errors
+    useEffect(() => {
+      const totalErrors = products.filter(product => 
+        product.status === 'bad' || product.status === 'warn'
+      ).length;
+      
+      // Dispatch the total errors to Redux
+      dispatch(setProfitabilityErrors(totalErrors));
+    }, [products, dispatch]);
     
     // Send suggestions data to parent component
     useEffect(() => {

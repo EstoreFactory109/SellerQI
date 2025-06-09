@@ -40,10 +40,11 @@ async function getReportId(accessToken, profileId, region) {
             "configuration": {
                 "adProduct": "SPONSORED_PRODUCTS",
                 "reportTypeId": "spAdvertisedProduct",
-                "timeUnit": "SUMMARY",
+                "timeUnit": "DAILY",
                 "format": "GZIP_JSON",
                 "groupBy": ["advertiser"],
                 "columns": [
+                    "date",
                     "advertisedAsin",
                     "advertisedSku",
                     "campaignId",
@@ -118,16 +119,16 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                if (attempts === 58 || attempts === 118 || attempts===178) {
-                    const refreshToken = await userModel.findById(userId).select('spiRefreshToken');
-                    if (!userRef) {
+                if (attempts === 58 || attempts === 118 || attempts === 178) {
+                    const user = await userModel.findById(userId).select('spiRefreshToken');
+                    if (!user || !user.spiRefreshToken) {
                         return {
                             status: 'FAILURE',
                             reportId: reportId,
-                            error: 'Report generation failed'
+                            error: 'Report generation failed - unable to refresh token'
                         }
                     }
-                    accessToken = await generateAccessToken(refreshToken);
+                    accessToken = await generateAccessToken(user.spiRefreshToken);
                 }
 
                 console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
@@ -148,7 +149,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 }
 
                 // If still processing, wait 60 seconds before next check
-                if (status === 'IN_PROGRESS' || status === 'PENDING') {
+                if (status === 'PROCESSING' || status === 'PENDING') {
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds
                     attempts++;
                 } else {
@@ -216,6 +217,7 @@ async function downloadReportData(location, accessToken, profileId) {
 
         reportJson.forEach(item=>{
             sponsoredAdsData.push({
+                date: item.date,
                 asin: item.advertisedAsin,
                 spend: item.cost,
                 salesIn7Days: item.sales7d,
@@ -267,6 +269,8 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) 
         if (reportStatus.status === 'COMPLETED') {
             // Download and parse the report data
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
+
+            
 
             const createProductWiseSponsoredAdsData = await ProductWiseSponsoredAdsData.create({
                 userId: userId,

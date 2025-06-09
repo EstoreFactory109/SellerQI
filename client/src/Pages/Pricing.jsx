@@ -2,15 +2,11 @@ import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
+import Navbar from '../Components/Navigation/Navbar';
+import Footer from '../Components/Navigation/Footer';
 
 export default function PricingPage() {
   const navigate = useNavigate();
-
-  const loginNavigate = (e) => {
-    e.preventDefault();
-    navigate('/log-in');
-  }
-
 
   const [openFaq, setOpenFaq] = useState(2);
   const faqs = [
@@ -38,17 +34,7 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
-      <header className="border-b border-gray-200">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <div className="flex items-center">
-              <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png' alt='SellerQI' className='w-28 h-9' />
-            </div>
-          <nav className="hidden md:flex items-center space-x-8">
-            <Link to="/" className="text-gray-600 hover:text-gray-900 font-medium cursor-pointer" >Home</Link>
-            <button className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-800" onClick={loginNavigate}>Login</button>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
       <main className="flex-1 w-full">
         <section className="py-20 px-4">
           <div className="container mx-auto max-w-3xl text-center mb-16">
@@ -149,56 +135,7 @@ export default function PricingPage() {
         </section>
       </main>
       {/* Footer */}
-      <footer className="bg-[#23253A] text-white py-12 mt-16">
-        <div className="container mx-auto px-4">
-          <div className="mb-8">
-            <div className="text-2xl font-bold mb-4">
-              Seller<span className="text-blue-400">QI</span>
-            </div>
-          </div>
-          <div className="grid md:grid-cols-5 gap-8 mb-8">
-            <div>
-              <h4 className="font-semibold mb-4">Column One</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>Twenty One</li>
-                <li>Thirty Two</li>
-                <li>Fourty Three</li>
-                <li>Fifty Four</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Column Two</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>Sixty Five</li>
-                <li>Seventy Six</li>
-                <li>Eighty Seven</li>
-                <li>Ninety Eight</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Column Two</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>Terms of Use</li>
-                <li>Refund Policy</li>
-                <li>Privacy Policy</li>
-                <li>Ninety Eight</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Join Us</h4>
-              <div className="flex gap-4 mt-2">
-                <span className="text-gray-400 hover:text-white"><svg width="24" height="24" fill="currentColor"><rect width="24" height="24" rx="4" /></svg></span>
-                <span className="text-gray-400 hover:text-white"><svg width="24" height="24" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg></span>
-                <span className="text-gray-400 hover:text-white"><svg width="24" height="24" fill="currentColor"><rect width="24" height="24" rx="4" /></svg></span>
-                <span className="text-gray-400 hover:text-white"><svg width="24" height="24" fill="currentColor"><rect width="24" height="24" rx="4" /></svg></span>
-              </div>
-            </div>
-          </div>
-          <div className="border-t border-gray-800 pt-8 flex items-center justify-between text-sm text-gray-400">
-            <p>© Copyright 2014 - 2024. All Rights Reserved.</p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

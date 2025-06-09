@@ -12,6 +12,7 @@ const {getAdGroups} = require('../Services/AmazonAds/GetAdGroups.js');
 const {getKeywords} = require('../Services/AmazonAds/GetKeywords.js');
 const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
+const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 
 const testReport = async (req, res) => {
     const { accessToken, marketplaceIds } = req.body;
@@ -208,9 +209,18 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     })
   }
 
+  const testGetBrand = async (req, res) => {
+    const { asin, marketplaceId, accessToken } = req.body;
+    const temporaryCredentials = await getTemporaryCredentials("us-east-1");
+    const SessionToken = temporaryCredentials.SessionToken;
+    const result = await getBrand(asin, marketplaceId, SessionToken, "sellingpartnerapi-na.amazon.com", accessToken);
+    return res.status(200).json({
+        data: result
+    })
+  }
 
 module.exports = { testReport, getTotalSales, 
   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testCampaignPerformanceReport,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand
    }

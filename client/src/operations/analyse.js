@@ -231,7 +231,8 @@ const analyseData = (data) => {
         endDate:data.endDate,
         profitibilityData: profitibilityData,
         sponsoredAdsMetrics: sponsoredAdsMetrics,
-        negativeKeywordsMetrics: negativeKeywordsMetrics
+        negativeKeywordsMetrics: negativeKeywordsMetrics,
+        ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData
     };
 
     return { dashboardData };

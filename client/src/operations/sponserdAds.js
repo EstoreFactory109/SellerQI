@@ -1,19 +1,21 @@
 /**
  * Calculate total cost and total sales in 30 days from sponsored ads data
  * @param {Array} productWiseSponsoredAds - Array of sponsored ads data with the same structure as in profitability data
- * @returns {Object} Object containing totalCost and totalSalesIn30Days
+ * @returns {Object} Object containing totalCost, totalSalesIn30Days, and totalProductsPurchased
  */
 const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
     // Initialize totals
     let totalCost = 0;
     let totalSalesIn30Days = 0;
+    let totalProductsPurchased = 0;
 
     // Validate input
     if (!Array.isArray(productWiseSponsoredAds)) {
         console.warn('productWiseSponsoredAds is not an array, returning zero values');
         return {
             totalCost: 0,
-            totalSalesIn30Days: 0
+            totalSalesIn30Days: 0,
+            totalProductsPurchased: 0
         };
     }
 
@@ -28,12 +30,18 @@ const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
         if (item.salesIn30Days !== undefined && item.salesIn30Days !== null) {
             totalSalesIn30Days += parseFloat(item.salesIn30Days) || 0;
         }
+
+        // Add purchased in 30 days to total
+        if (item.purchasedIn30Days !== undefined && item.purchasedIn30Days !== null) {
+            totalProductsPurchased += parseFloat(item.purchasedIn30Days) || 0;
+        }
     });
 
     // Return the calculated totals
     return {
         totalCost: parseFloat(totalCost.toFixed(2)),
-        totalSalesIn30Days: parseFloat(totalSalesIn30Days.toFixed(2))
+        totalSalesIn30Days: parseFloat(totalSalesIn30Days.toFixed(2)),
+        totalProductsPurchased: parseFloat(totalProductsPurchased.toFixed(2))
     };
 };
 

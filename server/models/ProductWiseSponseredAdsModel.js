@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 
 // Subschema for Product-wise Sponsored Ads
 const ProductWiseSponsoredAdsSchema = new mongoose.Schema({
+  date: {
+    type: String,
+    required: true
+  },
   asin: {
     type: String,
     required: true

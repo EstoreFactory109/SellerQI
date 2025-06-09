@@ -25,6 +25,11 @@ import EmailVerificationForNewPassword from './Pages/EmailVerificationForNewPass
 import ResetPassword from './Pages/ResetPassword.jsx';
 import Home from './Pages/Home.jsx';
 import Pricing from './Pages/Pricing.jsx';
+import PrivacyPolicy from './Pages/PrivacyPolicy.jsx';
+import ContactUs from './Pages/Contact.jsx';
+import Terms from './Pages/Terms.jsx';
+import LoadingPage from './Pages/LoadingPage.jsx';
+import ResultsPage from './Pages/ResultsPage.jsx';
 
 
 const App = () => {
@@ -49,6 +54,11 @@ const App = () => {
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />
         <Route path='/pricing' element={<Pricing />} />
+        <Route path='/privacy-policy' element={<PrivacyPolicy />} />
+        <Route path='/terms-of-use' element={<Terms />} />
+        <Route path='/contact-us' element={<ContactUs />} />
+        <Route path='/loading' element={<LoadingPage />} />
+        <Route path='/results' element={<ResultsPage />} />
         <Route
           element={
             <ProtectedRouteWrapper>
@@ -56,7 +66,7 @@ const App = () => {
             </ProtectedRouteWrapper>
           }
         >
-          
+
           <Route path='/seller-central-checker' element={<MainLayout />}>
 
             <Route path='dashboard' element={<DashBoard />} />
@@ -70,7 +80,7 @@ const App = () => {
           </Route>
         </Route>
         <Route path='/error/:status' element={<Error />} />
-        <Route path='*' element={<Navigate to="/error/404"/>}/>
+        <Route path='*' element={<Navigate to="/error/404" />} />
       </Routes>
 
     </>

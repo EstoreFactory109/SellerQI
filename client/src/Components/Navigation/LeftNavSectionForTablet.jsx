@@ -4,6 +4,7 @@ import Close from '../../assets/Icons/close.png'
 import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
+import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import BeatLoader from "react-spinners/BeatLoader";
@@ -19,20 +20,19 @@ const LeftNavSection = () => {
     const logoutUser=async(e)=>{
         e.preventDefault();
         setLoader(true)
-            try {
-                const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/logout`, {withCredentials:true});
-                if(response ){
-                    console.log(response.data.message)
-                    dispatch(logout());
-                    setLoader(false)
-                    ocalStorage.setItem("isAuth",false)
-                    navigate('/')
-                }
-            } catch (error) {
+        try {
+            const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/logout`, {withCredentials:true});
+            if(response.status===200){
+                localStorage.removeItem('isAuth');
+                dispatch(logout());
+                dispatch(clearCogsData());
                 setLoader(false)
-                throw new Error(error)
+                navigate('/login');
             }
-        
+        } catch (error) {
+            setLoader(false)
+            console.log(error);
+        }
     }
 
 

@@ -123,6 +123,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
     console.log("SellerAccount: ",SellerAccount)
 
+    const createdDate = new Date();
+    const ThirtyDaysAgo = new Date(createdDate);
+    ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
+
     const [
         v2Data,
         v1Data,
@@ -150,7 +154,15 @@ const Analyse = async (userId, country, region, adminId = null) => {
         TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-        ProductWiseSponsoredAdsData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        ProductWiseSponsoredAdsData.find({ 
+            userId, 
+            country, 
+            region,
+            createdAt: { 
+                $gte: ThirtyDaysAgo,
+                $lte: createdDate
+            }
+        }).sort({ createdAt: -1 }),
         ProductWiseFBAData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
@@ -160,7 +172,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     console.log("ProductWiseFBA: ",ProductWiseFBA)
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds,ProductWiseFBA,negetiveKeywords].every(Boolean)) {
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status: 404,
@@ -168,9 +180,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }
     }
 
-    const createdDate = financeData.createdAt;
-    const ThirtyDaysAgo = new Date(createdDate);
-    ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
+    const financeCreatedDate = financeData.createdAt;
+    const financeThirtyDaysAgo = new Date(financeCreatedDate);
+    financeThirtyDaysAgo.setDate(financeThirtyDaysAgo.getDate() - 30);
 
     function formatDate(date) {
         const dte = new Date(date);
@@ -179,10 +191,109 @@ const Analyse = async (userId, country, region, adminId = null) => {
         return `${Day} ${Month}`
     }
 
+    // Process ProductWiseSponsoredAds data
+    let mostRecentSponsoredAds = null;
+    let sponsoredAdsGraphData = {};
+    
+    if (ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0) {
+        // Get the most recent data for display
+        mostRecentSponsoredAds = ProductWiseSponsoredAds[0].sponsoredAds;
+        
+        // Organize data by ASIN
+        const asinDataMap = {};
+        
+        // First, collect all unique ASINs from all entries
+        const allAsins = new Set();
+        ProductWiseSponsoredAds.forEach(entry => {
+            if (entry.sponsoredAds && Array.isArray(entry.sponsoredAds)) {
+                entry.sponsoredAds.forEach(product => {
+                    const asin = product.asin || product.ASIN;
+                    if (asin) {
+                        allAsins.add(asin);
+                        // Initialize ASIN data structure if not exists
+                        if (!asinDataMap[asin]) {
+                            asinDataMap[asin] = {
+                                asin: asin,
+                                productName: product.productName || product.name || '',
+                                data: []
+                            };
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Create a map of dates to sponsored ads data for easier lookup
+        const dateDataMap = {};
+        ProductWiseSponsoredAds.forEach(entry => {
+            const dateKey = new Date(entry.createdAt).toDateString();
+            dateDataMap[dateKey] = entry.sponsoredAds || [];
+        });
+        
+        // Generate 30 days of data
+        for (let i = 0; i < 30; i++) {
+            const dateForData = new Date(createdDate);
+            dateForData.setDate(dateForData.getDate() - i);
+            const dateKey = dateForData.toDateString();
+            
+            // For each ASIN, add data for this date
+            allAsins.forEach(asin => {
+                const dayData = dateDataMap[dateKey] || [];
+                const productData = dayData.find(p => (p.asin || p.ASIN) === asin);
+                
+                if (productData) {
+                    // Use actual data from that day
+                    asinDataMap[asin].data.push({
+                        date: dateForData.toISOString(),
+                        formattedDate: formatDate(dateForData),
+                        salesIn7Days: parseFloat(productData['7daySales'] || productData.salesIn7Days || 0),
+                        salesIn14Days: parseFloat(productData['14daySales'] || productData.salesIn14Days || 0),
+                        salesIn30Days: parseFloat(productData['30daySales'] || productData.salesIn30Days || 0),
+                        purchasedIn7Days: parseFloat(productData['7dayPurchased'] || productData.purchasedIn7Days || productData['7dayOrders'] || 0),
+                        purchasedIn14Days: parseFloat(productData['14dayPurchased'] || productData.purchasedIn14Days || productData['14dayOrders'] || 0),
+                        purchasedIn30Days: parseFloat(productData['30dayPurchased'] || productData.purchasedIn30Days || productData['30dayOrders'] || 0),
+                        spend: parseFloat(productData.spend || 0),
+                        clicks: parseInt(productData.clicks || 0),
+                        impressions: parseInt(productData.impressions || 0),
+                        acos: parseFloat(productData.acos || 0),
+                        cpc: parseFloat(productData.cpc || 0),
+                        ctr: parseFloat(productData.ctr || 0)
+                    });
+                } else {
+                    // No data for this day, add zeros
+                    asinDataMap[asin].data.push({
+                        date: dateForData.toISOString(),
+                        formattedDate: formatDate(dateForData),
+                        salesIn7Days: 0,
+                        salesIn14Days: 0,
+                        salesIn30Days: 0,
+                        purchasedIn7Days: 0,
+                        purchasedIn14Days: 0,
+                        purchasedIn30Days: 0,
+                        spend: 0,
+                        clicks: 0,
+                        impressions: 0,
+                        acos: 0,
+                        cpc: 0,
+                        ctr: 0
+                    });
+                }
+            });
+        }
+        
+        // Sort data by date (newest first) for each ASIN
+        Object.keys(asinDataMap).forEach(asin => {
+            asinDataMap[asin].data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        });
+        
+        // Convert to final format
+        sponsoredAdsGraphData = asinDataMap;
+    }
+
     const result = {
         AllSellerAccounts: allSellerAccounts,
-        startDate: formatDate(ThirtyDaysAgo),
-        endDate: formatDate(createdDate),
+        startDate: formatDate(financeThirtyDaysAgo),
+        endDate: formatDate(financeCreatedDate),
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {
@@ -192,7 +303,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         FinanceData: financeData,
         replenishmentQty: replenishmentQty(restockInventoryRecommendationsData.Products),
         TotalSales: TotalSales.totalSales,
-        ProductWiseSponsoredAds: ProductWiseSponsoredAds.sponsoredAds,
+        ProductWiseSponsoredAds: mostRecentSponsoredAds,
+        ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
         ProductWiseFBAData: ProductWiseFBA.fbaData,
         negetiveKeywords: negetiveKeywords.negetiveKeywordsData
     };

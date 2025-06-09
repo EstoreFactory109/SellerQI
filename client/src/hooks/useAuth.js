@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import axiosInstance from '../config/axios.config.js';
+import { clearCogsData } from '../redux/slices/cogsSlice.js';
 
 // Global auth state to prevent multiple simultaneous checks
 let authCheckPromise = null;
@@ -74,11 +75,12 @@ export const useAuth = () => {
       console.error('Logout error:', error);
     } finally {
       localStorage.removeItem("isAuth");
+      dispatch(clearCogsData());
       setIsAuthenticated(false);
       setUser(null);
       navigate('/');
     }
-  }, [navigate]);
+  }, [navigate, dispatch]);
 
   useEffect(() => {
     // Quick check for existing auth status in localStorage

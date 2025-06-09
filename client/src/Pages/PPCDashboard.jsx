@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import { setSponsoredAdsErrors } from '../redux/slices/DashboardSlice';
 
 // Enhanced mock data for smoother chart
 const mockChartData = [
@@ -39,13 +40,68 @@ const mockChartData = [
 const PPCDashboard = () => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [openCalender, setOpenCalender] = useState(false);
+  const dispatch = useDispatch();
   
   // Get sponsoredAdsMetrics from Redux store
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
-  
+  console.log("Sponsored Ads Metrics: ",sponsoredAdsMetrics)
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
+  
+  // Get ProductWiseSponsoredAdsGraphData from Redux store
+  const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || [];
+  console.log("ProductWiseSponsoredAdsGraphData: ", productWiseSponsoredAdsGraphData);
+  
+  // Get ProductWiseSponsoredAds for error calculation
+  const productWiseSponsoredAds = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAds) || [];
+  
+  // Calculate total sponsored ads errors
+  useEffect(() => {
+    let totalErrors = 0;
+    
+    // Count products with high ACOS or no sales but high spend
+    if (Array.isArray(productWiseSponsoredAds)) {
+      productWiseSponsoredAds.forEach(product => {
+        const spend = parseFloat(product.spend) || 0;
+        const sales = parseFloat(product.salesIn30Days) || 0;
+        const acos = sales > 0 ? (spend / sales) * 100 : 0;
+        
+        // Count as error if:
+        // 1. ACOS > 50% (unprofitable)
+        // 2. Spend > $5 with no sales
+        // 3. Spend > $10 with ACOS > 30% (marginally profitable)
+        if ((acos > 50 && sales > 0) || 
+            (spend > 5 && sales === 0) || 
+            (spend > 10 && acos > 30)) {
+          totalErrors++;
+        }
+      });
+    }
+    
+    // Also count negative keywords with issues
+    if (Array.isArray(negativeKeywordsMetrics)) {
+      negativeKeywordsMetrics.forEach(keyword => {
+        // Count keywords with extremely high ACOS or no sales but spend
+        if ((keyword.acos > 100 && keyword.sales > 0) || 
+            (keyword.spend > 5 && keyword.sales === 0)) {
+          totalErrors++;
+        }
+      });
+    }
+    
+    // Dispatch the total errors to Redux
+    dispatch(setSponsoredAdsErrors(totalErrors));
+  }, [productWiseSponsoredAds, negativeKeywordsMetrics, dispatch]);
+  
+  // Transform the data for the chart
+  const chartData = productWiseSponsoredAdsGraphData.length > 0 
+    ? productWiseSponsoredAdsGraphData.map(item => ({
+        date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        ppcSales: item.totalSalesIn30Days || 0,
+        spend: item.totalSpend || 0,
+      })).reverse()
+    : mockChartData.reverse();
   
   // Divide data into chunks of 10
   const itemsPerPage = 10;
@@ -80,7 +136,7 @@ const PPCDashboard = () => {
     },
     { label: 'ACOS', value: `${((sponsoredAdsMetrics?.totalCost / sponsoredAdsMetrics?.totalSalesIn30Days) * 100).toFixed(2)}%` },
     { label: 'TACoS', value: `${((sponsoredAdsMetrics?.totalCost)/(Number(info?.TotalWeeklySale || 0).toFixed(2))*100).toFixed(2)}%` },
-    { label: 'Units Sold', value: '1,140' },
+    { label: 'Units Sold', value: `${sponsoredAdsMetrics?.totalProductsPurchased}` },
   ];
 
   const formatYAxis = (value) => {
@@ -215,11 +271,24 @@ const PPCDashboard = () => {
           </div>
         </div>
         
+        {/* KPI Cards */}
+        <div className="grid grid-cols-5 gap-3 mb-6">
+          {kpiData.map((kpi, index) => (
+            <div 
+              key={kpi.label} 
+              className="bg-white rounded-xl p-4"
+            >
+              <p className="text-xs text-gray-500 mb-1">{kpi.label}</p>
+              <p className="text-lg font-bold text-gray-900">{kpi.value}</p>
+            </div>
+          ))}
+        </div>
+        
         {/* Line Chart */}
         <div className="bg-white rounded-xl p-6 mb-6">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart 
-              data={mockChartData} 
+              data={chartData} 
               margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
             >
               <XAxis 
@@ -265,37 +334,8 @@ const PPCDashboard = () => {
                 dot={false}
                 activeDot={{ r: 5 }}
               />
-              <Line 
-                type="monotone" 
-                dataKey="acos" 
-                stroke="#14B8A6" 
-                strokeWidth={2.5} 
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="tacos" 
-                stroke="#9CA3AF" 
-                strokeWidth={2.5} 
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
             </LineChart>
           </ResponsiveContainer>
-        </div>
-        
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-          {kpiData.map((kpi, index) => (
-            <div 
-              key={kpi.label} 
-              className={`bg-white rounded-xl p-5 ${index === 4 ? 'md:col-span-1' : ''}`}
-            >
-              <p className="text-sm text-gray-500 mb-2">{kpi.label}</p>
-              <p className="text-2xl font-bold text-gray-900">{kpi.value}</p>
-            </div>
-          ))}
         </div>
         
         {/* Tabs - Only show if there's more than one page */}
