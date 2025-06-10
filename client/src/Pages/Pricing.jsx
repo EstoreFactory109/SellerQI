@@ -122,13 +122,9 @@ export default function PricingPage() {
         {/* Contact CTA */}
         <section className="py-20 bg-white text-center">
           <div className="mb-8">
-            <svg width="60" height="60" viewBox="0 0 100 100" className="mx-auto mb-4">
-              <circle cx="50" cy="50" r="30" fill="none" stroke="#FCD34D" strokeWidth="6" strokeDasharray="47 141" />
-              <circle cx="50" cy="50" r="30" fill="none" stroke="#EF4444" strokeWidth="6" strokeDasharray="47 141" strokeDashoffset="-47" />
-              <circle cx="50" cy="50" r="30" fill="none" stroke="#10B981" strokeWidth="6" strokeDasharray="47 141" strokeDashoffset="-94" />
-              <circle cx="50" cy="50" r="30" fill="none" stroke="#FFFFFF" strokeWidth="6" strokeDasharray="47 141" strokeDashoffset="-141" />
-              <text x="50" y="58" textAnchor="middle" fill="#23253A" fontSize="24" fontWeight="bold">Q</text>
-            </svg>
+          <div className="w-24 h-24 mx-auto bg-black rounded-full flex items-center justify-center mb-5">
+              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749234188/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
+            </div>
             <h2 className="text-2xl font-bold mb-2">Still have questions? We're here for you!</h2>
             <button className="mt-4 bg-[#23253A] text-white px-6 py-2 rounded font-semibold shadow">Contact Us <span className="ml-2">&gt;</span></button>
           </div>
