@@ -50,7 +50,7 @@ const App = () => {
         </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
-        <Route path='/account-access' element={<FetchingTokens />} />
+        <Route path='auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />
         <Route path='/pricing' element={<Pricing />} />

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
-import { setSponsoredAdsErrors } from '../redux/slices/DashboardSlice';
+import { AnimatePresence, motion } from 'framer-motion';
 
 // Enhanced mock data for smoother chart
 const mockChartData = [
@@ -39,60 +39,30 @@ const mockChartData = [
 
 const PPCDashboard = () => {
   const [selectedTab, setSelectedTab] = useState(0);
+  const [prevTab, setPrevTab] = useState(0);
+  const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  const [showAllHighAcos, setShowAllHighAcos] = useState(false);
+  const [showAllWastedSpend, setShowAllWastedSpend] = useState(false);
+  const [showAllNegative, setShowAllNegative] = useState(false);
+  const [showAllTopPerforming, setShowAllTopPerforming] = useState(false);
   const dispatch = useDispatch();
   
   // Get sponsoredAdsMetrics from Redux store
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
-  console.log("Sponsored Ads Metrics: ",sponsoredAdsMetrics)
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
   
   // Get ProductWiseSponsoredAdsGraphData from Redux store
   const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || [];
-  console.log("ProductWiseSponsoredAdsGraphData: ", productWiseSponsoredAdsGraphData);
   
   // Get ProductWiseSponsoredAds for error calculation
   const productWiseSponsoredAds = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAds) || [];
   
-  // Calculate total sponsored ads errors
-  useEffect(() => {
-    let totalErrors = 0;
-    
-    // Count products with high ACOS or no sales but high spend
-    if (Array.isArray(productWiseSponsoredAds)) {
-      productWiseSponsoredAds.forEach(product => {
-        const spend = parseFloat(product.spend) || 0;
-        const sales = parseFloat(product.salesIn30Days) || 0;
-        const acos = sales > 0 ? (spend / sales) * 100 : 0;
-        
-        // Count as error if:
-        // 1. ACOS > 50% (unprofitable)
-        // 2. Spend > $5 with no sales
-        // 3. Spend > $10 with ACOS > 30% (marginally profitable)
-        if ((acos > 50 && sales > 0) || 
-            (spend > 5 && sales === 0) || 
-            (spend > 10 && acos > 30)) {
-          totalErrors++;
-        }
-      });
-    }
-    
-    // Also count negative keywords with issues
-    if (Array.isArray(negativeKeywordsMetrics)) {
-      negativeKeywordsMetrics.forEach(keyword => {
-        // Count keywords with extremely high ACOS or no sales but spend
-        if ((keyword.acos > 100 && keyword.sales > 0) || 
-            (keyword.spend > 5 && keyword.sales === 0)) {
-          totalErrors++;
-        }
-      });
-    }
-    
-    // Dispatch the total errors to Redux
-    dispatch(setSponsoredAdsErrors(totalErrors));
-  }, [productWiseSponsoredAds, negativeKeywordsMetrics, dispatch]);
+  // Get keywords data from Redux store
+  const keywords = useSelector((state) => state.Dashboard.DashBoardInfo?.keywords) || [];
   
   // Transform the data for the chart
   const chartData = productWiseSponsoredAdsGraphData.length > 0 
@@ -103,22 +73,230 @@ const PPCDashboard = () => {
       })).reverse()
     : mockChartData.reverse();
   
-  // Divide data into chunks of 10
-  const itemsPerPage = 10;
-  const totalPages = Math.ceil(negativeKeywordsMetrics.length / itemsPerPage);
+  // Tab configuration
+  const tabs = [
+    { id: 0, label: 'High ACOS Campaigns' },
+    { id: 1, label: 'Wasted Spend Keywords' },
+    { id: 2, label: 'Negative Keywords' },
+    { id: 3, label: 'Top Performing Keywords' }
+  ];
   
-  // Get current page data
-  const getCurrentPageData = () => {
-    const startIndex = selectedTab * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return negativeKeywordsMetrics.slice(startIndex, endIndex);
+  // Get animation direction based on tab order
+  const getDirection = () => {
+    return selectedTab > prevTab ? 1 : -1;
   };
   
-  // Generate tab options based on data
-  const tabOptions = Array.from({ length: totalPages }, (_, index) => ({
-    key: index,
-    label: `Table ${index + 1}`
-  }));
+  const direction = getDirection();
+  
+  // Animation variants for page transitions
+  const pageVariants = {
+    enter: (direction) => ({
+      x: direction > 0 ? "100%" : "-100%",
+      opacity: 0,
+      position: "absolute",
+      width: "100%",
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      position: "relative",
+      width: "100%",
+      transition: { duration: 0.4, ease: "easeInOut" },
+    },
+    exit: (direction) => ({
+      x: direction > 0 ? "-100%" : "100%",
+      opacity: 0,
+      position: "absolute",
+      width: "100%",
+      transition: { duration: 0.4, ease: "easeInOut" },
+    }),
+  };
+  
+  // Handle tab click with animation state
+  const handleTabClick = (tabId) => {
+    if (tabId === selectedTab) return;
+    setPrevTab(selectedTab);
+    setSelectedTab(tabId);
+    setHasInteracted(true);
+  };
+  
+  // Process data for different tabs
+  // High ACOS Campaigns - First aggregate all products by campaign, then filter by ACOS > 40%
+  // Step 1: Aggregate all products by campaign
+  const campaignAggregates = productWiseSponsoredAds.reduce((acc, product) => {
+    const sales = parseFloat(product.salesIn30Days) || 0;
+    const spend = parseFloat(product.spend) || 0;
+    const campaignName = product.campaignName;
+    
+    if (!campaignName) return acc;
+    
+    if (!acc[campaignName]) {
+      acc[campaignName] = {
+        campaignName: campaignName,
+        campaignId: product.campaignId,
+        totalSpend: 0,
+        totalSales: 0,
+        products: new Set()
+      };
+    }
+    
+    acc[campaignName].totalSpend += spend;
+    acc[campaignName].totalSales += sales;
+    acc[campaignName].products.add(product.asin);
+    
+    return acc;
+  }, {});
+  
+  // Step 2: Convert to array, calculate ACOS, and filter
+  const highAcosCampaigns = Object.values(campaignAggregates)
+    .map(campaign => {
+      // Count keywords for this campaign
+      const campaignKeywords = keywords.filter(k => k.campaignId === campaign.campaignId);
+      
+      return {
+        campaignName: campaign.campaignName,
+        campaignId: campaign.campaignId,
+        totalSpend: campaign.totalSpend,
+        totalSales: campaign.totalSales,
+        acos: campaign.totalSales > 0 ? (campaign.totalSpend / campaign.totalSales) * 100 : 0,
+        productCount: campaign.products.size,
+        keywordCount: campaignKeywords.length
+      };
+    })
+    .filter(campaign => campaign.acos > 40 && campaign.totalSales > 0)
+    .sort((a, b) => b.acos - a.acos);
+  
+  // Wasted Spend Keywords - cost > 5 && salesIn30Days < 1
+  // First, create a map of campaignId to campaign data for easier lookup
+  const campaignMap = new Map();
+  productWiseSponsoredAds.forEach(product => {
+    if (!campaignMap.has(product.campaignId)) {
+      campaignMap.set(product.campaignId, {
+        campaignName: product.campaignName,
+        products: []
+      });
+    }
+    campaignMap.get(product.campaignId).products.push(product);
+  });
+  
+  // Process keywords to find wasted spend
+  const wastedSpendKeywords = keywords
+    .map(keyword => {
+      // Get campaign info
+      const campaignInfo = campaignMap.get(keyword.campaignId);
+      if (!campaignInfo) return null;
+      
+      // Calculate total spend and sales for this keyword across all products in the campaign
+      let totalSpend = 0;
+      let totalSales = 0;
+      
+      // Find matching data from negativeKeywordsMetrics
+      const keywordMetrics = negativeKeywordsMetrics.find(k => 
+        k.keyword === keyword.keywordText && 
+        k.campaignName === campaignInfo.campaignName
+      );
+      
+      if (keywordMetrics) {
+        totalSpend = keywordMetrics.spend;
+        totalSales = keywordMetrics.sales;
+      } else {
+        // If not in negativeKeywordsMetrics, aggregate from products
+        campaignInfo.products.forEach(product => {
+          totalSpend += parseFloat(product.spend) || 0;
+          totalSales += parseFloat(product.salesIn30Days) || 0;
+        });
+      }
+      
+      // Apply filter: cost > 5 && salesIn30Days < 1
+      if (totalSpend > 5 && totalSales < 1) {
+        const acos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
+        
+        return {
+          keyword: keyword.keywordText,
+          campaignName: campaignInfo.campaignName,
+          campaignId: keyword.campaignId,
+          bid: keyword.bid || 0,
+          sales: totalSales,
+          spend: totalSpend,
+          acos: acos,
+          matchType: keyword.matchType,
+          state: keyword.state
+        };
+      }
+      
+      return null;
+    })
+    .filter(keyword => keyword !== null)
+    .sort((a, b) => b.spend - a.spend);
+  
+  // Top Performing Keywords - ACOS < 20%, sales > 100, impressions > 10,000
+  const topPerformingKeywords = keywords
+    .map(keyword => {
+      // Get campaign info from the campaign map we already created
+      const campaignInfo = campaignMap.get(keyword.campaignId);
+      if (!campaignInfo) return null;
+      
+      // Calculate aggregated metrics for this keyword across all products in the campaign
+      let totalSpend = 0;
+      let totalSales = 0;
+      let totalImpressions = 0;
+      
+      // First check if we have keyword-specific metrics in negativeKeywordsMetrics
+      const keywordMetrics = negativeKeywordsMetrics.find(k => 
+        k.keyword === keyword.keywordText && 
+        k.campaignName === campaignInfo.campaignName
+      );
+      
+      if (keywordMetrics) {
+        // Use keyword-specific metrics if available
+        totalSpend = keywordMetrics.spend;
+        totalSales = keywordMetrics.sales;
+        totalImpressions = keywordMetrics.impressions || 0;
+      }
+      
+      // If we don't have keyword metrics or impressions, aggregate from all products in the campaign
+      if (!keywordMetrics || totalImpressions === 0) {
+        // Reset totals if we're going to aggregate from products
+        if (!keywordMetrics) {
+          totalSpend = 0;
+          totalSales = 0;
+        }
+        
+        // Aggregate impressions from ALL products in the campaign (30-day data)
+        campaignInfo.products.forEach(product => {
+          if (!keywordMetrics) {
+            // If no keyword metrics, aggregate all metrics
+            totalSpend += parseFloat(product.spend) || 0;
+            totalSales += parseFloat(product.salesIn30Days) || 0;
+          }
+          // Always aggregate impressions from all products
+          totalImpressions += parseFloat(product.impressions) || 0;
+        });
+      }
+      
+      // Calculate ACOS
+      const acos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
+      
+      // Apply filters: ACOS < 20%, sales > 100, impressions > 3,000
+      if (acos < 20 && totalSales > 100 && totalImpressions > 3000) {
+        return {
+          keyword: keyword.keywordText,
+          campaignName: campaignInfo.campaignName,
+          campaignId: keyword.campaignId,
+          bid: keyword.bid || 0,
+          sales: totalSales,
+          spend: totalSpend,
+          acos: acos,
+          impressions: totalImpressions,
+          matchType: keyword.matchType,
+          state: keyword.state
+        };
+      }
+      
+      return null;
+    })
+    .filter(keyword => keyword !== null)
+    .sort((a, b) => b.sales - a.sales);
   
   // Use Redux data for KPI values, fallback to mock data if not available
   const kpiData = [
@@ -151,7 +329,160 @@ const PPCDashboard = () => {
     const suggestions = [];
     const analyzedKeywords = new Set();
     
-    // Analyze all keywords in the dataset
+    // 1. Suggestions from High ACOS Campaigns
+    highAcosCampaigns.forEach((campaign, index) => {
+      if (index < 3) { // Top 3 worst performing campaigns
+        suggestions.push({
+          type: 'campaign-high-acos',
+          campaign: campaign.campaignName,
+          message: `Campaign "${campaign.campaignName}" has ${campaign.acos.toFixed(0)}% ACOS. Consider reducing bids, refining targeting, or pausing underperforming keywords.`,
+          priority: campaign.acos > 80 ? 'high' : 'medium',
+          metrics: {
+            spend: campaign.totalSpend,
+            sales: campaign.totalSales,
+            acos: campaign.acos
+          }
+        });
+      }
+    });
+    
+    // 2. Suggestions from Wasted Spend Keywords
+    wastedSpendKeywords.slice(0, 5).forEach((keyword) => {
+      suggestions.push({
+        type: 'keyword-wasted-spend',
+        keyword: keyword.keyword,
+        campaign: keyword.campaignName,
+        message: `"${keyword.keyword}" - Add as negative keyword. $${keyword.spend.toFixed(2)} spent with no sales.`,
+        priority: 'high',
+        metrics: {
+          spend: keyword.spend,
+          bid: keyword.bid
+        }
+      });
+    });
+    
+    // 3. Suggestions from Top Performing Keywords (optimization opportunities)
+    topPerformingKeywords.slice(0, 3).forEach((keyword) => {
+      suggestions.push({
+        type: 'keyword-optimize',
+        keyword: keyword.keyword,
+        campaign: keyword.campaignName,
+        message: `"${keyword.keyword}" performing well (${keyword.acos.toFixed(0)}% ACOS). Consider increasing bid from $${keyword.bid.toFixed(2)} to capture more traffic.`,
+        priority: 'low',
+        metrics: {
+          sales: keyword.sales,
+          acos: keyword.acos,
+          currentBid: keyword.bid
+        }
+      });
+    });
+    
+    // 4. Suggestions from Negative Keywords (high ACOS keywords)
+    negativeKeywordsMetrics
+      .filter(keyword => keyword.acos > 50 && keyword.spend > 10)
+      .slice(0, 5)
+      .forEach((keyword) => {
+        // Skip if already analyzed
+        const keywordIdentifier = `${keyword.keyword}-${keyword.campaignName}`;
+        if (analyzedKeywords.has(keywordIdentifier)) return;
+        analyzedKeywords.add(keywordIdentifier);
+        
+        if (keyword.acos > 100) {
+          suggestions.push({
+            type: 'keyword-extreme-acos',
+            keyword: keyword.keyword,
+            campaign: keyword.campaignName,
+            message: `"${keyword.keyword}" has ${keyword.acos.toFixed(0)}% ACOS. Pause immediately or reduce bid significantly.`,
+            priority: 'high',
+            metrics: {
+              spend: keyword.spend,
+              sales: keyword.sales,
+              acos: keyword.acos
+            }
+          });
+        } else {
+          suggestions.push({
+            type: 'keyword-high-acos',
+            keyword: keyword.keyword,
+            campaign: keyword.campaignName,
+            message: `"${keyword.keyword}" has ${keyword.acos.toFixed(0)}% ACOS. Consider bid optimization or adding as negative keyword.`,
+            priority: 'medium',
+            metrics: {
+              spend: keyword.spend,
+              sales: keyword.sales,
+              acos: keyword.acos
+            }
+          });
+        }
+      });
+    
+    // Continue with existing product-level analysis but skip if already covered
+    if (Array.isArray(productWiseSponsoredAds)) {
+      // Aggregate product data by ASIN
+      const aggregatedProductData = new Map();
+      
+      productWiseSponsoredAds.forEach((product) => {
+        const asin = product.asin;
+        if (!aggregatedProductData.has(asin)) {
+          aggregatedProductData.set(asin, {
+            asin: asin,
+            totalSpend: 0,
+            totalSales: 0,
+            campaigns: []
+          });
+        }
+        
+        const aggregated = aggregatedProductData.get(asin);
+        aggregated.totalSpend += parseFloat(product.spend) || 0;
+        aggregated.totalSales += parseFloat(product.salesIn30Days) || 0;
+        if (product.campaignName) {
+          aggregated.campaigns.push(product.campaignName);
+        }
+      });
+      
+      // Analyze aggregated product data for errors
+      aggregatedProductData.forEach((aggregatedProduct) => {
+        const spend = aggregatedProduct.totalSpend;
+        const sales = aggregatedProduct.totalSales;
+        const acos = sales > 0 ? (spend / sales) * 100 : 0;
+        const campaignCount = new Set(aggregatedProduct.campaigns).size;
+        
+        // Check if this product has an error based on the same criteria used in analyse.js
+        let hasError = false;
+        let errorType = '';
+        
+        if (acos > 50 && sales > 0) {
+          hasError = true;
+          errorType = 'high_acos';
+          suggestions.push({
+            type: 'product-high-acos',
+            asin: aggregatedProduct.asin,
+            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% ($${spend.toFixed(2)} spend, $${sales.toFixed(2)} sales). Consider reducing bids or pausing underperforming campaigns.`,
+            priority: 'high'
+          });
+        } else if (spend > 5 && sales === 0) {
+          hasError = true;
+          errorType = 'no_sales';
+          suggestions.push({
+            type: 'product-no-sales',
+            asin: aggregatedProduct.asin,
+            message: `ASIN ${aggregatedProduct.asin}: $${spend.toFixed(2)} spent with no sales. Review targeting and consider pausing campaigns.`,
+            priority: 'high'
+          });
+        } else if (spend > 10 && acos > 30) {
+          hasError = true;
+          errorType = 'marginal_profit';
+          suggestions.push({
+            type: 'product-marginal',
+            asin: aggregatedProduct.asin,
+            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% with $${spend.toFixed(2)} spend. Optimize bids to improve profitability.`,
+            priority: 'medium'
+          });
+        }
+      });
+    }
+    
+    // Then analyze negative keywords
     negativeKeywordsMetrics.forEach((keyword) => {
       const keywordIdentifier = `${keyword.keyword}-${keyword.campaignName}`;
       
@@ -159,8 +490,12 @@ const PPCDashboard = () => {
       if (analyzedKeywords.has(keywordIdentifier)) return;
       analyzedKeywords.add(keywordIdentifier);
       
-      // Rule #1: High Spend, No Sales (modified without clicks data)
+      // Check if this keyword has an error based on the same criteria used in analyse.js
+      let hasError = false;
+      
+      // Rule #1: High Spend, No Sales
       if (keyword.spend >= 5 && keyword.sales === 0) {
+        hasError = true;
         suggestions.push({
           type: 'high-spend-no-sales',
           keyword: keyword.keyword,
@@ -172,6 +507,7 @@ const PPCDashboard = () => {
       
       // Rule #2: Extremely High ACoS
       else if (keyword.acos >= 100 && keyword.spend >= 5) {
+        hasError = true;
         suggestions.push({
           type: 'high-acos',
           keyword: keyword.keyword,
@@ -240,24 +576,18 @@ const PPCDashboard = () => {
       }
     });
     
-    // Sort suggestions by priority and then by spend impact
+    // Sort suggestions by priority
     return suggestions.sort((a, b) => {
       const priorityOrder = { high: 0, medium: 1, low: 2 };
-      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      }
-      // Within same priority, sort by spend (higher spend first)
-      const aKeyword = negativeKeywordsMetrics.find(k => k.keyword === a.keyword && k.campaignName === a.campaign);
-      const bKeyword = negativeKeywordsMetrics.find(k => k.keyword === b.keyword && k.campaignName === b.campaign);
-      return (bKeyword?.spend || 0) - (aKeyword?.spend || 0);
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
     });
   };
   
   // Generate suggestions
   const suggestions = analyzeKeywordsAndGenerateSuggestions();
   
-  // Get top suggestions to display
-  const topSuggestions = suggestions.slice(0, 5);
+  // Get suggestions to display based on showAllSuggestions state
+  const suggestionsToDisplay = showAllSuggestions ? suggestions : suggestions.slice(0, 5);
 
   return (
     <div className="h-screen overflow-y-auto bg-[#eeeeee] p-6">
@@ -338,31 +668,152 @@ const PPCDashboard = () => {
           </ResponsiveContainer>
         </div>
         
-        {/* Tabs - Only show if there's more than one page */}
-        {totalPages > 1 && (
-          <div className="flex gap-6 mb-6">
-            {tabOptions.map((tab) => (
-              <button
-                key={tab.key}
-                className={`px-1 py-2 text-sm font-medium transition-colors relative ${
-                  selectedTab === tab.key 
-                    ? 'text-gray-900' 
+        {/* Tabs */}
+        <div className="flex gap-6 mb-6 relative">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className="relative pb-3 cursor-pointer"
+              onClick={() => handleTabClick(tab.id)}
+            >
+              <p
+                className={`text-sm font-medium transition-colors ${
+                  selectedTab === tab.id 
+                    ? 'text-gray-900 font-bold' 
                     : 'text-gray-400 hover:text-gray-600'
                 }`}
-                onClick={() => setSelectedTab(tab.key)}
               >
                 {tab.label}
-                {selectedTab === tab.key && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900"></div>
-                )}
-              </button>
+              </p>
+              
+              {/* Animated underline */}
+              {selectedTab === tab.id && (
+                <motion.div
+                  layoutId="ppcUnderline"
+                  className="absolute bottom-0 left-0 right-0 h-[3px] bg-gray-900 rounded-full"
+                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+              )}
+            </div>
             ))}
           </div>
-        )}
         
-        {/* Table */}
-        <div className="bg-white rounded-xl p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Non Profitable Keywords</h2>
+        {/* Tables based on selected tab */}
+        <div className="bg-white rounded-xl p-6 mb-6 relative overflow-hidden" style={{ minHeight: '400px' }}>
+          <AnimatePresence custom={direction} mode="sync">
+            <motion.div
+              key={selectedTab}
+              custom={direction}
+              variants={pageVariants}
+              initial={hasInteracted ? "enter" : false}
+              animate="center"
+              exit="exit"
+              className="w-full"
+            >
+              {/* High ACOS Campaigns Tab */}
+              {selectedTab === 0 && (
+                <>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">High ACOS Campaigns</h2>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {highAcosCampaigns.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="text-center py-12 text-gray-400">
+                        No campaigns with ACOS &gt; 40% found
+                      </td>
+                    </tr>
+                  ) : (
+                    highAcosCampaigns.slice(0, showAllHighAcos ? highAcosCampaigns.length : 5).map((campaign, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
+                        <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center font-medium text-red-600">
+                          {campaign.acos.toFixed(2)}%
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+              {highAcosCampaigns.length > 5 && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowAllHighAcos(!showAllHighAcos)}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    {showAllHighAcos ? 'Show Less' : `View More (${highAcosCampaigns.length - 5} more)`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          
+          {/* Wasted Spend Keywords Tab */}
+          {selectedTab === 1 && (
+            <>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Wasted Spend Keywords</h2>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Keywords</th>
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wastedSpendKeywords.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-12 text-gray-400">
+                        No wasted spend keywords found
+                      </td>
+                    </tr>
+                  ) : (
+                    wastedSpendKeywords.slice(0, showAllWastedSpend ? wastedSpendKeywords.length : 6).map((keyword, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                        <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                        <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center font-medium text-red-600">
+                          ${keyword.spend.toFixed(2)}
+                        </td>
+                        <td className="py-4 text-sm text-center font-medium text-gray-600">
+                          {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+              {wastedSpendKeywords.length > 6 && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowAllWastedSpend(!showAllWastedSpend)}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    {showAllWastedSpend ? 'Show Less' : `View More (${wastedSpendKeywords.length - 6} more)`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          
+          {/* Negative Keywords Tab */}
+          {selectedTab === 2 && (
+            <>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords</h2>
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
@@ -374,15 +825,25 @@ const PPCDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {getCurrentPageData().length === 0 ? (
+                  {negativeKeywordsMetrics.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="text-center py-12 text-gray-400">
                     No data available
                   </td>
                 </tr>
               ) : (
-                getCurrentPageData().map((row, idx) => (
-                  <tr key={`${selectedTab}-${idx}`} className="border-b border-gray-200">
+                    negativeKeywordsMetrics.slice(0, showAllNegative ? negativeKeywordsMetrics.length : 6).map((row, idx) => {
+                      // Find keyword details
+                      const keywordDetail = keywords.find(k => 
+                        k.keywordText === row.keyword && 
+                        productWiseSponsoredAds.some(p => 
+                          p.campaignName === row.campaignName && 
+                          p.campaignId === k.campaignId
+                        )
+                      );
+                      
+                      return (
+                        <tr key={idx} className="border-b border-gray-200">
                     <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
                     <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
                     <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
@@ -394,42 +855,118 @@ const PPCDashboard = () => {
                       {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
                     </td>
                   </tr>
-                ))
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+              {negativeKeywordsMetrics.length > 6 && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowAllNegative(!showAllNegative)}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    {showAllNegative ? 'Show Less' : `View More (${negativeKeywordsMetrics.length - 6} more)`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          
+          {/* Top Performing Keywords Tab */}
+          {selectedTab === 3 && (
+            <>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topPerformingKeywords.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-12 text-gray-400">
+                        No top performing keywords found (ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 3K)
+                      </td>
+                    </tr>
+                  ) : (
+                    topPerformingKeywords.slice(0, showAllTopPerforming ? topPerformingKeywords.length : 5).map((keyword, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                        <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                        <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center font-medium text-green-600">
+                          ${keyword.sales.toFixed(2)}
+                        </td>
+                        <td className="py-4 text-sm text-center font-medium text-green-600">
+                          {keyword.acos.toFixed(2)}%
+                        </td>
+                      </tr>
+                    ))
               )}
             </tbody>
           </table>
-          {/* Show data range info */}
-          {negativeKeywordsMetrics.length > 0 && (
-            <div className="mt-4 text-sm text-gray-500 text-right">
-              Showing {selectedTab * itemsPerPage + 1} - {Math.min((selectedTab + 1) * itemsPerPage, negativeKeywordsMetrics.length)} of {negativeKeywordsMetrics.length} keywords
+              {topPerformingKeywords.length > 5 && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowAllTopPerforming(!showAllTopPerforming)}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    {showAllTopPerforming ? 'Show Less' : `View More (${topPerformingKeywords.length - 5} more)`}
+                  </button>
             </div>
+              )}
+            </>
           )}
+            </motion.div>
+          </AnimatePresence>
         </div>
         
         {/* Suggestions */}
         <div className="bg-white rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">Suggestions</h3>
-          {topSuggestions.length > 0 ? (
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Suggestions</h3>
+          {suggestionsToDisplay.length > 0 ? (
             <div>
               {/* Summary of potential impact */}
               {(() => {
                 const highPrioritySuggestions = suggestions.filter(s => s.priority === 'high');
-                const potentialSavings = highPrioritySuggestions.reduce((total, suggestion) => {
-                  const keyword = negativeKeywordsMetrics.find(k => 
-                    k.keyword === suggestion.keyword && k.campaignName === suggestion.campaign
-                  );
-                  return total + (keyword?.spend || 0);
-                }, 0);
+                let potentialSavings = 0;
+                let campaignsToOptimize = new Set();
+                let keywordsToNegative = 0;
                 
-                if (potentialSavings > 0) {
+                highPrioritySuggestions.forEach(suggestion => {
+                  if (suggestion.type === 'keyword-wasted-spend') {
+                    potentialSavings += suggestion.metrics?.spend || 0;
+                    keywordsToNegative++;
+                  } else if (suggestion.type === 'campaign-high-acos') {
+                    campaignsToOptimize.add(suggestion.campaign);
+                    potentialSavings += (suggestion.metrics?.spend || 0) * 0.2; // Assume 20% savings from optimization
+                  } else if (suggestion.type === 'keyword-extreme-acos' || suggestion.type === 'high-spend-no-sales') {
+                    potentialSavings += suggestion.metrics?.spend || 0;
+                    keywordsToNegative++;
+                  }
+                });
+                
+                if (potentialSavings > 0 || campaignsToOptimize.size > 0) {
                   return (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
                       <p className="text-sm font-medium text-red-900">
                         Potential Monthly Savings: ${potentialSavings.toFixed(2)}
                       </p>
-                      <p className="text-xs text-red-700 mt-1">
-                        By implementing {highPrioritySuggestions.length} high-priority suggestions
-                      </p>
+                      <div className="text-xs text-red-700 mt-1 space-y-1">
+                        {campaignsToOptimize.size > 0 && (
+                          <p>• {campaignsToOptimize.size} campaigns need optimization</p>
+                        )}
+                        {keywordsToNegative > 0 && (
+                          <p>• {keywordsToNegative} keywords should be added as negative</p>
+                        )}
+                        <p>By implementing {highPrioritySuggestions.length} high-priority suggestions</p>
+                      </div>
                     </div>
                   );
                 }
@@ -438,7 +975,7 @@ const PPCDashboard = () => {
               
               {/* Individual suggestions */}
               <div className="space-y-3">
-                {topSuggestions.map((suggestion, index) => (
+                {suggestionsToDisplay.map((suggestion, index) => (
                   <div key={index} className="flex items-start gap-2 p-3 rounded-lg hover:bg-gray-50 transition-colors">
                     <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
                       suggestion.priority === 'high' ? 'bg-red-500' : 
@@ -446,40 +983,24 @@ const PPCDashboard = () => {
                     }`} />
                     <div className="flex-1">
                       <p className="text-sm text-gray-600">{suggestion.message}</p>
-                      <div className="mt-2 flex gap-2">
-                        {suggestion.type === 'high-spend-no-sales' && (
-                          <button className="text-xs px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors">
-                            Add as Negative
-                          </button>
-                        )}
-                        {(suggestion.type === 'high-acos' || suggestion.type === 'moderate-acos') && (
-                          <>
-                            <button className="text-xs px-3 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 transition-colors">
-                              Reduce Bid
-                            </button>
-                            <button className="text-xs px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors">
-                              Pause Keyword
-                            </button>
-                          </>
-                        )}
-                        {suggestion.type === 'duplicate-keyword' && (
-                          <button className="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">
-                            Consolidate Keywords
-                          </button>
-                        )}
-                        {suggestion.type === 'low-spend-poor-performance' && (
-                          <button className="text-xs px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors">
-                            Review Performance
-                          </button>
-                        )}
-                      </div>
                     </div>
                   </div>
                 ))}
-                {suggestions.length > 5 && (
-                  <p className="text-sm text-gray-400 mt-3">
+                {!showAllSuggestions && suggestions.length > 5 && (
+                  <button 
+                    onClick={() => setShowAllSuggestions(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 mt-3 font-medium transition-colors"
+                  >
                     + {suggestions.length - 5} more suggestions available
-                  </p>
+                  </button>
+                )}
+                {showAllSuggestions && suggestions.length > 5 && (
+                  <button 
+                    onClick={() => setShowAllSuggestions(false)}
+                    className="text-sm text-gray-600 hover:text-gray-700 mt-3 font-medium transition-colors"
+                  >
+                    Show less
+                  </button>
                 )}
               </div>
             </div>

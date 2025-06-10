@@ -29,6 +29,7 @@ const calculateTotalReimbursement = require('../Services/Calculations/Reimburstm
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
 const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
 const NegetiveKeywords = require('../models/NegetiveKeywords.js');
+const KeywordModel = require('../models/keywordModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -74,11 +75,13 @@ const Analyse = async (userId, country, region, adminId = null) => {
         getAllSellerAccounts.forEach(item => {
             const userId = item.User;
             const sellerId = item.selling_partner_id;
+            const brand = item.brand || "Brand Name";
 
             item.sellerAccount.forEach(Details => {
                 allSellerAccounts.push({
                     userId,
                     sellerId,
+                    brand,
                     country: Details.country,
                     region: Details.region,
                     NoOfProducts: Details.products.length
@@ -103,6 +106,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
         sellerCentral.sellerAccount.forEach(item => {
             allSellerAccounts.push({
+                brand: sellerCentral.brand,
                 country: item.country,
                 region: item.region,
                 NoOfProducts: item.products.length
@@ -141,7 +145,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         saleByProduct,
         ProductWiseSponsoredAds,
         ProductWiseFBA,
-        negetiveKeywords
+        negetiveKeywords,
+        keywords,
+        
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -165,14 +171,15 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }).sort({ createdAt: -1 }),
         ProductWiseFBAData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
 
     //console.log("ProductWiseSponsoredAds: ",ProductWiseSponsoredAds)
-    console.log("ProductWiseFBA: ",ProductWiseFBA)
+   
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords].every(Boolean)) {
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords,keywords].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status: 404,
@@ -290,7 +297,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
         sponsoredAdsGraphData = asinDataMap;
     }
 
+    
+
     const result = {
+        Brand:sellerCentral.brand,
         AllSellerAccounts: allSellerAccounts,
         startDate: formatDate(financeThirtyDaysAgo),
         endDate: formatDate(financeCreatedDate),
@@ -306,7 +316,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         ProductWiseSponsoredAds: mostRecentSponsoredAds,
         ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
         ProductWiseFBAData: ProductWiseFBA.fbaData,
-        negetiveKeywords: negetiveKeywords.negetiveKeywordsData
+        negetiveKeywords: negetiveKeywords.negetiveKeywordsData,
+        keywords: keywords.keywordData
     };
 
 

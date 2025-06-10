@@ -37,7 +37,14 @@ const LeftNavSection = () => {
     return (
         <aside className="h-screen w-2/5 lg:w-1/5 shadow-md p-2 border-r-[1px] border-gray-200 font-roboto bg-white hidden lg:block">
             <div className="w-full h-7 flex items-center pl-2 mt-4">
-                <p className="text-2xl font-semibold">Seller QI</p>
+                <img 
+                    src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png"
+                    alt="Seller QI Logo"
+                    loading="lazy"
+                    className="h-7 w-auto object-contain"
+                    width="120"
+                    height="28"
+                />
             </div>
             <div className="w-full mt-5 pl-2 pb-5">
                 <p className="font-light mb-3 text-sm">MENU</p>
@@ -54,6 +61,21 @@ const LeftNavSection = () => {
                             <>
                                <LayoutDashboard className="w-4 h-4"/>
                                 <p className="font-medium text-xs">Dashboard</p>
+                            </>
+                        )}
+                    </NavLink>
+                    <NavLink
+                        to="/seller-central-checker/issues"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <BadgeAlert className="w-4 h-4"/>
+                                <p className="font-medium text-xs">Issues</p>
                             </>
                         )}
                     </NavLink>
@@ -85,22 +107,6 @@ const LeftNavSection = () => {
                             <>
                                <ChartLine className="w-4 h-4"/>
                                 <p className="font-medium text-xs">Profitibility</p>
-                            </>
-                        )}
-                    </NavLink>
-
-                    <NavLink
-                        to="/seller-central-checker/issues"
-                        className={({ isActive }) =>
-                            isActive
-                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
-                                : 'flex items-center gap-2 p-2 rounded-md'
-                        }
-                    >
-                        {({ isActive }) => (
-                            <>
-                               <BadgeAlert className="w-4 h-4"/>
-                                <p className="font-medium text-xs">Issues</p>
                             </>
                         )}
                     </NavLink>

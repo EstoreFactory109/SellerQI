@@ -53,10 +53,13 @@ export default function AccountCards() {
             <h3 className="text-lg font-semibold text-indigo-900">{account.platform}</h3>
             <p className="text-sm text-gray-800 mt-1">{account.username}</p>
             <p className="text-sm text-gray-500 mt-2">
-              <span className="font-medium">Region :</span> {account.region}
+              <span className="font-medium">Brand :</span> {account?.brand}
+            </p>
+            <p className="text-sm text-gray-500 ">
+              <span className="font-medium">Region :</span> {account?.region}
             </p>
             <p className="text-sm text-gray-500">
-              <span className="font-medium">Marketplace :</span> {account.country}
+              <span className="font-medium">Marketplace :</span> {account?.country}
             </p>
           </div>
         ))}

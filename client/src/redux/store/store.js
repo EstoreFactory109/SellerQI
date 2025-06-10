@@ -7,6 +7,7 @@ import MobileMenuSlice from '../slices/MobileMenuSlice.js'
 import profileImageSlice from '../slices/profileImage.js'
 import AllAccountsSlice from '../slices/AllAccountsSlice.js'
 import cogsSlice from '../slices/cogsSlice.js'
+import errorsSlice from '../slices/errorsSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -16,6 +17,7 @@ export const store = configureStore({
     MobileMenu:MobileMenuSlice,
     profileImage:profileImageSlice,
     AllAccounts:AllAccountsSlice,
-    cogs: cogsSlice
+    cogs: cogsSlice,
+    errors: errorsSlice
   },
 });

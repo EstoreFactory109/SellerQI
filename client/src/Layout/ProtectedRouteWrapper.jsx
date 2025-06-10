@@ -2,11 +2,12 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { motion, AnimatePresence } from "framer-motion";
-import { loginSuccess } from "../redux/slices/authSlice.js";
+import { loginSuccess,addBrand } from "../redux/slices/authSlice.js";
 import { updateImageLink } from "../redux/slices/profileImage.js";
 import { setDashboardInfo } from '../redux/slices/DashboardSlice.js';
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js';
 import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
+import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js';
 import analyseData from '../operations/analyse.js';
 import axiosInstance from '../config/axios.config.js';
 import Loader from '../Components/Loader/Loader.jsx';
@@ -52,7 +53,7 @@ const ProtectedRouteWrapper = ({ children }) => {
 
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
-
+          
           setAuthChecked(true);
 
           await fetchData();
@@ -98,8 +99,20 @@ const ProtectedRouteWrapper = ({ children }) => {
         }
 
         dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
+        
+        dispatch(addBrand(response.data.data.Brand));
         dashboardData = analyseData(response.data.data).dashboardData;
         dispatch(setDashboardInfo(dashboardData));
+        
+        // Also dispatch error details to the errors slice
+        dispatch(setProfitabilityErrorDetails({
+            totalErrors: dashboardData.totalProfitabilityErrors,
+            errorDetails: dashboardData.profitabilityErrorDetails
+        }));
+        dispatch(setSponsoredAdsErrorDetails({
+            totalErrors: dashboardData.totalSponsoredAdsErrors,
+            errorDetails: dashboardData.sponsoredAdsErrorDetails
+        }));
 
         const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
 

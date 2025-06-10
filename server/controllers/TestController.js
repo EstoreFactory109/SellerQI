@@ -9,7 +9,7 @@ const { getPPCSpendsSalesUnitsSold } = require('../Services/AmazonAds/PPCSpendsS
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 const {CampaignPerformanceReport} = require('../Services/AmazonAds/Campaign Performance Report(High ACoS Campaigns).js');
 const {getAdGroups} = require('../Services/AmazonAds/GetAdGroups.js');
-const {getKeywords} = require('../Services/AmazonAds/GetKeywords.js');
+const {getKeywords} = require('../Services/AmazonAds/Keywords.js');
 const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
@@ -213,7 +213,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     const { asin, marketplaceId, accessToken } = req.body;
     const temporaryCredentials = await getTemporaryCredentials("us-east-1");
     const SessionToken = temporaryCredentials.SessionToken;
-    const result = await getBrand(asin, marketplaceId, SessionToken, "sellingpartnerapi-na.amazon.com", accessToken);
+    const result = await getBrand(asin, marketplaceId, SessionToken, "sellingpartnerapi-na.amazon.com", accessToken,"681b7e41525925e8abb7d3c6");
     return res.status(200).json({
         data: result
     })

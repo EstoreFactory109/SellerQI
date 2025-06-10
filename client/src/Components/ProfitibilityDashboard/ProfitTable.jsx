@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Check, AlertTriangle, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setCogsValue } from '../../redux/slices/cogsSlice';
-import { setProfitabilityErrors } from '../../redux/slices/DashboardSlice';
+import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 
 const ProfitTable = ({ setSuggestionsData }) => {
     const [currentPage, setCurrentPage] = useState(1);
@@ -28,42 +28,43 @@ const ProfitTable = ({ setSuggestionsData }) => {
       const margin = product.sales > 0 ? (product.netProfit / product.sales) * 100 : 0;
       const cogsPercentage = product.sales > 0 ? (product.totalCogs / product.sales) * 100 : 0;
       
-      // 1. Negative Profit
-      if (product.netProfit < 0) {
-        suggestions.push(
-          `ASIN ${product.asin}: This product is incurring a loss. Consider increasing price, reducing PPC spend, or reviewing Amazon fees.`,
-          `ASIN ${product.asin}: You are losing money on each sale. Temporarily pause ads for this SKU.`
-        );
-      }
-      
-      // 2. Low Profit Margin (Below 15%)
-      if (margin < 15 && margin >= 0) {
-        suggestions.push(
-          `ASIN ${product.asin}: Very low margin. Consider increasing selling price or negotiating a lower COGS with your supplier.`
-        );
-      }
-      
-      // 3. High COGS %
-      if (cogsPercentage > 50) {
-        suggestions.push(
-          `ASIN ${product.asin}: Your COGS is consuming over half of your sales. Explore alternative suppliers or reduce packaging costs.`
-        );
-      }
-      
-      // 4. Unprofitable despite high sales
-      if (product.sales > 1000 && product.netProfit < 100) {
-        suggestions.push(
-          `ASIN ${product.asin}: This SKU is a revenue driver but not profitable. Audit PPC spend and fulfillment fees closely.`,
-          `ASIN ${product.asin}: Optimize listing and reduce ad spend to improve margins.`
-        );
-      }
-      
-      // 5. Low Volume, High Margin (Missed opportunity)
-      if (product.units < 10 && margin > 40) {
-        suggestions.push(
-          `ASIN ${product.asin}: This product is very profitable. Increase visibility through PPC or bundling.`,
-          `ASIN ${product.asin}: Test discounts or Amazon Deals to boost volume.`
-        );
+      // Only generate suggestions for products with errors (bad or warn status)
+      if (product.status === 'bad' || product.status === 'warn') {
+        // 1. Negative Profit
+        if (product.netProfit < 0) {
+          suggestions.push(
+            `ASIN ${product.asin}: This product is incurring a loss. Consider increasing price, reducing PPC spend, or reviewing Amazon fees.`,
+            `ASIN ${product.asin}: You are losing money on each sale. Temporarily pause ads for this SKU.`
+          );
+        }
+        
+        // 2. Low Profit Margin (Below 10% but positive)
+        else if (margin < 10 && margin >= 0) {
+          suggestions.push(
+            `ASIN ${product.asin}: Very low margin (${margin.toFixed(1)}%). Consider increasing selling price or negotiating a lower COGS with your supplier.`
+          );
+          
+          // Additional suggestion if COGS is high
+          if (cogsPercentage > 50) {
+            suggestions.push(
+              `ASIN ${product.asin}: Your COGS is consuming ${cogsPercentage.toFixed(1)}% of your sales. Explore alternative suppliers or reduce packaging costs.`
+            );
+          }
+          
+          // Additional suggestion if ad spend is high
+          if (product.adSpend > 0 && (product.adSpend / product.sales) * 100 > 20) {
+            suggestions.push(
+              `ASIN ${product.asin}: Ad spend is ${((product.adSpend / product.sales) * 100).toFixed(1)}% of sales. Optimize PPC campaigns to improve profitability.`
+            );
+          }
+        }
+        
+        // 3. Unprofitable despite high sales
+        if (product.sales > 1000 && product.netProfit < 100) {
+          suggestions.push(
+            `ASIN ${product.asin}: This SKU is a revenue driver but not profitable. Audit PPC spend and fulfillment fees closely.`
+          );
+        }
       }
       
       return suggestions;
@@ -115,24 +116,36 @@ const ProfitTable = ({ setSuggestionsData }) => {
       });
     }, [profitibilityData, cogsValues, totalProducts]);
     
-    // Calculate total profitability errors
+    // Update profitability errors in Redux when products change
     useEffect(() => {
       const totalErrors = products.filter(product => 
         product.status === 'bad' || product.status === 'warn'
       ).length;
       
-      // Dispatch the total errors to Redux
-      dispatch(setProfitabilityErrors(totalErrors));
+      const errorDetails = products
+        .filter(product => product.status === 'bad' || product.status === 'warn')
+        .map(product => ({
+          asin: product.asin,
+          sales: product.sales,
+          netProfit: product.netProfit,
+          profitMargin: product.sales > 0 ? (product.netProfit / product.sales) * 100 : 0,
+          errorType: product.status === 'bad' ? 'negative_profit' : 'low_margin',
+          cogsPerUnit: product.cogsPerUnit
+        }));
+      
+      // Dispatch the updated errors to Redux
+      dispatch(updateProfitabilityErrors({ totalErrors, errorDetails }));
     }, [products, dispatch]);
     
     // Send suggestions data to parent component
     useEffect(() => {
       if (setSuggestionsData && typeof setSuggestionsData === 'function') {
-        // Create a flat array of all suggestions
+        // Create a flat array of suggestions only from products with errors
         const allSuggestions = [];
         
         products.forEach(product => {
-          if (product.suggestions && product.suggestions.length > 0) {
+          // Only include suggestions from products with errors (bad or warn status)
+          if ((product.status === 'bad' || product.status === 'warn') && product.suggestions && product.suggestions.length > 0) {
             allSuggestions.push(...product.suggestions);
           }
         });
@@ -140,7 +153,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
         // Call the parent's setSuggestionsData function with the flat array
         setSuggestionsData(allSuggestions);
       }
-    }, [profitibilityData, cogsValues, setSuggestionsData]);
+    }, [products, setSuggestionsData]);
     
     // Calculate total pages
     const totalPages = Math.ceil(products.length / productsPerPage);

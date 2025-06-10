@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -39,7 +39,14 @@ const LeftNavSection = () => {
     return (
         <aside className="h-screen w-2/5 lg:w-1/5 shadow-md p-2 border-r-[1px] border-gray-200 font-roboto bg-white block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out" style={{ left: position }}>
             <div className="w-full h-7 flex items-center pl-2 mt-4">
-                <p className="text-2xl font-semibold">iBEX</p>
+                <img 
+                    src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png"
+                    alt="Seller QI Logo"
+                    loading="lazy"
+                    className="h-7 w-auto object-contain"
+                    width="120"
+                    height="28"
+                />
                 <img src={Close} alt="Close" className="w-3 h-3 ml-auto cursor-pointer mr-3" onClick={() => dispatch(setPosition("-100%"))} />
             </div>
             <div className="w-full mt-5 pl-2 pb-5">
@@ -73,6 +80,38 @@ const LeftNavSection = () => {
                             <>
                                 <BadgeAlert className="w-4 h-4" />
                                 <p className="font-medium text-xs">Issues</p>
+                            </>
+                        )}
+                    </NavLink>
+
+                    <NavLink
+                        to="/seller-central-checker/ppc-dashboard"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <LaptopMinimalCheck className="w-4 h-4"/>
+                                <p className="font-medium text-xs">Sponsored Ads</p>
+                            </>
+                        )}
+                    </NavLink>
+                    
+                    <NavLink
+                        to="/seller-central-checker/profitibility-dashboard"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <ChartLine className="w-4 h-4"/>
+                                <p className="font-medium text-xs">Profitibility</p>
                             </>
                         )}
                     </NavLink>

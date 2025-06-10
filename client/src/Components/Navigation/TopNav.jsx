@@ -38,14 +38,12 @@ const TopNav = () => {
 
 
     const user = useSelector((state) => state.Auth?.user);
-    console.log(user)
     const Country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country);
     const sellerAccount = useSelector(state => state.AllAccounts?.AllAccounts) || []
     const [openDropDown, setOpenDropDown] = useState(false);
     const dispatch = useDispatch();
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
-
     console.log(sellerAccount)
 
     const switchAccount = async (userId="",country,region) => {
@@ -91,33 +89,33 @@ const TopNav = () => {
             <img src={hamburger} className='w-[1.5rem] lg:hidden' onClick={handleHamburger} />
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
-                    <div className="lg:p-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
-                        <p>{user?.firstName || "Brand Name"} | {marketplaces[Country]}</p>
-                        <img src={Arrow} alt="" className='w-3 h-2 ' />
+                    <div className="lg:px-4 lg:py-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 min-w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
+                        <p>{user?.brand || "Brand Name"} | {marketplaces[Country]}</p>
+                        {sellerAccount.length>1 &&<img src={Arrow} alt="" className='w-3 h-2 ' />}
                     </div>
-                    <AnimatePresence>
+                    {sellerAccount.length>1 &&<AnimatePresence>
                         {openDropDown && (
                             <motion.div
                                 initial={{ opacity: 0, scaleY: 0 }}
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="min-w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99]"
+                                className="min-w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
                             >
-                                {sellerAccount.map((elm, key) =>
-                                    elm.region !== Country && (
+                                { sellerAccount.length>1 &&  sellerAccount.map((elm, key) =>
+                                   
                                         <div
                                             key={key}
-                                            className="w-full h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-sm"
+                                            className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
                                             onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                         >
-                                            {"Brand Name"} | {marketplaces[elm.country]}
+                                            {elm.brand || "Brand Name"} | {marketplaces[elm.country]}
                                         </div>
-                                    )
+                                    
                                 )}
                             </motion.div>
                         )}
-                    </AnimatePresence>
+                    </AnimatePresence>}
 
                 </div>
                 <div className="w-6 h-6 lg:w-7 lg:h-8 relative flex justify-center items-center mr-2" >

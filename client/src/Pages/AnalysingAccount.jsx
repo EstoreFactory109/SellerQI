@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { setDashboardInfo } from '../redux/slices/DashboardSlice.js'
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js'
+import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js'
 import analyseData from "../operations/analyse.js"
 
 
@@ -45,6 +46,16 @@ const AnalysingAccount = () => {
                     dashboardData = analyseData(response.data.data).dashboardData;
                     console.log(dashboardData)
                     dispatch(setDashboardInfo(dashboardData));
+                    
+                    // Also dispatch error details to the errors slice
+                    dispatch(setProfitabilityErrorDetails({
+                        totalErrors: dashboardData.totalProfitabilityErrors,
+                        errorDetails: dashboardData.profitabilityErrorDetails
+                    }));
+                    dispatch(setSponsoredAdsErrorDetails({
+                        totalErrors: dashboardData.totalSponsoredAdsErrors,
+                        errorDetails: dashboardData.sponsoredAdsErrorDetails
+                    }));
 
                 }
 

@@ -18,21 +18,9 @@ const DashboardDataSlice = createSlice({
         state.DashBoardInfo.reimbustment=action.payload.reimburstmentData;
         state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales;
         state.DashBoardInfo.TotalSales=action.payload.TotalSales;
-      },
-      setProfitabilityErrors: (state, action) => {
-        if (state.DashBoardInfo) {
-          state.DashBoardInfo.totalProfitabilityErrors = action.payload;
-        }
-      },
-      setSponsoredAdsErrors: (state, action) => {
-        if (state.DashBoardInfo) {
-          state.DashBoardInfo.totalSponsoredAdsErrors = action.payload;
-        }
-      },
-
-
+      }
     },
   });
 
-  export const { setDashboardInfo,UpdateDashboardInfo, setProfitabilityErrors, setSponsoredAdsErrors } = DashboardDataSlice.actions;
-export default DashboardDataSlice.reducer;
+  export const { setDashboardInfo,UpdateDashboardInfo } = DashboardDataSlice.actions;
+  export default DashboardDataSlice.reducer;

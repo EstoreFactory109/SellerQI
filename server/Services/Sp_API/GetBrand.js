@@ -3,6 +3,7 @@ const axiosRetry = require('axios-retry').default;
 const aws4 = require('aws4');
 const logger = require('../../utils/Logger.js');
 const ApiError = require('../../utils/ApiError.js'); // If you're using custom ApiError
+const SellerCentralModel = require('../../models/sellerCentralModel.js');
 
 // ✅ Setup axios-retry globally
 axiosRetry(axios, {
@@ -18,7 +19,7 @@ axiosRetry(axios, {
   }
 });
 
-const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken) => {
+const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken,UserId) => {
   const host = baseuri;
 
   const queryParams = `marketplaceIds=${marketplaceId}&includedData=attributes`
@@ -52,10 +53,18 @@ const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken) =
       headers: request.headers
     });
 
-   
-   
+    const sellerCentral = await SellerCentralModel.findOne({User:UserId})
 
-    return response.data.attributes.brand[0].value
+    if(!sellerCentral){
+      logger.error(new ApiError(400, "Seller Central not found"));
+      return false;
+    }
+   
+    const brand = response.data.attributes.brand[0].value
+    sellerCentral.brand = brand
+    await sellerCentral.save()
+
+    return brand
 
   } catch (error) {
     console.error(`❌ Error fetching brand for ASIN: ${asin}:`, error.response?.data || error.message);

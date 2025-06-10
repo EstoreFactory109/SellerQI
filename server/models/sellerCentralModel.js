@@ -51,6 +51,10 @@ const SellerSchema = new mongoose.Schema(
       type: String,
       unique: true,
     },
+    brand:{
+      type:String,
+      required:true
+    },
     sellerAccount:[sellerCentral]
     
   },

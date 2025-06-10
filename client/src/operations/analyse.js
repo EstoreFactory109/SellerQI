@@ -2,6 +2,103 @@ import Profitiblity from "./Profitiblity";
 import calculateSponsoredAdsMetrics from "./sponserdAds";
 import {calculateNegativeKeywordsMetrics} from "./sponserdAds";
 
+// Function to calculate profitability errors
+const calculateProfitabilityErrors = (profitibilityData) => {
+    let totalErrors = 0;
+    const errorDetails = [];
+    
+    profitibilityData.forEach(item => {
+        // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
+        const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
+        
+        // Determine status based on profit margin
+        const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
+        
+        // Count as error if profit margin is below 10% or negative
+        if (profitMargin < 10 || netProfit < 0) {
+            totalErrors++;
+            errorDetails.push({
+                asin: item.asin,
+                sales: item.sales,
+                netProfit: netProfit,
+                profitMargin: profitMargin,
+                errorType: netProfit < 0 ? 'negative_profit' : 'low_margin'
+            });
+        }
+    });
+    
+    return { totalErrors, errorDetails };
+};
+
+// Function to calculate sponsored ads errors
+const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMetrics) => {
+    let totalErrors = 0;
+    const errorDetails = [];
+    
+    // Count products with high ACOS or no sales but high spend
+    if (Array.isArray(productWiseSponsoredAds)) {
+        productWiseSponsoredAds.forEach(product => {
+            const spend = parseFloat(product.spend) || 0;
+            const sales = parseFloat(product.salesIn30Days) || 0;
+            const acos = sales > 0 ? (spend / sales) * 100 : 0;
+            
+            let errorType = null;
+            // Count as error if:
+            // 1. ACOS > 50% (unprofitable)
+            // 2. Spend > $5 with no sales
+            // 3. Spend > $10 with ACOS > 30% (marginally profitable)
+            if (acos > 50 && sales > 0) {
+                errorType = 'high_acos';
+            } else if (spend > 5 && sales === 0) {
+                errorType = 'no_sales_high_spend';
+            } else if (spend > 10 && acos > 30) {
+                errorType = 'marginal_profit';
+            }
+            
+            if (errorType) {
+                totalErrors++;
+                errorDetails.push({
+                    asin: product.asin,
+                    campaignName: product.campaignName,
+                    spend: spend,
+                    sales: sales,
+                    acos: acos,
+                    errorType: errorType,
+                    source: 'product'
+                });
+            }
+        });
+    }
+    
+    // Also count negative keywords with issues
+    if (Array.isArray(negativeKeywordsMetrics)) {
+        negativeKeywordsMetrics.forEach(keyword => {
+            let errorType = null;
+            // Count keywords with extremely high ACOS or no sales but spend
+            if (keyword.acos > 100 && keyword.sales > 0) {
+                errorType = 'extreme_high_acos';
+            } else if (keyword.spend > 5 && keyword.sales === 0) {
+                errorType = 'keyword_no_sales';
+            }
+            
+            if (errorType) {
+                totalErrors++;
+                errorDetails.push({
+                    keyword: keyword.keyword,
+                    campaignName: keyword.campaignName,
+                    spend: keyword.spend,
+                    sales: keyword.sales,
+                    acos: keyword.acos,
+                    errorType: errorType,
+                    source: 'keyword'
+                });
+            }
+        });
+    }
+    
+    return { totalErrors, errorDetails };
+};
+
 const analyseData = (data) => {
     console.log(data)
     const TotalProducts = data.TotalProducts;
@@ -204,6 +301,10 @@ const analyseData = (data) => {
         }
     });
 
+    // Calculate profitability and sponsored ads errors
+    const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData);
+    const sponsoredAdsErrorsData = calculateSponsoredAdsErrors(data.ProductWiseSponsoredAds, negativeKeywordsMetrics);
+
     const dashboardData = {
         Country:data.Country,
         accountHealthPercentage,
@@ -232,7 +333,13 @@ const analyseData = (data) => {
         profitibilityData: profitibilityData,
         sponsoredAdsMetrics: sponsoredAdsMetrics,
         negativeKeywordsMetrics: negativeKeywordsMetrics,
-        ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData
+        ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData,
+        totalProfitabilityErrors: profitabilityErrorsData.totalErrors,
+        totalSponsoredAdsErrors: sponsoredAdsErrorsData.totalErrors,
+        ProductWiseSponsoredAds: data.ProductWiseSponsoredAds,
+        profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
+        sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
+        keywords: data.keywords || []
     };
 
     return { dashboardData };

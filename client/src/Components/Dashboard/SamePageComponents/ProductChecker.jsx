@@ -9,23 +9,26 @@ const ProductChecker = () => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
    console.log(info)
    const navigate = useNavigate()
+   
+   // Get error counts from Redux - these are now pre-calculated during analysis
    const profitabilityErrors = info?.totalProfitabilityErrors || 0;
    const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
-    const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-  const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
- const [productErrors, setProductErrors] = useState([]);
-  useEffect(() => {
+   
+   const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+   const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
+   const [productErrors, setProductErrors] = useState([]);
+   
+   useEffect(() => {
      let tempArr = [];
      tempArr.push(info.first);
      tempArr.push(info.second);
      tempArr.push(info.third);
      tempArr.push(info.fourth);
      setProductErrors(tempArr)
-     
    }, [info])
  
   useEffect(() => {
-    // Update series data when profitability errors change
+    // Update series data when info changes
     setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
   }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
   

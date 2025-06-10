@@ -6,75 +6,78 @@ import TooltipBox from '../ToolTipBox/ToolTipBoxBottomLeft';
 
 const IssuesSummery = () => {
   const info = useSelector(state => state.Dashboard.DashBoardInfo)
+  
+  // Get error counts from Redux - these are now pre-calculated during analysis
   const profitabilityErrors = info?.totalProfitabilityErrors || 0;
   const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
-     const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-      const [LableData,setDableData]=useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
+  
+  const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+  const [LableData,setDableData]=useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
     
-      // Calculate total errors
-      const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
+  // Calculate total errors
+  const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
       
-      useEffect(() => {
-        // Update series data when errors change
-        setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-      }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+  useEffect(() => {
+    // Update series data when errors change
+    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
     
-      const [chartData, setChartData] = useState({
-        series: seriesData, // Data values
-        options: {
-          chart: {
-            type: "donut",
-          },
-          labels: LableData, 
-          colors:["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651"],
-          
-          legend: {
-            show: false// Hides legend globally
-          },
-          dataLabels: {
-            enabled: false, // Hide percentages on the chart
-          },
-          plotOptions: {
-            pie: {
-              donut: {
-                size: '65%',
-                labels: {
-                  show: true,
-                  name: {
-                    show: false
-                  },
-                  value: {
-                    show: false
-                  },
-                  total: {
-                    show: false
-                  }
-                }
+  const [chartData, setChartData] = useState({
+    series: seriesData, // Data values
+    options: {
+      chart: {
+        type: "donut",
+      },
+      labels: LableData, 
+      colors:["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651"],
+      
+      legend: {
+        show: false// Hides legend globally
+      },
+      dataLabels: {
+        enabled: false, // Hide percentages on the chart
+      },
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '65%',
+            labels: {
+              show: true,
+              name: {
+                show: false
+              },
+              value: {
+                show: false
+              },
+              total: {
+                show: false
               }
             }
-          },
-          responsive: [
-            {
-              breakpoint: 764,
-              options: {
-                chart: {
-                  width: 200,
-                },
-              },
+          }
+        }
+      },
+      responsive: [
+        {
+          breakpoint: 764,
+          options: {
+            chart: {
+              width: 200,
             },
-          ],
+          },
         },
-      });
-      
-      useEffect(() => {
-        // Update chart data when series data changes
-        setChartData(prevData => ({
-          ...prevData,
-          series: seriesData
-        }));
-      }, [seriesData]);
+      ],
+    },
+  });
+  
+  useEffect(() => {
+    // Update chart data when series data changes
+    setChartData(prevData => ({
+      ...prevData,
+      series: seriesData
+    }));
+  }, [seriesData]);
 
-      const [tooltipForProductChecker, setToolTipForProductChecker] = useState(false);
+  const [tooltipForProductChecker, setToolTipForProductChecker] = useState(false);
   return (
    <>
      <div className='lg:w-[45vw] w-full h-[30vh] bg-white p-3  rounded-md'>
