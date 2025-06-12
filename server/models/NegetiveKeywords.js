@@ -13,7 +13,7 @@ const negetiveKeywordsSchema = new mongoose.Schema({
             state: { type: String, default: "enabled" },
         }
     ]
-});
+}, {timestamps: true});
 
 const NegetiveKeywords = mongoose.model('NegetiveKeywords', negetiveKeywordsSchema);
 

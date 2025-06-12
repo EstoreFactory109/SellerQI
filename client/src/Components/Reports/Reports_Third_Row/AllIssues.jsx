@@ -115,7 +115,7 @@ const AllIssues = () => {
                 </li>
               </ul>
             </div>
-            <p className='flex items-center justify-center mt-4 text-sm  w-full'>Product Checker</p>
+          
           </div>
          
         </div>

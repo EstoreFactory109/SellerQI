@@ -20,7 +20,7 @@ export default function Navbar() {
           </div>
           <nav className="hidden md:flex items-center space-x-8">
             <Link to="/" className="text-gray-600 hover:text-gray-900">Home</Link>
-            <Link to="/support" className="text-gray-600 hover:text-gray-900">Support</Link>
+            <Link to="/contact-us" className="text-gray-600 hover:text-gray-900">Support</Link>
             <Link to="/pricing" className="text-gray-600 hover:text-gray-900">Pricing</Link>
             <button className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-800"
               onClick={loginNavigate}

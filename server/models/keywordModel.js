@@ -43,6 +43,6 @@ const keywordSchema = new mongoose.Schema({
             }
         }
     ]
-})
+}, {timestamps: true})
 
 module.exports = mongoose.model('Keyword', keywordSchema);

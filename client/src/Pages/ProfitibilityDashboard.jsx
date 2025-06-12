@@ -165,7 +165,7 @@ const ProfitabilityDashboard = () => {
 
 
   return (
-    <div className="bg-[#eeeeee] h-screen overflow-y-auto">
+    <div className="bg-[#eeeeee] h-[90vh] overflow-y-auto">
       <div className="p-6">
         <div className="max-w-[1400px] mx-auto pb-6">
           <div className="flex items-center justify-between mb-6">
@@ -244,8 +244,6 @@ const ProfitabilityDashboard = () => {
 
           <SuggestionList suggestionsData={suggestionsData} />
           <div className='w-full h-[3rem]'></div>
-          <div className='w-full h-[3rem]'></div>
-    
         </div>
       </div>
     </div>

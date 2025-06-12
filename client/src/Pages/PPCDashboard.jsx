@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
@@ -47,6 +47,8 @@ const PPCDashboard = () => {
   const [showAllWastedSpend, setShowAllWastedSpend] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
   const [showAllTopPerforming, setShowAllTopPerforming] = useState(false);
+  const [showAllSearchTerms, setShowAllSearchTerms] = useState(false);
+  const [showAllAutoCampaign, setShowAllAutoCampaign] = useState(false);
   const dispatch = useDispatch();
   
   // Get sponsoredAdsMetrics from Redux store
@@ -64,21 +66,35 @@ const PPCDashboard = () => {
   // Get keywords data from Redux store
   const keywords = useSelector((state) => state.Dashboard.DashBoardInfo?.keywords) || [];
   
+  // Get searchTerms data from Redux store
+  const searchTerms = useSelector((state) => state.Dashboard.DashBoardInfo?.searchTerms) || [];
+  
+  // Get campaignData from Redux store
+  const campaignData = useSelector((state) => state.Dashboard.DashBoardInfo?.campaignData) || [];
+  
+  // Filter search terms where clicks > 5 and sales = 0
+  const filteredSearchTerms = searchTerms.filter(term => term.clicks > 5 && term.sales === 0);
+  
   // Transform the data for the chart
-  const chartData = productWiseSponsoredAdsGraphData.length > 0 
-    ? productWiseSponsoredAdsGraphData.map(item => ({
+  const chartData = useMemo(() => {
+    if (productWiseSponsoredAdsGraphData.length > 0) {
+      return productWiseSponsoredAdsGraphData.map(item => ({
         date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         ppcSales: item.totalSalesIn30Days || 0,
         spend: item.totalSpend || 0,
-      })).reverse()
-    : mockChartData.reverse();
+      }));
+    }
+    return mockChartData.slice();
+  }, [productWiseSponsoredAdsGraphData]);
   
   // Tab configuration
   const tabs = [
     { id: 0, label: 'High ACOS Campaigns' },
     { id: 1, label: 'Wasted Spend Keywords' },
     { id: 2, label: 'Negative Keywords' },
-    { id: 3, label: 'Top Performing Keywords' }
+    { id: 3, label: 'Top Performing Keywords' },
+    { id: 4, label: 'Search Terms' },
+    { id: 5, label: 'Auto Campaign Insights' }
   ];
   
   // Get animation direction based on tab order
@@ -297,6 +313,80 @@ const PPCDashboard = () => {
     })
     .filter(keyword => keyword !== null)
     .sort((a, b) => b.sales - a.sales);
+  
+  // Auto Campaign Insights Processing
+  /*
+   * Logic:
+   * 1. Get all auto campaigns (targetingType === 'auto')
+   * 2. Get keywords associated with auto campaigns
+   * 3. For each search term:
+   *    - Check if it has sales > 30
+   *    - Check if its associated keyword belongs to an auto campaign
+   *    - Show in table with ACOS calculation
+   *    - If search term doesn't exist in manual campaigns, suggest migration
+   *    - Otherwise, leave action blank
+   */
+  
+  // Get auto campaigns
+  const autoCampaigns = campaignData.filter(campaign => campaign.targetingType === 'auto');
+  const autoCampaignIds = autoCampaigns.map(campaign => campaign.campaignId);
+  
+  // Get manual campaigns for checking if keywords exist there
+  const manualCampaigns = campaignData.filter(campaign => campaign.targetingType === 'manual');
+  const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
+  
+  // Get keywords from manual campaigns - these are the keywords we want to check against
+  const manualKeywords = keywords
+    .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
+    .map(keyword => keyword.keywordText.toLowerCase());
+  
+    // Process auto campaign insights
+  const autoCampaignInsights = [];
+  
+  // Process search terms directly by matching campaign IDs
+  searchTerms.forEach(searchTerm => {
+    // Check if sales > 30
+    if (searchTerm.sales > 30) {
+      // Check if this search term's campaignId belongs to an auto campaign
+      if (searchTerm.campaignId && autoCampaignIds.includes(searchTerm.campaignId)) {
+        
+        // Calculate ACOS for this search term
+        const acos = searchTerm.sales > 0 ? (searchTerm.spend / searchTerm.sales) * 100 : 0;
+        
+        // Find the campaign details
+        const campaign = autoCampaigns.find(c => c.campaignId === searchTerm.campaignId);
+        
+        // Check if this search term exists as a keyword in manual campaigns
+        const existsInManual = manualKeywords.includes(searchTerm.searchTerm.toLowerCase());
+        
+        // Determine action - only suggest migration if not in manual campaigns
+        const action = !existsInManual ? 'Migrate to Manual Campaign' : '';
+        
+        // Check if we already have this search term in our insights
+        const existingInsight = autoCampaignInsights.find(
+          insight => insight.searchTerm === searchTerm.searchTerm
+        );
+        
+        if (!existingInsight) {
+          autoCampaignInsights.push({
+            searchTerm: searchTerm.searchTerm,
+            keyword: searchTerm.keyword || '',
+            campaignName: searchTerm.campaignName || campaign?.name || 'Unknown Campaign',
+            campaignId: searchTerm.campaignId,
+            sales: searchTerm.sales,
+            spend: searchTerm.spend,
+            clicks: searchTerm.clicks,
+            impressions: searchTerm.impressions || 0,
+            acos: acos,
+            action: action
+          });
+        }
+      }
+    }
+  });
+  
+  // Sort by sales descending
+  autoCampaignInsights.sort((a, b) => b.sales - a.sales);
   
   // Use Redux data for KPI values, fallback to mock data if not available
   const kpiData = [
@@ -590,7 +680,7 @@ const PPCDashboard = () => {
   const suggestionsToDisplay = showAllSuggestions ? suggestions : suggestions.slice(0, 5);
 
   return (
-    <div className="h-screen overflow-y-auto bg-[#eeeeee] p-6">
+    <div className="h-[90vh] overflow-y-auto bg-[#eeeeee] p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
@@ -727,7 +817,7 @@ const PPCDashboard = () => {
                   {highAcosCampaigns.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="text-center py-12 text-gray-400">
-                        No campaigns with ACOS &gt; 40% found
+                        No data available
                       </td>
                     </tr>
                   ) : (
@@ -776,7 +866,7 @@ const PPCDashboard = () => {
                   {wastedSpendKeywords.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center py-12 text-gray-400">
-                        No wasted spend keywords found
+                        No data available
                       </td>
                     </tr>
                   ) : (
@@ -891,7 +981,7 @@ const PPCDashboard = () => {
                   {topPerformingKeywords.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="text-center py-12 text-gray-400">
-                        No top performing keywords found (ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 3K)
+                        No data available
                       </td>
                     </tr>
                   ) : (
@@ -908,9 +998,9 @@ const PPCDashboard = () => {
                         </td>
                       </tr>
                     ))
-              )}
-            </tbody>
-          </table>
+                  )}
+                </tbody>
+              </table>
               {topPerformingKeywords.length > 5 && (
                 <div className="mt-4 text-center">
                   <button
@@ -919,10 +1009,112 @@ const PPCDashboard = () => {
                   >
                     {showAllTopPerforming ? 'Show Less' : `View More (${topPerformingKeywords.length - 5} more)`}
                   </button>
-            </div>
+                </div>
               )}
             </>
           )}
+          
+          {/* Search Terms Tab */}
+          {selectedTab === 4 && (
+            <>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms</h2>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
+                    <th className="text-left py-3 text-sm font-medium text-gray-700">Matched Keyword</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Clicks</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSearchTerms.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-12 text-gray-400">
+                        No data available
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSearchTerms.slice(0, showAllSearchTerms ? filteredSearchTerms.length : 5).map((term, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
+                        <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
+                        <td className="py-4 text-sm text-center">{term.clicks}</td>
+                        <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
+                        <td className="py-4 text-sm text-center font-medium text-red-600">
+                          ${term.spend.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+              {filteredSearchTerms.length > 5 && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowAllSearchTerms(!showAllSearchTerms)}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    {showAllSearchTerms ? 'Show Less' : `View More (${filteredSearchTerms.length - 5} more)`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          
+                      {/* Auto Campaign Insights Tab */}
+            {selectedTab === 5 && (
+              <>
+                <h2 className="text-xl font-semibold text-gray-900 mb-6">Auto Campaign Insights</h2>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
+                      <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                      <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                      <th className="text-center py-3 text-sm font-medium text-gray-700">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {autoCampaignInsights.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-12 text-gray-400">
+                          No data available
+                        </td>
+                      </tr>
+                    ) : (
+                      autoCampaignInsights.slice(0, showAllAutoCampaign ? autoCampaignInsights.length : 5).map((insight, idx) => (
+                        <tr key={idx} className="border-b border-gray-200">
+                          <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
+                          <td className="py-4 text-sm text-center font-medium text-green-600">
+                            ${insight.sales.toFixed(2)}
+                          </td>
+                          <td className="py-4 text-sm text-center font-medium">
+                            {insight.acos.toFixed(2)}%
+                          </td>
+                          <td className="py-4 text-sm text-center">
+                            {insight.action && (
+                              <span className="text-blue-600 font-medium">{insight.action}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+                {autoCampaignInsights.length > 5 && (
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={() => setShowAllAutoCampaign(!showAllAutoCampaign)}
+                      className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                    >
+                      {showAllAutoCampaign ? 'Show Less' : `View More (${autoCampaignInsights.length - 5} more)`}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -1013,7 +1205,8 @@ const PPCDashboard = () => {
         </div>
       </div>
       <div className='w-full h-[3rem]'></div>
-      <div className='w-full h-[2rem]'></div>
+
+
      
     </div>
   );

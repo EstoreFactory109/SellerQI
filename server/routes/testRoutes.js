@@ -1,7 +1,7 @@
 const express=require('express');
 const router=express.Router();
 const {testReport,getTotalSales,getReviewData,testAmazonAds,
-    testPPCSpendsSalesUnitsSold,testGetCampaigns,testCampaignPerformanceReport,
+    testPPCSpendsSalesUnitsSold,testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,
     testGetBrand}=require('../controllers/TestController.js')
 
@@ -12,7 +12,6 @@ router.get('/getReviewData',getReviewData)
 router.post('/testAmazonAds',testAmazonAds)
 router.post('/testPPCSpendsSalesUnitsSold',testPPCSpendsSalesUnitsSold)
 router.post('/testGetCampaigns',testGetCampaigns)
-router.post('/testCampaignPerformanceReport',testCampaignPerformanceReport)
 router.post('/testGetAdGroups',testGetAdGroups)
 router.post('/testGetKeywords',testGetKeywords)
 router.post('/testGetPPCSpendsBySKU',testGetPPCSpendsBySKU)

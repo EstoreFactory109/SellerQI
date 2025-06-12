@@ -49,15 +49,15 @@ const Health = () => {
   const series = [info.accountHealthPercentage.Percentage];
   return (
     <>
-      <div className="relative w-64 lg:w-full min-h-[170px]">
-        <Chart options={options} series={series} type="radialBar" height={200} />
-        <p className="absolute text-sm font-medium bottom-9 left-1/2 transform -translate-x-1/2 text-[#1e1e3f]">
-          {info.accountHealthPercentage.status}
-        </p>
-       
+      <div className="w-full h-full bg-white p-3 rounded-md">
+        <div className="relative w-64 lg:w-full min-h-[170px]">
+          <Chart options={options} series={series} type="radialBar" height={200} />
+          <p className="absolute text-sm font-medium bottom-9 left-1/2 transform -translate-x-1/2 text-[#1e1e3f]">
+            {info.accountHealthPercentage.status}
+          </p>
+        </div>
+        <p className="flex items-center justify-center text-sm w-full">Account Health</p>
       </div>
-      <p className="flex items-center justify-center  text-sm w-full">Account Health</p>
-
     </>
   )
 }

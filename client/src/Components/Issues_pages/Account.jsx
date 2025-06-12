@@ -1,18 +1,105 @@
-import React from "react";
+import React, { useRef } from "react";
 import Chart from "react-apexcharts";
 import moment from "moment";
 import Health from '../Reports/Reports_Third_Row/Health.jsx'
 import { useSelector } from 'react-redux';
+import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
 export default function AccountHealthDashboard() {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
+    const contentRef = useRef(null);
 
     const AccountErrors=info.AccountErrors
  
     console.log(AccountErrors)
     console.log(AccountErrors.validTrackingRateStatus.HowTOSolve.length)
 
-
+    // Prepare data for CSV/Excel export
+    const prepareAccountData = () => {
+        const exportData = [];
+        
+        // Account Status
+        exportData.push({
+            Category: 'Account Status',
+            Issue: AccountErrors.accountStatus.Message,
+            Status: AccountErrors.accountStatus.status,
+            Solution: AccountErrors.accountStatus.HowTOSolve.length > 0 ? AccountErrors.accountStatus.HowTOSolve : 'N/A'
+        });
+        
+        // Negative Seller Feedback
+        exportData.push({
+            Category: 'Negative Seller Feedback',
+            Issue: AccountErrors.negativeFeedbacks.Message,
+            Status: AccountErrors.negativeFeedbacks.status,
+            Solution: AccountErrors.negativeFeedbacks.HowTOSolve.length > 0 ? AccountErrors.negativeFeedbacks.HowTOSolve : 'N/A'
+        });
+        
+        // NCX
+        exportData.push({
+            Category: 'NCX - Negative Customer Experience',
+            Issue: AccountErrors.NCX.Message,
+            Status: AccountErrors.NCX.status,
+            Solution: AccountErrors.NCX.HowTOSolve.length > 0 ? AccountErrors.NCX.HowTOSolve : 'N/A'
+        });
+        
+        // Policy Violations
+        exportData.push({
+            Category: 'Policy Violations',
+            Issue: AccountErrors.PolicyViolations.Message,
+            Status: AccountErrors.PolicyViolations.status,
+            Solution: AccountErrors.PolicyViolations.HowTOSolve.length > 0 ? AccountErrors.PolicyViolations.HowTOSolve : 'N/A'
+        });
+        
+        // Valid Tracking Rate
+        exportData.push({
+            Category: 'Valid Tracking Rate',
+            Issue: AccountErrors.validTrackingRateStatus.Message,
+            Status: AccountErrors.validTrackingRateStatus.status,
+            Solution: AccountErrors.validTrackingRateStatus.HowTOSolve.length > 0 ? AccountErrors.validTrackingRateStatus.HowTOSolve : 'N/A'
+        });
+        
+        // Order Defect Rate
+        exportData.push({
+            Category: 'Order Defect Rate',
+            Issue: AccountErrors.orderWithDefectsStatus.Message,
+            Status: AccountErrors.orderWithDefectsStatus.status,
+            Solution: AccountErrors.orderWithDefectsStatus.HowTOSolve.length > 0 ? AccountErrors.orderWithDefectsStatus.HowTOSolve : 'N/A'
+        });
+        
+        // Late Shipment Rate
+        exportData.push({
+            Category: 'Late Shipment Rate',
+            Issue: AccountErrors.lateShipmentRateStatus.Message,
+            Status: AccountErrors.lateShipmentRateStatus.status,
+            Solution: AccountErrors.lateShipmentRateStatus.HowTOSolve.length > 0 ? AccountErrors.lateShipmentRateStatus.HowTOSolve : 'N/A'
+        });
+        
+        // A-Z Guarantee Claim
+        exportData.push({
+            Category: 'A-Z Guarantee Claim',
+            Issue: AccountErrors.a_z_claims.Message,
+            Status: AccountErrors.a_z_claims.status,
+            Solution: AccountErrors.a_z_claims.HowTOSolve.length > 0 ? AccountErrors.a_z_claims.HowTOSolve : 'N/A'
+        });
+        
+        // Cancellation Rate
+        exportData.push({
+            Category: 'Cancellation Rate (CR)',
+            Issue: AccountErrors.CancellationRate.Message,
+            Status: AccountErrors.CancellationRate.status,
+            Solution: AccountErrors.CancellationRate.HowTOSolve.length > 0 ? AccountErrors.CancellationRate.HowTOSolve : 'N/A'
+        });
+        
+        // Customer Response Time
+        exportData.push({
+            Category: 'Customer Response Time (More than 24 Hours)',
+            Issue: AccountErrors.responseUnder24HoursCount.Message,
+            Status: AccountErrors.responseUnder24HoursCount.status,
+            Solution: AccountErrors.responseUnder24HoursCount.HowTOSolve.length > 0 ? AccountErrors.responseUnder24HoursCount.HowTOSolve : 'N/A'
+        });
+        
+        return exportData;
+    };
 
   const totalSales = info.TotalSales.slice(-10);
 
@@ -69,7 +156,7 @@ export default function AccountHealthDashboard() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-6" ref={contentRef}>
       {/* Top Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Account Health */}
@@ -95,10 +182,14 @@ export default function AccountHealthDashboard() {
       {/* Issues Table */}
       <div className="bg-white shadow-md rounded-2xl p-6 overflow-x-auto">
         <div className="flex justify-end items-center mb-4">
-          
-          <button className="text-sm text-white bg-[#333651]  rounded px-3 py-1 hover:bg-blue-50">
-            Download PDF
-          </button>
+          <DownloadReport
+            prepareDataFunc={prepareAccountData}
+            filename="Account_Health_Report"
+            contentRef={contentRef}
+            buttonText="Download Report"
+            buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
+            showIcon={false}
+          />
         </div>
         <table className="min-w-full table-auto text-sm text-left">
           <thead>

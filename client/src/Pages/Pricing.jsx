@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
@@ -9,6 +9,11 @@ export default function PricingPage() {
   const navigate = useNavigate();
 
   const [openFaq, setOpenFaq] = useState(2);
+  
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+  
   const faqs = [
     {
       q: "What's the difference between Lite and Pro ?",
@@ -123,7 +128,7 @@ export default function PricingPage() {
         <section className="py-20 bg-white text-center">
           <div className="mb-8">
           <div className="w-24 h-24 mx-auto bg-black rounded-full flex items-center justify-center mb-5">
-              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749234188/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
+              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
             </div>
             <h2 className="text-2xl font-bold mb-2">Still have questions? We're here for you!</h2>
             <button className="mt-4 bg-[#23253A] text-white px-6 py-2 rounded font-semibold shadow">Contact Us <span className="ml-2">&gt;</span></button>

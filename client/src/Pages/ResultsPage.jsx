@@ -37,6 +37,20 @@ function ResultsPage() {
   ) : 0;
 
   console.log(analysisResult?.rankingResult?.TitleResult?.RestictedWords?.Message)
+  
+  // Safe parsing of units sold
+  const parseUnitsSold = (unitsSold) => {
+    if (!unitsSold || unitsSold === "N/A") return 0;
+    const numberStr = unitsSold.split(" ")[0] || "0";
+    return parseInt(numberStr.replace(/,/g, ''), 10) || 0;
+  };
+  
+  // Safe formatting of order amount
+  const formatOrderAmount = (orderAmount) => {
+    if (!orderAmount || orderAmount === "N/A" || orderAmount === 0) return "N/A";
+    return `$${orderAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
@@ -54,7 +68,7 @@ function ResultsPage() {
             <div className="flex flex-col md:flex-row gap-16 md:gap-24 mb-12">
               {/* Product Image */}
               <div className="w-full md:w-1/3 flex justify-center items-start">
-                <img src={analysisResult?.image} loading='lazy' alt="Product" className="rounded-lg w-80 h-80 object-cover" />
+                <img src={analysisResult?.image || '/placeholder-image.png'} loading='lazy' alt="Product" className="rounded-lg w-80 h-80 object-cover" />
               </div>
               {/* Product Info */}
               <div className="flex-1 pt-4 md:pt-0">
@@ -66,7 +80,7 @@ function ResultsPage() {
                   <div>Market : <span className="font-medium">{market}</span></div>
                   <div>Category : {analysisResult?.category || 'N/A'}</div>
                   <div>Brand : {analysisResult?.Brand || 'N/A'}</div>
-                  <div>List Price : ${analysisResult?.price || 'N/A'}</div>
+                  <div>List Price : ${analysisResult?.price ? analysisResult.price.toFixed(2) : 'N/A'}</div>
                   <div>Star Ratings : {analysisResult?.starRatting || 'N/A'}/5</div>
                   <div>Reviews Count : {analysisResult?.ReviewsCount || 'N/A'}</div>
                 </div>
@@ -75,14 +89,14 @@ function ResultsPage() {
             {/* At a Glance */}
             <div className="mb-12 grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="bg-white border rounded-lg p-6">
-                <div className="font-semibold mb-4">{analysisResult?.rankingErrors+analysisResult?.conversionErrors} Issues found with this product</div>
+                <div className="font-semibold mb-4">{(analysisResult?.rankingErrors || 0) + (analysisResult?.conversionErrors || 0)} Issues found with this product</div>
                 <div className="flex items-center gap-4">
                   <svg width="100" height="100" viewBox="0 0 100 100">
                     <circle cx="50" cy="50" r="40" fill="#f3f4f6" />
                     <circle cx="50" cy="50" r="40" fill="none" stroke="#f87171" strokeWidth="10" strokeDasharray="75 251" />
                     <circle cx="50" cy="50" r="40" fill="none" stroke="#fbbf24" strokeWidth="10" strokeDasharray="50 251" strokeDashoffset="-75" />
                     <circle cx="50" cy="50" r="40" fill="none" stroke="#10b981" strokeWidth="10" strokeDasharray="126 251" strokeDashoffset="-125" />
-                    <text x="50" y="55" textAnchor="middle" fill="#111827" fontSize="22" fontWeight="bold">{analysisResult?.rankingErrors+analysisResult?.conversionErrors}</text>
+                    <text x="50" y="55" textAnchor="middle" fill="#111827" fontSize="22" fontWeight="bold">{(analysisResult?.rankingErrors || 0) + (analysisResult?.conversionErrors || 0)}</text>
                     <text x="50" y="70" textAnchor="middle" fill="#6b7280" fontSize="8">ERRORS</text>
                   </svg>
                   <div className="text-sm space-y-1">
@@ -113,13 +127,13 @@ function ResultsPage() {
                 <div className="bg-white border rounded-lg p-6">
                   <div className="flex items-center justify-between">
                     <div className="text-lg font-bold text-gray-900">Unit Sold</div>
-                    <div className="text-base text-gray-600">{parseInt(analysisResult?.unitsSold.split(" ")[0],10) || 'N/A'}</div>
+                    <div className="text-base text-gray-600">{parseUnitsSold(analysisResult?.unitsSold) || 'N/A'}</div>
                   </div>
                 </div>
                 <div className="bg-white border rounded-lg p-6">
                   <div className="flex items-center justify-between">
                     <div className="text-lg font-bold text-gray-900">Sales</div>
-                    <div className="text-base text-gray-600">{analysisResult?.orderAmount || "N/A"}</div>
+                    <div className="text-base text-gray-600">{formatOrderAmount(analysisResult?.orderAmount)}</div>
                   </div>
                 </div>
               </div>

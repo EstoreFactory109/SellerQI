@@ -1,4 +1,6 @@
 const axios = require('axios');
+const Campaign = require('../../models/CampaignModel');
+const logger = require('../../utils/Logger.js');
 
 // Base URIs for different regions (same as PPCSpendsSalesUnitsSold.js)
 const BASE_URIS = {
@@ -8,7 +10,7 @@ const BASE_URIS = {
 };
 
 
-async function getCampaign(accessToken, profileId, region) {
+async function getCampaign(accessToken, profileId, region,userId,country) {
   try {
     // Validate region and get base URI
     const baseUri = BASE_URIS[region];
@@ -30,7 +32,22 @@ async function getCampaign(accessToken, profileId, region) {
     const response = await axios.get(url, { headers });
 
     // Return the response data
-    return response.data;
+
+    const createCampaignData= await Campaign.create({
+      userId,
+      country,
+      region,
+      campaignData: response.data
+    })
+
+    if(!createCampaignData){
+      logger.error('Failed to create campaign data');
+      return res.status(500).json({
+        message: 'Failed to create campaign data'
+      })
+    }
+
+    return createCampaignData;
 
   } catch (error) {
     // Handle different types of errors

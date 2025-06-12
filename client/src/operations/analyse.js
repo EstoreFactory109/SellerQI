@@ -339,7 +339,9 @@ const analyseData = (data) => {
         ProductWiseSponsoredAds: data.ProductWiseSponsoredAds,
         profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
         sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
-        keywords: data.keywords || []
+        keywords: data.keywords || [],
+        searchTerms: data.searchTerms || [],
+        campaignData: data.campaignData || []
     };
 
     return { dashboardData };

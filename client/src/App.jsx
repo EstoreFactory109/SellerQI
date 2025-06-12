@@ -30,6 +30,7 @@ import ContactUs from './Pages/Contact.jsx';
 import Terms from './Pages/Terms.jsx';
 import LoadingPage from './Pages/LoadingPage.jsx';
 import ResultsPage from './Pages/ResultsPage.jsx';
+import RefundPolicy from './Pages/RefundPolicy.jsx';
 
 
 const App = () => {
@@ -57,6 +58,7 @@ const App = () => {
         <Route path='/privacy-policy' element={<PrivacyPolicy />} />
         <Route path='/terms-of-use' element={<Terms />} />
         <Route path='/contact-us' element={<ContactUs />} />
+        <Route path='/refund-policy' element={<RefundPolicy />} />
         <Route path='/loading' element={<LoadingPage />} />
         <Route path='/results' element={<ResultsPage />} />
         <Route

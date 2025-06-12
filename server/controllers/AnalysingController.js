@@ -30,6 +30,8 @@ const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsMo
 const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
 const NegetiveKeywords = require('../models/NegetiveKeywords.js');
 const KeywordModel = require('../models/keywordModel.js');
+const SearchTerms = require('../models/SearchTermsModel.js');
+const Campaign = require('../models/CampaignModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -147,7 +149,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         ProductWiseFBA,
         negetiveKeywords,
         keywords,
-        
+        searchTerms,
+        campaignData,
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -172,6 +175,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         ProductWiseFBAData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
 
@@ -179,7 +184,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
    
 
 
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords,keywords].every(Boolean)) {
+    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords,keywords,searchTerms,campaignData].every(Boolean)) {
         logger.error(new ApiError(404, "Required data not found"));
         return {
             status: 404,
@@ -317,7 +322,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
         ProductWiseFBAData: ProductWiseFBA.fbaData,
         negetiveKeywords: negetiveKeywords.negetiveKeywordsData,
-        keywords: keywords.keywordData
+        keywords: keywords.keywordData,
+        searchTerms: searchTerms.searchTermData,
+        campaignData: campaignData.campaignData
     };
 
 

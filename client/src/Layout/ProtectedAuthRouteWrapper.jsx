@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import Loader from '../Components/Loader/Loader.jsx';
 
 const ProtectedAuthRouteWrapper = ({ children }) => {
   const [isAuth, setIsAuth] = useState(null); // null = loading, true or false = known
@@ -42,9 +43,9 @@ const ProtectedAuthRouteWrapper = ({ children }) => {
     validate();
   }, [navigate]);
 
-  // Show nothing or a loader while auth status is unknown
+  // Show loader while auth status is unknown
   if (isAuth === null) {
-    return <div>Loading...</div>;
+    return <Loader />;
   }
 
   // If user is authenticated, don't show this page (redirect done)

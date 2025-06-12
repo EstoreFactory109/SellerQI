@@ -38,7 +38,7 @@ const sellerCentral=new mongoose.Schema({
   },
   products:[Products],
   TotatProducts:[TotatProductsBasedOnDate]
-})
+}, {timestamps: true})
 // Define the schema
 const SellerSchema = new mongoose.Schema(
   {

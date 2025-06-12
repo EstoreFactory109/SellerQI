@@ -7,10 +7,10 @@ const { generateAccessToken } = require('../Services/AmazonAds/GenerateToken.js'
 const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js');
 const { getPPCSpendsSalesUnitsSold } = require('../Services/AmazonAds/PPCSpendsSalesUnitsSold.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
-const {CampaignPerformanceReport} = require('../Services/AmazonAds/Campaign Performance Report(High ACoS Campaigns).js');
-const {getAdGroups} = require('../Services/AmazonAds/GetAdGroups.js');
+
+const {getAdGroups} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
 const {getKeywords} = require('../Services/AmazonAds/Keywords.js');
-const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
+const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 
@@ -158,21 +158,15 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 
 
   const testGetCampaigns = async (req, res) => {
-    const { accessToken, region,profileId } = req.body;
-    const result = await getCampaign(accessToken,profileId,region);
+    const { accessToken, profileId } = req.body;
+    const result = await getCampaign(accessToken,profileId,"NA","681b7e41525925e8abb7d3c6","US");
     return res.status(200).json({
         data: result
     })
   }
 
 
-  const testCampaignPerformanceReport = async (req, res) => {
-    const { accessToken, region,profileId,date } = req.body;
-    const result = await CampaignPerformanceReport(accessToken,profileId,date,region);
-    return res.status(200).json({
-        data: result
-    })
-  }
+
 
   const testGetAdGroups = async (req, res) => {
     const { accessToken, region,profileId,campaignIds } = req.body;
@@ -195,7 +189,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
   const testGetPPCSpendsBySKU = async (req, res) => {
     const { accessToken, region,profileId } = req.body;
    
-    const result = await getPPCSpendsBySKU(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region);
+    const result = await getSearchKeywords(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region);
     return res.status(200).json({
         data: result
     })
@@ -221,6 +215,6 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 
 module.exports = { testReport, getTotalSales, 
   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
-   testGetCampaigns,testCampaignPerformanceReport,testGetAdGroups,
+   testGetCampaigns,testGetAdGroups,
    testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand
    }

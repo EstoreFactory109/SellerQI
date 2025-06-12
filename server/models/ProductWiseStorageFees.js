@@ -26,7 +26,7 @@ const ProductWiseStorageFeesSchema = new mongoose.Schema({
             }
         }
     ]
-});
+}, {timestamps: true});
 
 const ProductWiseStorageFees = mongoose.model('ProductWiseStorageFees', ProductWiseStorageFeesSchema);
 

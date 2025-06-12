@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronRight, Check, X, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +10,10 @@ export default function SellerQIHomepage() {
   const [market, setMarket] = useState('US');
 
   const navigate = useNavigate();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const handleAnalyze = () => {
     navigate(`/loading?asin=${asin}&market=${market}`);
@@ -147,7 +151,7 @@ export default function SellerQIHomepage() {
             {/* Dashboard Mockup Image */}
             <div className="bg-white rounded-lg shadow-xl overflow-hidden">
               <img
-                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1600/v1749361323/Issues_zkmc4i.png"
+                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1600/v1749657988/Issues_zkmc4i.png"
                 alt="Dashboard Mockup"
                 loading="eager"
                 className="w-full h-auto"
@@ -160,7 +164,7 @@ export default function SellerQIHomepage() {
           <div className="grid md:grid-cols-2 gap-12 items-center mb-20">
             <div className="bg-white rounded-lg shadow-xl overflow-hidden">
               <img
-                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749361323/product_uwjfki.png"
+                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749658154/product_uwjfki.png"
                 alt="Error Illustration"
                 loading="eager"
                 className="w-full h-auto"
@@ -212,7 +216,7 @@ export default function SellerQIHomepage() {
 
             <div className="bg-white rounded-lg shadow-xl overflow-hidden">
               <img
-                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749361324/reports_r4erus.png"
+                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749658291/reports_r4erus.png"
                 alt="Reports Section"
                 loading="eager"
                 className="w-full h-auto"
@@ -233,8 +237,8 @@ export default function SellerQIHomepage() {
               <thead>
                 <tr className="bg-[#3B4A6B] text-white">
                   <th className="py-4 px-6 text-left">FEATURE</th>
-                  <th className="py-4 px-6 text-center">IBEX LITE</th>
-                  <th className="py-4 px-6 text-center">IBEX PRO</th>
+                  <th className="py-4 px-6 text-center">Seller QI LITE</th>
+                  <th className="py-4 px-6 text-center">Seller QI PRO</th>
                 </tr>
               </thead>
               <tbody>
@@ -304,7 +308,7 @@ export default function SellerQIHomepage() {
           {/* Logo */}
           <div className="mb-8">
             <div className="w-24 h-24 mx-auto bg-black rounded-full flex items-center justify-center">
-              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749234188/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
+              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
             </div>
           </div>
 

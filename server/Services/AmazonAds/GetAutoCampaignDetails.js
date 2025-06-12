@@ -1,9 +1,11 @@
 const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
-
+const { generateAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
-
+const userModel = require('../../models/userModel.js');
+// You'll need to create this new model
+const AutoCampaignSearchTermsModel = require('../../models/AutoCampaignSearchTermsModel.js');
 
 // Base URIs for different regions
 const BASE_URIS = {
@@ -12,7 +14,7 @@ const BASE_URIS = {
     'FE': 'https://advertising-api-fe.amazon.com'
 };
 
-async function getReportId(accessToken, profileId, date, region) {
+async function getSearchTermReportId(accessToken, profileId, region) {
     try {
         // Validate region and get base URI
         const baseUri = BASE_URIS[region];
@@ -31,26 +33,46 @@ async function getReportId(accessToken, profileId, date, region) {
             'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
         };
 
-        // Set up request body
+        // Set up request body for Search Term Report with AUTO campaigns filter
         const body = {
-            "name": "Campaign Performance for ACoS Analysis",
-            "startDate": "2025-04-01",
-            "endDate": "2025-04-30",
+            "name": "Auto Campaign Search Terms Report",
+            "startDate": "2025-05-01",
+            "endDate": "2025-05-31",
             "configuration": {
                 "adProduct": "SPONSORED_PRODUCTS",
-                "reportTypeId": "spCampaigns",
-                "groupBy": ["campaign"],
+                "reportTypeId": "spSearchTerm",  // Changed from spAdvertisedProduct
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON",
+                "groupBy": ["searchTerm", "campaignId"],  // Group by search term and campaign
                 "columns": [
+                    "date",
+                    "searchTerm",           // The actual search query
                     "campaignId",
                     "campaignName",
-                    "spend",
-                    "sales7d",
-                    "purchases7d",
+                    "adGroupId",
+                    "adGroupName",
+                    "advertisedAsin",       // Which ASIN was shown
+                    "advertisedSku",
                     "impressions",
-                    "clicks"
+                    "clicks",
+                    "cost",
+                    "purchases1d",
+                    "purchases7d",
+                    "purchases14d",
+                    "purchases30d",
+                    "sales1d",
+                    "sales7d",
+                    "sales14d",
+                    "sales30d",
+                    "acos",                 // Advertising Cost of Sales
+                    "roas"                  // Return on Ad Spend
                 ],
-                "timeUnit": "DAILY",
-                "format": "GZIP_JSON"
+                "filters": [
+                    {
+                        "field": "targetingType",
+                        "values": ["AUTO"]  // CRITICAL: Only get auto campaigns
+                    }
+                ]
             }
         }
 
@@ -63,8 +85,6 @@ async function getReportId(accessToken, profileId, date, region) {
     } catch (error) {
         // Handle different types of errors
         if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
             console.error('API Error Response:', {
                 status: error.response.status,
                 data: error.response.data,
@@ -72,18 +92,16 @@ async function getReportId(accessToken, profileId, date, region) {
             });
             throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
         } else if (error.request) {
-            // The request was made but no response was received
             console.error('No response received:', error.request);
             throw new Error('No response received from Amazon Ads API');
         } else {
-            // Something happened in setting up the request that triggered an Error
             console.error('Request setup error:', error.message);
             throw error;
         }
     }
 }
 
-async function checkReportStatus(reportId, accessToken, profileId, region) {
+async function checkReportStatus(reportId, accessToken, profileId, region, userId) {
     try {
         // Validate region and get base URI
         const baseUri = BASE_URIS[region];
@@ -110,18 +128,30 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
             try {
                 // Make GET request to check status
                 const response = await axios.get(url, { headers });
-                const { status, location } = response.data;
+                const { status } = response.data;
+                const location = response.data.url;
+
+                if (attempts === 58 || attempts === 118 || attempts === 178) {
+                    const user = await userModel.findById(userId).select('spiRefreshToken');
+                    if (!user || !user.spiRefreshToken) {
+                        return {
+                            status: 'FAILURE',
+                            reportId: reportId,
+                            error: 'Report generation failed - unable to refresh token'
+                        }
+                    }
+                    accessToken = await generateAccessToken(user.spiRefreshToken);
+                }
 
                 console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
-                if (status === 'SUCCESS') {
+                if (status === 'COMPLETED') {
                     return {
-                        status: 'SUCCESS',
+                        status: 'COMPLETED',
                         location: location,
                         reportId: reportId
                     };
-
                 } else if (status === 'FAILURE') {
                     return {
                         status: 'FAILURE',
@@ -131,7 +161,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
                 }
 
                 // If still processing, wait 60 seconds before next check
-                if (status === 'IN_PROGRESS' || status === 'PENDING') {
+                if (status === 'PROCESSING' || status === 'PENDING') {
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds
                     attempts++;
                 } else {
@@ -173,19 +203,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
     }
 }
 
-
-async function downloadReportData(location, accessToken, profileId) {
+async function downloadSearchTermReportData(location, accessToken, profileId) {
     try {
         // 1) Always ask for binary so we can gunzip ourselves
         const response = await axios.get(location, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
-                'Amazon-Advertising-API-Scope': profileId,
-                'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
-            },
             responseType: 'arraybuffer',  // get raw bytes
-            decompress: false             // turn off axios’s auto-inflate
+            decompress: false             // turn off axios's auto-inflate
         });
 
         // 2) Inflate the GZIP buffer
@@ -194,11 +217,46 @@ async function downloadReportData(location, accessToken, profileId) {
 
         // 3) Parse JSON
         const reportJson = JSON.parse(payloadText);
-        console.log('Successfully downloaded and parsed report:', {
-            totalRows: reportJson.metadata?.totalRows ?? reportJson.length
-        });
+        
+        if(!reportJson){
+            return {
+                success: false,
+                message: "Error in downloading report",
+            };
+        }
+        
+        const searchTermsData = [];
 
-        return reportJson;
+        reportJson.forEach(item => {
+            searchTermsData.push({
+                date: item.date,
+                searchTerm: item.searchTerm,  // The actual search query
+                campaignId: item.campaignId,
+                campaignName: item.campaignName,
+                adGroupId: item.adGroupId,
+                adGroupName: item.adGroupName,
+                advertisedAsin: item.advertisedAsin,
+                advertisedSku: item.advertisedSku,
+                impressions: item.impressions,
+                clicks: item.clicks,
+                cost: item.cost,
+                purchasesIn1Day: item.purchases1d,
+                purchasesIn7Days: item.purchases7d,
+                purchasesIn14Days: item.purchases14d,
+                purchasesIn30Days: item.purchases30d,
+                salesIn1Day: item.sales1d,
+                salesIn7Days: item.sales7d,
+                salesIn14Days: item.sales14d,
+                salesIn30Days: item.sales30d,
+                acos: item.acos,  // Advertising Cost of Sales percentage
+                roas: item.roas,  // Return on Ad Spend
+                // Calculate additional metrics if needed
+                conversionRate: item.clicks > 0 ? (item.purchases7d / item.clicks * 100).toFixed(2) : 0,
+                cpc: item.clicks > 0 ? (item.cost / item.clicks).toFixed(2) : 0
+            });
+        });
+        
+        return searchTermsData;
 
     } catch (err) {
         // 4) Better error logging
@@ -212,10 +270,12 @@ async function downloadReportData(location, accessToken, profileId) {
     }
 }
 
-async function CampaignPerformanceReport(accessToken, profileId, date, region) {
+async function getAutoSearchTermsWithSales(accessToken, profileId, userId, country, region) {
+    console.log(`Getting search terms for auto campaigns in region: ${region}`);
+
     try {
         // Get the report ID first
-        const reportData = await getReportId(accessToken, profileId, date, region);
+        const reportData = await getSearchTermReportId(accessToken, profileId, region);
 
         if (!reportData || !reportData.reportId) {
             throw new Error('Failed to get report ID');
@@ -224,19 +284,49 @@ async function CampaignPerformanceReport(accessToken, profileId, date, region) {
         console.log(`Report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
-        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region);
+        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);
 
-        if (reportStatus.status === 'SUCCESS') {
-            console.log('Report generated successfully:', reportStatus.location);
-
+        if (reportStatus.status === 'COMPLETED') {
             // Download and parse the report data
-            const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
+            const searchTermsContent = await downloadSearchTermReportData(reportStatus.location, accessToken, profileId);
+
+            // Optional: Filter for high-performing search terms
+            const highPerformingTerms = searchTermsContent.filter(term => 
+                term.salesIn7Days > 0 || term.clicks >= 10
+            );
+
+            // Save to database
+            const createSearchTermsData = await AutoCampaignSearchTermsModel.create({
+                userId: userId,
+                country: country,
+                region: region,
+                reportDate: new Date(),
+                totalSearchTerms: searchTermsContent.length,
+                highPerformingTerms: highPerformingTerms.length,
+                searchTerms: searchTermsContent
+            });
+
+            if(!createSearchTermsData){
+                return {
+                    success: false,
+                    message: "Error in creating search terms data",
+                };
+            }
+
+            // Optional: Return summary statistics
+            const summary = {
+                totalSearchTerms: searchTermsContent.length,
+                totalSpend: searchTermsContent.reduce((sum, term) => sum + term.cost, 0).toFixed(2),
+                totalSales7d: searchTermsContent.reduce((sum, term) => sum + term.salesIn7Days, 0).toFixed(2),
+                totalClicks: searchTermsContent.reduce((sum, term) => sum + term.clicks, 0),
+                averageAcos: (searchTermsContent.reduce((sum, term) => sum + (term.acos || 0), 0) / searchTermsContent.length).toFixed(2)
+            };
 
             return {
                 success: true,
-                reportId: reportStatus.reportId,
-                location: reportStatus.location,
-                data: reportContent
+                message: "Auto campaign search terms data fetched successfully",
+                data: createSearchTermsData,
+                summary: summary
             };
         } else {
             console.error('Report generation failed:', reportStatus.error);
@@ -248,14 +338,11 @@ async function CampaignPerformanceReport(accessToken, profileId, date, region) {
         }
 
     } catch (error) {
-        console.error('Error in getPPCSpendsSalesUnitsSold:', error.message);
+        console.error('Error in getAutoSearchTermsWithSales:', error.message);
         throw error;
     }
 }
 
 module.exports = {
-    CampaignPerformanceReport,
+    getAutoSearchTermsWithSales,
 };
-
-
-
