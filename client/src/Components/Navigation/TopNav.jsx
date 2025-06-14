@@ -103,7 +103,7 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="min-w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
+                                className="w-full absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
                             >
                                 {/* Show existing accounts if there are multiple accounts */}
                                 {sellerAccount.length > 1 && sellerAccount.map((elm, key) =>

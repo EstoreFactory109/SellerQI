@@ -275,7 +275,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
        })
   ])
 
-   let [
+      let [
        WeeklySales, 
     shipment,
        financeData,
@@ -300,8 +300,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
            return [];
        }),
        tokenManager.wrapDataToSendFunction(
-           getBrand,dataToSend,userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
+           getBrand, userId, RefreshToken, AdsRefreshToken
+       )(dataToSend, userId, Base_URI).catch(err => {
            logger.error(`Brand Data Error: ${err.message}`);
            return null;
        })
@@ -436,6 +436,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("Shipment data not available - continuing without it");
     }
 
+    if (!brandData) {
+        logger.warn("Brand data not available - continuing without it");
+    }
+
     const result = {
         MerchantlistingData: merchantListingsData,
         v2data: v2data,
@@ -445,7 +449,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
         RestockinventoryData: RestockinventoryData,
         productReview: productReview,
         WeeklySales: WeeklySales,
-        shipment: shipment
+        shipment: shipment,
+        brandData: brandData
     }
 
     // Final validation - log warnings for missing data but continue
