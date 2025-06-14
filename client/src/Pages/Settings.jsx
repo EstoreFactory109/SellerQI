@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 
 import Profile from '../Components/settings/UserProfile/Profile.jsx';
 import Security from '../Components/settings/Security/Security.jsx';
@@ -11,6 +12,7 @@ const Settings = () => {
   const [prevOption, setPrevOption] = useState('User-Profile');
   const [hasInteracted, setHasInteracted] = useState(false);
   const [isMobileOrTablet, setIsMobileOrTablet] = useState(false);
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const checkDevice = () => {
@@ -22,6 +24,16 @@ const Settings = () => {
       window.removeEventListener('resize', checkDevice);
     };
   }, []);
+
+  // Check for URL parameter to directly navigate to specific tab
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'account-integration') {
+      setPrevOption(settingOption);
+      setSettingOption('Account-Integration');
+      setHasInteracted(true);
+    }
+  }, [searchParams, settingOption]);
 
   const order = ['User-Profile', 'Security', 'Account-Integration', 'Team-Members'];
 

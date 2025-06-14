@@ -56,7 +56,7 @@ const TopNav = () => {
                 region:region
             }
            
-            const response=await axios.post(`http://localhost:8080/app/switch-account`,data,{withCredentials:true})
+            const response=await axios.post(`${import.meta.env.VITE_BASE_URI}/app/switch-account`,data,{withCredentials:true})
             if(response.status===200){
                 window.location.href = "/seller-central-checker/dashboard";
             }
@@ -94,9 +94,9 @@ const TopNav = () => {
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div className="lg:px-4 lg:py-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 min-w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
                         <p>{user?.brand || "Brand Name"} | {marketplaces[Country]}</p>
-                        {sellerAccount.length>1 &&<img src={Arrow} alt="" className='w-3 h-2 ' />}
+                        <img src={Arrow} alt="" className='w-3 h-2 ' />
                     </div>
-                    {sellerAccount.length>1 &&<AnimatePresence>
+                    <AnimatePresence>
                         {openDropDown && (
                             <motion.div
                                 initial={{ opacity: 0, scaleY: 0 }}
@@ -105,20 +105,30 @@ const TopNav = () => {
                                 transition={{ duration: 0.25 }}
                                 className="min-w-[13rem] absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
                             >
-                                { sellerAccount.length>1 &&  sellerAccount.map((elm, key) =>
-                                   
-                                        <div
-                                            key={key}
-                                            className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
-                                            onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
-                                        >
-                                            {elm.brand || "Brand Name"} | {marketplaces[elm.country]}
-                                        </div>
-                                    
+                                {/* Show existing accounts if there are multiple accounts */}
+                                {sellerAccount.length > 1 && sellerAccount.map((elm, key) =>
+                                    <div
+                                        key={key}
+                                        className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
+                                        onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
+                                    >
+                                        {elm.brand || "Brand Name"} | {marketplaces[elm.country]}
+                                    </div>
                                 )}
+                                
+                                {/* Add New Account Option */}
+                                <div
+                                    className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 border-t border-gray-200"
+                                    onClick={() => {
+                                        setOpenDropDown(false);
+                                        navigate('/seller-central-checker/settings?tab=account-integration');
+                                    }}
+                                >
+                                    + Add New Account
+                                </div>
                             </motion.div>
                         )}
-                    </AnimatePresence>}
+                    </AnimatePresence>
 
                 </div>
                 <div className="w-6 h-6 lg:w-7 lg:h-8 relative flex justify-center items-center mr-2" >
