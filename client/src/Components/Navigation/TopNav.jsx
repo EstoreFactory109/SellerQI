@@ -41,6 +41,7 @@ const TopNav = () => {
     const Country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country);
     const sellerAccount = useSelector(state => state.AllAccounts?.AllAccounts) || []
     const [openDropDown, setOpenDropDown] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
     const dispatch = useDispatch();
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
@@ -48,6 +49,7 @@ const TopNav = () => {
 
     const switchAccount = async (userId="",country,region) => {
         try{
+            setIsLoading(true);
             const data={
                 userId:userId,
                 country:country,
@@ -60,6 +62,7 @@ const TopNav = () => {
             }
         }catch(error){
             console.log(error)
+            setIsLoading(false);
         }
     }
 
@@ -126,6 +129,22 @@ const TopNav = () => {
                 <img src={profilepic || ProfileIcon} alt="" className="lg:w-8 lg:h-8 w-6 h-6 rounded-full border-2 border-gray-300 cursor-pointer" onClick={() => navigate('/seller-central-checker/settings')} />
             </div>
 
+            {/* Loading Screen Overlay */}
+            {isLoading && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
+                >
+                    <div className="bg-white rounded-lg p-8 flex flex-col items-center justify-center shadow-lg">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#333651] mb-4"></div>
+                        <p className="text-gray-700 text-lg font-medium">Switching Account...</p>
+                        <p className="text-gray-500 text-sm mt-2">Please wait</p>
+                    </div>
+                </motion.div>
+            )}
         </nav>
     )
 }
