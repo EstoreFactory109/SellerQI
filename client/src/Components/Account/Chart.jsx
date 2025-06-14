@@ -6,6 +6,18 @@ const IssuesLineChart = () => {
 
       const info = useSelector(state => state.History.HistoryInfo);
 
+  // Handle empty or invalid data
+  if (!info || !Array.isArray(info) || info.length === 0) {
+    return (
+      <div>
+        <h2>Issues Week by Week</h2>
+        <div className="text-center text-gray-500 py-8">
+          No data found in the history section
+        </div>
+      </div>
+    );
+  }
+
   const chartData = info.slice(0, 10);
 
   const categories = chartData.map(item => new Date(item.Date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }));

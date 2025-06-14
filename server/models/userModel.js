@@ -60,10 +60,6 @@ const userSchema = new mongoose.Schema(
         type: String,
         required: false,
       },
-      spiRefreshToken: {
-        type: String,
-        required: false,
-      },
       spiAccessToken: {
         type: String,
         required: false,

@@ -19,12 +19,12 @@ axiosRetry(axios, {
   }
 });
 
-const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken,UserId) => {
+const getBrand = async ( dataToReceive,UserId, baseuri,) => {
   const host = baseuri;
 
-  const queryParams = `marketplaceIds=${marketplaceId}&includedData=attributes`
+  const queryParams = `marketplaceIds=${dataToReceive.marketplaceId}&includedData=attributes`
 
-  const path = `/catalog/2022-04-01/items/${asin}`;
+  const path = `/catalog/2022-04-01/items/${dataToReceive.ASIN[0]}`;
   const fullUrl = `https://${host}${path}?${queryParams}`;
 
   let request = {
@@ -35,7 +35,7 @@ const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken,Us
       "host": host,
             "user-agent": "MyApp/1.0",
             "content-type": "application/json",
-            "x-amz-access-token": accessToken
+            "x-amz-access-token": dataToReceive.AccessToken
     }
   };
 
@@ -43,7 +43,7 @@ const getBrand = async ( asin,marketplaceId,SessionToken, baseuri,accessToken,Us
   aws4.sign(request, {
     accessKeyId: process.env.AWS_ACCESS_KEY,
     secretAccessKey: process.env.AWS_SECRET_KEY,
-    sessionToken: SessionToken,
+    sessionToken: dataToReceive.SessionToken,
     service: 'execute-api',
     region: 'us-east-1'
   });

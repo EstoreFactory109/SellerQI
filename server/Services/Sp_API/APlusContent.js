@@ -90,7 +90,7 @@ const getContentDocument = async (dataToReceive, userId, baseURI, country, regio
         // Ensure ApiContentDetails is an array, even if empty
         const apiContentDetailsToSave = asinList.map(item => ({
             ContentReferenceKey: item.ContentReferenceKey,
-            Asins: item.Asins,
+            Asins: Array.isArray(item.Asins) ? item.Asins.join(', ') : (item.Asins || ''), // Convert array to comma-separated string
             status: item.status // This will always be 'APPROVED' due to the filter
         }));
 

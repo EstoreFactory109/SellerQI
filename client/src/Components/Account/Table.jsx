@@ -45,7 +45,14 @@ const AccountSnapshotTable = () => {
   };
 
   if (!Array.isArray(info) || info.length === 0) {
-    return <div className="text-center text-gray-500">No data available.</div>;
+    return (
+      <div>
+        <h2 className="text-lg font-semibold mb-4">ACCOUNT SNAPSHOT HISTORY</h2>
+        <div className="text-center text-gray-500 py-8">
+          No data found in the history section
+        </div>
+      </div>
+    );
   }
 
   return (

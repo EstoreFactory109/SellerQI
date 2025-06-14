@@ -9,7 +9,7 @@ const { getPPCSpendsSalesUnitsSold } = require('../Services/AmazonAds/PPCSpendsS
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 
 const {getAdGroups} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
-const {getKeywords} = require('../Services/AmazonAds/Keywords.js');
+const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
@@ -180,7 +180,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     const { accessToken, region,profileId } = req.body;
     const campaignId=["384401447418864","344856825901105","304447074514909"]
     const adGroupId=["430568511470558","507081767760505","366695316274140"]
-    const result = await getKeywords(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region,campaignId,adGroupId);
+    const result = await getNegativeKeywords(accessToken,"3813192246011322","684b2156d5c2340ff1b7bd2b","US",region,campaignId,adGroupId);
     return res.status(200).json({
         data: result
     })
@@ -189,7 +189,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
   const testGetPPCSpendsBySKU = async (req, res) => {
     const { accessToken, region,profileId } = req.body;
    
-    const result = await getSearchKeywords(accessToken,profileId,"681b7e41525925e8abb7d3c6","US",region);
+    const result = await getSearchKeywords(accessToken,"3813192246011322","684b2156d5c2340ff1b7bd2b","US",region);
     return res.status(200).json({
         data: result
     })

@@ -27,6 +27,18 @@ const Products=new mongoose.Schema({
 },{timestamps:true})
 
 const sellerCentral=new mongoose.Schema({
+  spiRefreshToken: {
+    type: String,
+    required: false,
+  },
+  adsRefreshToken:{
+    type: String,
+    required: false,  
+  },
+  ProfileId:{
+    type: String,
+    required: false,
+  },
   country: {
     type: String,
     required: false,
@@ -39,6 +51,8 @@ const sellerCentral=new mongoose.Schema({
   products:[Products],
   TotatProducts:[TotatProductsBasedOnDate]
 }, {timestamps: true})
+
+
 // Define the schema
 const SellerSchema = new mongoose.Schema(
   {
@@ -53,7 +67,7 @@ const SellerSchema = new mongoose.Schema(
     },
     brand:{
       type:String,
-      required:true
+      required:false
     },
     sellerAccount:[sellerCentral]
     

@@ -12,6 +12,12 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
     console.log("📥 Incoming data:", dataToReceive);
 
+    // Validate required parameters
+    if (!dataToReceive || !userId || !baseuri || !country || !region) {
+        logger.error("Missing required parameters for listFinancialEventsMethod");
+        return [];
+    }
+
     // Collect all transactions
     let allTransactions = [];
     let nextToken = null;
@@ -49,19 +55,50 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 headers: request.headers
             });
 
-            const responseData = response.data.payload;
+            const responseData = response.data?.payload;
+
+            if (!responseData) {
+                logger.error("No payload in API response");
+                break;
+            }
 
             console.log("responseData: ",responseData)
             
-            if (responseData.transactions) {
+            if (responseData.transactions && Array.isArray(responseData.transactions)) {
                 allTransactions.push(...responseData.transactions);
             }
             
             nextToken = responseData.nextToken;
             
-        } while (nextToken);
+                } while (nextToken);
 
-      
+        console.log(`📊 Total transactions fetched: ${allTransactions.length}`);
+        
+        if (allTransactions.length === 0) {
+            logger.warn("No financial transactions found for the specified date range");
+            // Return default financial data structure instead of empty array
+            const emptyFinanceData = await listFinancialEvents.create({
+                User: userId,
+                region: region,
+                country: country,
+                Total_Sales: "0.00",
+                Gross_Profit: "0.00",
+                ProductAdsPayment: "0.00",
+                FBA_Fees: "0.00",
+                Amazon_Charges: "0.00",
+                Refunds: "0.00",
+                Storage: "0.00",
+            });
+
+            const emptySalesData = await ProductWiseSales.create({
+                User: userId,
+                region: region,
+                country: country,
+                productWiseSales: []
+            });
+
+            return emptyFinanceData;
+        }
 
         const dataObj = calculateAmazonFees(allTransactions);
 
@@ -84,40 +121,55 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
             console.log("Other Service Fees:", dataObj._debug.otherServiceFees);
         }
 
-        const addToDb = await listFinancialEvents.create({
-            User: userId,
-            region: region,
-            country: country,
-            Total_Sales: dataObj.Total_Sales,
-            Gross_Profit: dataObj.Gross_Profit,
-            ProductAdsPayment: dataObj.ProductAdsPayment,
-            FBA_Fees: dataObj.FBA_Fees,
-            Amazon_Charges: dataObj.Amazon_Charges,
-            Refunds: dataObj.Refunds,
-            Storage: dataObj.Storage,
-        });
+        let addToDb, addToSalesDb;
+        
+        try {
+            addToDb = await listFinancialEvents.create({
+                User: userId,
+                region: region,
+                country: country,
+                Total_Sales: dataObj.Total_Sales,
+                Gross_Profit: dataObj.Gross_Profit,
+                ProductAdsPayment: dataObj.ProductAdsPayment,
+                FBA_Fees: dataObj.FBA_Fees,
+                Amazon_Charges: dataObj.Amazon_Charges,
+                Refunds: dataObj.Refunds,
+                Storage: dataObj.Storage,
+            });
 
-        const addToSalesDb = await ProductWiseSales.create({
-            User: userId,
-            region: region,
-            country: country,
-            productWiseSales: dataObj.ProductWiseSales
-        });
+            addToSalesDb = await ProductWiseSales.create({
+                User: userId,
+                region: region,
+                country: country,
+                productWiseSales: dataObj.ProductWiseSales
+            });
+        } catch (dbError) {
+            logger.error(`Database operation failed: ${dbError.message}`);
+            return [];
+        }
 
         if (!addToDb || !addToSalesDb ) {
             logger.error(new ApiError(500, "Error in adding to DB"));
-            return false;
+            return [];
         }
 
-        const getUser = await UserModel.findById(userId);
-        getUser.listFinancialEvents = addToDb._id;
-        await getUser.save();
+        try {
+            const getUser = await UserModel.findById(userId);
+            if (getUser) {
+                getUser.listFinancialEvents = addToDb._id;
+                await getUser.save();
+            }
+        } catch (userUpdateError) {
+            logger.error(`Failed to update user with financial events ID: ${userUpdateError.message}`);
+            // Continue processing even if user update fails
+        }
 
         return addToDb;
 
     } catch (error) {
         console.error("❌ Error Fetching Financial Events:", error.response?.data || error.message);
-        return false;
+        logger.error(`Finance API Error: ${error.message}`);
+        return [];
     }
 };
 
@@ -137,7 +189,34 @@ const calculateAmazonFees = (dataArray) => {
     // Track unique ASINs to aggregate sales
     const asinSalesMap = new Map();
 
+    // Validate input array
+    if (!Array.isArray(dataArray) || dataArray.length === 0) {
+        console.log("No transactions to process or invalid data array");
+        return {
+            Total_Sales: "0.00",
+            Gross_Profit: "0.00",
+            ProductAdsPayment: "0.00",
+            FBA_Fees: "0.00",
+            Amazon_Charges: "0.00",
+            Refunds: "0.00",
+            Storage: "0.00",
+            ProductWiseSales: [],
+            _debug: {
+                debtRecovery: "0.00",
+                adjustment: "0.00",
+                otherServiceFees: "0.00",
+                transactionCount: 0
+            }
+        };
+    }
+
     dataArray.forEach(transaction => {
+        // Skip invalid transactions
+        if (!transaction || typeof transaction !== 'object') {
+            console.log("Skipping invalid transaction:", transaction);
+            return;
+        }
+        
         const amount = transaction.totalAmount?.currencyAmount || 0;
         const transactionType = transaction.transactionType;
         const description = transaction.description || '';

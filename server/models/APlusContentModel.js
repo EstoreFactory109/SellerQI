@@ -2,17 +2,14 @@ const mongoose = require("mongoose");
 
 // Define the schema
 const ApiContentDetails= new mongoose.Schema({
-    ContentReferenceKey:{
+   
+    Asins:{
         type:String,
-        require:true
+        required:true
     },
-    Asins:[{
-        type:String,
-        require:true
-    }],
     status:{
         type:String,
-        require:true
+        required:true
     }
 })
 const APlusContentSchema = new mongoose.Schema(
@@ -20,15 +17,15 @@ const APlusContentSchema = new mongoose.Schema(
     User:{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
-        require:true
+        required:true
     },
     region:{
         type:String,
-        require:true
+        required:true
     },
     country:{
         type:String,
-        require:true
+        required:true
     },
     ApiContentDetails:[ApiContentDetails]
   },

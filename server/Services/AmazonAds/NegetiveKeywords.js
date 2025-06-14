@@ -1,5 +1,5 @@
 const axios = require('axios');
-const NegetiveKeywords = require('../../models/NegetiveKeywords.js');
+const NegativeKeywords = require('../../models/NegetiveKeywords.js');
 
 
 const BASE_URIS = {
@@ -9,10 +9,17 @@ const BASE_URIS = {
 };
 
 
-async function getKeywords(accessToken, profileId, userId, country, region = 'NA', campaignIdArray, adGroupIdArray) {
+// Helper function to chunk arrays into smaller pieces
+function chunkArray(array, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+        chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
+
+async function getNegativeKeywords(accessToken, profileId, userId, country, region = 'NA', campaignIdArray, adGroupIdArray) {
     try {
-
-
         // Validate region
         if (!BASE_URIS[region]) {
             throw new Error(`Invalid region: ${region}. Must be NA, EU, or FE`);
@@ -27,48 +34,77 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
         // Construct the base URL
         const baseUrl = BASE_URIS[region];
 
-        // Configure the request
-        const config = {
-            method: 'GET',
-            url: `${baseUrl}/v2/negativeKeywords`,
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Amazon-Advertising-API-ClientId': clientId,
-                'Amazon-Advertising-API-Scope': profileId,
-                'Content-Type': 'application/json'
-            },
-            params: {
-                campaignIdFilter: campaignIdArray.join(','),
-                adGroupIdFilter: adGroupIdArray.join(',')
+        // Chunk the arrays into groups of 50
+        const campaignIdChunks = chunkArray(campaignIdArray, 50);
+        const adGroupIdChunks = chunkArray(adGroupIdArray, 50);
+
+        // Array to store all fetched data
+        let allNegativeKeywordsData = [];
+
+        // Fetch data for each combination of chunks
+        for (const campaignChunk of campaignIdChunks) {
+            for (const adGroupChunk of adGroupIdChunks) {
+                try {
+                    // Configure the request for current chunks
+                    const config = {
+                        method: 'GET',
+                        url: `${baseUrl}/v2/negativeKeywords`,
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Amazon-Advertising-API-ClientId': clientId,
+                            'Amazon-Advertising-API-Scope': profileId,
+                            'Content-Type': 'application/json'
+                        },
+                        params: {
+                            campaignIdFilter: campaignChunk.join(','),
+                            adGroupIdFilter: adGroupChunk.join(',')
+                        }
+                    };
+
+                    // Make the request for current chunk combination
+                    const response = await axios(config);
+
+                    if (response && response.data && response.data.length > 0) {
+                        // Process and add the chunk data to the main array
+                        const chunkData = response.data.map(item => ({
+                            campaignId: item.campaignId || '',
+                            adGroupId: item.adGroupId || '',
+                            keywordId: item.keywordId || '',
+                            keywordText: item.keywordText || '',
+                            state: item.state || 'enabled'
+                        }));
+                        
+                        allNegativeKeywordsData.push(...chunkData);
+                    }
+
+                    // Add a small delay between requests to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                } catch (chunkError) {
+                    console.error(`Error fetching chunk - Campaign IDs: ${campaignChunk.join(',')}, AdGroup IDs: ${adGroupChunk.join(',')}:`, chunkError.message);
+                    // Continue with other chunks even if one fails
+                    continue;
+                }
             }
-        };
-
-        // Make the request
-        const response = await axios(config);
-
-        if(response.data.length === 0){
-            return false;
         }
 
-        const negetiveKeywordsData = response.data.map(item => ({
-            campaignId: item.campaignId,
-            adGroupId: item.adGroupId,
-            keywordId: item.keywordId,
-            keywordText: item.keywordText,
-            state: item.state
-        }));
+        // Remove duplicates based on keywordId (if any)
+        const uniqueNegativeKeywordsData = allNegativeKeywordsData.filter((item, index, self) => 
+            index === self.findIndex(t => t.keywordId === item.keywordId)
+        );
 
-        const negetiveKeywords = NegetiveKeywords.create({
+        // Save all merged data to database
+        const negativeKeywords = await NegativeKeywords.create({
             userId: userId,
             country: country,
             region: region,
-            negetiveKeywordsData: negetiveKeywordsData
-        })
+            negativeKeywordsData: uniqueNegativeKeywordsData
+        });
         
-        if(!negetiveKeywords){
+        if(!negativeKeywords){
             return false;
         }
-        return negetiveKeywords;
+        return negativeKeywords;
 
     } catch (error) {
         // Handle specific axios errors
@@ -94,4 +130,4 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
 }
 
 
-module.exports = { getKeywords }
+module.exports = { getNegativeKeywords }

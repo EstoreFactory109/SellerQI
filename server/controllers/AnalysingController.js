@@ -27,7 +27,6 @@ const {
 } = require('../Services/Calculations/Conversion.js');
 const calculateTotalReimbursement = require('../Services/Calculations/Reimburstment.js');
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
-const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
 const NegetiveKeywords = require('../models/NegetiveKeywords.js');
 const KeywordModel = require('../models/keywordModel.js');
 const SearchTerms = require('../models/SearchTermsModel.js');
@@ -63,7 +62,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
             }
         }
 
-       // console.log(userId)
         sellerCentral = getAllSellerAccounts.find(item => item.User.toString() === userId)
 
         if (!sellerCentral) {
@@ -94,7 +92,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
                 }
             })
         })
-        //console.log(allSellerAccounts)
     } else {
 
         sellerCentral = await Seller.findOne({ User: userId });
@@ -127,8 +124,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }
     }
 
-    console.log("SellerAccount: ",SellerAccount)
-
     const createdDate = new Date();
     const ThirtyDaysAgo = new Date(createdDate);
     ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
@@ -146,7 +141,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
         shipmentdata,
         saleByProduct,
         ProductWiseSponsoredAds,
-        ProductWiseFBA,
         negetiveKeywords,
         keywords,
         searchTerms,
@@ -172,27 +166,63 @@ const Analyse = async (userId, country, region, adminId = null) => {
                 $lte: createdDate
             }
         }).sort({ createdAt: -1 }),
-        ProductWiseFBAData.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+
         NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
+    // Create default values for missing data instead of returning error
+    const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
+    const safeV1Data = v1Data || { V1Reports: [] };
+    const safeFinanceData = financeData || { 
+        createdAt: createdDate,
+        Gross_Profit: 0,
+        ProductAdsPayment: 0,
+        FBA_Fees: 0,
+        Storage: 0,
+        Amazon_Charges: 0,
+        Refunds: 0
+    };
+    const safeRestockData = restockInventoryRecommendationsData || { Products: [] };
+    const safeProductReviews = numberOfProductReviews || { Products: [] };
+    const safeListingItems = GetlistingAllItems || { GenericKeyword: [] };
+    const safeCompetitiveData = getCompetitiveData || { Products: [] };
+    const safeAplusResponse = aplusResponse || { ApiContentDetails: [] };
+    const safeTotalSales = TotalSales || { totalSales: [] };
+    const safeShipmentData = shipmentdata || { shipmentData: [] };
+    const safeSaleByProduct = saleByProduct || { productWiseSales: [] };
+    const safeProductWiseSponsoredAds = ProductWiseSponsoredAds || [];
+    const safeNegetiveKeywords = negetiveKeywords || { negetiveKeywordsData: [] };
+    const safeKeywords = keywords || { keywordData: [] };
+    const safeSearchTerms = searchTerms || { searchTermData: [] };
+    const safeCampaignData = campaignData || { campaignData: [] };
 
-    //console.log("ProductWiseSponsoredAds: ",ProductWiseSponsoredAds)
-   
-
-
-    if (![v2Data, v1Data, financeData, restockInventoryRecommendationsData, numberOfProductReviews, GetlistingAllItems, getCompetitiveData, aplusResponse, TotalSales, saleByProduct,ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0,ProductWiseFBA,negetiveKeywords,keywords,searchTerms,campaignData].every(Boolean)) {
-        logger.error(new ApiError(404, "Required data not found"));
-        return {
-            status: 404,
-            message: "Required data not found"
-        }
+    // Log warnings for missing data instead of failing
+    const missingDataWarnings = [];
+    if (!v2Data) missingDataWarnings.push('v2Data');
+    if (!v1Data) missingDataWarnings.push('v1Data');
+    if (!financeData) missingDataWarnings.push('financeData');
+    if (!restockInventoryRecommendationsData) missingDataWarnings.push('restockInventoryRecommendationsData');
+    if (!numberOfProductReviews) missingDataWarnings.push('numberOfProductReviews');
+    if (!GetlistingAllItems) missingDataWarnings.push('GetlistingAllItems');
+    if (!getCompetitiveData) missingDataWarnings.push('getCompetitiveData');
+    if (!aplusResponse) missingDataWarnings.push('aplusResponse');
+    if (!TotalSales) missingDataWarnings.push('TotalSales');
+    if (!shipmentdata) missingDataWarnings.push('shipmentdata');
+    if (!saleByProduct) missingDataWarnings.push('saleByProduct');
+    if (!ProductWiseSponsoredAds || ProductWiseSponsoredAds.length === 0) missingDataWarnings.push('ProductWiseSponsoredAds');
+    if (!negetiveKeywords) missingDataWarnings.push('negetiveKeywords');
+    if (!keywords) missingDataWarnings.push('keywords');
+    if (!searchTerms) missingDataWarnings.push('searchTerms');
+    if (!campaignData) missingDataWarnings.push('campaignData');
+    
+    if (missingDataWarnings.length > 0) {
+        logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
     }
 
-    const financeCreatedDate = financeData.createdAt;
+    const financeCreatedDate = safeFinanceData.createdAt;
     const financeThirtyDaysAgo = new Date(financeCreatedDate);
     financeThirtyDaysAgo.setDate(financeThirtyDaysAgo.getDate() - 30);
 
@@ -203,20 +233,20 @@ const Analyse = async (userId, country, region, adminId = null) => {
         return `${Day} ${Month}`
     }
 
-    // Process ProductWiseSponsoredAds data
-    let mostRecentSponsoredAds = null;
+    // Process ProductWiseSponsoredAds data with safe defaults
+    let mostRecentSponsoredAds = [];
     let sponsoredAdsGraphData = {};
     
-    if (ProductWiseSponsoredAds && ProductWiseSponsoredAds.length > 0) {
+    if (safeProductWiseSponsoredAds && safeProductWiseSponsoredAds.length > 0) {
         // Get the most recent data for display
-        mostRecentSponsoredAds = ProductWiseSponsoredAds[0].sponsoredAds;
+        mostRecentSponsoredAds = safeProductWiseSponsoredAds[0].sponsoredAds || [];
         
         // Organize data by ASIN
         const asinDataMap = {};
         
         // First, collect all unique ASINs from all entries
         const allAsins = new Set();
-        ProductWiseSponsoredAds.forEach(entry => {
+        safeProductWiseSponsoredAds.forEach(entry => {
             if (entry.sponsoredAds && Array.isArray(entry.sponsoredAds)) {
                 entry.sponsoredAds.forEach(product => {
                     const asin = product.asin || product.ASIN;
@@ -237,7 +267,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         
         // Create a map of dates to sponsored ads data for easier lookup
         const dateDataMap = {};
-        ProductWiseSponsoredAds.forEach(entry => {
+        safeProductWiseSponsoredAds.forEach(entry => {
             const dateKey = new Date(entry.createdAt).toDateString();
             dateDataMap[dateKey] = entry.sponsoredAds || [];
         });
@@ -305,34 +335,33 @@ const Analyse = async (userId, country, region, adminId = null) => {
     
 
     const result = {
-        Brand:sellerCentral.brand,
+        Brand: sellerCentral.brand,
         AllSellerAccounts: allSellerAccounts,
         startDate: formatDate(financeThirtyDaysAgo),
         endDate: formatDate(financeCreatedDate),
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {
-            getAccountHealthPercentge: calculateAccountHealthPercentage(v2Data),
-            accountHealth: checkAccountHealth(v2Data, v1Data)
+            getAccountHealthPercentge: calculateAccountHealthPercentage(safeV2Data),
+            accountHealth: checkAccountHealth(safeV2Data, safeV1Data)
         },
-        FinanceData: financeData,
-        replenishmentQty: replenishmentQty(restockInventoryRecommendationsData.Products),
-        TotalSales: TotalSales.totalSales,
+        FinanceData: safeFinanceData,
+        replenishmentQty: replenishmentQty(safeRestockData.Products),
+        TotalSales: safeTotalSales.totalSales,
         ProductWiseSponsoredAds: mostRecentSponsoredAds,
         ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
-        ProductWiseFBAData: ProductWiseFBA.fbaData,
-        negetiveKeywords: negetiveKeywords.negetiveKeywordsData,
-        keywords: keywords.keywordData,
-        searchTerms: searchTerms.searchTermData,
-        campaignData: campaignData.campaignData
+        negetiveKeywords: safeNegetiveKeywords.negetiveKeywordsData,
+        keywords: safeKeywords.keywordData,
+        searchTerms: safeSearchTerms.searchTermData,
+        campaignData: safeCampaignData.campaignData,
+        missingDataWarnings: missingDataWarnings // Include warnings in response
     };
 
 
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));
-    const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(getCompetitiveData.Products).presentAsin);
-    const productReviewsAsins = new Set(numberOfProductReviews.Products.map(p => p.asin));
-    const listingAllAsins = new Set((GetlistingAllItems.GenericKeyword || []).map(p => p.asin));
-    //console.log("setof Listing asins: ", ListingAllItems)
+    const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(safeCompetitiveData.Products).presentAsin);
+    const productReviewsAsins = new Set(safeProductReviews.Products.map(p => p.asin));
+    const listingAllAsins = new Set((safeListingItems.GenericKeyword || []).map(p => p.asin));
 
     const productReviewsDefaulters = [], listingAllItemsDefaulters = [], ProductwithoutBuyboxDefaulters = [];
     asinSet.forEach(asin => {
@@ -350,7 +379,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const AmazonReadyProductsSet = new Set();
     const imageResultArray = [], videoResultArray = [], productReviewResultArray = [], productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
-    numberOfProductReviews.Products.forEach(product => {
+    safeProductReviews.Products.forEach(product => {
         if (!DefaulterList.ProductReviews.includes(product.asin)) {
             const imageResult = checkNumberOfImages(product.product_photos);
             const videoResult = checkIfVideoExists(product.video_url);
@@ -371,7 +400,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     });
 
 
-    GetlistingAllItems.GenericKeyword.forEach(item => {
+    safeListingItems.GenericKeyword.forEach(item => {
         const asin = item.asin;
         if (!DefaulterList.ListingAllItems.includes(asin)) {
             const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
@@ -381,15 +410,16 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }
     });
 
-    const approvedAsins = [...new Set(aplusResponse.ApiContentDetails.filter(el => el.status === "APPROVED").flatMap(el => el.Asins))];
-    const aPlusArray = [];
+   // const approvedAsins = [...new Set(aplusResponse.ApiContentDetails.filter(el => el.status === "APPROVED").flatMap(el => el.Asins))];
+   const aplusProducts = safeAplusResponse.ApiContentDetails;
+    const aPlusArray = checkAPlus(aplusProducts);
 
-    asinSet.forEach(asin => {
-        const aplusResult = checkAPlus(approvedAsins, asin);
+  /*  aplusProducts.forEach(asin => {
+        const aplusResult = checkAPlus(aplusProducts);
         if (aplusResult.status === "Success") AmazonReadyProductsSet.add(asin);
         if (aplusResult.status === "ERROR") AmazonReadyProductsSet.delete(asin);
         aPlusArray.push({ asin, data: aplusResult });
-    });
+    });*/
 
     result.RankingsData = {
         RankingResultArray,
@@ -403,7 +433,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         productReviewResult: productReviewResultArray,
         productStarRatingResult: productStarRatingResultArray,
         aPlusResult: aPlusArray,
-        ProductWithOutBuybox: checkProductWithOutBuyBox(getCompetitiveData.Products).buyboxResult,
+        ProductWithOutBuybox: checkProductWithOutBuyBox(safeCompetitiveData.Products).buyboxResult,
         AmazonReadyproducts: Array.from(AmazonReadyProductsSet)
     };
 
@@ -412,19 +442,29 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
     result.Defaulters = DefaulterList;
 
-    const reimburstmentData = calculateTotalReimbursement(shipmentdata.shipmentData, sellerCentral.products)
+    // Validate shipment data and products before calculating reimbursement
+    let reimburstmentData = null;
+    if (safeShipmentData && safeShipmentData.shipmentData && SellerAccount && SellerAccount.products) {
+        reimburstmentData = calculateTotalReimbursement(safeShipmentData.shipmentData, SellerAccount.products);
+    } else {
+        console.log('No shipment data available or products data missing for reimbursement calculation - using defaults');
+        reimburstmentData = {
+            productWiseReimburstment: [],
+            totalReimbursement: 0
+        };
+    }
 
     if (!reimburstmentData) {
-        logger.error(new ApiError(500, "Failed to fetch reimburstment data"));
-        return {
-            status: 500,
-            message: "Failed to fetch reimburstment data",
-        }
+        logger.warn("Failed to calculate reimbursement data - using defaults");
+        reimburstmentData = {
+            productWiseReimburstment: [],
+            totalReimbursement: 0
+        };
     }
 
 
     result.Reimburstment = reimburstmentData
-    result.SalesByProducts = saleByProduct.productWiseSales
+    result.SalesByProducts = safeSaleByProduct.productWiseSales
 
     return {
         status: 200,
@@ -497,15 +537,23 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
 
     ]);
 
+    // Create safe defaults for missing data instead of returning error
+    const safeFinanceData = financeData || [];
+    const safeRestockData = restockInventoryRecommendationsData || [];
+    const safeCompetitiveData = getCompetitiveData || [];
+    const safeTotalSales = TotalSales || [];
+    const safeShipmentData = shipmentdata || [];
 
-
-
-    if (![financeData, restockInventoryRecommendationsData, getCompetitiveData, TotalSales].every(Boolean)) {
-        logger.error(new ApiError(404, "Required data not found"));
-        return {
-            status: 404,
-            message: "Required data not found"
-        }
+    // Log warnings for missing data instead of failing
+    const missingDataWarnings = [];
+    if (!financeData || financeData.length === 0) missingDataWarnings.push('financeData');
+    if (!restockInventoryRecommendationsData || restockInventoryRecommendationsData.length === 0) missingDataWarnings.push('restockInventoryRecommendationsData');
+    if (!getCompetitiveData || getCompetitiveData.length === 0) missingDataWarnings.push('getCompetitiveData');
+    if (!TotalSales || TotalSales.length === 0) missingDataWarnings.push('TotalSales');
+    if (!shipmentdata || shipmentdata.length === 0) missingDataWarnings.push('shipmentdata');
+    
+    if (missingDataWarnings.length > 0) {
+        logger.warn(`Missing data for date range (using defaults): ${missingDataWarnings.join(', ')}`);
     }
 
     function formatDate(date) {
@@ -521,23 +569,27 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
         startDate: formatDate(end),
         endDate: formatDate(start),
         Country: country,
+        missingDataWarnings: missingDataWarnings // Include warnings in response
     };
 
     function getTotalFinancialData(data) {
-        Gross_Profit = 0
-        ProductAdsPayment = 0
-        FBA_Fees = 0
-        Storage = 0
-        Amazon_Charges = 0
-        Refunds = 0
-        data.forEach(item => {
-            Gross_Profit += Number(item.Gross_Profit)
-            ProductAdsPayment += Number(item.ProductAdsPayment)
-            FBA_Fees += Number(item.FBA_Fees)
-            Storage += Number(item.Storage)
-            Amazon_Charges += Number(item.Amazon_Charges)
-            Refunds += Number(item.Refunds)
-        })
+        let Gross_Profit = 0
+        let ProductAdsPayment = 0
+        let FBA_Fees = 0
+        let Storage = 0
+        let Amazon_Charges = 0
+        let Refunds = 0
+        
+        if (data && data.length > 0) {
+            data.forEach(item => {
+                Gross_Profit += Number(item.Gross_Profit || 0)
+                ProductAdsPayment += Number(item.ProductAdsPayment || 0)
+                FBA_Fees += Number(item.FBA_Fees || 0)
+                Storage += Number(item.Storage || 0)
+                Amazon_Charges += Number(item.Amazon_Charges || 0)
+                Refunds += Number(item.Refunds || 0)
+            })
+        }
 
         return {
             Gross_Profit,
@@ -551,31 +603,49 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
 
     function getTotalReimbursement(data) {
         let totalReimburstment = 0;
-        data.forEach(item => {
-            totalReimburstment += calculateTotalReimbursement(item.shipmentData, sellerCentral.products).totalReimbursement
-        })
+        
+        // Validate that SellerAccount and products exist
+        if (!SellerAccount || !SellerAccount.products) {
+            console.log('Invalid SellerAccount or products data for getTotalReimbursement - using defaults');
+            return totalReimburstment;
+        }
+        
+        if (data && data.length > 0) {
+            data.forEach(item => {
+                if (item && item.shipmentData) {
+                    const reimbursementResult = calculateTotalReimbursement(item.shipmentData, SellerAccount.products);
+                    totalReimburstment += reimbursementResult.totalReimbursement;
+                } else {
+                    console.log('Invalid shipment data item in getTotalReimbursement - skipping');
+                }
+            })
+        }
 
-        //console.log(totalReimburstment)
         return totalReimburstment
     }
 
     function calculateTotalSales(data) {
         let totalSales = 0;
         let dateWiseSales = [];
-        data.forEach((item) => {
-            item.totalSales.forEach((sale) => {
-                if (dateWiseSales.length === 0) {
-                    dateWiseSales.push(sale);
-                    totalSales += sale.TotalAmount
-                } else {
-                    let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
-                    if (!containsInterval) {
-                        dateWiseSales.push(sale);
-                        totalSales += sale.TotalAmount;
-                    }
+        
+        if (data && data.length > 0) {
+            data.forEach((item) => {
+                if (item.totalSales && Array.isArray(item.totalSales)) {
+                    item.totalSales.forEach((sale) => {
+                        if (dateWiseSales.length === 0) {
+                            dateWiseSales.push(sale);
+                            totalSales += sale.TotalAmount || 0
+                        } else {
+                            let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
+                            if (!containsInterval) {
+                                dateWiseSales.push(sale);
+                                totalSales += sale.TotalAmount || 0;
+                            }
+                        }
+                    })
                 }
             })
-        })
+        }
 
         return {
             totalSales,
@@ -583,9 +653,9 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
         }
     }
 
-    result.FinanceData = getTotalFinancialData(financeData)
-    result.reimburstmentData = getTotalReimbursement(shipmentdata)
-    result.TotalSales = calculateTotalSales(TotalSales)
+    result.FinanceData = getTotalFinancialData(safeFinanceData)
+    result.reimburstmentData = getTotalReimbursement(safeShipmentData)
+    result.TotalSales = calculateTotalSales(safeTotalSales)
 
 
 

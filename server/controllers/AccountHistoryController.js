@@ -63,8 +63,7 @@ const getAccountHistory=asyncHandler(async(req,res)=>{
      }
     const GetAccountHistory=await AccountHistory.findOne({User:userId,country:country,region:region});
     if(!GetAccountHistory){
-        logger.error(new ApiError(404,"Account history not found"));
-        return res.status(404).json(new ApiResponse(404,"","Account history not found"));
+        return res.status(200).json(new ApiResponse(200,[],"No account history found"));
     }
     return res.status(200).json(new ApiResponse(200,GetAccountHistory.accountHistory,"Account history fetched successfully"));
 })

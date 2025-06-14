@@ -4,6 +4,7 @@ const promiseLimit = require("promise-limit"); // ✅ Concurrency limiter
 const logger = require("../../utils/Logger.js");
 const User = require("../../models/userModel.js");
 const NumberOfProductReviews = require("../../models/NumberOfProductReviewsModel.js");
+const APlusContentModel = require("../../models/APlusContentModel.js");
 
 // ✅ Setup axios-retry globally
 axiosRetry(axios, {
@@ -112,16 +113,40 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
           video_url: data.data.product_videos?.map(video => video.video_url) || [],
           product_num_ratings: data.data.product_num_ratings || "",
           product_star_ratings: data.data.product_star_rating || "",
+          aplus:data.data.has_aplus || false
         };
       })
     );
 
     const products = await Promise.all(tasks);
+    const aplusProducts = products
+      .filter(product => product !== null) // First filter out null products
+      .map(product => ({
+        Asins: product.asin, // Single ASIN as string (matches schema)
+        status: product.aplus ? 'true' : 'false' // Convert boolean to string to match schema
+      }));
     const filteredProducts = products.filter(product => product !== null);
 
     if (filteredProducts.length === 0) {
       logger.warn("❗ No valid products found. Skipping database insert.");
       return false;
+    }
+
+    if(aplusProducts.length>0){
+      const aplusContent= await APlusContentModel.create({
+        User: userId,
+        region:region,
+        country: country,
+        ApiContentDetails: aplusProducts
+      })
+
+      if(!aplusContent){
+        logger.warn("❗ Failed to save A+ content.");
+        return false;
+      }
+
+      logger.info("✅ A+ content saved successfully");
+      
     }
 
     const addReview = await NumberOfProductReviews.create({

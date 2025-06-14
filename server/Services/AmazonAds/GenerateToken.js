@@ -1,4 +1,8 @@
-const generateAccessToken=async(refreshToken)=>{
+const axios = require('axios');
+const logger = require('../../utils/Logger.js');
+const { ApiError } = require('../../utils/ApiError.js');
+
+const generateAdsAccessToken=async(refreshToken)=>{
     if(!refreshToken){
         logger.error(new ApiError(400,"Refresh token is missing"));
         return false;
@@ -36,5 +40,5 @@ const generateAccessToken=async(refreshToken)=>{
 }
 
 module.exports={
-    generateAccessToken
+    generateAdsAccessToken
 }
