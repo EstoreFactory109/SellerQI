@@ -36,6 +36,12 @@ const TopNav = () => {
         AU: "Australia"
     };
 
+    // Helper function to truncate brand name to 10 characters including spaces
+    const truncateBrandName = (brandName) => {
+        const brand = brandName || "Brand Name";
+        return brand.length > 10 ? brand.substring(0, 10) + "..." : brand;
+    };
+
 
     const user = useSelector((state) => state.Auth?.user);
     const Country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country);
@@ -93,7 +99,7 @@ const TopNav = () => {
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div className="lg:px-4 lg:py-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 min-w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
-                        <p>{user?.brand || "Brand Name"} | {marketplaces[Country]}</p>
+                        <p>{truncateBrandName(user?.brand)} | {marketplaces[Country]}</p>
                         <img src={Arrow} alt="" className='w-3 h-2 ' />
                     </div>
                     <AnimatePresence>
@@ -106,19 +112,21 @@ const TopNav = () => {
                                 className="w-full absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
                             >
                                 {/* Show existing accounts if there are multiple accounts */}
-                                {sellerAccount.length > 1 && sellerAccount.map((elm, key) =>
+                                {sellerAccount.length > 1 && sellerAccount
+                                    .filter(elm => !(elm.country === Country && (elm.brand || "Brand Name") === (user?.brand || "Brand Name")))
+                                    .map((elm, key) =>
                                     <div
                                         key={key}
-                                        className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
+                                        className="min-w-[13rem] min-h-10 bg-white flex justify-start items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
                                         onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                     >
-                                        {elm.brand || "Brand Name"} | {marketplaces[elm.country]}
+                                        {truncateBrandName(elm.brand)} | {marketplaces[elm.country]}
                                     </div>
                                 )}
                                 
                                 {/* Add New Account Option */}
                                 <div
-                                    className="min-w-[13rem] min-h-10 bg-white flex justify-center items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 border-t border-gray-200"
+                                    className="min-w-[13rem] min-h-10 bg-white flex justify-start items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 border-t border-gray-200"
                                     onClick={() => {
                                         setOpenDropDown(false);
                                         navigate('/seller-central-checker/settings?tab=account-integration');

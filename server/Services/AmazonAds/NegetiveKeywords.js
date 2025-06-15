@@ -93,13 +93,21 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
             index === self.findIndex(t => t.keywordId === item.keywordId)
         );
 
-        // Save all merged data to database
-        const negativeKeywords = await NegativeKeywords.create({
-            userId: userId,
-            country: country,
-            region: region,
-            negativeKeywordsData: uniqueNegativeKeywordsData
-        });
+        // Save all merged data to database (update if exists, create if not)
+        const negativeKeywords = await NegativeKeywords.findOneAndUpdate(
+            { 
+                userId: userId,
+                country: country,
+                region: region 
+            },
+            { 
+                negativeKeywordsData: uniqueNegativeKeywordsData
+            },
+            { 
+                new: true, 
+                upsert: true 
+            }
+        );
         
         if(!negativeKeywords){
             return false;

@@ -440,6 +440,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("Brand data not available - continuing without it");
     }
 
+    if (!negativeKeywords) {
+        logger.warn("Negative keywords data not available - continuing without it");
+    }
+
+    if (!searchKeywords) {
+        logger.warn("Search keywords data not available - continuing without it");
+    }
+
     const result = {
         MerchantlistingData: merchantListingsData,
         v2data: v2data,
@@ -450,7 +458,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
         productReview: productReview,
         WeeklySales: WeeklySales,
         shipment: shipment,
-        brandData: brandData
+        brandData: brandData,
+        negativeKeywords: negativeKeywords,
+        searchKeywords: searchKeywords
     }
 
     // Final validation - log warnings for missing data but continue

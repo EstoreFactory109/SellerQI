@@ -173,6 +173,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
+    console.log("negetiveKeywords: ", negetiveKeywords);
+
     // Create default values for missing data instead of returning error
     const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
     const safeV1Data = v1Data || { V1Reports: [] };
@@ -194,7 +196,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const safeShipmentData = shipmentdata || { shipmentData: [] };
     const safeSaleByProduct = saleByProduct || { productWiseSales: [] };
     const safeProductWiseSponsoredAds = ProductWiseSponsoredAds || [];
-    const safeNegetiveKeywords = negetiveKeywords || { negetiveKeywordsData: [] };
+    const safeNegetiveKeywords = negetiveKeywords || { negativeKeywordsData: [] };
     const safeKeywords = keywords || { keywordData: [] };
     const safeSearchTerms = searchTerms || { searchTermData: [] };
     const safeCampaignData = campaignData || { campaignData: [] };
@@ -332,7 +334,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         sponsoredAdsGraphData = asinDataMap;
     }
 
-    
+    console.log("negetiveKeywords: ", safeNegetiveKeywords.negativeKeywordsData);
 
     const result = {
         Brand: sellerCentral.brand,
@@ -350,7 +352,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         TotalSales: safeTotalSales.totalSales,
         ProductWiseSponsoredAds: mostRecentSponsoredAds,
         ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
-        negetiveKeywords: safeNegetiveKeywords.negetiveKeywordsData,
+        negetiveKeywords: safeNegetiveKeywords.negativeKeywordsData,
         keywords: safeKeywords.keywordData,
         searchTerms: safeSearchTerms.searchTermData,
         campaignData: safeCampaignData.campaignData,

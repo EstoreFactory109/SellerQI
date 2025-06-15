@@ -48,12 +48,22 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
         if(response.data.length === 0){
             return false;
         }
-        const createdKeywords = await KeywordModel.create({
-            userId: userId,
-            country: country,
-            region: region,
-            keywordData: response.data
-        })
+        
+        // Update if exists, create if not to prevent duplicates
+        const createdKeywords = await KeywordModel.findOneAndUpdate(
+            { 
+                userId: userId,
+                country: country,
+                region: region 
+            },
+            { 
+                keywordData: response.data
+            },
+            { 
+                new: true, 
+                upsert: true 
+            }
+        );
         
         if(!createdKeywords){
             return false;
