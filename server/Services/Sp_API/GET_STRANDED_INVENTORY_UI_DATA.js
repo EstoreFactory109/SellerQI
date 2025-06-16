@@ -2,7 +2,6 @@ const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
-const logger = require('../../utils/Logger');
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     console.log(marketplaceIds);

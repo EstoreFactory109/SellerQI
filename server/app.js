@@ -13,10 +13,12 @@ const spapiroute=require('./routes/spi.routes.js');
 const analysingRoute=require('./routes/analysing.routes.js')
 const testRoute=require('./routes/testRoutes.js')
 const accountHistoryRoute=require('./routes/AccountHistory.routes.js')
+const cacheRoute=require('./routes/cache.routes.js')
 
 
 const dbConnect=require('./config/dbConn.js')
 const logger=require('./utils/Logger.js')
+const {connectRedis} = require('./config/redisConn.js')
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN,credentials:true}))
@@ -31,12 +33,14 @@ app.use('/app/info',spapiroute)
 app.use('/app/analyse',analysingRoute)
 app.use('/app/test',testRoute);
 app.use('/app/accountHistory',accountHistoryRoute)
+app.use('/app/cache',cacheRoute)
 
 
 
 app.get('/',(req,res)=>{
     res.send("Hello world");
 })
+
 
 dbConnect()
 .then(()=>{
@@ -45,6 +49,21 @@ dbConnect()
 .catch((err)=>{
     logger.error(`Error in connecting to database: ${err}`);
 })
+
+
+const redisConnection = async () => {
+    try {
+        // Connect to Redis once when app starts
+        await connectRedis();
+        logger.info('Redis initialized successfully');
+        
+    } catch (error) {
+        logger.error('Failed to initalize redis:', error);
+        process.exit(1);
+    }
+};
+
+redisConnection();
 
 
 module.exports=app

@@ -5,7 +5,6 @@ const asyncHandler = require('../utils/AsyncHandler.js');
 const { generateAccessToken } = require('../Services/Sp_API/GenerateTokens.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const logger = require('../utils/Logger.js');
-const UserModel = require('../models/userModel.js');
 const Seller = require('../models/sellerCentralModel.js')
 const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js')
 const tokenManager = require('../utils/TokenManager.js');
@@ -30,6 +29,8 @@ const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
+
+const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -192,13 +193,57 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // Validate ppcSpendsBySKU and extract sponsored ads data safely
     const sponsoredAdsData = (ppcSpendsBySKU && Array.isArray(ppcSpendsBySKU.sponsoredAds)) ? ppcSpendsBySKU.sponsoredAds : [];
 
-    // Ensure sponsoredAdsData is an array before mapping
-    const campaignIdArray = Array.isArray(sponsoredAdsData) 
-        ? sponsoredAdsData.map(item => item && item.campaignId).filter(Boolean)
-        : [];
-    const adGroupIdArray = Array.isArray(sponsoredAdsData) 
-        ? sponsoredAdsData.map(item => item && item.adGroupId).filter(Boolean) 
-        : [];
+    // SAFER APPROACH: Get campaign and ad group IDs from ProductWiseSponsoredAdsData model
+    console.log("=== FETCHING CAMPAIGN & AD GROUP IDs FROM DATABASE ===");
+    const storedSponsoredAdsData = await ProductWiseSponsoredAdsData.findOne({ 
+        userId: userId, 
+        region: Region, 
+        country: Country 
+    }).catch(err => {
+        logger.error(`Error fetching stored sponsored ads data: ${err.message}`);
+        return null;
+    });
+
+    let campaignIdArray = [];
+    let adGroupIdArray = [];
+
+    if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
+        // Extract unique campaign and ad group IDs from stored data
+        const campaignIds = new Set();
+        const adGroupIds = new Set();
+        
+        storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+            if (ad.campaignId) campaignIds.add(ad.campaignId);
+            if (ad.adGroupId) adGroupIds.add(ad.adGroupId);
+        });
+        
+        campaignIdArray = Array.from(campaignIds);
+        adGroupIdArray = Array.from(adGroupIds);
+        
+        logger.info(`Successfully fetched from database: ${campaignIdArray.length} unique campaign IDs and ${adGroupIdArray.length} unique ad group IDs`);
+        console.log("Database data summary:");
+        console.log("- Total sponsored ads records:", storedSponsoredAdsData.sponsoredAds.length);
+        console.log("- Unique campaign IDs:", campaignIdArray.length);
+        console.log("- Unique ad group IDs:", adGroupIdArray.length);
+        console.log("- Campaign IDs:", campaignIdArray);
+        console.log("- Ad Group IDs:", adGroupIdArray);
+    } else {
+        // Fallback to live PPC data if no stored data found
+        logger.warn("No stored sponsored ads data found in database, falling back to live PPC data");
+        campaignIdArray = Array.isArray(sponsoredAdsData) 
+            ? sponsoredAdsData.map(item => item && item.campaignId).filter(Boolean)
+            : [];
+        adGroupIdArray = Array.isArray(sponsoredAdsData) 
+            ? sponsoredAdsData.map(item => item && item.adGroupId).filter(Boolean) 
+            : [];
+            
+        logger.info(`Fallback: Using ${campaignIdArray.length} campaign IDs and ${adGroupIdArray.length} ad group IDs from live PPC data`);
+    }
+    
+    console.log("=== FINAL IDs TO USE FOR getNegativeKeywords ===");
+    console.log("Campaign IDs count:", campaignIdArray.length);
+    console.log("Ad Group IDs count:", adGroupIdArray.length);
+    console.log("========================================================");
 
         let competitivePriceData = [];
 
@@ -309,6 +354,17 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
 
 
+    // CALLING getNegativeKeywords WITH DATABASE-SOURCED IDs
+    console.log("=== CALLING getNegativeKeywords ===");
+    console.log("Parameters being passed:");
+    console.log("- Profile ID:", ProfileId);
+    console.log("- User ID:", userId);
+    console.log("- Country:", Country);
+    console.log("- Region:", Region);
+    console.log("- Campaign IDs (from DB):", campaignIdArray);
+    console.log("- Ad Group IDs (from DB):", adGroupIdArray);
+    console.log("======================================");
+
     const [
         negativeKeywords,
         searchKeywords
@@ -320,6 +376,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 Array.isArray(adGroupIdArray) ? adGroupIdArray : []
             ).catch(err => {
                 logger.error(`Negative Keywords Error: ${err.message}`);
+                console.log("ERROR DETAILS:", err);
                 return null;
             }),
             tokenManager.wrapAdsFunction(
@@ -329,6 +386,30 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 return null;
             })
        ]);
+
+    // LOG NEGATIVE KEYWORDS RESULT
+    console.log("=== getNegativeKeywords RESULT ===");
+    if (negativeKeywords) {
+        console.log("✅ SUCCESS - getNegativeKeywords returned data");
+        console.log("Type:", typeof negativeKeywords);
+        console.log("Is Array:", Array.isArray(negativeKeywords));
+        
+        if (Array.isArray(negativeKeywords)) {
+            console.log("Total negative keywords found:", negativeKeywords.length);
+            if (negativeKeywords.length > 0) {
+                console.log("Sample negative keywords (first 3):");
+                negativeKeywords.slice(0, 3).forEach((keyword, index) => {
+                    console.log(`  ${index + 1}.`, JSON.stringify(keyword, null, 2));
+                });
+            }
+        } else if (typeof negativeKeywords === 'object') {
+            console.log("Object keys:", Object.keys(negativeKeywords));
+            console.log("Full result:", JSON.stringify(negativeKeywords, null, 2));
+        }
+    } else {
+        console.log("❌ FAILED - getNegativeKeywords returned null/undefined");
+    }
+    console.log("==================================");
 
 
     function delay(ms) {
@@ -409,9 +490,28 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     // Finance data validation - ensure it's an array
     if (!Array.isArray(financeData)) {
-        logger.warn(`Finance data is not an array, received: ${typeof financeData}, converting to empty array`);
-        // Convert to empty array instead of failing
-        financeData = [];
+        if (financeData && typeof financeData === 'object') {
+            // Try to extract array from common object structures
+            if (Array.isArray(financeData.financialEvents)) {
+                financeData = financeData.financialEvents;
+                logger.info("Extracted financial events array from object");
+            } else if (Array.isArray(financeData.events)) {
+                financeData = financeData.events;
+                logger.info("Extracted events array from object");
+            } else if (Array.isArray(financeData.data)) {
+                financeData = financeData.data;
+                logger.info("Extracted data array from object");
+            } else if (Array.isArray(financeData.items)) {
+                financeData = financeData.items;
+                logger.info("Extracted items array from object");
+            } else {
+                logger.warn(`Finance data is an object but no recognizable array property found. Object keys: ${Object.keys(financeData)}`);
+                financeData = [];
+            }
+        } else {
+            logger.warn(`Finance data is not an array, received: ${typeof financeData}, converting to empty array`);
+            financeData = [];
+        }
     }
 
     // Optional data validation - log warnings but don't fail the entire request
