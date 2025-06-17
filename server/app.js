@@ -14,11 +14,13 @@ const analysingRoute=require('./routes/analysing.routes.js')
 const testRoute=require('./routes/testRoutes.js')
 const accountHistoryRoute=require('./routes/AccountHistory.routes.js')
 const cacheRoute=require('./routes/cache.routes.js')
+const backgroundJobsRoute=require('./routes/backgroundJobs.routes.js')
 
 
 const dbConnect=require('./config/dbConn.js')
 const logger=require('./utils/Logger.js')
 const {connectRedis} = require('./config/redisConn.js')
+const { jobScheduler } = require('./Services/BackgroundJobs/JobScheduler.js')
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN,credentials:true}))
@@ -34,6 +36,7 @@ app.use('/app/analyse',analysingRoute)
 app.use('/app/test',testRoute);
 app.use('/app/accountHistory',accountHistoryRoute)
 app.use('/app/cache',cacheRoute)
+app.use('/app/jobs',backgroundJobsRoute)
 
 
 
@@ -63,7 +66,20 @@ const redisConnection = async () => {
     }
 };
 
+const initializeBackgroundJobs = async () => {
+    try {
+        // Initialize background job scheduler
+        await jobScheduler.initialize();
+        logger.info('Background job scheduler initialized successfully');
+        
+    } catch (error) {
+        logger.error('Failed to initialize background job scheduler:', error);
+        // Don't exit process for job scheduler failure, just log it
+    }
+};
+
 redisConnection();
+initializeBackgroundJobs();
 
 
 module.exports=app

@@ -688,4 +688,4 @@ const getDataFromDate = asyncHandler(async (req, res) => {
     res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
 })
 
-module.exports = { analysingController, getDataFromDate };
+module.exports = { analysingController, getDataFromDate, Analyse };

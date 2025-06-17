@@ -6,6 +6,7 @@ const { ApiResponse } = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/AsyncHandler');
 const {createLocationToken}=require('../utils/Tokens.js');
 const logger = require('../utils/Logger.js');
+const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 
 
 const SaveAllDetails=asyncHandler(async(req,res)=>{
@@ -36,6 +37,15 @@ const SaveAllDetails=asyncHandler(async(req,res)=>{
     getUser.sellerCentral=createSellerCentral._id;
     await getUser.save();
 
+    // Update user's seller accounts in scheduling system
+    try {
+        await UserSchedulingService.updateUserSellerAccounts(userId);
+        logger.info(`Updated seller accounts in scheduling system for user ${userId}`);
+    } catch (error) {
+        logger.error(`Failed to update scheduling for user ${userId}:`, error);
+        // Don't fail the process if scheduling update fails
+    }
+
     const locationToken=await createLocationToken(country,region);
     if(!locationToken){
         logger.error(new ApiError(500,"Error in creating location token")); 
@@ -60,6 +70,16 @@ const saveDetailsOfOtherAccounts=asyncHandler(async(req,res)=>{
     }
     sellerCentral.sellerAccount.push({country:country,region:region});
     await sellerCentral.save();
+
+    // Update user's seller accounts in scheduling system
+    try {
+        await UserSchedulingService.updateUserSellerAccounts(userId);
+        logger.info(`Updated seller accounts in scheduling system for user ${userId}`);
+    } catch (error) {
+        logger.error(`Failed to update scheduling for user ${userId}:`, error);
+        // Don't fail the process if scheduling update fails
+    }
+
     const locationToken=await createLocationToken(country,region);
     if(!locationToken){
         logger.error(new ApiError(500,"Error in creating location token")); 
@@ -82,6 +102,16 @@ const addNewAccount=asyncHandler(async(req,res)=>{
     }
     sellerCentral.sellerAccount.push({region:region,country:country});
     await sellerCentral.save();
+
+    // Update user's seller accounts in scheduling system
+    try {
+        await UserSchedulingService.updateUserSellerAccounts(userId);
+        logger.info(`Updated seller accounts in scheduling system for user ${userId}`);
+    } catch (error) {
+        logger.error(`Failed to update scheduling for user ${userId}:`, error);
+        // Don't fail the process if scheduling update fails
+    }
+
     const locationToken=await createLocationToken(country,region);
     if(!locationToken){
         logger.error(new ApiError(500,"Error in creating location token")); 

@@ -12,9 +12,9 @@ const connectRedis = async () => {
     try {
         redisClient = createClient({
             username: 'default',
-            password: '1wIlUfUSIs8KpljSQQaJzeDXzdQNeEgW',
+            password: process.env.REDIS_PASSWORD,
             socket: {
-                host: 'redis-13335.c267.us-east-1-4.ec2.redns.redis-cloud.com',
+                host: process.env.REDIS_HOST,
                 port: 13335
             }
         });

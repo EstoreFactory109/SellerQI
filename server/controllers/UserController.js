@@ -13,6 +13,7 @@ const { uploadToCloudinary } = require('../Services/Cloudinary/Cloudinary.js');
 const { sendEmailResetLink } = require('../Services/Email/SendResetLink.js');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, whatsapp, email, password } = req.body;
@@ -94,6 +95,15 @@ const verifyUser = asyncHandler(async (req, res) => {
     if (!UpdateRefreshToken) {
         logger.error(new ApiError(500, "Internal server error in updating refresh token"));
         return res.status(500).json(new ApiError(500, "Internal server error in updating refresh token"));
+    }
+
+    // Initialize background job scheduling for the new user
+    try {
+        await UserSchedulingService.initializeUserSchedule(verifyUser.id);
+        logger.info(`Background job scheduling initialized for user ${verifyUser.id}`);
+    } catch (error) {
+        logger.error(`Failed to initialize scheduling for user ${verifyUser.id}:`, error);
+        // Don't fail the verification process if scheduling fails
     }
 
     const options = {
