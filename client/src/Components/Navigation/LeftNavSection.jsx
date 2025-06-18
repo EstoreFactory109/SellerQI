@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck} from 'lucide-react'
+import { NavLink, useLocation } from 'react-router-dom';
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/logout.png';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -8,11 +8,36 @@ import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import BeatLoader from "react-spinners/BeatLoader";
+import { AnimatePresence, motion } from "framer-motion";
+
 const LeftNavSection = () => {
 
     const dispatch = useDispatch();
     const navigate=useNavigate();
+    const location = useLocation();
     const [loader,setLoader]=useState(false)
+    const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
+    
+    // Get current tab from URL search params
+    const searchParams = new URLSearchParams(location.search);
+    const currentTab = searchParams.get('tab') || 'overview';
+    const isIssuesPage = location.pathname.includes('/issues');
+    
+    // Keep dropdown open if we're on issues page
+    React.useEffect(() => {
+        if (isIssuesPage) {
+            setIssuesDropdownOpen(true);
+        }
+    }, [isIssuesPage]);
+
+    // Handle Issues button click
+    const handleIssuesClick = () => {
+        if (!isIssuesPage) {
+            // If not on issues page, navigate to overview
+            navigate('/seller-central-checker/issues?tab=overview');
+        }
+        setIssuesDropdownOpen(!issuesDropdownOpen);
+    };
     
     const logoutUser=async(e)=>{
         e.preventDefault();
@@ -64,21 +89,99 @@ const LeftNavSection = () => {
                             </>
                         )}
                     </NavLink>
-                    <NavLink
-                        to="/seller-central-checker/issues"
-                        className={({ isActive }) =>
-                            isActive
-                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
-                                : 'flex items-center gap-2 p-2 rounded-md'
-                        }
-                    >
-                        {({ isActive }) => (
-                            <>
-                               <BadgeAlert className="w-4 h-4"/>
-                                <p className="font-medium text-xs">Issues</p>
-                            </>
-                        )}
-                    </NavLink>
+                    
+                    {/* Issues with Dropdown */}
+                    <div className="space-y-1">
+                        <div
+                            className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                                isIssuesPage 
+                                    ? 'bg-[#333651] text-white' 
+                                    : 'hover:bg-gray-100'
+                            }`}
+                            onClick={handleIssuesClick}
+                        >
+                            <BadgeAlert className="w-4 h-4"/>
+                            <p className="font-medium text-xs flex-1">Issues</p>
+                            <motion.div
+                                animate={{ rotate: issuesDropdownOpen ? 90 : 0 }}
+                                transition={{ duration: 0.2, ease: "easeInOut" }}
+                            >
+                                {issuesDropdownOpen ? 
+                                    <ChevronDown className="w-3 h-3"/> : 
+                                    <ChevronRight className="w-3 h-3"/>
+                                }
+                            </motion.div>
+                        </div>
+                        
+                        <AnimatePresence>
+                            {issuesDropdownOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: "auto" }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    transition={{ 
+                                        duration: 0.3, 
+                                        ease: "easeInOut",
+                                        opacity: { duration: 0.2 }
+                                    }}
+                                    className="ml-6 space-y-1 overflow-hidden"
+                                >
+                                    <motion.div
+                                        initial={{ y: -10, opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: -10, opacity: 0 }}
+                                        transition={{ delay: 0.1, duration: 0.2 }}
+                                    >
+                                        <NavLink
+                                            to="/seller-central-checker/issues?tab=overview"
+                                            className={() =>
+                                                isIssuesPage && currentTab === 'overview'
+                                                    ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                    : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                            }
+                                        >
+                                            Overview
+                                        </NavLink>
+                                    </motion.div>
+                                    <motion.div
+                                        initial={{ y: -10, opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: -10, opacity: 0 }}
+                                        transition={{ delay: 0.15, duration: 0.2 }}
+                                    >
+                                        <NavLink
+                                            to="/seller-central-checker/issues?tab=category"
+                                            className={() =>
+                                                isIssuesPage && currentTab === 'category'
+                                                    ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                    : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                            }
+                                        >
+                                            Issues By Category
+                                        </NavLink>
+                                    </motion.div>
+                                    <motion.div
+                                        initial={{ y: -10, opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: -10, opacity: 0 }}
+                                        transition={{ delay: 0.2, duration: 0.2 }}
+                                    >
+                                        <NavLink
+                                            to="/seller-central-checker/issues?tab=account"
+                                            className={() =>
+                                                isIssuesPage && currentTab === 'account'
+                                                    ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                    : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                            }
+                                        >
+                                            Account Issues
+                                        </NavLink>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+
                     <NavLink
                         to="/seller-central-checker/ppc-dashboard"
                         className={({ isActive }) =>
@@ -123,6 +226,22 @@ const LeftNavSection = () => {
                             <>
                                <ClipboardPlus className="w-4 h-4"/>
                                 <p className="font-medium text-xs">Reports</p>
+                            </>
+                        )}
+                    </NavLink>
+
+                    <NavLink
+                        to="/seller-central-checker/asin-analyzer"
+                        className={({ isActive }) =>
+                            isActive
+                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
+                                : 'flex items-center gap-2 p-2 rounded-md'
+                        }
+                    >
+                        {({ isActive }) => (
+                            <>
+                               <Search className="w-4 h-4"/>
+                                <p className="font-medium text-xs">ASIN Analyzer</p>
                             </>
                         )}
                     </NavLink>

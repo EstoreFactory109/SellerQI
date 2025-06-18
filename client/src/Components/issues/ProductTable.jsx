@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import ScaleLoader from "react-spinners/ScaleLoader";
 import { motion, AnimatePresence } from "framer-motion";
+import dropdown from '../../assets/Icons/Arrow.png';
 
 const priorityColors = {
   High: "text-red-500",
@@ -28,20 +29,56 @@ export default function ProductTable() {
   console.log(allProducts)
   const itemsPerPage = 10;
   const [currentPage, setCurrentPage] = useState(1);
+  const [query, setQuery] = useState('')
+  const [suggestions, setSuggestion] = useState([])
+  const [openSuggestion, setOpenSuggestion] = useState(false)
+  const [sortBy, setSortBy] = useState('revenue') // Default sorting by revenue
+  const [showSortDropdown, setShowSortDropdown] = useState(false)
+  const sortDropdownRef = useRef(null)
+  
   const totalPages = Math.ceil(allProducts.length / itemsPerPage);
 
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const currentSlice = allProducts.slice(startIndex, startIndex + itemsPerPage);
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target)) {
+        setShowSortDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
-  const sortedBySales = [...currentSlice].sort(
-    (a, b) => Number(b.sales ?? 0) - Number(a.sales ?? 0)
-  );
+  // First, sort ALL products based on selected criteria and assign priorities globally
+  const getSortedProducts = (products, criteria) => {
+    switch (criteria) {
+      case 'revenue':
+        return [...products].sort((a, b) => Number(b.sales ?? 0) - Number(a.sales ?? 0));
+      case 'unitsSold':
+        return [...products].sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0));
+      case 'issues':
+        return [...products].sort((a, b) => Number(b.errors ?? 0) - Number(a.errors ?? 0));
+      default:
+        return [...products].sort((a, b) => Number(b.sales ?? 0) - Number(a.sales ?? 0));
+    }
+  };
 
+  const sortedAllProducts = getSortedProducts(allProducts, sortBy);
 
-  const prioritizedProducts = sortedBySales.map((product, index) => ({
+  const totalProducts = sortedAllProducts.length;
+  const highThreshold = Math.ceil(totalProducts * 0.3); // Top 30% are High priority
+  const mediumThreshold = Math.ceil(totalProducts * 0.7); // Next 40% are Medium priority
+  // Remaining 30% are Low priority
+
+  const allPrioritizedProducts = sortedAllProducts.map((product, index) => ({
     ...product,
-    priority: index < 3 ? "High" : index < 7 ? "Medium" : "Low",
+    priority: index < highThreshold ? "High" : index < mediumThreshold ? "Medium" : "Low",
   }));
+
+  // Then apply pagination to the prioritized products
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const prioritizedProducts = allPrioritizedProducts.slice(startIndex, startIndex + itemsPerPage);
 
   const getPageNumbers = () => {
     const maxPages = 5;
@@ -68,9 +105,24 @@ export default function ProductTable() {
 
   const pageNumbers = getPageNumbers();
 
-  const [query, setQuery] = useState('')
-  const [suggestions, setSuggestion] = useState([])
-  const [openSuggestion, setOpenSuggestion] = useState(false)
+  const getSortDisplayText = (sortValue) => {
+    switch (sortValue) {
+      case 'revenue':
+        return 'Top 10 products by revenue';
+      case 'unitsSold':
+        return 'Top 10 products by unit sold';
+      case 'issues':
+        return 'Top 10 products by issues';
+      default:
+        return 'Top 10 products by revenue';
+    }
+  };
+
+  const handleSortChange = (newSortBy) => {
+    setSortBy(newSortBy);
+    setCurrentPage(1);
+    setShowSortDropdown(false);
+  };
 
   const handleSuggestions = (e) => {
     setQuery(e.target.value)
@@ -80,7 +132,7 @@ export default function ProductTable() {
       setOpenSuggestion(false)
     } else {
       setOpenSuggestion(true)
-      const suggestedProducts = allProducts.filter(product => product.asin.toLowerCase().startsWith(inputValue.toLowerCase()) || product.name.toLowerCase().startsWith(inputValue.toLowerCase())).slice(0, 5)
+      const suggestedProducts = sortedAllProducts.filter(product => product.asin.toLowerCase().startsWith(inputValue.toLowerCase()) || product.name.toLowerCase().startsWith(inputValue.toLowerCase())).slice(0, 5)
       setSuggestion(suggestedProducts)
     }
   }
@@ -90,7 +142,7 @@ export default function ProductTable() {
       return
     }
     const value = query.trim()
-    const getProduct = allProducts.find(product => product.asin.toLowerCase() === value.toLowerCase() || product.name.toLowerCase() === value.toLowerCase());
+    const getProduct = sortedAllProducts.find(product => product.asin.toLowerCase() === value.toLowerCase() || product.name.toLowerCase() === value.toLowerCase());
     if (getProduct) {
       navigate(`/seller-central-checker/issues/${getProduct.asin}`)
     }
@@ -107,9 +159,48 @@ export default function ProductTable() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 mb-4">
         <h2 className="text-xl font-semibold">Top Products to Optimize</h2>
         <div className="flex flex-col md:flex-row gap-2">
-          <select className="border p-2 rounded-md">
-            <option>Top 10 products by revenue</option>
-          </select>
+          <div className="relative" ref={sortDropdownRef}>
+            <button
+              className="flex items-center justify-between gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md text-sm hover:bg-gray-50 outline-none w-[20rem]"
+              onClick={() => setShowSortDropdown(!showSortDropdown)}
+            >
+              <span>{getSortDisplayText(sortBy)}</span>
+              <img src={dropdown} alt="dropdown" className="w-2 h-1" />
+            </button>
+            
+            <AnimatePresence>
+              {showSortDropdown && (
+                <motion.div
+                  className="absolute top-full mt-1 w-[20rem] bg-white border border-gray-300 rounded-md shadow-lg z-10 overflow-hidden"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                >
+                  <ul className="py-1 text-sm text-gray-700">
+                    <li
+                      className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer"
+                      onClick={() => handleSortChange('revenue')}
+                    >
+                      Top 10 products by revenue
+                    </li>
+                    <li
+                      className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer"
+                      onClick={() => handleSortChange('unitsSold')}
+                    >
+                      Top 10 products by unit sold
+                    </li>
+                    <li
+                      className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer"
+                      onClick={() => handleSortChange('issues')}
+                    >
+                      Top 10 products by issues
+                    </li>
+                  </ul>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="border p-2 rounded-md outline-none w-[20rem] flex relative">
             <input
               type="text"

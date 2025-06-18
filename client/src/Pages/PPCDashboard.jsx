@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Enhanced mock data for smoother chart
 const mockChartData = [
@@ -37,18 +38,66 @@ const mockChartData = [
   { date: 'Apr 31', ppcSales: 1800, spend: 1480, acos: 840, tacos: 600, units: 85 },
 ];
 
+// Reusable Pagination Component
+const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }) => {
+  if (totalPages <= 1) return null;
+  
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+  
+  return (
+    <div className="flex items-center justify-between mt-4 px-4 py-3 bg-gray-50 rounded-lg">
+      <div className="text-sm text-gray-700">
+        Showing {startItem} to {endItem} of {totalItems} results
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className={`p-2 rounded-lg border transition-colors ${
+            currentPage === 1
+              ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+              : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="px-3 py-1 text-sm font-medium text-gray-700">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className={`p-2 rounded-lg border transition-colors ${
+            currentPage === totalPages
+              ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+              : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const PPCDashboard = () => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [prevTab, setPrevTab] = useState(0);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
-  const [showAllHighAcos, setShowAllHighAcos] = useState(false);
-  const [showAllWastedSpend, setShowAllWastedSpend] = useState(false);
-  const [showAllNegative, setShowAllNegative] = useState(false);
-  const [showAllTopPerforming, setShowAllTopPerforming] = useState(false);
-  const [showAllSearchTerms, setShowAllSearchTerms] = useState(false);
-  const [showAllAutoCampaign, setShowAllAutoCampaign] = useState(false);
+  
+  // Pagination states for each table
+  const [highAcosPage, setHighAcosPage] = useState(1);
+  const [wastedSpendPage, setWastedSpendPage] = useState(1);
+  const [negativePage, setNegativePage] = useState(1);
+  const [topPerformingPage, setTopPerformingPage] = useState(1);
+  const [searchTermsPage, setSearchTermsPage] = useState(1);
+  const [autoCampaignPage, setAutoCampaignPage] = useState(1);
+  
+  const itemsPerPage = 5;
+  
   const dispatch = useDispatch();
   
   // Get sponsoredAdsMetrics from Redux store
@@ -72,8 +121,8 @@ const PPCDashboard = () => {
   // Get campaignData from Redux store
   const campaignData = useSelector((state) => state.Dashboard.DashBoardInfo?.campaignData) || [];
   
-  // Filter search terms where clicks > 5 and sales = 0
-  const filteredSearchTerms = searchTerms.filter(term => term.clicks > 5 && term.sales === 0);
+  // Filter search terms where clicks >= 10 and sales = 0
+  const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
   // Transform the data for the chart
   const chartData = useMemo(() => {
@@ -706,7 +755,7 @@ const PPCDashboard = () => {
         
         {/* Line Chart */}
         <div className="bg-white rounded-xl p-6 mb-6">
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={400}>
             <LineChart 
               data={chartData} 
               margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
@@ -732,15 +781,23 @@ const PPCDashboard = () => {
                   padding: '12px'
                 }}
                 formatter={(value, name) => {
-                  if (name === 'ppcSales' || name === 'spend') {
-                    return [`$${value}`, name === 'ppcSales' ? 'PPC Sales' : 'Spend'];
+                  if (name === 'PPC Sales' || name === 'PPC Spend') {
+                    return [`$${value}`, name];
                   }
                   return [value, name];
                 }}
               />
+              <Legend 
+                wrapperStyle={{ 
+                  fontSize: '12px', 
+                  paddingTop: '20px' 
+                }}
+                iconType="line"
+              />
               <Line 
                 type="monotone" 
                 dataKey="ppcSales" 
+                name="PPC Sales"
                 stroke="#3B82F6" 
                 strokeWidth={2.5} 
                 dot={false}
@@ -749,6 +806,7 @@ const PPCDashboard = () => {
               <Line 
                 type="monotone" 
                 dataKey="spend" 
+                name="PPC Spend"
                 stroke="#F97316" 
                 strokeWidth={2.5} 
                 dot={false}
@@ -821,29 +879,30 @@ const PPCDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    highAcosCampaigns.slice(0, showAllHighAcos ? highAcosCampaigns.length : 5).map((campaign, idx) => (
-                      <tr key={idx} className="border-b border-gray-200">
-                        <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
-                        <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center font-medium text-red-600">
-                          {campaign.acos.toFixed(2)}%
-                        </td>
-                      </tr>
-                    ))
+                    (() => {
+                      const startIndex = (highAcosPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
+                        <tr key={idx} className="border-b border-gray-200">
+                          <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
+                          <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center font-medium text-red-600">
+                            {campaign.acos.toFixed(2)}%
+                          </td>
+                        </tr>
+                      ));
+                    })()
                   )}
                 </tbody>
               </table>
-              {highAcosCampaigns.length > 5 && (
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={() => setShowAllHighAcos(!showAllHighAcos)}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                  >
-                    {showAllHighAcos ? 'Show Less' : `View More (${highAcosCampaigns.length - 5} more)`}
-                  </button>
-                </div>
-              )}
+              <TablePagination
+                currentPage={highAcosPage}
+                totalPages={Math.ceil(highAcosCampaigns.length / itemsPerPage)}
+                onPageChange={setHighAcosPage}
+                totalItems={highAcosCampaigns.length}
+                itemsPerPage={itemsPerPage}
+              />
             </>
           )}
           
@@ -870,33 +929,34 @@ const PPCDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    wastedSpendKeywords.slice(0, showAllWastedSpend ? wastedSpendKeywords.length : 6).map((keyword, idx) => (
-                      <tr key={idx} className="border-b border-gray-200">
-                        <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                        <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                        <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center font-medium text-red-600">
-                          ${keyword.spend.toFixed(2)}
-                        </td>
-                        <td className="py-4 text-sm text-center font-medium text-gray-600">
-                          {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
-                        </td>
-                      </tr>
-                    ))
+                    (() => {
+                      const startIndex = (wastedSpendPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                        <tr key={idx} className="border-b border-gray-200">
+                          <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                          <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                          <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center font-medium text-red-600">
+                            ${keyword.spend.toFixed(2)}
+                          </td>
+                          <td className="py-4 text-sm text-center font-medium text-gray-600">
+                            {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
+                          </td>
+                        </tr>
+                      ));
+                    })()
                   )}
                 </tbody>
               </table>
-              {wastedSpendKeywords.length > 6 && (
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={() => setShowAllWastedSpend(!showAllWastedSpend)}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                  >
-                    {showAllWastedSpend ? 'Show Less' : `View More (${wastedSpendKeywords.length - 6} more)`}
-                  </button>
-                </div>
-              )}
+              <TablePagination
+                currentPage={wastedSpendPage}
+                totalPages={Math.ceil(wastedSpendKeywords.length / itemsPerPage)}
+                onPageChange={setWastedSpendPage}
+                totalItems={wastedSpendKeywords.length}
+                itemsPerPage={itemsPerPage}
+              />
             </>
           )}
           
@@ -922,44 +982,45 @@ const PPCDashboard = () => {
                   </td>
                 </tr>
               ) : (
-                    negativeKeywordsMetrics.slice(0, showAllNegative ? negativeKeywordsMetrics.length : 6).map((row, idx) => {
-                      // Find keyword details
-                      const keywordDetail = keywords.find(k => 
-                        k.keywordText === row.keyword && 
-                        productWiseSponsoredAds.some(p => 
-                          p.campaignName === row.campaignName && 
-                          p.campaignId === k.campaignId
-                        )
-                      );
-                      
-                      return (
-                        <tr key={idx} className="border-b border-gray-200">
-                    <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
-                    <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
-                    <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
-                    <td className="py-4 text-sm text-center">${row.spend.toFixed(2)}</td>
-                    <td className={`py-4 text-sm text-center font-medium ${
-                      row.acos === 0 ? 'text-gray-400' : 
-                      row.acos > 100 ? 'text-red-600' : 'text-gray-900'
-                    }`}>
-                      {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
-                    </td>
-                  </tr>
-                      );
-                    })
+                    (() => {
+                      const startIndex = (negativePage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      return negativeKeywordsMetrics.slice(startIndex, endIndex).map((row, idx) => {
+                        // Find keyword details
+                        const keywordDetail = keywords.find(k => 
+                          k.keywordText === row.keyword && 
+                          productWiseSponsoredAds.some(p => 
+                            p.campaignName === row.campaignName && 
+                            p.campaignId === k.campaignId
+                          )
+                        );
+                        
+                        return (
+                          <tr key={idx} className="border-b border-gray-200">
+                      <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
+                      <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
+                      <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
+                      <td className="py-4 text-sm text-center">${row.spend.toFixed(2)}</td>
+                      <td className={`py-4 text-sm text-center font-medium ${
+                        row.acos === 0 ? 'text-gray-400' : 
+                        row.acos > 100 ? 'text-red-600' : 'text-gray-900'
+                      }`}>
+                        {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
+                      </td>
+                    </tr>
+                        );
+                      });
+                    })()
                   )}
                 </tbody>
               </table>
-              {negativeKeywordsMetrics.length > 6 && (
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={() => setShowAllNegative(!showAllNegative)}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                  >
-                    {showAllNegative ? 'Show Less' : `View More (${negativeKeywordsMetrics.length - 6} more)`}
-                  </button>
-                </div>
-              )}
+              <TablePagination
+                currentPage={negativePage}
+                totalPages={Math.ceil(negativeKeywordsMetrics.length / itemsPerPage)}
+                onPageChange={setNegativePage}
+                totalItems={negativeKeywordsMetrics.length}
+                itemsPerPage={itemsPerPage}
+              />
             </>
           )}
           
@@ -985,32 +1046,33 @@ const PPCDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    topPerformingKeywords.slice(0, showAllTopPerforming ? topPerformingKeywords.length : 5).map((keyword, idx) => (
-                      <tr key={idx} className="border-b border-gray-200">
-                        <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                        <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                        <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center font-medium text-green-600">
-                          ${keyword.sales.toFixed(2)}
-                        </td>
-                        <td className="py-4 text-sm text-center font-medium text-green-600">
-                          {keyword.acos.toFixed(2)}%
-                        </td>
-                      </tr>
-                    ))
+                    (() => {
+                      const startIndex = (topPerformingPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                        <tr key={idx} className="border-b border-gray-200">
+                          <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                          <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                          <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center font-medium text-green-600">
+                            ${keyword.sales.toFixed(2)}
+                          </td>
+                          <td className="py-4 text-sm text-center font-medium text-green-600">
+                            {keyword.acos.toFixed(2)}%
+                          </td>
+                        </tr>
+                      ));
+                    })()
                   )}
                 </tbody>
               </table>
-              {topPerformingKeywords.length > 5 && (
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={() => setShowAllTopPerforming(!showAllTopPerforming)}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                  >
-                    {showAllTopPerforming ? 'Show Less' : `View More (${topPerformingKeywords.length - 5} more)`}
-                  </button>
-                </div>
-              )}
+              <TablePagination
+                currentPage={topPerformingPage}
+                totalPages={Math.ceil(topPerformingKeywords.length / itemsPerPage)}
+                onPageChange={setTopPerformingPage}
+                totalItems={topPerformingKeywords.length}
+                itemsPerPage={itemsPerPage}
+              />
             </>
           )}
           
@@ -1036,30 +1098,31 @@ const PPCDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredSearchTerms.slice(0, showAllSearchTerms ? filteredSearchTerms.length : 5).map((term, idx) => (
-                      <tr key={idx} className="border-b border-gray-200">
-                        <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
-                        <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
-                        <td className="py-4 text-sm text-center">{term.clicks}</td>
-                        <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
-                        <td className="py-4 text-sm text-center font-medium text-red-600">
-                          ${term.spend.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))
+                    (() => {
+                      const startIndex = (searchTermsPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
+                        <tr key={idx} className="border-b border-gray-200">
+                          <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
+                          <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
+                          <td className="py-4 text-sm text-center">{term.clicks}</td>
+                          <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
+                          <td className="py-4 text-sm text-center font-medium text-red-600">
+                            ${term.spend.toFixed(2)}
+                          </td>
+                        </tr>
+                      ));
+                    })()
                   )}
                 </tbody>
               </table>
-              {filteredSearchTerms.length > 5 && (
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={() => setShowAllSearchTerms(!showAllSearchTerms)}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                  >
-                    {showAllSearchTerms ? 'Show Less' : `View More (${filteredSearchTerms.length - 5} more)`}
-                  </button>
-                </div>
-              )}
+              <TablePagination
+                currentPage={searchTermsPage}
+                totalPages={Math.ceil(filteredSearchTerms.length / itemsPerPage)}
+                onPageChange={setSearchTermsPage}
+                totalItems={filteredSearchTerms.length}
+                itemsPerPage={itemsPerPage}
+              />
             </>
           )}
           
@@ -1071,9 +1134,9 @@ const PPCDashboard = () => {
                   <thead>
                     <tr className="border-b border-gray-200">
                       <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
+                      <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
                       <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
                       <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                      <th className="text-center py-3 text-sm font-medium text-gray-700">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1084,35 +1147,32 @@ const PPCDashboard = () => {
                         </td>
                       </tr>
                     ) : (
-                      autoCampaignInsights.slice(0, showAllAutoCampaign ? autoCampaignInsights.length : 5).map((insight, idx) => (
-                        <tr key={idx} className="border-b border-gray-200">
-                          <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
-                          <td className="py-4 text-sm text-center font-medium text-green-600">
-                            ${insight.sales.toFixed(2)}
-                          </td>
-                          <td className="py-4 text-sm text-center font-medium">
-                            {insight.acos.toFixed(2)}%
-                          </td>
-                          <td className="py-4 text-sm text-center">
-                            {insight.action && (
-                              <span className="text-blue-600 font-medium">{insight.action}</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
+                      (() => {
+                        const startIndex = (autoCampaignPage - 1) * itemsPerPage;
+                        const endIndex = startIndex + itemsPerPage;
+                        return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => (
+                          <tr key={idx} className="border-b border-gray-200">
+                            <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
+                            <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
+                            <td className="py-4 text-sm text-center font-medium text-green-600">
+                              ${insight.sales.toFixed(2)}
+                            </td>
+                            <td className="py-4 text-sm text-center font-medium">
+                              {insight.acos.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ));
+                      })()
                     )}
                   </tbody>
                 </table>
-                {autoCampaignInsights.length > 5 && (
-                  <div className="mt-4 text-center">
-                    <button
-                      onClick={() => setShowAllAutoCampaign(!showAllAutoCampaign)}
-                      className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                    >
-                      {showAllAutoCampaign ? 'Show Less' : `View More (${autoCampaignInsights.length - 5} more)`}
-                    </button>
-                  </div>
-                )}
+                <TablePagination
+                  currentPage={autoCampaignPage}
+                  totalPages={Math.ceil(autoCampaignInsights.length / itemsPerPage)}
+                  onPageChange={setAutoCampaignPage}
+                  totalItems={autoCampaignInsights.length}
+                  itemsPerPage={itemsPerPage}
+                />
               </>
             )}
             </motion.div>

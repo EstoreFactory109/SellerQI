@@ -11,12 +11,12 @@ export default function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-8">
           <div>
             <img 
-              src="https://res.cloudinary.com/ddoa960le/image/upload/v1749393210/bg-white-logo_xrtck2.png"
+              src="https://res.cloudinary.com/ddoa960le/image/upload/v1750194049/Seller_QI_Logo___White_bcthaw.png"
               alt="SellerQI Logo"
-              className="h-10 w-auto"
+              className="h-16 w-auto"
               loading="lazy"
-              width="120"
-              height="40"
+             
+              
             />
           </div>
           <div>

@@ -1,18 +1,59 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronRight, Check, X, Search } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronRight, Check, X, Search, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
 
 export default function SellerQIHomepage() {
   const [asin, setAsin] = useState('');
   const [market, setMarket] = useState('US');
+  const [showMarketDropdown, setShowMarketDropdown] = useState(false);
+  const marketDropdownRef = useRef(null);
 
   const navigate = useNavigate();
 
+  // Market options
+  const marketOptions = [
+    { value: 'US', label: 'US - United States' },
+    { value: 'CA', label: 'CA - Canada' },
+    { value: 'MX', label: 'MX - Mexico' },
+    { value: 'BR', label: 'BR - Brazil' },
+    { value: 'UK', label: 'UK - United Kingdom' },
+    { value: 'DE', label: 'DE - Germany' },
+    { value: 'FR', label: 'FR - France' },
+    { value: 'IT', label: 'IT - Italy' },
+    { value: 'ES', label: 'ES - Spain' },
+    { value: 'NL', label: 'NL - Netherlands' },
+    { value: 'SE', label: 'SE - Sweden' },
+    { value: 'PL', label: 'PL - Poland' },
+    { value: 'BE', label: 'BE - Belgium' },
+    { value: 'TR', label: 'TR - Turkey' },
+    { value: 'AE', label: 'AE - United Arab Emirates' },
+    { value: 'SA', label: 'SA - Saudi Arabia' },
+    { value: 'EG', label: 'EG - Egypt' },
+    { value: 'IN', label: 'IN - India' },
+    { value: 'JP', label: 'JP - Japan' },
+    { value: 'AU', label: 'AU - Australia' },
+    { value: 'SG', label: 'SG - Singapore' },
+  ];
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (marketDropdownRef.current && !marketDropdownRef.current.contains(event.target)) {
+        setShowMarketDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   const handleAnalyze = () => {
@@ -44,33 +85,43 @@ export default function SellerQIHomepage() {
                   className="w-full pl-12 pr-4 py-4 border border-gray-300 rounded-l-lg focus:outline-none focus:border-blue-500"
                 />
               </div>
-              <select
-                className="px-6 py-4 border border-l-0 border-gray-300 rounded-r-lg bg-white focus:outline-none font-medium appearance-none text-center"
-                value={market}
-                onChange={e => setMarket(e.target.value)}
-              >
-                <option value="US">US - United States</option>
-                <option value="CA">CA - Canada</option>
-                <option value="MX">MX - Mexico</option>
-                <option value="BR">BR - Brazil</option>
-                <option value="UK">UK - United Kingdom</option>
-                <option value="DE">DE - Germany</option>
-                <option value="FR">FR - France</option>
-                <option value="IT">IT - Italy</option>
-                <option value="ES">ES - Spain</option>
-                <option value="NL">NL - Netherlands</option>
-                <option value="SE">SE - Sweden</option>
-                <option value="PL">PL - Poland</option>
-                <option value="BE">BE - Belgium</option>
-                <option value="TR">TR - Turkey</option>
-                <option value="AE">AE - United Arab Emirates</option>
-                <option value="SA">SA - Saudi Arabia</option>
-                <option value="EG">EG - Egypt</option>
-                <option value="IN">IN - India</option>
-                <option value="JP">JP - Japan</option>
-                <option value="AU">AU - Australia</option>
-                <option value="SG">SG - Singapore</option>
-              </select>
+              <div className="relative" ref={marketDropdownRef}>
+                <button
+                  type="button"
+                  className="flex items-center justify-between gap-2 px-6 py-4 border border-l-0 border-gray-300 rounded-r-lg bg-white hover:bg-gray-50 focus:outline-none font-medium text-center min-w-[180px]"
+                  onClick={() => setShowMarketDropdown(!showMarketDropdown)}
+                >
+                  <span>{marketOptions.find(option => option.value === market)?.label || 'Select Market'}</span>
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </button>
+                
+                <AnimatePresence>
+                  {showMarketDropdown && (
+                    <motion.div
+                      className="absolute top-full -mt-px w-full bg-white border border-gray-300 border-t-white rounded-b-md shadow-lg z-50 overflow-hidden max-h-60 overflow-y-auto"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                    >
+                      <ul className="py-1 text-sm text-gray-700">
+                        {marketOptions.map((option) => (
+                          <li
+                            key={option.value}
+                            className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer transition-colors"
+                            onClick={() => {
+                              setMarket(option.value);
+                              setShowMarketDropdown(false);
+                            }}
+                          >
+                            {option.label}
+                          </li>
+                        ))}
+                      </ul>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </div>
 
@@ -324,13 +375,6 @@ export default function SellerQIHomepage() {
 
       {/* Footer */}
       <Footer />
-
-      {/* Help Widget */}
-      <div className="fixed bottom-8 right-8">
-        <button className="w-14 h-14 bg-yellow-400 rounded-full shadow-lg hover:bg-yellow-500 transition-colors flex items-center justify-center group">
-          <span className="text-2xl font-bold text-gray-900">?</span>
-        </button>
-      </div>
     </div>
   );
 }

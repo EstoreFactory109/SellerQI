@@ -7,7 +7,8 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import BeatLoader from "react-spinners/BeatLoader";
 import {useDispatch} from 'react-redux';
-import { loginSuccess } from '../redux/slices/authSlice.js'
+import { loginSuccess } from '../redux/slices/authSlice.js';
+import stripeService from '../services/stripeService';
 
 
 const Login = () => {
@@ -66,12 +67,28 @@ const Login = () => {
 
             if (response.status === 200) {
                 dispatch(loginSuccess(response.data.data));
-                setLoading(false);
                 setEmail("");
                 setPassword("");
-                localStorage.setItem("isAuth",true)
+                localStorage.setItem("isAuth", true);
                 
-                window.location.href = "/seller-central-checker/dashboard";
+                // Check subscription status before redirecting
+                try {
+                    const subscriptionStatus = await stripeService.getSubscriptionStatus();
+                    
+                    if (subscriptionStatus.hasSubscription) {
+                        // User has a subscription, redirect to dashboard
+                        window.location.href = "/seller-central-checker/dashboard";
+                    } else {
+                        // No subscription, redirect to pricing page
+                        navigate("/pricing");
+                    }
+                } catch (error) {
+                    console.error('Error checking subscription status:', error);
+                    // If subscription check fails, default to pricing page
+                    navigate("/pricing");
+                }
+                
+                setLoading(false);
             }
             // You can dispatch or navigate here
         } catch (error) {
@@ -90,7 +107,12 @@ const Login = () => {
             {/* Left Section */}
             <section className="w-1/2 h-full flex flex-col justify-center items-center p-6">
                 <form className="w-4/5" onSubmit={handleSubmit}>
-                    <h1 className="text-2xl font-semibold mb-6">Log In</h1>
+                    <div className='flex justify-center items-center  w-full h-12 mb-4'>
+
+                        <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png' alt='SellerQI Logo' className='w-auto h-20' />
+
+                    </div>
+                    <h1 className="text-2xl font-semibold mb-8  text-center">Welcome to SellerQI</h1>
 
                     <label className="block">Email</label>
                     <div className={`flex items-center border rounded-md mt-2 mb-4 p-2 gap-2 ${errors.email ? 'border-red-500' : 'border-black'}`}>

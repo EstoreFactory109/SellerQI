@@ -50,8 +50,17 @@ const OtpVerification = () => {
       },{withCredentials:true});
       if (response.status === 200) {
         setLoading(false);
-        localStorage.setItem("isAuth",true)
-        navigate("/connect-to-amazon");
+        localStorage.setItem("isAuth", true);
+        
+        // Check if user came here for subscription purchase
+        const intendedPlan = localStorage.getItem('intendedPlan');
+        if (intendedPlan) {
+          // Redirect back to pricing page to complete subscription
+          navigate("/pricing");
+        } else {
+          // Normal flow - redirect to connect amazon
+          navigate("/connect-to-amazon");
+        }
       }
     } catch (error) {
       console.error("Verification failed", error);

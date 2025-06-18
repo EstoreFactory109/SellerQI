@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import MetricCard from '../Components/ProfitibilityDashboard/MetricCard';
 import ProfitTable from '../Components/ProfitibilityDashboard/ProfitTable';
 import SuggestionList from '../Components/ProfitibilityDashboard/SuggestionList';
@@ -182,14 +182,24 @@ const ProfitabilityDashboard = () => {
             ))}
           </div>
 
-          {/* Line Chart for Spend and Net Profit */}
+          {/* Area Chart for Spend and Net Profit */}
           <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
             <h3 className="text-base font-semibold text-gray-900 mb-4">Spend vs Net Profit Trend</h3>
             <ResponsiveContainer width="100%" height={250}>
-              <LineChart
+              <AreaChart
                 data={chartData}
                 margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
               >
+                <defs>
+                  <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#EF4444" stopOpacity={0.35}/>
+                    <stop offset="95%" stopColor="#EF4444" stopOpacity={0.05}/>
+                  </linearGradient>
+                  <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.35}/>
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0.05}/>
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
                   dataKey="date"
@@ -218,23 +228,25 @@ const ProfitabilityDashboard = () => {
                     fontSize: '12px'
                   }}
                 />
-                <Line
+                <Area
                   type="monotone"
                   dataKey="spend"
                   stroke="#EF4444"
+                  fill="url(#spendGradient)"
                   name="Ad Spend"
                   strokeWidth={2}
-                  dot={{ r: 4 }}
+                  dot={false}
                 />
-                <Line
+                <Area
                   type="monotone"
                   dataKey="netProfit"
                   stroke="#10B981"
+                  fill="url(#profitGradient)"
                   name="Net Profit"
                   strokeWidth={2}
-                  dot={{ r: 4 }}
+                  dot={false}
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
 

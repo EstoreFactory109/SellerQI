@@ -115,6 +115,26 @@ const userSchema = new mongoose.Schema(
         type:mongoose.Schema.Types.ObjectId,
         ref:"APlusContent",
         require:true
+      },
+      // Subscription-related fields
+      stripeCustomerId: {
+        type: String,
+        required: false,
+        index: true
+      },
+      subscriptionStatus: {
+        type: String,
+        enum: ['active', 'canceled', 'incomplete', 'incomplete_expired', 'past_due', 'trialing', 'unpaid', 'none'],
+        default: 'none'
+      },
+      subscriptionPlan: {
+        type: String,
+        enum: ['LITE', 'PRO', 'AGENCY'],
+        default: 'LITE'
+      },
+      stripeSubscriptionId: {
+        type: String,
+        required: false
       }
     },
     {

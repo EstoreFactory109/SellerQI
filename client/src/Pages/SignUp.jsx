@@ -87,14 +87,19 @@ const SignUp = () => {
   };
 
   const navigateToLogin = () => {
-    navigate('/');
+    navigate('/log-in');
   };
 
   return (
     <div className="w-screen h-screen flex items-center justify-center font-roboto">
       <section className="w-1/2 h-full flex flex-col justify-center items-center p-6">
         <form className="w-3/4" onSubmit={handleSubmit}>
-          <h1 className="text-4xl font-semibold mb-8">Sign Up</h1>
+          <div className='flex justify-center items-center  w-full h-12 mb-4'>
+
+            <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png' alt='SellerQI Logo' className='w-auto h-20' />
+
+          </div>
+          <h1 className="text-2xl font-semibold mb-8  text-center">Welcome to SellerQI</h1>
           <div className="flex gap-4 mb-5">
             <div className="w-1/2">
               <label>First Name</label>
