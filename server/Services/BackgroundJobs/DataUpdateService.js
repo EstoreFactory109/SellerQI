@@ -50,20 +50,43 @@ class DataUpdateService {
         try {
             logger.info(`Starting weekly data update for user ${userId}, ${country}-${region}`);
 
-            // Fetch fresh data from all APIs
-            // In a real implementation, you would call methods to fetch:
-            // - V2 and V1 performance reports
-            // - Financial events
-            // - Inventory recommendations  
-            // - Product reviews
-            // - Listing items
-            // - Competitive pricing
-            // - A+ content
-            // - Sales data
-            // - Shipment data
-            // - Keywords, search terms, campaigns
+            // Create mock request object for SpApiDataController
+            const mockReq = {
+                userId: userId,
+                country: country,
+                region: region
+            };
 
-            // For now, we'll trigger analysis with existing data
+            // Create mock response object
+            let spApiResult = null;
+            const mockRes = {
+                status: (code) => ({
+                    json: (data) => {
+                        spApiResult = { statusCode: code, data };
+                        return mockRes;
+                    }
+                })
+            };
+
+            try {
+                // Fetch fresh data from all APIs including the three new inventory services:
+                // - GET_FBA_INVENTORY_PLANNING_DATA
+                // - GET_STRANDED_INVENTORY_UI_DATA  
+                // - GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA
+                logger.info(`Fetching fresh API data for user ${userId}, ${country}-${region}`);
+                await SpApiDataController.getSpApiData(mockReq, mockRes);
+                
+                if (spApiResult && spApiResult.statusCode === 200) {
+                    logger.info(`Fresh API data fetched successfully for user ${userId}, ${country}-${region}`);
+                } else {
+                    logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}`);
+                }
+            } catch (apiError) {
+                logger.error(`Error fetching fresh API data for user ${userId}, ${country}-${region}:`, apiError);
+                // Continue with analysis using existing data if API fetch fails
+            }
+
+            // Run the analysis to get processed data (this will use the fresh data we just fetched)
             const analysisResult = await Analyse(userId, country, region);
             
             if (analysisResult.status !== 200) {

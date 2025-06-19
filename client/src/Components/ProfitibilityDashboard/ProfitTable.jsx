@@ -87,8 +87,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
         // Calculate total COGS (COGS per unit * quantity)
         const totalCogs = cogsPerUnit * (item.quantity || 0);
         
-        // Calculate net profit: sales - (cogs * quantity) - ads - fees
-        const netProfit = (item.sales || 0) - totalCogs - (item.ads || 0) - (item.amzFee || 0);
+        // Calculate gross profit: sales - ads - fees (no COGS deducted)
+        const grossProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
+        
+        // Calculate net profit: gross profit - COGS
+        const netProfit = grossProfit - totalCogs;
         
         // Determine status based on profit margin
         let status = 'good';
@@ -105,6 +108,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
           totalCogs: totalCogs,
           adSpend: item.ads || 0,
           fees: item.amzFee || 0,
+          grossProfit: grossProfit,
           netProfit: netProfit,
           status: status
         };
@@ -190,6 +194,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">COGS/unit</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">Ad Spend</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">Amazon Fees</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">Gross Profit</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">Net Profit</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-700">Status</th>
             </tr>
@@ -227,8 +232,22 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   <td className="px-4 py-4 text-sm text-gray-900 text-center">
                     ${product.fees.toFixed(2)}
                   </td>
-                  <td className={`px-4 py-4 text-sm font-medium text-center ${product.netProfit < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                  <td className={`px-4 py-4 text-sm font-medium text-center ${product.grossProfit < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                    ${product.grossProfit < 0 ? `-${Math.abs(product.grossProfit).toFixed(2)}` : product.grossProfit.toFixed(2)}
+                  </td>
+                  <td className={`px-4 py-4 text-sm font-medium text-center relative ${
+                    !cogsValues[product.asin] || cogsValues[product.asin] === 0 
+                      ? 'filter blur-sm text-gray-400' 
+                      : product.netProfit < 0 ? 'text-red-600' : 'text-gray-900'
+                  }`}>
                     ${product.netProfit < 0 ? `-${Math.abs(product.netProfit).toFixed(2)}` : product.netProfit.toFixed(2)}
+                    {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded shadow-sm filter-none">
+                          Add COGS
+                        </span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-4 text-center">
                     {getStatusIcon(product.status)}
@@ -237,7 +256,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
               ))
             ) : (
               <tr>
-                <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
+                <td colSpan="10" className="px-4 py-8 text-center text-gray-500">
                   No profitability data available
                 </td>
               </tr>

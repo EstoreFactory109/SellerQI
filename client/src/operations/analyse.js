@@ -105,11 +105,35 @@ const analyseData = (data) => {
     const accountHealthPercentage = data.AccountData.getAccountHealthPercentge;
     const accountFinance = data.FinanceData;
     const totalErrorInAccount = data.AccountData.accountHealth.TotalErrors;
-    const replenishmentQty = data.replenishmentQty;
     const amazonReadyProducts = data.ConversionData.AmazonReadyproducts;
     const profitibilityData = Profitiblity(data.SalesByProducts, data.ProductWiseSponsoredAds, data.ProductWiseFBAData);
     const sponsoredAdsMetrics = calculateSponsoredAdsMetrics(data.ProductWiseSponsoredAds);
     const negativeKeywordsMetrics = calculateNegativeKeywordsMetrics(data.negetiveKeywords, data.ProductWiseSponsoredAds);
+
+    // Process inventory analysis data
+    const inventoryAnalysis = data.InventoryAnalysis || {
+        inventoryPlanning: [],
+        strandedInventory: [],
+        inboundNonCompliance: [],
+        replenishment: []
+    };
+    
+    console.log("Frontend received InventoryAnalysis: ", {
+        planning: inventoryAnalysis.inventoryPlanning?.length || 0,
+        stranded: inventoryAnalysis.strandedInventory?.length || 0,
+        compliance: inventoryAnalysis.inboundNonCompliance?.length || 0,
+        replenishment: inventoryAnalysis.replenishment?.length || 0,
+        totalInventoryErrors: (inventoryAnalysis.inventoryPlanning?.length || 0) + 
+                            (inventoryAnalysis.strandedInventory?.length || 0) + 
+                            (inventoryAnalysis.inboundNonCompliance?.length || 0) +
+                            (inventoryAnalysis.replenishment?.filter(item => item.status === "Error").length || 0)
+    });
+    
+    // Calculate total inventory errors
+    const totalInventoryErrors = (inventoryAnalysis.inventoryPlanning?.length || 0) + 
+                               (inventoryAnalysis.strandedInventory?.length || 0) + 
+                               (inventoryAnalysis.inboundNonCompliance?.length || 0) +
+                               (inventoryAnalysis.replenishment?.filter(item => item.status === "Error").length || 0);
 
     console.log("negativeKeywordsMetrics: ",negativeKeywordsMetrics)
 
@@ -119,6 +143,7 @@ const analyseData = (data) => {
     const productWiseError = [];
     const rankingProductWiseErrors = [];
     const conversionProductWiseErrors = [];
+    const inventoryProductWiseErrors = [];
 
     const seenAsins = new Set();
 
@@ -175,6 +200,44 @@ const analyseData = (data) => {
         return { data, errorCount };
     };
 
+    // This is for getting inventory errors for each product
+    const getInventoryErrors = (asin) => {
+        let errorCount = 0;
+        const data = { asin };
+
+        // Check inventory planning errors
+        const planningError = inventoryAnalysis.inventoryPlanning?.find(item => item.asin === asin);
+        if (planningError) {
+            data.inventoryPlanningErrorData = planningError;
+            // Count individual errors within planning data
+            if (planningError.longTermStorageFees?.status === "Error") errorCount++;
+            if (planningError.unfulfillable?.status === "Error") errorCount++;
+        }
+
+        // Check stranded inventory errors
+        const strandedError = inventoryAnalysis.strandedInventory?.find(item => item.asin === asin);
+        if (strandedError) {
+            data.strandedInventoryErrorData = strandedError;
+            errorCount++;
+        }
+
+        // Check inbound non-compliance errors
+        const complianceError = inventoryAnalysis.inboundNonCompliance?.find(item => item.asin === asin);
+        if (complianceError) {
+            data.inboundNonComplianceErrorData = complianceError;
+            errorCount++;
+        }
+
+        // Check replenishment/restock errors
+        const replenishmentError = inventoryAnalysis.replenishment?.find(item => item.asin === asin && item.status === "Error");
+        if (replenishmentError) {
+            data.replenishmentErrorData = replenishmentError;
+            errorCount++;
+        }
+
+        return { data, errorCount };
+    };
+
     let TotalRankingerrors = 0;
     let index=0;
 
@@ -191,17 +254,26 @@ const analyseData = (data) => {
         const quantity = productDetails?.quantity || 0;
 
         const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
+        const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
 
         // Find the product in TotalProducts by ASIN
         const totalProduct = TotalProducts.find(p => p.asin === asin);
 
-        let productwiseTotalError = elm.data.TotalErrors + conversionErrors;
+        let productwiseTotalError = elm.data.TotalErrors + conversionErrors + inventoryErrors;
         if (elm.data.TotalErrors > 0) {
             TotalRankingerrors += elm.data.TotalErrors;
         }
 
         conversionProductWiseErrors.push(conversionData);
         conversionProductWiseErrors[conversionProductWiseErrors.length - 1].Title = elm.data.Title;
+
+        // Add inventory errors to inventoryProductWiseErrors array
+        if (inventoryErrors > 0) {
+            inventoryProductWiseErrors.push({
+                ...inventoryData,
+                Title: elm.data.Title
+            });
+        }
 
         rankingProductWiseErrors.push(
             elm.data.TotalErrors > 0
@@ -220,6 +292,7 @@ const analyseData = (data) => {
             errors: productwiseTotalError,
             rankingErrors: elm.data.TotalErrors > 0 ? elm : undefined,
             conversionErrors: conversionData,
+            inventoryErrors: inventoryData,
             sales,
             quantity
         });
@@ -237,6 +310,26 @@ const analyseData = (data) => {
             const productWiseErrorElm = productWiseError.find(p => p.asin === asin);
             if (productWiseErrorElm) {
                 productWiseErrorElm.errors += elm.data.NumberOfErrors;
+            } else {
+                // If product doesn't exist in productWiseError array yet, create it
+                const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
+                const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
+                const totalProduct = TotalProducts.find(p => p.asin === asin);
+                const title = totalProduct?.title?.substring(0, 50) || "N/A";
+                
+                productWiseError.push({
+                    asin,
+                    sku: totalProduct?.sku || "N/A",
+                    name: title,
+                    price: totalProduct?.price || 0,
+                    MainImage: data.ConversionData.imageResult.find(item=>item.asin===asin)?.data?.MainImage || null,
+                    errors: elm.data.NumberOfErrors + conversionErrors + inventoryErrors,
+                    rankingErrors: undefined,
+                    conversionErrors: conversionData,
+                    inventoryErrors: inventoryData,
+                    sales: 0,
+                    quantity: 0
+                });
             }
 
             let rankingErrors = rankingProductWiseErrors.find(p => p.asin === asin);
@@ -312,12 +405,12 @@ const analyseData = (data) => {
         totalErrorInAccount,
         totalErrorInConversion,
         TotalRankingerrors,
+        totalInventoryErrors,
         first,
         second,
         third,
         fourth,
         productsWithOutBuyboxError: productsWithOutBuyboxError.length,
-        replenishmentQty,
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
@@ -327,6 +420,8 @@ const analyseData = (data) => {
         productWiseError: productWiseError,
         rankingProductWiseErrors: rankingProductWiseErrors,
         conversionProductWiseErrors: conversionProductWiseErrors,
+        inventoryProductWiseErrors: inventoryProductWiseErrors,
+        InventoryAnalysis: inventoryAnalysis,
         AccountErrors: data.AccountData.accountHealth,
         startDate:data.startDate,
         endDate:data.endDate,

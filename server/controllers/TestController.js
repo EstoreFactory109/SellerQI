@@ -1,4 +1,4 @@
-const generateReport = require('../Services/Sp_API/GetProductWiseFBAData.js');
+const generateReport = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
@@ -21,7 +21,7 @@ const testReport = async (req, res) => {
         return res.status(400).json({ message: "Credentials are missing" })
     }
 
-    const report = await generateReport(accessToken, marketplaceIds, "681c63da2abd9848fbc2c6d2", "sellingpartnerapi-na.amazon.com","NA","US");
+    const report = await generateReport(accessToken, marketplaceIds, "681c63da2abd9848fbc2c6d2", "US","NA");
     if (!report) {
         return res.status(408).json({ message: "Report did not complete within 5 minutes" })
     }

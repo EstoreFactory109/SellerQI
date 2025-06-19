@@ -18,7 +18,6 @@ import { useSelector } from 'react-redux';
 const Reports = () => {
    const [openCalender, setOpenCalender] = useState(false)
     const CalenderRef = useRef(null);
-    const contentRef = useRef(null);
     const info = useSelector(state => state.Dashboard.DashBoardInfo);
 
    useEffect(() => {
@@ -71,7 +70,7 @@ const Reports = () => {
        exportData.push({
          Category: 'Product Metrics',
          Metric: 'Products to Replenish',
-         Value: info.replenishmentQty?.length || 0,
+         Value: info?.InventoryAnalysis?.replenishment?.length || 0,
          Details: 'Number of products that are ready to be replenished'
        });
        
@@ -87,7 +86,7 @@ const Reports = () => {
        exportData.push({
          Category: 'Product Checker',
          Metric: 'Total Errors',
-         Value: (info.TotalRankingerrors || 0) + (info.totalErrorInConversion || 0) + (info.totalErrorInAccount || 0) + (info.totalProfitabilityErrors || 0) + (info.totalSponsoredAdsErrors || 0),
+         Value: (info.TotalRankingerrors || 0) + (info.totalErrorInConversion || 0) + (info.totalErrorInAccount || 0) + (info.totalProfitabilityErrors || 0) + (info.totalSponsoredAdsErrors || 0) + (info.totalInventoryErrors || 0),
          Details: 'Total number of all errors across all categories'
        });
        
@@ -124,6 +123,13 @@ const Reports = () => {
          Metric: 'Sponsored Ads Errors',
          Value: info.totalSponsoredAdsErrors || 0,
          Details: 'Issues with sponsored advertising'
+       });
+       
+       exportData.push({
+         Category: 'Product Checker',
+         Metric: 'Inventory Errors',
+         Value: info.totalInventoryErrors || 0,
+         Details: 'Issues with inventory management'
        });
        
        // Issues Section (Fourth Row)
@@ -175,7 +181,7 @@ const Reports = () => {
    };
 
   return (
-    <div className='bg-[#eeeeee] w-full h-auto lg:h-[90vh] p-6 overflow-y-auto lg:mt-0 mt-[10vh]' ref={contentRef}>
+    <div className='bg-[#eeeeee] w-full h-auto lg:h-[90vh] p-6 overflow-y-auto lg:mt-0 mt-[10vh]'>
       <div className='w-full flex flex-wrap items-center justify-between cursor-pointer mb-4'>
         <p className='text-sm'>REPORTS</p>
         <div className='flex gap-4 flex-wrap'>
@@ -203,7 +209,7 @@ const Reports = () => {
           <DownloadReport
             prepareDataFunc={prepareReportsData}
             filename="Dashboard_Report"
-            contentRef={contentRef}
+            
             buttonText="Download Report"
             buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
             showIcon={true}

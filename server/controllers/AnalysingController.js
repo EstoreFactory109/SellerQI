@@ -14,7 +14,12 @@ const restockInventoryRecommendationsModel = require('../models/GET_RESTOCK_INVE
 const TotalSalesModel = require('../models/TotalSalesModel.js');
 const ShipmentModel = require('../models/ShipmentModel.js');
 const ProductWiseSalesModel = require('../models/ProductWiseSalesModel.js');
-const { replenishmentQty } = require('../Services/Calculations/Inventory_.js');
+const { 
+    replenishmentQty,
+    inventoryPlanningData: processInventoryPlanningData,
+    inventoryStrandedData: processInventoryStrandedData,
+    inboundNonComplianceData: processInboundNonComplianceData 
+} = require('../Services/Calculations/Inventory_.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Services/Calculations/AccountHealth.js');
 const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Services/Calculations/Rankings.js');
 const {
@@ -31,6 +36,9 @@ const NegetiveKeywords = require('../models/NegetiveKeywords.js');
 const KeywordModel = require('../models/keywordModel.js');
 const SearchTerms = require('../models/SearchTermsModel.js');
 const Campaign = require('../models/CampaignModel.js');
+const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../models/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
+const GET_STRANDED_INVENTORY_UI_DATA_Model = require('../models/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
+const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../models/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -145,6 +153,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         keywords,
         searchTerms,
         campaignData,
+        inventoryPlanningData,
+        inventoryStrandedData,
+        inboundNonComplianceData
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -171,9 +182,15 @@ const Analyse = async (userId, country, region, adminId = null) => {
         KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
     ]);
 
-    console.log("negetiveKeywords: ", negetiveKeywords);
+    console.log("userId: ", userId);
+    console.log("inventoryPlanningData: ", inventoryPlanningData);
+    console.log("inventoryStrandedData: ", inventoryStrandedData);
+    console.log("inboundNonComplianceData: ", inboundNonComplianceData);
 
     // Create default values for missing data instead of returning error
     const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
@@ -219,6 +236,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (!keywords) missingDataWarnings.push('keywords');
     if (!searchTerms) missingDataWarnings.push('searchTerms');
     if (!campaignData) missingDataWarnings.push('campaignData');
+    if (!inventoryPlanningData) missingDataWarnings.push('inventoryPlanningData');
+    if (!inventoryStrandedData) missingDataWarnings.push('inventoryStrandedData');
+    if (!inboundNonComplianceData) missingDataWarnings.push('inboundNonComplianceData');
     
     if (missingDataWarnings.length > 0) {
         logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
@@ -348,7 +368,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
             accountHealth: checkAccountHealth(safeV2Data, safeV1Data)
         },
         FinanceData: safeFinanceData,
-        replenishmentQty: replenishmentQty(safeRestockData.Products),
         TotalSales: safeTotalSales.totalSales,
         ProductWiseSponsoredAds: mostRecentSponsoredAds,
         ProductWiseSponsoredAdsGraphData: sponsoredAdsGraphData,
@@ -428,6 +447,133 @@ const Analyse = async (userId, country, region, adminId = null) => {
         BackendKeywordResultArray
     };
 
+    // Process inventory analysis data for each ASIN first
+    const inventoryAnalysis = {
+        inventoryPlanning: [],
+        strandedInventory: [],
+        inboundNonCompliance: [],
+        replenishment: []
+    };
+
+    // Create safe defaults for inventory data
+    const safeInventoryPlanningData = inventoryPlanningData || { data: [] };
+    const safeInventoryStrandedData = inventoryStrandedData || { strandedUIData: [] };
+    const safeInboundNonComplianceData = inboundNonComplianceData || { ErrorData: [] };
+
+    // Process Inventory Planning Data for each ASIN
+    if (safeInventoryPlanningData.data && Array.isArray(safeInventoryPlanningData.data)) {
+        safeInventoryPlanningData.data.forEach(item => {
+            if (item && item.asin) {
+                try {
+                    const planningResult = processInventoryPlanningData(item);
+                    inventoryAnalysis.inventoryPlanning.push(planningResult);
+                } catch (error) {
+                    console.error(`Error processing inventory planning data for ASIN ${item.asin}:`, error);
+                    logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);
+                }
+            }
+        });
+    }
+
+    // Process Stranded Inventory Data for each ASIN
+    if (safeInventoryStrandedData.strandedUIData && Array.isArray(safeInventoryStrandedData.strandedUIData)) {
+        safeInventoryStrandedData.strandedUIData.forEach(strandedArray => {
+            if (Array.isArray(strandedArray)) {
+                strandedArray.forEach(item => {
+                    if (item && item.asin) {
+                        try {
+                            const strandedResult = processInventoryStrandedData(item);
+                            inventoryAnalysis.strandedInventory.push(strandedResult);
+                        } catch (error) {
+                            console.error(`Error processing stranded inventory data for ASIN ${item.asin}:`, error);
+                            logger.error(`Error processing stranded inventory data for ASIN ${item.asin}: ${error.message}`);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Process Inbound Non-Compliance Data for each ASIN
+    if (safeInboundNonComplianceData.ErrorData && Array.isArray(safeInboundNonComplianceData.ErrorData)) {
+        safeInboundNonComplianceData.ErrorData.forEach(item => {
+            if (item && item.asin) {
+                try {
+                    const complianceResult = processInboundNonComplianceData(item);
+                    inventoryAnalysis.inboundNonCompliance.push(complianceResult);
+                } catch (error) {
+                    console.error(`Error processing inbound non-compliance data for ASIN ${item.asin}:`, error);
+                    logger.error(`Error processing inbound non-compliance data for ASIN ${item.asin}: ${error.message}`);
+                }
+            }
+        });
+    }
+
+    // Process Replenishment/Restock Data for each ASIN
+    if (safeRestockData.Products && Array.isArray(safeRestockData.Products)) {
+        try {
+            const replenishmentResults = replenishmentQty(safeRestockData.Products);
+            inventoryAnalysis.replenishment = replenishmentResults || [];
+        } catch (error) {
+            console.error(`Error processing replenishment data:`, error);
+            logger.error(`Error processing replenishment data: ${error.message}`);
+            inventoryAnalysis.replenishment = [];
+        }
+    } else {
+        inventoryAnalysis.replenishment = [];
+    }
+
+    // Calculate total inventory errors per ASIN for AmazonReadyProducts determination
+    const inventoryErrorsByAsin = new Map();
+    
+    // Count errors from inventory planning data
+    if (inventoryAnalysis.inventoryPlanning && Array.isArray(inventoryAnalysis.inventoryPlanning)) {
+        inventoryAnalysis.inventoryPlanning.forEach(item => {
+            if (item && item.asin) {
+                let errorCount = 0;
+                if (item.longTermStorageFees && item.longTermStorageFees.status === "Error") errorCount++;
+                if (item.unfulfillable && item.unfulfillable.status === "Error") errorCount++;
+                
+                if (errorCount > 0) {
+                    inventoryErrorsByAsin.set(item.asin, (inventoryErrorsByAsin.get(item.asin) || 0) + errorCount);
+                }
+            }
+        });
+    }
+    
+    // Count errors from stranded inventory (always errors when present)
+    if (inventoryAnalysis.strandedInventory && Array.isArray(inventoryAnalysis.strandedInventory)) {
+        inventoryAnalysis.strandedInventory.forEach(item => {
+            if (item && item.asin && item.status === "Error") {
+                inventoryErrorsByAsin.set(item.asin, (inventoryErrorsByAsin.get(item.asin) || 0) + 1);
+            }
+        });
+    }
+    
+    // Count errors from inbound non-compliance (always errors when present)
+    if (inventoryAnalysis.inboundNonCompliance && Array.isArray(inventoryAnalysis.inboundNonCompliance)) {
+        inventoryAnalysis.inboundNonCompliance.forEach(item => {
+            if (item && item.asin && item.status === "Error") {
+                inventoryErrorsByAsin.set(item.asin, (inventoryErrorsByAsin.get(item.asin) || 0) + 1);
+            }
+        });
+    }
+    
+    // Count errors from replenishment/restock data (low inventory errors)
+    if (inventoryAnalysis.replenishment && Array.isArray(inventoryAnalysis.replenishment)) {
+        inventoryAnalysis.replenishment.forEach(item => {
+            if (item && item.asin && item.status === "Error") {
+                inventoryErrorsByAsin.set(item.asin, (inventoryErrorsByAsin.get(item.asin) || 0) + 1);
+            }
+        });
+    }
+
+    // Remove ASINs with inventory errors from AmazonReadyProductsSet
+    inventoryErrorsByAsin.forEach((errorCount, asin) => {
+        if (errorCount > 0) {
+            AmazonReadyProductsSet.delete(asin);
+        }
+    });
 
     result.ConversionData = {
         imageResult: imageResultArray,
@@ -467,6 +613,58 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
     result.Reimburstment = reimburstmentData
     result.SalesByProducts = safeSaleByProduct.productWiseSales
+
+    // Calculate total errors across all categories
+    let totalErrorsAllCategories = 0;
+    
+    // Count conversion errors
+    const conversionErrors = [
+        ...imageResultArray.filter(item => item && item.data && item.data.status === "Error"),
+        ...videoResultArray.filter(item => item && item.data && item.data.status === "Error"),
+        ...productReviewResultArray.filter(item => item && item.data && item.data.status === "Error"),
+        ...productStarRatingResultArray.filter(item => item && item.data && item.data.status === "Error"),
+        ...aPlusArray.filter(item => item && item.status === "Error")
+    ];
+    totalErrorsAllCategories += conversionErrors.length;
+    
+    // Count ranking errors
+    const rankingErrors = RankingResultArray.reduce((count, item) => {
+        return count + ((item && item.data && item.data.TotalErrors) || 0);
+    }, 0);
+    totalErrorsAllCategories += rankingErrors;
+    
+    // Count backend keyword errors
+    const keywordErrors = BackendKeywordResultArray.reduce((count, item) => {
+        return count + ((item && item.data && item.data.NumberOfErrors) || 0);
+    }, 0);
+    totalErrorsAllCategories += keywordErrors;
+    
+    // Count buybox errors
+    const buyboxErrors = checkProductWithOutBuyBox(safeCompetitiveData.Products).buyboxResult.filter(item => item && item.data && item.data.status === "Error").length;
+    totalErrorsAllCategories += buyboxErrors;
+    
+    // Count inventory errors
+    const totalInventoryErrors = inventoryErrorsByAsin && inventoryErrorsByAsin.size > 0 
+        ? Array.from(inventoryErrorsByAsin.values()).reduce((sum, count) => sum + (count || 0), 0)
+        : 0;
+    totalErrorsAllCategories += totalInventoryErrors;
+
+    // Add inventory analysis and error summary to result
+    result.InventoryAnalysis = inventoryAnalysis;
+    result.ErrorSummary = {
+        totalErrors: totalErrorsAllCategories,
+        conversionErrors: conversionErrors.length,
+        rankingErrors: rankingErrors,
+        keywordErrors: keywordErrors,
+        buyboxErrors: buyboxErrors,
+        inventoryErrors: totalInventoryErrors,
+        inventoryErrorsByAsin: inventoryErrorsByAsin && inventoryErrorsByAsin.size > 0 
+            ? Object.fromEntries(inventoryErrorsByAsin) 
+            : {}
+    };
+
+    // Log comprehensive summary
+    logger.info(`Analysis Summary: Total Errors=${totalErrorsAllCategories}, Inventory Analysis: Planning=${inventoryAnalysis.inventoryPlanning.length}, Stranded=${inventoryAnalysis.strandedInventory.length}, NonCompliance=${inventoryAnalysis.inboundNonCompliance.length}, Amazon Ready Products=${AmazonReadyProductsSet.size}`);
 
     return {
         status: 200,

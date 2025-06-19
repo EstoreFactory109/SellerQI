@@ -7,8 +7,6 @@ import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from "framer-motion";
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import './IssuesByProduct.css';
@@ -79,6 +77,10 @@ const Dashboard = () => {
         setProductStarRatingSolution("");
         setProductsWithOutBuyboxSolution("");
         setAplusSolution("");
+        setInventoryPlanningSolution("");
+        setStrandedInventorySolution("");
+        setInboundNonComplianceSolution("");
+        setReplenishmentSolution("");
         setOpenSelector(false);
         setShowDownloadOptions(false);
         
@@ -101,6 +103,13 @@ const Dashboard = () => {
         product.conversionErrors.productsWithOutBuyboxErrorData?.status,
         product.conversionErrors.aplusErrorData?.status
     ].includes("Error");
+
+    const hasAnyInventoryError = product.inventoryErrors && (
+        product.inventoryErrors.inventoryPlanningErrorData ||
+        product.inventoryErrors.strandedInventoryErrorData ||
+        product.inventoryErrors.inboundNonComplianceErrorData ||
+        product.inventoryErrors.replenishmentErrorData
+    );
 
     // Ranking issue states
     const [TitleSolution, setTitleSolution] = useState("");
@@ -131,6 +140,12 @@ const Dashboard = () => {
     const [productsWithOutBuyboxSolution, setProductsWithOutBuyboxSolution] = useState("");
     const [aplusSolution, setAplusSolution] = useState("");
 
+    // Inventory issue states (independent toggles)
+    const [inventoryPlanningSolution, setInventoryPlanningSolution] = useState("");
+    const [strandedInventorySolution, setStrandedInventorySolution] = useState("");
+    const [inboundNonComplianceSolution, setInboundNonComplianceSolution] = useState("");
+    const [replenishmentSolution, setReplenishmentSolution] = useState("");
+
     const openCloseSolutionConversion = (val, component) => {
         if (component === "Image") {
             setImageSolution(prev => prev === val ? "" : val);
@@ -149,6 +164,21 @@ const Dashboard = () => {
         }
         if (component === "Aplus") {
             setAplusSolution(prev => prev === val ? "" : val);
+        }
+    };
+
+    const openCloseSolutionInventory = (val, component) => {
+        if (component === "InventoryPlanning") {
+            setInventoryPlanningSolution(prev => prev === val ? "" : val);
+        }
+        if (component === "StrandedInventory") {
+            setStrandedInventorySolution(prev => prev === val ? "" : val);
+        }
+        if (component === "InboundNonCompliance") {
+            setInboundNonComplianceSolution(prev => prev === val ? "" : val);
+        }
+        if (component === "Replenishment") {
+            setReplenishmentSolution(prev => prev === val ? "" : val);
         }
     };
     const [openSelector, setOpenSelector] = useState(false)
@@ -363,6 +393,56 @@ const Dashboard = () => {
             });
         }
 
+        // Inventory Issues
+        if (product.inventoryErrors?.inventoryPlanningErrorData) {
+            const planning = product.inventoryErrors.inventoryPlanningErrorData;
+            if (planning.longTermStorageFees?.status === "Error") {
+                exportData.push({
+                    Category: 'Inventory Issues',
+                    Type: 'Inventory Planning',
+                    Issue: 'Long-Term Storage Fees',
+                    Message: planning.longTermStorageFees.Message,
+                    Solution: planning.longTermStorageFees.HowToSolve
+                });
+            }
+            if (planning.unfulfillable?.status === "Error") {
+                exportData.push({
+                    Category: 'Inventory Issues',
+                    Type: 'Inventory Planning',
+                    Issue: 'Unfulfillable Inventory',
+                    Message: planning.unfulfillable.Message,
+                    Solution: planning.unfulfillable.HowToSolve
+                });
+            }
+        }
+        if (product.inventoryErrors?.strandedInventoryErrorData) {
+            exportData.push({
+                Category: 'Inventory Issues',
+                Type: 'Stranded Inventory',
+                Issue: 'Product Not Listed',
+                Message: product.inventoryErrors.strandedInventoryErrorData.Message,
+                Solution: product.inventoryErrors.strandedInventoryErrorData.HowToSolve
+            });
+        }
+        if (product.inventoryErrors?.inboundNonComplianceErrorData) {
+            exportData.push({
+                Category: 'Inventory Issues',
+                Type: 'Inbound Non-Compliance',
+                Issue: 'Shipment Issue',
+                Message: product.inventoryErrors.inboundNonComplianceErrorData.Message,
+                Solution: product.inventoryErrors.inboundNonComplianceErrorData.HowToSolve
+            });
+        }
+        if (product.inventoryErrors?.replenishmentErrorData) {
+            exportData.push({
+                Category: 'Inventory Issues',
+                Type: 'Replenishment',
+                Issue: 'Low Inventory Risk',
+                Message: product.inventoryErrors.replenishmentErrorData.Message,
+                Solution: product.inventoryErrors.replenishmentErrorData.HowToSolve
+            });
+        }
+
         return exportData;
     };
 
@@ -403,7 +483,6 @@ const Dashboard = () => {
 
     // Download handler with format selection
     const [showDownloadOptions, setShowDownloadOptions] = useState(false);
-    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
     const downloadRef = useRef(null);
     const contentRef = useRef(null);
 
@@ -419,158 +498,7 @@ const Dashboard = () => {
         }
     }, []);
 
-    // Download as PDF
-    const downloadPDF = async () => {
-        try {
-            // Close all dropdowns first
-            setShowDownloadOptions(false);
-            setOpenSelector(false);
-            
-            // Wait for animations to complete
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            // Now start the PDF generation
-            setIsGeneratingPDF(true);
-            
-            const element = contentRef.current;
-            
-            // Clone the element to avoid modifying the original
-            const clonedElement = element.cloneNode(true);
-            
-            // Hide the download button and switch product option in the cloned element
-            const buttonsContainer = clonedElement.querySelector('.flex.items-center.gap-2.relative.w-fit');
-            if (buttonsContainer) {
-                buttonsContainer.style.display = 'none';
-            }
-            
-            // Hide all "How to solve" buttons and expand all solutions
-            const howToSolveButtons = clonedElement.querySelectorAll('button');
-            howToSolveButtons.forEach(button => {
-                if (button.textContent.includes('How to solve')) {
-                    button.style.display = 'none';
-                }
-            });
-            
-            // Expand all solution divs
-            const solutionDivs = clonedElement.querySelectorAll('.bg-gray-200');
-            solutionDivs.forEach(div => {
-                div.style.opacity = '1';
-                div.style.maxHeight = 'none';
-                div.style.minHeight = '80px';
-                div.style.display = 'flex';
-                div.style.padding = '2rem';
-                div.style.overflow = 'visible';
-                div.style.height = 'auto';
-            });
-            
-            // Create a temporary container
-            const tempContainer = document.createElement('div');
-            tempContainer.style.position = 'absolute';
-            tempContainer.style.left = '-9999px';
-            tempContainer.style.top = '0';
-            tempContainer.style.width = '1200px';
-            tempContainer.style.backgroundColor = '#f3f4f6';
-            tempContainer.style.padding = '24px'; // Add padding to match original
-            
-            // Apply styles to cloned element
-            clonedElement.style.maxHeight = 'none';
-            clonedElement.style.overflow = 'visible';
-            clonedElement.style.height = 'auto';
-            clonedElement.style.marginBottom = '50px'; // Add margin to ensure bottom content is captured
-            
-            // Append to body temporarily
-            document.body.appendChild(tempContainer);
-            tempContainer.appendChild(clonedElement);
-            
-            // Force layout recalculation
-            tempContainer.offsetHeight;
-            
-            // Wait for images to load
-            const images = clonedElement.getElementsByTagName('img');
-            const imagePromises = Array.from(images).map(img => {
-                if (img.complete) return Promise.resolve();
-                return new Promise(resolve => {
-                    img.onload = resolve;
-                    img.onerror = resolve;
-                });
-            });
-            await Promise.all(imagePromises);
-            
-            // Wait a bit more for any dynamic content
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Capture the cloned element with extra height
-            const canvas = await html2canvas(tempContainer, {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#f3f4f6',
-                width: 1200,
-                height: tempContainer.scrollHeight + 100, // Add extra height
-                windowWidth: 1200,
-                windowHeight: tempContainer.scrollHeight + 100
-            });
-            
-            // Remove temporary container
-            document.body.removeChild(tempContainer);
 
-            // Calculate PDF dimensions to match webpage width
-            const pageWidthInPx = 1200;
-            const pageWidthInMm = 297; // Use A4 landscape width for better match
-            const scaleFactor = pageWidthInMm / pageWidthInPx;
-            
-            const imgWidth = pageWidthInMm;
-            const imgHeight = (canvas.height * scaleFactor);
-            
-            // Create PDF with custom page size
-            const pdf = new jsPDF({
-                orientation: imgHeight > imgWidth ? 'portrait' : 'landscape',
-                unit: 'mm',
-                format: [imgWidth, imgHeight] // Custom page size to match content
-            });
-            
-            // Add image to PDF
-            const imgData = canvas.toDataURL('image/png');
-            pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-            
-            // If content is too long for single page, use standard A4 pages
-            if (imgHeight > 420) { // Max reasonable height for a single page
-                // Recreate PDF with standard A4 pages
-                const standardPdf = new jsPDF('p', 'mm', 'a4');
-                const a4Width = 210;
-                const a4Height = 297;
-                const contentHeight = (canvas.height * a4Width) / canvas.width;
-                let heightLeft = contentHeight;
-                let position = 0;
-                
-                // Add first page
-                standardPdf.addImage(imgData, 'PNG', 0, position, a4Width, contentHeight);
-                heightLeft -= a4Height;
-                
-                // Add additional pages if needed
-                while (heightLeft >= 0) {
-                    position = heightLeft - contentHeight;
-                    standardPdf.addPage();
-                    standardPdf.addImage(imgData, 'PNG', 0, position, a4Width, contentHeight);
-                    heightLeft -= a4Height;
-                }
-                
-                // Save the standard PDF
-                const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.pdf`;
-                standardPdf.save(fileName);
-            } else {
-                // Save the custom-sized PDF
-                const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.pdf`;
-                pdf.save(fileName);
-            }
-
-        } catch (error) {
-            console.error('Error generating PDF:', error);
-            alert('Error generating PDF. Please try again.');
-        } finally {
-            setIsGeneratingPDF(false);
-        }
-    };
 
     return (
         <>
@@ -631,15 +559,7 @@ const Dashboard = () => {
                                         >
                                             Download as CSV (.csv)
                                         </button>
-                                        <button
-                                            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors border-t border-gray-200"
-                                            onClick={() => {
-                                                setShowDownloadOptions(false);
-                                                downloadPDF();
-                                            }}
-                                        >
-                                            Download as PDF (.pdf)
-                                        </button>
+
                                     </motion.div>
                                 )}
                             </AnimatePresence>
@@ -949,6 +869,80 @@ const Dashboard = () => {
                                         solutionContent={product.conversionErrors.aplusErrorData.HowToSolve}
                                         stateValue={aplusSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Aplus")}
+                                    />
+                                )}
+                            </ul>
+                        </div>
+                    </div>
+                )}
+
+                {/* Inventory Issues */}
+                {hasAnyInventoryError && (
+                    <div className="mb-4">
+                        <div className="bg-[#333651] text-white px-4 py-2 rounded-t-md font-medium">
+                            INVENTORY ISSUES
+                        </div>
+                        <div className="border border-t-0 rounded-b-md p-4">
+                            <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
+                                {/* Inventory Planning Issues */}
+                                {product.inventoryErrors?.inventoryPlanningErrorData && (
+                                    <>
+                                        {product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees?.status === "Error" && (
+                                            <IssueItem
+                                                label="Long-Term Storage Fees"
+                                                message={product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees.Message}
+                                                solutionKey="LongTermStorage"
+                                                solutionContent={product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees.HowToSolve}
+                                                stateValue={inventoryPlanningSolution}
+                                                toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
+                                            />
+                                        )}
+                                        {product.inventoryErrors.inventoryPlanningErrorData.unfulfillable?.status === "Error" && (
+                                            <IssueItem
+                                                label="Unfulfillable Inventory"
+                                                message={product.inventoryErrors.inventoryPlanningErrorData.unfulfillable.Message}
+                                                solutionKey="Unfulfillable"
+                                                solutionContent={product.inventoryErrors.inventoryPlanningErrorData.unfulfillable.HowToSolve}
+                                                stateValue={inventoryPlanningSolution}
+                                                toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
+                                            />
+                                        )}
+                                    </>
+                                )}
+
+                                {/* Stranded Inventory Issues */}
+                                {product.inventoryErrors?.strandedInventoryErrorData && (
+                                    <IssueItem
+                                        label="Stranded Inventory"
+                                        message={product.inventoryErrors.strandedInventoryErrorData.Message}
+                                        solutionKey="StrandedInventory"
+                                        solutionContent={product.inventoryErrors.strandedInventoryErrorData.HowToSolve}
+                                        stateValue={strandedInventorySolution}
+                                        toggleFunc={(val) => openCloseSolutionInventory(val, "StrandedInventory")}
+                                    />
+                                )}
+
+                                {/* Inbound Non-Compliance Issues */}
+                                {product.inventoryErrors?.inboundNonComplianceErrorData && (
+                                    <IssueItem
+                                        label="Inbound Non-Compliance"
+                                        message={product.inventoryErrors.inboundNonComplianceErrorData.Message}
+                                        solutionKey="InboundNonCompliance"
+                                        solutionContent={product.inventoryErrors.inboundNonComplianceErrorData.HowToSolve}
+                                        stateValue={inboundNonComplianceSolution}
+                                        toggleFunc={(val) => openCloseSolutionInventory(val, "InboundNonCompliance")}
+                                    />
+                                )}
+
+                                {/* Replenishment/Restock Issues */}
+                                {product.inventoryErrors?.replenishmentErrorData && (
+                                    <IssueItem
+                                        label="Low Inventory Risk"
+                                        message={product.inventoryErrors.replenishmentErrorData.Message}
+                                        solutionKey="Replenishment"
+                                        solutionContent={product.inventoryErrors.replenishmentErrorData.HowToSolve}
+                                        stateValue={replenishmentSolution}
+                                        toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
                                     />
                                 )}
                             </ul>

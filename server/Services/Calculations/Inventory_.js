@@ -58,5 +58,27 @@ const inventoryPlanningData=(data)=>{
 
 }
 
+const inventoryStrandedData=(data)=>{
+    
+    return {
+        asin:data.asin,
+        status:"Error",
+        Message:"Some of your inventory is stranded, meaning it is in Amazon’s fulfillment centers but not actively listed for sale. Stranded inventory can lead to unnecessary storage fees and lost sales opportunities.",
+        HowToSolve:`Check the Stranded Inventory Report in Seller Central > Inventory > Manage Inventory to identify affected SKUs. Determine the reason for the issue, such as listing errors, pricing rules, or account suspensions. Resolve it by relisting the product, adjusting pricing, or creating a removal order if needed. Regularly monitor stranded inventory to prevent accumulation and reduce unnecessary FBA storage fees.
+        Reason: ${data.stranded_reason}`
+    }
 
-module.exports={replenishmentQty,inventoryPlanningData}
+}
+
+const inboundNonComplianceData=(data)=>{
+    return {
+        asin:data.asin,
+        status:"Error",
+        Message:"There is an issue with a product in your incoming shipment. This may cause delays in receiving inventory at Amazon’s fulfillment center, potentially leading to stockouts and missed sales.",
+        HowToSolve:`Check the Shipment Status in Seller Central > Inventory > Manage FBA Shipments to identify the issue. Common problems include incorrect labeling, quantity discrepancies, or carrier delays. Resolve any flagged issues by contacting your supplier, ensuring correct packaging and labeling, and providing accurate shipment details. If needed, contact Amazon Seller Support for assistance.
+        Problem: ${data.problemType}`
+    }
+}
+
+
+module.exports={replenishmentQty,inventoryPlanningData,inventoryStrandedData,inboundNonComplianceData}

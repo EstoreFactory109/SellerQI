@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React from "react";
 import Chart from "react-apexcharts";
 import moment from "moment";
 import Health from '../Reports/Reports_Third_Row/Health.jsx'
@@ -7,7 +7,6 @@ import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
 export default function AccountHealthDashboard() {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
-    const contentRef = useRef(null);
 
     const AccountErrors=info.AccountErrors
  
@@ -156,7 +155,7 @@ export default function AccountHealthDashboard() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-6" ref={contentRef}>
+    <div className="p-4 md:p-8 space-y-6">
       {/* Top Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Account Health */}
@@ -185,7 +184,6 @@ export default function AccountHealthDashboard() {
           <DownloadReport
             prepareDataFunc={prepareAccountData}
             filename="Account_Health_Report"
-            contentRef={contentRef}
             buttonText="Download Report"
             buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
             showIcon={false}

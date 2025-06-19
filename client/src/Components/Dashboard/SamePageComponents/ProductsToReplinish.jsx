@@ -16,7 +16,7 @@ const ProductsToReplinish = () => {
                 </div>
             </div>
             <div className='w-full '>
-                <p className='font-bold text-base'>{info.replenishmentQty.length}</p>
+                <p className='font-bold text-base'>{info?.InventoryAnalysis?.replenishment?.length || 0}</p>
             </div>
         </div>
   )

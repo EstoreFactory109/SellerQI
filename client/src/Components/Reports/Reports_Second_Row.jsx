@@ -6,8 +6,9 @@ import { useSelector } from 'react-redux';
 const TopSalesChart = () => {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
 
-  const totalSales = info.TotalSales;
-  console.log(totalSales)
+  // Get last 16 days of sales data (covers 10-16 days range)
+  const totalSales = info.TotalSales ? info.TotalSales.slice(-16) : [];
+  console.log('Last 16 days of sales data:', totalSales)
 
   const chartData = {
     series: [
@@ -29,13 +30,19 @@ const TopSalesChart = () => {
       },
       xaxis: {
         categories: totalSales.map(item =>
-          moment(item.interval.split('--')[0]).format('D/MM')
+          moment(item.interval.split('--')[0]).format('DD MMM')
         ),
         title: {
           text: 'Date',
           style: {
             fontSize: '14px',
             fontWeight: 'bold'
+          }
+        },
+        labels: {
+          rotate: -45,
+          style: {
+            fontSize: '12px'
           }
         }
       },

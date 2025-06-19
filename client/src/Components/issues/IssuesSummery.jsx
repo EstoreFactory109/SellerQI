@@ -10,17 +10,18 @@ const IssuesSummery = () => {
   // Get error counts from Redux - these are now pre-calculated during analysis
   const profitabilityErrors = info?.totalProfitabilityErrors || 0;
   const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
+  const inventoryErrors = info?.totalInventoryErrors || 0;
   
-  const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-  const [LableData,setDableData]=useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
+  const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+  const [LableData,setDableData]=useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads", "Inventory"])
     
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
       
   useEffect(() => {
     // Update series data when errors change
-    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
     
   const [chartData, setChartData] = useState({
     series: seriesData, // Data values
@@ -29,7 +30,7 @@ const IssuesSummery = () => {
         type: "donut",
       },
       labels: LableData, 
-      colors:["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651"],
+      colors:["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651", "#ff6b35"],
       
       legend: {
         show: false// Hides legend globally
@@ -61,7 +62,15 @@ const IssuesSummery = () => {
           breakpoint: 764,
           options: {
             chart: {
-              width: 200,
+              width: 180,
+            },
+          },
+        },
+        {
+          breakpoint: 480,
+          options: {
+            chart: {
+              width: 160,
             },
           },
         },
@@ -80,66 +89,82 @@ const IssuesSummery = () => {
   const [tooltipForProductChecker, setToolTipForProductChecker] = useState(false);
   return (
    <>
-     <div className='lg:w-[45vw] w-full h-[30vh] bg-white p-3  rounded-md'>
-          <div className='w-full h-[58%] '>
-          <div className='flex items-center gap-3 my-2'>
-            <h2 className='text-sm'>ALL ISSUES</h2>
-            <div className='relative fit-content'>
-              <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
-              onMouseEnter={() => setToolTipForProductChecker(true)}
-              onMouseLeave={() => setToolTipForProductChecker(false)}
-              />
-              {tooltipForProductChecker && <TooltipBox Information='A total number of issues in all products and the Amazon account that required attention.​ ' />}
-            </div>
-          </div>
-            <div className='w-full flex  justify-between'>
+     <div className='lg:w-[45vw] w-full min-h-[320px] bg-white p-4 rounded-md shadow-sm'>
+          <div className='w-full flex flex-col'>
+            {/* Header Section */}
+            <div className='flex items-center gap-3 mb-4'>
+              <h2 className='text-sm font-medium text-gray-700'>ALL ISSUES</h2>
               <div className='relative'>
-                <Chart options={chartData.options} series={chartData.series} type="donut" width={200} />
-                <div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
-                  <div className='text-2xl font-bold text-gray-900'>{totalErrors}</div>
-                  <div className='text-xs font-normal text-red-600'>ERRORS</div>
+                <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
+                onMouseEnter={() => setToolTipForProductChecker(true)}
+                onMouseLeave={() => setToolTipForProductChecker(false)}
+                />
+                {tooltipForProductChecker && <TooltipBox Information='A total number of issues in all products and the Amazon account that required attention.​ ' />}
+              </div>
+            </div>
+            
+            {/* Chart and Legend Section */}
+            <div className='w-full flex flex-col lg:flex-row lg:items-center gap-6'>
+              {/* Chart Container */}
+              <div className='flex-shrink-0 flex justify-center lg:justify-start'>
+                <div className='relative'>
+                  <Chart options={chartData.options} series={chartData.series} type="donut" width={200} height={200} />
+                  <div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
+                    <div className='text-2xl font-bold text-gray-900'>{totalErrors}</div>
+                    <div className='text-xs font-normal text-red-600'>ERRORS</div>
+                  </div>
                 </div>
               </div>
-              <ul className='w-[50%]  py-4 pr-3'>
-                <li className='flex w-full items-center justify-between text-sm mb-3'>
-                  <div className='flex items-center gap-2'>
-                    <div className='w-3 h-3 rounded-full bg-[#fad12a]' ></div>
-                    <p className='mr-5'>{LableData[0]}</p>
-                  </div>
-                  <p>{seriesData[0]}</p>
-                </li>
-                <li className='flex w-full items-center justify-between text-sm mb-3'>
-                  <div className='flex items-center gap-2'>
-                    <div className='w-3 h-3 rounded-full bg-[#b92533]' ></div>
-                    <p className='mr-5'>{LableData[1]}</p>
-                  </div>
-                  <p>{seriesData[1]}</p>
-                </li>
-                <li className='flex w-full items-center justify-between text-sm mb-3'>
-                  <div className='flex items-center gap-2'>
-                    <div className='w-3 h-3 rounded-full bg-[#90acc7]' ></div>
-                    <p className='mr-5'>{LableData[2]}</p>
-                  </div>
-                  <p>{seriesData[2]}</p>
-                </li>
-                <li className='flex w-full items-center justify-between text-sm mb-3'>
-                  <div className='flex items-center gap-2'>
-                    <div className='w-3 h-3 rounded-full bg-[#05724e]' ></div>
-                    <p className='mr-5'>{LableData[3]}</p>
-                  </div>
-                  <p>{profitabilityErrors}</p>
-                </li>
-                <li className='flex w-full items-center justify-between text-sm'>
-                  <div className='flex items-center gap-2'>
-                    <div className='w-3 h-3 rounded-full bg-[#333651]' ></div>
-                    <p className='mr-5'>{LableData[4]}</p>
-                  </div>
-                  <p>{sponsoredAdsErrors}</p>
-                </li>
-              </ul>
+              
+              {/* Legend Container */}
+              <div className='flex-1 min-w-0'>
+                <ul className='space-y-3'>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#fad12a] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[0]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[0] || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#b92533] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[1]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[1] || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#90acc7] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[2]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[2] || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#05724e] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[3]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{profitabilityErrors || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#333651] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[4]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{sponsoredAdsErrors || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#ff6b35] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[5]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{inventoryErrors || 0}</p>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
-         
         </div>
    </>
   )

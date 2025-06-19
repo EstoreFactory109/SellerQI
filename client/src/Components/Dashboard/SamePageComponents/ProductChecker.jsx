@@ -13,9 +13,10 @@ const ProductChecker = () => {
    // Get error counts from Redux - these are now pre-calculated during analysis
    const profitabilityErrors = info?.totalProfitabilityErrors || 0;
    const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
+   const inventoryErrors = info?.totalInventoryErrors || 0;
    
-   const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-   const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads"])
+   const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+   const [LableData, setDableData] = useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads", "Inventory"])
    const [productErrors, setProductErrors] = useState([]);
    
    useEffect(() => {
@@ -29,8 +30,8 @@ const ProductChecker = () => {
  
   useEffect(() => {
     // Update series data when info changes
-    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
   
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
@@ -42,7 +43,7 @@ const ProductChecker = () => {
         type: "donut",
       },
       labels: LableData,
-      colors: ["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651"],
+      colors: ["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651", "#ff6b35"],
 
       legend: {
         show: false// Hides legend globally
@@ -154,35 +155,42 @@ const ProductChecker = () => {
                 <div className='w-3 h-3 rounded-full bg-[#fad12a]' ></div>
                 <p>{LableData[0]}</p>
               </div>
-              <p>{seriesData[0]}</p>
+              <p>{seriesData[0] || 0}</p>
             </li>
             <li className='flex w-full items-center justify-between text-sm mb-3'>
               <div className='flex items-center gap-2'>
                 <div className='w-3 h-3 rounded-full bg-[#b92533]' ></div>
                 <p>{LableData[1]}</p>
               </div>
-              <p>{seriesData[1]}</p>
+              <p>{seriesData[1] || 0}</p>
             </li>
             <li className='flex w-full items-center justify-between text-sm mb-3'>
               <div className='flex items-center gap-2'>
                 <div className='w-3 h-3 rounded-full bg-[#90acc7]' ></div>
                 <p>{LableData[2]}</p>
               </div>
-              <p>{seriesData[2]}</p>
+              <p>{seriesData[2] || 0}</p>
             </li>
             <li className='flex w-full items-center justify-between text-sm mb-3'>
               <div className='flex items-center gap-2'>
                 <div className='w-3 h-3 rounded-full bg-[#05724e]' ></div>
                 <p>{LableData[3]}</p>
               </div>
-              <p>{profitabilityErrors}</p>
+              <p>{profitabilityErrors || 0}</p>
             </li>
-            <li className='flex w-full items-center justify-between text-sm'>
+            <li className='flex w-full items-center justify-between text-sm mb-3'>
               <div className='flex items-center gap-2'>
                 <div className='w-3 h-3 rounded-full bg-[#333651]' ></div>
                 <p>{LableData[4]}</p>
               </div>
-              <p>{sponsoredAdsErrors}</p>
+              <p>{sponsoredAdsErrors || 0}</p>
+            </li>
+            <li className='flex w-full items-center justify-between text-sm'>
+              <div className='flex items-center gap-2'>
+                <div className='w-3 h-3 rounded-full bg-[#ff6b35]' ></div>
+                <p>{LableData[5]}</p>
+              </div>
+              <p>{inventoryErrors || 0}</p>
             </li>
           </ul>
         </div>

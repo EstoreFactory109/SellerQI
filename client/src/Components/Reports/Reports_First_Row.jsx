@@ -78,7 +78,7 @@ const Reports_First_Row = () => {
             { openToolTipForReplinish && <ToolTipForReplenishment Information='Number of products that are ready to be replenished.'/>}
             </div>
           </div>
-          <p className='font-bold mt-3'>{info.replenishmentQty.length}</p>
+                          <p className='font-bold mt-3'>{info?.InventoryAnalysis?.replenishment?.length || 0}</p>
         </div>
     </div>
   );

@@ -34,6 +34,7 @@ import RefundPolicy from './Pages/RefundPolicy.jsx';
 import SubscriptionSuccess from './Pages/SubscriptionSuccess.jsx';
 import SubscriptionCancel from './Pages/SubscriptionCancel.jsx';
 import ASINAnalyzer from './Pages/ASINAnalyzer.jsx';
+import AboutUs from './Pages/AboutUs.jsx';
 
 const App = () => {
 
@@ -65,6 +66,7 @@ const App = () => {
         <Route path='/results' element={<ResultsPage />} />
         <Route path='/subscription-success' element={<SubscriptionSuccess />} />
         <Route path='/subscription-cancel' element={<SubscriptionCancel />} />
+        <Route path='/about-us' element={<AboutUs />} />
         <Route
           element={
             <ProtectedRouteWrapper>
@@ -84,6 +86,7 @@ const App = () => {
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />
+            
           </Route>
         </Route>
         <Route path='/error/:status' element={<Error />} />

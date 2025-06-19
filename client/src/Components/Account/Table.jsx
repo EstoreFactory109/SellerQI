@@ -11,7 +11,8 @@ const AccountSnapshotTable = () => {
 
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return info.slice(start, start + ITEMS_PER_PAGE);
+    const reversedInfo = [...info].reverse();
+    return reversedInfo.slice(start, start + ITEMS_PER_PAGE);
   }, [currentPage, info]);
 
   useEffect(() => {

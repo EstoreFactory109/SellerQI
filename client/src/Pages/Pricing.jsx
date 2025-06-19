@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
 import stripeService from '../services/stripeService';
@@ -9,7 +10,7 @@ import { useSelector } from 'react-redux';
 
 export default function PricingPage() {
   const navigate = useNavigate();
-  const [openFaq, setOpenFaq] = useState(2);
+  const [openFaq, setOpenFaq] = useState(null);
   const [loading, setLoading] = useState({
     LITE: false,
     PRO: false,
@@ -268,6 +269,7 @@ export default function PricingPage() {
                 <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Expert Consultation</li>
                 <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Track Multiple Products</li>
                 <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Issue Breakdown</li>
+                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Minimum 5 Accounts</li>
               </ul>
               <button 
                 onClick={() => handleSubscribe('AGENCY')}
@@ -293,19 +295,45 @@ export default function PricingPage() {
             </div>
             <div className="space-y-4">
               {faqs.map((faq, i) => (
-                <div key={i} className={`bg-white rounded-lg overflow-hidden transition-all border ${openFaq === i ? 'border-blue-200 shadow-md' : 'border-transparent'}`}>
+                <div 
+                  key={i} 
+                  className={`bg-white rounded-lg overflow-hidden transition-all duration-300 border ${
+                    openFaq === i ? 'border-blue-200 shadow-md' : 'border-transparent'
+                  }`}
+                >
                   <button
                     className="w-full text-left px-6 py-4 font-semibold flex justify-between items-center focus:outline-none text-lg"
                     onClick={() => setOpenFaq(openFaq === i ? null : i)}
                   >
                     <span>{faq.q}</span>
-                    <span className={`ml-4 text-2xl font-bold transition-transform ${openFaq === i ? 'text-blue-500 rotate-45' : 'text-gray-400'}`}>
-                      {openFaq === i ? '×' : '+'}
-                    </span>
+                    <motion.span 
+                      className={`ml-4 text-2xl font-bold`}
+                      animate={{ 
+                        rotate: openFaq === i ? 45 : 0,
+                        color: openFaq === i ? '#3b82f6' : '#9ca3af'
+                      }}
+                      transition={{ duration: 0.2, ease: "easeOut" }}
+                    >
+                      +
+                    </motion.span>
                   </button>
-                  {openFaq === i && faq.a && (
-                    <div className="px-6 pb-4 text-gray-600 text-base bg-blue-50">{faq.a}</div>
-                  )}
+                  <motion.div
+                    initial={false}
+                    animate={{
+                      height: openFaq === i ? 'auto' : 0,
+                      opacity: openFaq === i ? 1 : 0
+                    }}
+                    transition={{ 
+                      duration: 0.25, 
+                      ease: "easeOut",
+                      opacity: { duration: 0.2 }
+                    }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-6 pb-4 text-gray-600 text-base bg-blue-50">
+                      {faq.a}
+                    </div>
+                  </motion.div>
                 </div>
               ))}
             </div>

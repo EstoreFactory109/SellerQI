@@ -10,13 +10,11 @@ const subscriptionSchema = new mongoose.Schema({
     stripeSubscriptionId: {
         type: String,
         required: true,
-        unique: true,
-        index: true
+        unique: true
     },
     stripeCustomerId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     planType: {
         type: String,
@@ -99,7 +97,6 @@ const subscriptionSchema = new mongoose.Schema({
 
 // Indexes for better query performance
 subscriptionSchema.index({ userId: 1, status: 1 });
-subscriptionSchema.index({ stripeSubscriptionId: 1 });
 subscriptionSchema.index({ stripeCustomerId: 1 });
 subscriptionSchema.index({ planType: 1, status: 1 });
 subscriptionSchema.index({ currentPeriodEnd: 1 });

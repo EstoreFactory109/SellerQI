@@ -1,14 +1,14 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
+const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/GET_STRANDED_INVENTORY_UI_DATA_MODEL');
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     console.log(marketplaceIds);
     try {
         const now = new Date();
-        const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const EndTime = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours before now
+        const StartTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days before now
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
@@ -33,10 +33,10 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
-const checkReportStatus = async (accessToken, reportId) => {
+const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/${reportId}`,
+            `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
             {
                 headers: { "x-amz-access-token": accessToken },
             }
@@ -82,10 +82,10 @@ const checkReportStatus = async (accessToken, reportId) => {
     }
 };
 
-const getReportLink = async (accessToken, reportDocumentId) => {
+const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/${reportDocumentId}`,
+            `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
             { headers: { "x-amz-access-token": accessToken } }
         );
 
@@ -100,14 +100,14 @@ const getReportLink = async (accessToken, reportDocumentId) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, userId,country,region) => {
+const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     try {
         console.log("📄 Generating Report...");
-        const reportId = await generateReport(accessToken, marketplaceIds);
+        const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
@@ -119,7 +119,7 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
         while (!reportDocumentId && retries > 0) {
             console.log(`⏳ Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
-            reportDocumentId = await checkReportStatus(accessToken, reportId);
+            reportDocumentId = await checkReportStatus(accessToken, reportId,baseuri);
             if (reportDocumentId === false) {
                 return {
                     success: false,
@@ -140,7 +140,7 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
         console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
 
         console.log("📥 Downloading Report...");
-        const reportUrl = await getReportLink(accessToken, reportDocumentId);
+        const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
         const fullReport = await axios({
             method: "GET",
@@ -154,7 +154,7 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
 
         const refinedData = convertTSVToJson(fullReport.data);
 
-        //return refinedData;
+        
 
         let strandedUIdata=[]
 
@@ -169,6 +169,8 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
 
         const createStrandedUIdata = await GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.create({
             User:userId,
+            region:region,
+            country:country,
             strandedUIData:strandedUIdata
         })
 

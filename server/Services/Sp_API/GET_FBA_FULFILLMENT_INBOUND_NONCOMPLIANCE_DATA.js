@@ -1,20 +1,20 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
+const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../../models/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
 
 
-const generateReport = async (accessToken, marketplaceIds) => {
+const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     console.log(marketplaceIds);
     try {
         const now = new Date();
-        const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const EndTime = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours before now
+        const StartTime = new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000); // 6 months before now
         const response = await axios.post(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports`,
+            `https://${baseuri}/reports/2021-06-30/reports`,
             {
                 reportType: "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA",
-                marketplaceIds: ["ATVPDKIKX0DER"], 
+                marketplaceIds: ["ATVPDKIKX0DER"],
                 dataStartTime: StartTime.toISOString(),
                 dataEndTime: EndTime.toISOString(),
             },
@@ -34,10 +34,10 @@ const generateReport = async (accessToken, marketplaceIds) => {
     }
 };
 
-const checkReportStatus = async (accessToken, reportId) => {
+const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/${reportId}`,
+            `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
             {
                 headers: { "x-amz-access-token": accessToken },
             }
@@ -83,10 +83,10 @@ const checkReportStatus = async (accessToken, reportId) => {
     }
 };
 
-const getReportLink = async (accessToken, reportDocumentId) => {
+const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/${reportDocumentId}`,
+            `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
             { headers: { "x-amz-access-token": accessToken } }
         );
 
@@ -101,26 +101,26 @@ const getReportLink = async (accessToken, reportDocumentId) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, userId,country,region) => {
+const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     try {
         console.log("📄 Generating Report...");
-        const reportId = await generateReport(accessToken, marketplaceIds);
+        const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
         }
 
         let reportDocumentId = null;
-        let retries = 30; 
+        let retries = 30;
 
         while (!reportDocumentId && retries > 0) {
             console.log(`⏳ Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 60000));
-            reportDocumentId = await checkReportStatus(accessToken, reportId);
+            reportDocumentId = await checkReportStatus(accessToken, reportId,baseuri);
             if (reportDocumentId === false) {
                 return {
                     success: false,
@@ -141,7 +141,7 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
         console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
 
         console.log("📥 Downloading Report...");
-        const reportUrl = await getReportLink(accessToken, reportDocumentId);
+        const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
         const fullReport = await axios({
             method: "GET",
@@ -155,9 +155,42 @@ const getReport = async (accessToken, marketplaceIds, userId,country,region) => 
 
         const refinedData = convertTSVToJson(fullReport.data);
 
-        return refinedData;
+        const errorData = [];
 
-       
+        refinedData.forEach(item => {
+            const dateStr = item["issue-reported-date"];
+            const inputDate = new Date(dateStr);
+
+            const today = new Date();
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+
+            if(inputDate>=today && inputDate<=thirtyDaysAgo){
+                errorData.push({
+                    issueReportedDate: item["issue-reported-date"],
+                    shipmentCreationDate: item["shipment-creation-date"],
+                    asin: item["asin"],
+                    problemType:item["problem-type"]
+                })
+            }
+
+        })
+
+        const createData= GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.create({
+            userId:userId,
+            country:country,
+            region:region,
+            ErrorData:errorData
+        })
+
+        if(!createData){
+            return false;
+        }
+
+
+        return createData;
+
+
 
     } catch (error) {
         console.error("❌ Error in getReport:", error.message);
@@ -174,7 +207,7 @@ function convertTSVToJson(tsvBuffer) {
     const jsonData = rows.slice(1).map(row => {
         const values = row.split("\t");
         return headers.reduce((obj, header, index) => {
-            obj[header] = values[index] || ""; 
+            obj[header] = values[index] || "";
             return obj;
         }, {});
     });

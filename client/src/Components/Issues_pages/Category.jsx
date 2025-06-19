@@ -170,6 +170,117 @@ const ConversionTableSection = ({ title, data }) => {
   );
 };
 
+const InventoryTableSection = ({ title, data }) => {
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 5;
+
+  const extractInventoryErrors = (item) => {
+    const errorRows = [];
+
+    // Process inventory planning errors
+    if (item.inventoryPlanningErrorData) {
+      const planning = item.inventoryPlanningErrorData;
+      if (planning.longTermStorageFees?.status === "Error") {
+        errorRows.push({
+          asin: item.asin,
+          title: item.Title?.length > 30 ? item.Title.slice(0, 30) + '...' : item.Title || 'N/A',
+          issueHeading: 'Inventory Planning | Long-Term Storage Fees',
+          message: planning.longTermStorageFees.Message,
+          solution: planning.longTermStorageFees.HowToSolve
+        });
+      }
+      if (planning.unfulfillable?.status === "Error") {
+        errorRows.push({
+          asin: item.asin,
+          title: item.Title?.length > 30 ? item.Title.slice(0, 30) + '...' : item.Title || 'N/A',
+          issueHeading: 'Inventory Planning | Unfulfillable Inventory',
+          message: planning.unfulfillable.Message,
+          solution: planning.unfulfillable.HowToSolve
+        });
+      }
+    }
+
+    // Process stranded inventory errors
+    if (item.strandedInventoryErrorData) {
+      errorRows.push({
+        asin: item.asin,
+        title: item.Title?.length > 30 ? item.Title.slice(0, 30) + '...' : item.Title || 'N/A',
+        issueHeading: 'Stranded Inventory | Product Not Listed',
+        message: item.strandedInventoryErrorData.Message,
+        solution: item.strandedInventoryErrorData.HowToSolve
+      });
+    }
+
+    // Process inbound non-compliance errors
+    if (item.inboundNonComplianceErrorData) {
+      errorRows.push({
+        asin: item.asin,
+        title: item.Title?.length > 30 ? item.Title.slice(0, 30) + '...' : item.Title || 'N/A',
+        issueHeading: 'Inbound Non-Compliance | Shipment Issue',
+        message: item.inboundNonComplianceErrorData.Message,
+        solution: item.inboundNonComplianceErrorData.HowToSolve
+      });
+    }
+
+    // Process replenishment/restock errors
+    if (item.replenishmentErrorData) {
+      errorRows.push({
+        asin: item.asin,
+        title: item.Title?.length > 30 ? item.Title.slice(0, 30) + '...' : item.Title || 'N/A',
+        issueHeading: 'Replenishment | Low Inventory Risk',
+        message: item.replenishmentErrorData.Message,
+        solution: item.replenishmentErrorData.HowToSolve
+      });
+    }
+
+    return errorRows;
+  };
+
+  const flattenedData = data.flatMap(extractInventoryErrors);
+  const displayedData = flattenedData.slice(0, page * itemsPerPage);
+  const hasMore = flattenedData.length > displayedData.length;
+
+  return (
+    <div className="mb-10">
+      <h2 className="text-xl font-semibold text-gray-800 mb-4">{title}</h2>
+      <div className="overflow-x-auto rounded-lg shadow">
+        <table className="min-w-full bg-white border border-gray-200">
+          <thead>
+            <tr className="bg-[#333651] text-left text-sm font-medium text-white uppercase tracking-wider">
+              <th className="px-4 py-3 border">ASIN</th>
+              <th className="px-4 py-3 border">Product Title</th>
+              <th className="px-4 py-3 border">Issue</th>
+              <th className="px-4 py-3 border">How to solve</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayedData.map((row, idx) => (
+              <tr key={idx} className="border-t text-sm text-gray-700">
+                <td className="px-4 py-3 border">{row.asin}</td>
+                <td className="px-4 py-3 border">{row.title}</td>
+                <td className="px-4 py-3 border">
+                  <span className="font-semibold">{row.issueHeading}:</span> {row.message}
+                </td>
+                <td className="px-4 py-3 border">{row.solution}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {hasMore && (
+        <div className="mt-4 text-center">
+          <button
+            className="bg-[#333651] text-white px-4 py-2 rounded hover:bg-[#1e2031] transition"
+            onClick={() => setPage((prev) => prev + 1)}
+          >
+            View More
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const OptimizationDashboard = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const [issuesSelectedOption, setIssuesSelectedOption] = useState("All");
@@ -213,7 +324,7 @@ const OptimizationDashboard = () => {
                   transition={{ duration: 0.2, ease: "easeInOut" }}
                 >
                   <ul className="py-1 text-sm text-gray-700">
-                    {["All", "Conversion", "Ranking"].map((option) => (
+                    {["All", "Conversion", "Ranking", "Inventory"].map((option) => (
                       <li
                         key={option}
                         className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer"
@@ -238,9 +349,14 @@ const OptimizationDashboard = () => {
         <>
           <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />
           <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />
+          <InventoryTableSection title="Inventory Management" data={info.inventoryProductWiseErrors || []} />
         </>
       ) : issuesSelectedOption === "Ranking" ? (
         <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />
+      ) : issuesSelectedOption === "Conversion" ? (
+        <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />
+      ) : issuesSelectedOption === "Inventory" ? (
+        <InventoryTableSection title="Inventory Management" data={info.inventoryProductWiseErrors || []} />
       ) : (
         <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />
       )}

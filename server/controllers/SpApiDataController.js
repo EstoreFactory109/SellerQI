@@ -29,6 +29,9 @@ const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
+const GET_FBA_INVENTORY_PLANNING_DATA = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
+const GET_STRANDED_INVENTORY_UI_DATA = require('../Services/Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js');
+const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
 
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
 
@@ -292,7 +295,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
         RestockinventoryData,
         productReview,
         adsKeywords,
-        campaignData
+        campaignData,
+        fbaInventoryPlanningData,
+        strandedInventoryData,
+        inboundNonComplianceData
    ] = await Promise.all([
        tokenManager.wrapSpApiFunction(
           GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
@@ -316,6 +322,24 @@ const getSpApiData = asyncHandler(async (req, res) => {
             getCampaign, userId, RefreshToken, AdsRefreshToken
        )(AdsAccessToken, ProfileId, Region, userId, Country).catch(err => {
             logger.error(`Campaign Error: ${err.message}`);
+            return null;
+       }),
+       tokenManager.wrapSpApiFunction(
+            GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken
+       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+            logger.error(`FBA Inventory Planning Error: ${err.message}`);
+            return null;
+       }),
+       tokenManager.wrapSpApiFunction(
+            GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken
+       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+            logger.error(`Stranded Inventory Error: ${err.message}`);
+            return null;
+       }),
+       tokenManager.wrapSpApiFunction(
+            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA, userId, RefreshToken, AdsRefreshToken
+       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+            logger.error(`Inbound Non-Compliance Error: ${err.message}`);
             return null;
        })
   ])
@@ -548,6 +572,18 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("Search keywords data not available - continuing without it");
     }
 
+    if (!fbaInventoryPlanningData) {
+        logger.warn("FBA Inventory Planning data not available - continuing without it");
+    }
+
+    if (!strandedInventoryData) {
+        logger.warn("Stranded Inventory data not available - continuing without it");
+    }
+
+    if (!inboundNonComplianceData) {
+        logger.warn("Inbound Non-Compliance data not available - continuing without it");
+    }
+
     const result = {
         MerchantlistingData: merchantListingsData,
         v2data: v2data,
@@ -560,7 +596,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
         shipment: shipment,
         brandData: brandData,
         negativeKeywords: negativeKeywords,
-        searchKeywords: searchKeywords
+        searchKeywords: searchKeywords,
+        fbaInventoryPlanningData: fbaInventoryPlanningData,
+        strandedInventoryData: strandedInventoryData,
+        inboundNonComplianceData: inboundNonComplianceData
     }
 
     // Final validation - log warnings for missing data but continue

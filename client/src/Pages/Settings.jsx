@@ -6,6 +6,7 @@ import Profile from '../Components/settings/UserProfile/Profile.jsx';
 import Security from '../Components/settings/Security/Security.jsx';
 import Teams from '../Components/settings/Teams/Teams.jsx';
 import AccountIntegration from '../Components/settings/AccountIntegrations/AccountIntegrations.jsx';
+import PlansAndBilling from '../Components/settings/PlansAndBilling/PlansAndBilling.jsx';
 
 const Settings = () => {
   const [settingOption, setSettingOption] = useState('User-Profile');
@@ -35,7 +36,7 @@ const Settings = () => {
     }
   }, [searchParams, settingOption]);
 
-  const order = ['User-Profile', 'Security', 'Account-Integration', 'Team-Members'];
+  const order = ['User-Profile', 'Security', 'Account-Integration', 'Plans-And-Billing', 'Team-Members'];
 
   const getDirection = () => {
     return order.indexOf(settingOption) > order.indexOf(prevOption) ? 1 : -1;
@@ -74,6 +75,8 @@ const Settings = () => {
       //   return <Security />;
       case 'Account-Integration':
         return <AccountIntegration />;
+      case 'Plans-And-Billing':
+        return <PlansAndBilling />;
       // case 'Team-Members':
       //   return <Teams />;
       default:
@@ -95,7 +98,7 @@ const Settings = () => {
       {/* Tabs with sliding underline */}
       <div className="mt-5">
         <div className="relative flex gap-6 flex-wrap text-sm border-b-2 border-gray-200">
-          {['User-Profile', 'Security', 'Account-Integration', 'Team-Members'].map((item) => {
+          {['User-Profile', 'Security', 'Account-Integration', 'Plans-And-Billing', 'Team-Members'].map((item) => {
             const isActive = settingOption === item;
             return (
               <div
@@ -113,6 +116,7 @@ const Settings = () => {
                     'User-Profile': 'User Profile',
                     // 'Security': 'Security',
                     'Account-Integration': 'Account Integration',
+                    'Plans-And-Billing': 'Plans & Billing',
                     // 'Team-Members': 'Invite Team Members',
                   }[item]}
                 </p>
