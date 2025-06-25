@@ -14,7 +14,8 @@ import Issues from './Pages/Issues.jsx';
 import Reports from './Pages/Reports.jsx';
 import AccountHistory from './Pages/Account.jsx';
 import Settings from './Pages/Settings.jsx';
-import IssuesByProducts from './Pages/IssuesByProduct.jsx';
+import IssuesByProducts from './Pages/IssuesPerProduct.jsx';
+import IssuesByProduct from './Pages/IssuesByProduct.jsx';
 import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
@@ -81,6 +82,7 @@ const App = () => {
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
             <Route path='issues' element={<Issues />} />
+            <Route path='issues-by-product' element={<IssuesByProduct />} />
             <Route path='issues/:asin' element={<IssuesByProducts />} />
             <Route path='reports' element={<Reports />} />
             <Route path='account-history' element={<AccountHistory />} />

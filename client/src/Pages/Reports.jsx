@@ -106,6 +106,13 @@ const Reports = () => {
        
        exportData.push({
          Category: 'Product Checker',
+         Metric: 'Inventory Errors',
+         Value: info.totalInventoryErrors || 0,
+         Details: 'Issues with inventory management'
+       });
+       
+       exportData.push({
+         Category: 'Product Checker',
          Metric: 'Account Health Errors',
          Value: info.totalErrorInAccount || 0,
          Details: 'Account-level health issues'
@@ -123,13 +130,6 @@ const Reports = () => {
          Metric: 'Sponsored Ads Errors',
          Value: info.totalSponsoredAdsErrors || 0,
          Details: 'Issues with sponsored advertising'
-       });
-       
-       exportData.push({
-         Category: 'Product Checker',
-         Metric: 'Inventory Errors',
-         Value: info.totalInventoryErrors || 0,
-         Details: 'Issues with inventory management'
        });
        
        // Issues Section (Fourth Row)

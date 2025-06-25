@@ -32,11 +32,21 @@ async function getReportId(accessToken, profileId, region) {
             'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
         };
 
+        // Calculate dynamic dates
+        const now = new Date();
+        const endDate = new Date(now.getTime() - (72 * 60 * 60 * 1000)); // 72 hours before now
+        const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
+        
+        // Format dates as YYYY-MM-DD strings
+        const formatDate = (date) => {
+            return date.toISOString().split('T')[0];
+        };
+
         // Set up request body for ASIN/SKU level data
         const body = {
             "name": "Search Terms With Zero Sales",
-            "startDate": "2025-05-01",
-            "endDate": "2025-05-31",
+            "startDate": formatDate(startDate),
+            "endDate": formatDate(endDate),
             "configuration": {
                 "adProduct": "SPONSORED_PRODUCTS",
                 "reportTypeId": "spSearchTerm",

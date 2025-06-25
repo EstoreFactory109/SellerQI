@@ -12,15 +12,15 @@ const IssuesSummery = () => {
   const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
   const inventoryErrors = info?.totalInventoryErrors || 0;
   
-  const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
-  const [LableData,setDableData]=useState(["Rankings", "Conversion", "Account Health", "Profitability", "Sponsored Ads", "Inventory"])
+  const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, inventoryErrors, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+  const [LableData,setDableData]=useState(["Rankings", "Conversion", "Inventory", "Account Health", "Profitability", "Sponsored Ads"])
     
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
       
   useEffect(() => {
     // Update series data when errors change
-    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, inventoryErrors, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
   }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
     
   const [chartData, setChartData] = useState({
@@ -30,7 +30,7 @@ const IssuesSummery = () => {
         type: "donut",
       },
       labels: LableData, 
-      colors:["#fad12a", "#b92533", "#90acc7", "#05724e", "#333651", "#ff6b35"],
+      colors:["#fad12a", "#b92533", "#ff6b35", "#90acc7", "#05724e", "#333651"],
       
       legend: {
         show: false// Hides legend globally
@@ -135,31 +135,31 @@ const IssuesSummery = () => {
                   </li>
                   <li className='flex items-center justify-between text-sm'>
                     <div className='flex items-center gap-2 min-w-0 flex-1'>
-                      <div className='w-3 h-3 rounded-full bg-[#90acc7] flex-shrink-0'></div>
+                      <div className='w-3 h-3 rounded-full bg-[#ff6b35] flex-shrink-0'></div>
                       <p className='truncate'>{LableData[2]}</p>
                     </div>
                     <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[2] || 0}</p>
                   </li>
                   <li className='flex items-center justify-between text-sm'>
                     <div className='flex items-center gap-2 min-w-0 flex-1'>
-                      <div className='w-3 h-3 rounded-full bg-[#05724e] flex-shrink-0'></div>
+                      <div className='w-3 h-3 rounded-full bg-[#90acc7] flex-shrink-0'></div>
                       <p className='truncate'>{LableData[3]}</p>
                     </div>
-                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{profitabilityErrors || 0}</p>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[3] || 0}</p>
+                  </li>
+                  <li className='flex items-center justify-between text-sm'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <div className='w-3 h-3 rounded-full bg-[#05724e] flex-shrink-0'></div>
+                      <p className='truncate'>{LableData[4]}</p>
+                    </div>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[4] || 0}</p>
                   </li>
                   <li className='flex items-center justify-between text-sm'>
                     <div className='flex items-center gap-2 min-w-0 flex-1'>
                       <div className='w-3 h-3 rounded-full bg-[#333651] flex-shrink-0'></div>
-                      <p className='truncate'>{LableData[4]}</p>
-                    </div>
-                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{sponsoredAdsErrors || 0}</p>
-                  </li>
-                  <li className='flex items-center justify-between text-sm'>
-                    <div className='flex items-center gap-2 min-w-0 flex-1'>
-                      <div className='w-3 h-3 rounded-full bg-[#ff6b35] flex-shrink-0'></div>
                       <p className='truncate'>{LableData[5]}</p>
                     </div>
-                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{inventoryErrors || 0}</p>
+                    <p className='text-gray-600 font-medium ml-2 flex-shrink-0'>{seriesData[5] || 0}</p>
                   </li>
                 </ul>
               </div>

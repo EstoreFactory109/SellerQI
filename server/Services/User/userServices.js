@@ -4,10 +4,15 @@ const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
 
 
-const createUser = async (firstname, lastname, phone, whatsapp, email, password,otp) => {
+const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed) => {
 
     if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp){
         logger.error(new ApiError(404,"Details and credentials are missing"));
+        return false;
+    }
+
+    if (typeof allTermsAndConditionsAgreed !== 'boolean' || allTermsAndConditionsAgreed !== true) {
+        logger.error(new ApiError(400, "Terms and conditions agreement is required"));
         return false;
     }
 
@@ -20,7 +25,8 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
             whatsapp: whatsapp,
             email: email,
             password: hashedPassword,
-            OTP:otp
+            OTP: otp,
+            allTermsAndConditionsAgreed: allTermsAndConditionsAgreed
         });
         return await user.save();
     } catch (error) {

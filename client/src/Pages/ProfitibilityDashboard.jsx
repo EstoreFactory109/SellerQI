@@ -60,11 +60,13 @@ const ProfitabilityDashboard = () => {
   const chartData = useMemo(() => {
     // Prioritize filtered TotalSales data from Redux (calendar selection)
     if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      // Calculate total fees and other costs for the period using filtered finance data
+      // Calculate total fees from account finance data
       const filteredAccountFinance = info?.accountFinance || accountFinance;
       const totalFees = (parseFloat(filteredAccountFinance.FBA_Fees) || 0) + 
                        (parseFloat(filteredAccountFinance.Storage) || 0) + 
-                       (parseFloat(filteredAccountFinance.Amazon_Charges) || 0);
+                       (parseFloat(filteredAccountFinance.Amazon_Charges) || 0) +
+                       (parseFloat(filteredAccountFinance.ProductAdsPayment) || 0) +
+                       (parseFloat(filteredAccountFinance.Refunds) || 0);
       const avgFeesPerDay = totalFees / totalSalesData.length;
       
       // Transform filtered sales data for the chart
@@ -75,119 +77,116 @@ const ProfitabilityDashboard = () => {
           const dateKey = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           const totalSales = parseFloat(sale.TotalAmount) || 0;
           
-          // Estimate ad spend as a percentage of sales (typically 10-30% for profitable campaigns)
-          const estimatedSpend = totalSales * 0.15; // Assume 15% of sales as ad spend
-          
-          // Calculate net profit: Total Sales - Ad Spend - Fees
-          const netProfit = totalSales - estimatedSpend - avgFeesPerDay;
+          // Calculate total spend including all Amazon fees and ad spend
+          const totalSpend = avgFeesPerDay;
           
           return {
             date: dateKey,
-            spend: parseFloat(estimatedSpend.toFixed(2)),
-            netProfit: parseFloat(netProfit.toFixed(2))
+            spend: parseFloat(totalSpend.toFixed(2)),
+            totalSales: parseFloat(totalSales.toFixed(2))
           };
         }
         return null;
       }).filter(item => item !== null);
     }
     
-    // Fallback to original productWiseSponsoredAdsGraphData logic
-    const hasGraphData = Object.keys(productWiseSponsoredAdsGraphData).length > 0;
-    
-    if (!hasGraphData) {
-      return mockChartData;
-    }
-    
-    // Create a map to aggregate data by date
-    const dateAggregateMap = new Map();
-    
-    // Create a map for total sales by date from original TotalSales data
-    const totalSalesByDateMap = new Map();
-    if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      totalSalesData.forEach(sale => {
+    // Fallback to original TotalSales data if available
+    if (Array.isArray(info?.TotalSales) && info.TotalSales.length > 0) {
+      // Calculate total fees from account finance data
+      const totalFees = (parseFloat(accountFinance.FBA_Fees) || 0) + 
+                       (parseFloat(accountFinance.Storage) || 0) + 
+                       (parseFloat(accountFinance.Amazon_Charges) || 0) +
+                       (parseFloat(accountFinance.ProductAdsPayment) || 0) +
+                       (parseFloat(accountFinance.Refunds) || 0);
+      const avgFeesPerDay = totalFees / info.TotalSales.length;
+      
+      return info.TotalSales.map(sale => {
         if (sale.interval) {
           const startDate = new Date(sale.interval.split('--')[0]);
           const dateKey = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          totalSalesByDateMap.set(dateKey, parseFloat(sale.TotalAmount) || 0);
+          const totalSales = parseFloat(sale.TotalAmount) || 0;
+          
+          // Calculate total spend including all Amazon fees
+          const totalSpend = avgFeesPerDay;
+          
+          return {
+            date: dateKey,
+            spend: parseFloat(totalSpend.toFixed(2)),
+            totalSales: parseFloat(totalSales.toFixed(2))
+          };
         }
-      });
+        return null;
+      }).filter(item => item !== null);
     }
     
-    // Iterate through each ASIN's data
-    Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
-      if (asinData.data && Array.isArray(asinData.data)) {
-        asinData.data.forEach(dayData => {
-          const dateKey = dayData.formattedDate || new Date(dayData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          
-          if (!dateAggregateMap.has(dateKey)) {
-            dateAggregateMap.set(dateKey, {
-              date: dateKey,
-              totalSpend: 0,
-              ppcSales: 0
-            });
-          }
-          
-          const aggregate = dateAggregateMap.get(dateKey);
-          aggregate.totalSpend += parseFloat(dayData.spend) || 0;
-          aggregate.ppcSales += parseFloat(dayData.salesIn30Days) || 0;
-        });
-      }
-    });
-    
-    // Calculate total fees and other costs for the period
-    const totalFees = (parseFloat(accountFinance.FBA_Fees) || 0) + (parseFloat(accountFinance.Storage) || 0) + (parseFloat(accountFinance.Amazon_Charges) || 0);
-    const daysInPeriod = dateAggregateMap.size || 30;
-    const avgFeesPerDay = totalFees / daysInPeriod;
-    
-    // Convert map to array and calculate net profit for each date
-    const chartDataArray = Array.from(dateAggregateMap.values()).map(dayData => {
-      const actualDailySales = totalSalesByDateMap.get(dayData.date);
-      
-      let netProfit;
-      if (actualDailySales !== undefined) {
-        netProfit = actualDailySales - dayData.totalSpend - avgFeesPerDay;
-      } else {
-        const estimatedTotalSales = dayData.ppcSales / 0.3;
-        netProfit = estimatedTotalSales - dayData.totalSpend - avgFeesPerDay;
-      }
-      
-      return {
-        date: dayData.date,
-        spend: parseFloat(dayData.totalSpend.toFixed(2)),
-        netProfit: parseFloat(netProfit.toFixed(2))
-      };
-    });
-    
-    return chartDataArray.sort((a, b) => new Date(a.date) - new Date(b.date));
+    // Final fallback to mock data (updated for spend)
+    return [
+      { date: 'Apr 1', spend: 250, totalSales: 1000 },
+      { date: 'Apr 5', spend: 280, totalSales: 1200 },
+      { date: 'Apr 8', spend: 300, totalSales: 1333 },
+      { date: 'Apr 12', spend: 275, totalSales: 1167 },
+      { date: 'Apr 15', spend: 290, totalSales: 1267 },
+      { date: 'Apr 18', spend: 265, totalSales: 1100 },
+      { date: 'Apr 22', spend: 285, totalSales: 1233 },
+      { date: 'Apr 25', spend: 270, totalSales: 1133 },
+      { date: 'Apr 28', spend: 295, totalSales: 1300 },
+      { date: 'Apr 30', spend: 260, totalSales: 1067 },
+    ];
   }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance]);
 
+  // Get COGs values from Redux store
+  const cogsValues = useSelector((state) => state.cogs.cogsValues);
+  
   const metrics = useMemo(() => {
     // Calculate metrics from filtered data if available
     const totalSalesData = info?.TotalSales;
     const filteredAccountFinance = info?.accountFinance || accountFinance;
     let filteredTotalSales = 0;
-    let estimatedSpend = 0;
+    let totalOverallSpend = 0;
     
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
       // Calculate totals from filtered date range
       filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      estimatedSpend = filteredTotalSales * 0.15; // Estimate 15% of sales as ad spend
     }
+    
+    // Calculate total COGS from all products that have COGS entered
+    let totalCOGS = 0;
+    const profitibilityData = info?.profitibilityData || [];
+    
+    profitibilityData.forEach(product => {
+      const cogsPerUnit = cogsValues[product.asin] || 0;
+      const quantity = product.quantity || 0;
+      totalCOGS += cogsPerUnit * quantity;
+    });
+    
+    // Calculate total overall spend including all Amazon fees
+    totalOverallSpend = (Number(filteredAccountFinance?.FBA_Fees || 0) + 
+                        Number(filteredAccountFinance?.Storage || 0) + 
+                        Number(filteredAccountFinance?.Amazon_Charges || 0) +
+                        Number(filteredAccountFinance?.ProductAdsPayment || 0) +
+                        Number(filteredAccountFinance?.Refunds || 0));
     
     // Use filtered data if available, otherwise fall back to original data
     const totalSales = filteredTotalSales > 0 ? filteredTotalSales : Number(info?.TotalWeeklySale || 0);
-    const grossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
-    const adSpend = estimatedSpend > 0 ? estimatedSpend : (info?.sponsoredAdsMetrics?.totalCost || 0);
-    const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0));
+    const originalGrossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
+    
+    // Adjust gross profit by subtracting total COGS (only for profitability page)
+    const adjustedGrossProfit = originalGrossProfit - totalCOGS;
+    
+    const adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
+    const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0) + Number(filteredAccountFinance?.Amazon_Charges || 0));
+    
+    // Calculate adjusted profit margin using COGS-adjusted gross profit
+    const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
     
     return [
       { label: 'Total Sales', value: `$${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `$${grossProfit.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Avg Profit Margin', value: `${totalSales > 0 ? ((grossProfit / totalSales) * 100).toFixed(2) : '0.00'}%`, icon: 'percent' },
+      { label: 'Gross Profit', value: `$${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Avg Profit Margin', value: `${adjustedProfitMargin.toFixed(2)}%`, icon: 'percent' },
       { label: 'Total Ad Spend', value: `$${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Amazon Fees', value: `$${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.TotalSales, info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, accountFinance]);
+  }, [info?.TotalSales, info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -199,22 +198,33 @@ const ProfitabilityDashboard = () => {
     csvData.push(['Date Range:', info?.startDate && info?.endDate ? `${info.startDate} to ${info.endDate}` : 'Last 30 Days']);
     csvData.push([]);
     
-    // Add metrics summary
-    csvData.push(['Key Metrics']);
+    // Add metrics summary (with COGS adjustments)
+    csvData.push(['Key Metrics (COGS-Adjusted)']);
     metrics.forEach(metric => {
       csvData.push([metric.label, metric.value]);
     });
+    
+    // Add COGS summary
+    let totalCOGS = 0;
+    const profitibilityData = info?.profitibilityData || [];
+    profitibilityData.forEach(product => {
+      const cogsPerUnit = cogsValues[product.asin] || 0;
+      const quantity = product.quantity || 0;
+      totalCOGS += cogsPerUnit * quantity;
+    });
+    
+    csvData.push(['Total COGS Deducted', `$${totalCOGS.toFixed(2)}`]);
     csvData.push([]);
     
     // Add chart data
     if (chartData.length > 0) {
-      csvData.push(['Daily Spend vs Net Profit']);
-      csvData.push(['Date', 'Ad Spend', 'Net Profit']);
+      csvData.push(['Daily Spend vs Total Sales']);
+      csvData.push(['Date', 'Spend', 'Total Sales']);
       chartData.forEach(day => {
         csvData.push([
           day.date,
           `$${day.spend.toFixed(2)}`,
-          `$${day.netProfit.toFixed(2)}`
+          `$${day.totalSales.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -235,7 +245,7 @@ const ProfitabilityDashboard = () => {
       
       profitabilityTableData.forEach(product => {
         const productDetails = productDetailsMap.get(product.asin) || {};
-        const cogsPerUnit = 0; // Default COGS since we don't have access to Redux COGS state here
+        const cogsPerUnit = cogsValues[product.asin] || 0; // Get COGS from Redux state
         const totalCogs = cogsPerUnit * (product.quantity || 0);
         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
         const netProfit = grossProfit - totalCogs;
@@ -309,9 +319,22 @@ const ProfitabilityDashboard = () => {
     
     // Add financial summary
     if (info?.accountFinance) {
-      csvData.push(['Financial Summary']);
+      // Calculate adjusted gross profit for summary
+      const originalGrossProfit = Number(info.accountFinance.Gross_Profit || 0);
+      let totalCOGSSummary = 0;
+      const profitibilityDataSummary = info?.profitibilityData || [];
+      profitibilityDataSummary.forEach(product => {
+        const cogsPerUnit = cogsValues[product.asin] || 0;
+        const quantity = product.quantity || 0;
+        totalCOGSSummary += cogsPerUnit * quantity;
+      });
+      const adjustedGrossProfitSummary = originalGrossProfit - totalCOGSSummary;
+      
+      csvData.push(['Financial Summary (COGS-Adjusted for Profitability Dashboard)']);
       csvData.push(['Total Sales', `$${info.TotalWeeklySale || 0}`]);
-      csvData.push(['Gross Profit', `$${info.accountFinance.Gross_Profit || 0}`]);
+      csvData.push(['Original Gross Profit (from Amazon)', `$${originalGrossProfit}`]);
+      csvData.push(['Total COGS Entered', `$${totalCOGSSummary.toFixed(2)}`]);
+      csvData.push(['Adjusted Gross Profit (Original - COGS)', `$${adjustedGrossProfitSummary.toFixed(2)}`]);
       csvData.push(['FBA Fees', `$${info.accountFinance.FBA_Fees || 0}`]);
       csvData.push(['Storage Fees', `$${info.accountFinance.Storage || 0}`]);
       csvData.push(['Amazon Charges', `$${info.accountFinance.Amazon_Charges || 0}`]);
@@ -325,15 +348,15 @@ const ProfitabilityDashboard = () => {
     csvData.push(['Priority', 'Category', 'Recommendation', 'Expected Impact', 'Timeframe']);
     const comprehensiveSuggestions = [
       ['High', 'Product Mix', 'Focus marketing budget on highest margin products (>20% profit margin)', 'High', '1-2 months'],
-      ['High', 'Advertising', 'Reduce ad spend on products with negative profit margins', 'High', '1 week'],
-      ['High', 'COGS Management', 'Negotiate better rates with suppliers for top-selling products', 'Medium-High', '1-3 months'],
+      ['High', 'Cost Management', 'Optimize overall spend by reducing unnecessary Amazon fees', 'High', '1 week'],
+      ['High', 'COGS Management', 'Enter COGS values for accurate profitability and negotiate better supplier rates for products with high COGS', 'Medium-High', '1-3 months'],
       ['Medium', 'Inventory', 'Optimize inventory levels to reduce storage fees', 'Medium', '1-2 months'],
       ['Medium', 'Pricing', 'Review and adjust pricing strategy for low-margin products', 'Medium', '2-4 weeks'],
       ['Medium', 'Product Development', 'Consider discontinuing consistently unprofitable products', 'Medium', '3-6 months'],
-      ['Low', 'Automation', 'Implement automated bidding strategies for better ad efficiency', 'Medium', '2-3 months'],
+      ['Medium', 'Fee Optimization', 'Review FBA fees and consider alternative fulfillment for low-margin items', 'Medium', '2-3 months'],
       ['Low', 'Market Research', 'Analyze competitor pricing and positioning', 'Low-Medium', '1 month'],
       ['Low', 'Customer Analysis', 'Focus on high-value customer segments', 'Low-Medium', '2-4 months'],
-      ['Low', 'Operational', 'Review fulfillment options to reduce fees', 'Low', '3-6 months']
+      ['Low', 'Operational', 'Review fulfillment options to reduce overall fees', 'Low', '3-6 months']
     ];
     
     comprehensiveSuggestions.forEach(([priority, category, recommendation, impact, timeframe]) => {
@@ -344,12 +367,12 @@ const ProfitabilityDashboard = () => {
     // Add Performance Summary
     csvData.push(['Performance Summary']);
     csvData.push(['Metric', 'Value', 'Status']);
-    const totalRevenue = chartData.reduce((sum, item) => sum + item.netProfit + item.spend, 0);
+    const totalRevenue = chartData.reduce((sum, item) => sum + item.totalSales, 0);
     const totalCosts = chartData.reduce((sum, item) => sum + item.spend, 0);
     const overallProfitMargin = totalRevenue > 0 ? ((totalRevenue - totalCosts) / totalRevenue) * 100 : 0;
     
     csvData.push(['Total Revenue', `$${totalRevenue.toFixed(2)}`, totalRevenue > 0 ? 'Good' : 'Poor']);
-    csvData.push(['Total Ad Costs', `$${totalCosts.toFixed(2)}`, '']);
+    csvData.push(['Total Costs', `$${totalCosts.toFixed(2)}`, '']);
     csvData.push(['Overall Profit Margin', `${overallProfitMargin.toFixed(2)}%`, overallProfitMargin > 15 ? 'Good' : overallProfitMargin > 5 ? 'Warning' : 'Poor']);
     csvData.push(['Number of Products', profitabilityTableData.length.toString(), profitabilityTableData.length > 10 ? 'Good' : 'Limited']);
     csvData.push([]);
@@ -438,9 +461,9 @@ const ProfitabilityDashboard = () => {
             ))}
           </div>
 
-          {/* Area Chart for Spend and Net Profit */}
+          {/* Area Chart for Spend vs Total Sales */}
           <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-            <h3 className="text-base font-semibold text-gray-900 mb-4">Spend vs Net Profit Trend</h3>
+            <h3 className="text-base font-semibold text-gray-900 mb-4">Spend vs Total Sales</h3>
             <ResponsiveContainer width="100%" height={250}>
               <AreaChart
                 data={chartData}
@@ -451,9 +474,9 @@ const ProfitabilityDashboard = () => {
                     <stop offset="5%" stopColor="#EF4444" stopOpacity={0.35}/>
                     <stop offset="95%" stopColor="#EF4444" stopOpacity={0.05}/>
                   </linearGradient>
-                  <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#10B981" stopOpacity={0.05}/>
+                  <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.35}/>
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -489,16 +512,16 @@ const ProfitabilityDashboard = () => {
                   dataKey="spend"
                   stroke="#EF4444"
                   fill="url(#spendGradient)"
-                  name="Ad Spend"
+                  name="Spend"
                   strokeWidth={2}
                   dot={false}
                 />
                 <Area
                   type="monotone"
-                  dataKey="netProfit"
-                  stroke="#10B981"
-                  fill="url(#profitGradient)"
-                  name="Net Profit"
+                  dataKey="totalSales"
+                  stroke="#3B82F6"
+                  fill="url(#salesGradient)"
+                  name="Total Sales"
                   strokeWidth={2}
                   dot={false}
                 />

@@ -100,7 +100,8 @@ const ResetPassword = () => {
                 { 
                     newPassword,
                     code 
-                }
+                },
+                { withCredentials: true }
             );
 
             if (response.status === 200) {

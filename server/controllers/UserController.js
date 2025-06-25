@@ -16,12 +16,17 @@ const { v4: uuidv4 } = require('uuid');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, whatsapp, email, password } = req.body;
+    const { firstname, lastname, phone, whatsapp, email, password, allTermsAndConditionsAgreed } = req.body;
     console.log(firstname)
 
     if (!firstname || !lastname || !phone || !whatsapp || !email || !password) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
+    }
+
+    if (typeof allTermsAndConditionsAgreed !== 'boolean' || allTermsAndConditionsAgreed !== true) {
+        logger.error(new ApiError(400, "Terms and conditions agreement is required"));
+        return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
 
     const checkUserIfExists = await getUserByEmail(email);
@@ -45,7 +50,7 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
     }
 
-    let data = await createUser(firstname, lastname, phone, whatsapp, email, password, otp);
+    let data = await createUser(firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed);
     // console.log(data);
 
     if (!data) {

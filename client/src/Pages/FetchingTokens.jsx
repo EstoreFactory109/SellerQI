@@ -23,7 +23,7 @@ const FetchingTokens = () => {
     const payload=searcParams.get("payload");
     (async()=>{
       try {
-        const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/token/generateSPAPITokens/${payload}`);
+        const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/token/generateSPAPITokens/${payload}`, { withCredentials: true });
       if(response.status===200){
         navigate("/failure"); //Or some failure route.
         

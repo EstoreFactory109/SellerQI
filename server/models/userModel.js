@@ -45,6 +45,16 @@ const userSchema = new mongoose.Schema(
         minlength: [8, "Password must be at least 8 characters long"],
         select: false, // Prevents returning password in queries
       },
+      allTermsAndConditionsAgreed: {
+        type: Boolean,
+        required: [true, "Terms and conditions agreement is required"],
+        validate: {
+          validator: function(value) {
+            return value === true;
+          },
+          message: "You must agree to the Terms of Use and Privacy Policy"
+        }
+      },
       profilePic:{
         type: String,
         required: false,

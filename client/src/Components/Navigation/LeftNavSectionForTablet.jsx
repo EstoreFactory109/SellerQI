@@ -25,14 +25,14 @@ const LeftNavSection = () => {
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'overview';
-    const isIssuesPage = location.pathname.includes('/issues');
+    const isIssuesPage = location.pathname === '/seller-central-checker/issues';
     
-    // Keep dropdown open if we're on issues page
+    // Keep dropdown open if we're on any issues-related page
     React.useEffect(() => {
-        if (isIssuesPage) {
+        if (isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product') {
             setIssuesDropdownOpen(true);
         }
-    }, [isIssuesPage]);
+    }, [isIssuesPage, location.pathname]);
 
     // Handle Issues button click
     const handleIssuesClick = () => {
@@ -98,7 +98,7 @@ const LeftNavSection = () => {
                     <div className="space-y-1">
                         <div
                             className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
-                                isIssuesPage 
+                                isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
                                     ? 'bg-[#333651] text-white' 
                                     : 'hover:bg-gray-100'
                             }`}
@@ -110,10 +110,7 @@ const LeftNavSection = () => {
                                 animate={{ rotate: issuesDropdownOpen ? 90 : 0 }}
                                 transition={{ duration: 0.2, ease: "easeInOut" }}
                             >
-                                {issuesDropdownOpen ? 
-                                    <ChevronDown className="w-3 h-3"/> : 
-                                    <ChevronRight className="w-3 h-3"/>
-                                }
+                                <ChevronRight className="w-3 h-3"/>
                             </motion.div>
                         </div>
                         
@@ -162,6 +159,23 @@ const LeftNavSection = () => {
                                             }
                                         >
                                             Issues By Category
+                                        </NavLink>
+                                    </motion.div>
+                                    <motion.div
+                                        initial={{ y: -10, opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: -10, opacity: 0 }}
+                                        transition={{ delay: 0.175, duration: 0.2 }}
+                                    >
+                                        <NavLink
+                                            to="/seller-central-checker/issues-by-product"
+                                            className={({ isActive }) =>
+                                                isActive
+                                                    ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                    : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                            }
+                                        >
+                                            Issues By Product
                                         </NavLink>
                                     </motion.div>
                                     <motion.div
