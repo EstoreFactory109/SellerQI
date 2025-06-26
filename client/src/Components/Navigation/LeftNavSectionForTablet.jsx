@@ -326,16 +326,16 @@ const LeftNavSection = () => {
                         </motion.div>
                     </div>
                     
-                    <AnimatePresence>
+                                            <AnimatePresence>
                         {settingsDropdownOpen && (
                             <motion.div
                                 initial={{ opacity: 0, height: 0 }}
                                 animate={{ opacity: 1, height: "auto" }}
                                 exit={{ opacity: 0, height: 0 }}
                                 transition={{ 
-                                    duration: 0.3, 
+                                    duration: 0.25, 
                                     ease: "easeInOut",
-                                    opacity: { duration: 0.2 }
+                                    opacity: { duration: 0.15 }
                                 }}
                                 className="ml-6 space-y-1 overflow-hidden"
                             >
@@ -343,7 +343,7 @@ const LeftNavSection = () => {
                                     initial={{ y: -10, opacity: 0 }}
                                     animate={{ y: 0, opacity: 1 }}
                                     exit={{ y: -10, opacity: 0 }}
-                                    transition={{ delay: 0.1, duration: 0.2 }}
+                                    transition={{ delay: 0.05, duration: 0.15 }}
                                 >
                                     <NavLink
                                         to="/seller-central-checker/settings?tab=profile"
@@ -360,7 +360,7 @@ const LeftNavSection = () => {
                                     initial={{ y: -10, opacity: 0 }}
                                     animate={{ y: 0, opacity: 1 }}
                                     exit={{ y: -10, opacity: 0 }}
-                                    transition={{ delay: 0.15, duration: 0.2 }}
+                                    transition={{ delay: 0.08, duration: 0.15 }}
                                 >
                                     <NavLink
                                         to="/seller-central-checker/settings?tab=account-integration"
@@ -377,7 +377,7 @@ const LeftNavSection = () => {
                                     initial={{ y: -10, opacity: 0 }}
                                     animate={{ y: 0, opacity: 1 }}
                                     exit={{ y: -10, opacity: 0 }}
-                                    transition={{ delay: 0.175, duration: 0.2 }}
+                                    transition={{ delay: 0.11, duration: 0.15 }}
                                 >
                                     <NavLink
                                         to="/seller-central-checker/settings?tab=plans-billing"
