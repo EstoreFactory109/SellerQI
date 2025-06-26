@@ -114,63 +114,179 @@ const ASINAnalyzer = () => {
   const getProductAnalysisData = () => {
     if (!analysisResult) return [];
 
-    const rankingScore = calculateRankingScore(analysisResult.rankingResult);
-    const conversionScore = calculateConversionScore(analysisResult);
+    // Helper function to calculate percentage score
+    const calculatePercentageScore = (actual, required) => {
+      if (actual >= required) return 100;
+      return Math.round((actual / required) * 100);
+    };
+
+    // Helper function to get image count from API data
+    const getImageCount = () => {
+      // Use actual count if available (most accurate)
+      if (typeof analysisResult.actualImageCount === 'number') {
+        return analysisResult.actualImageCount;
+      }
+      
+      // Fallback to extracting from error message if available
+      const message = analysisResult.imageResult?.Message || '';
+      
+      if (analysisResult.imageResult?.status === 'Success') {
+        return 7; // Has recommended amount or more
+      }
+      
+      if (message.includes('No images found')) {
+        return 0;
+      }
+      
+      if (message.includes('fewer than 7')) {
+        // Try to extract actual number from message if possible
+        const match = message.match(/(\d+)\s*images?/);
+        if (match) {
+          return parseInt(match[1]);
+        }
+        return 3; // Conservative estimate
+      }
+      
+      // If we have a MainImage but status is Error, assume some images exist
+      if (analysisResult.imageResult?.MainImage) {
+        return 4; // Estimate - has some but not enough
+      }
+      
+      return 0;
+    };
+
+    // Helper function to get video count
+    const getVideoCount = () => {
+      // Use actual count if available (most accurate)
+      if (typeof analysisResult.actualVideoCount === 'number') {
+        return analysisResult.actualVideoCount;
+      }
+      
+      // Fallback to status-based logic
+      return analysisResult.videoResult?.status === 'Success' ? 1 : 0;
+    };
+
+    // Helper function to get bullet points info
+    const getBulletPointsInfo = () => {
+      const bulletResult = analysisResult.rankingResult?.BulletPoints;
+      
+      // No bullet points at all
+      if (bulletResult?.nullCheck?.status === 'Error' || bulletResult?.emptyArray?.status === 'Error') {
+        return { count: 0, avgLength: 0 };
+      }
+      
+      // Has bullet points but issues with null items
+      if (bulletResult?.nullItems?.status === 'Error') {
+        const message = bulletResult.nullItems.Message || '';
+        const match = message.match(/(\d+)\s*bullet/);
+        const nullCount = match ? parseInt(match[1]) : 1;
+        return { count: Math.max(5 - nullCount, 1), avgLength: 100 }; // Some are null
+      }
+      
+      // Character limit issues - has bullets but too short
+      if (bulletResult?.charLim?.status === 'Error') {
+        return { count: 5, avgLength: 120 }; // Has 5 bullets but average < 150 chars
+      }
+      
+      // All good
+      if (bulletResult?.charLim?.status === 'Success') {
+        return { count: 5, avgLength: 180 }; // Good bullets
+      }
+      
+      // Default estimate
+      return { count: 3, avgLength: 100 };
+    };
+
+    // Helper function to get description length
+    const getDescriptionLength = () => {
+      const descResult = analysisResult.rankingResult?.Description;
+      
+      // No description
+      if (descResult?.nullCheck?.status === 'Error' || descResult?.emptyArray?.status === 'Error') {
+        return 0;
+      }
+      
+      // Has description but too short
+      if (descResult?.charLim?.status === 'Error') {
+        const message = descResult.charLim.Message || '';
+        if (message.includes('under 1700')) {
+          // Estimate based on typical short descriptions
+          return 900; // Estimate - has content but insufficient
+        }
+        return 800;
+      }
+      
+      // Good description
+      if (descResult?.charLim?.status === 'Success') {
+        return 1800; // Meets requirement
+      }
+      
+      // Default estimate
+      return 500;
+    };
+
+    const imageCount = getImageCount();
+    const videoCount = getVideoCount();
+    const titleLength = analysisResult.Title?.length || 0;
+    const bulletInfo = getBulletPointsInfo();
+    const descriptionLength = getDescriptionLength();
+    const reviewCount = parseInt(analysisResult.ReviewsCount) || 0;
+    const starRating = parseFloat(analysisResult.starRatting) || 0;
 
     return [
       // Product Images
       {
         label: 'Product Images',
-        score: analysisResult.imageResult?.status === 'Success' ? 100 : 0,
-        current: analysisResult.imageResult?.MainImage ? 'Images Present' : 'No images',
+        score: calculatePercentageScore(imageCount, 7),
+        current: `${imageCount} images`,
         recommended: '7+ high-quality images',
         max: 100
       },
       // Product Video
       {
         label: 'Product Video',
-        score: analysisResult.videoResult?.status === 'Success' ? 100 : 0,
-        current: analysisResult.videoResult?.status === 'Success' ? 'Video Present' : 'No video',
+        score: calculatePercentageScore(videoCount, 1),
+        current: `${videoCount} video${videoCount !== 1 ? 's' : ''}`,
         recommended: 'Add product demo video',
         max: 100
       },
       // Product Title
       {
         label: 'Product Title',
-        score: analysisResult.rankingResult?.TitleResult?.charLim?.status === 'Success' ? 100 : 50,
-        current: `${analysisResult.Title?.length || 0} characters`,
+        score: calculatePercentageScore(titleLength, 80),
+        current: `${titleLength} characters`,
         recommended: '80+ characters',
         max: 100
       },
       // Bullet Points
       {
         label: 'Bullet Points',
-        score: analysisResult.rankingResult?.BulletPoints?.charLim?.status === 'Success' ? 100 : 50,
-        current: analysisResult.rankingResult?.BulletPoints ? 'Present' : 'Missing',
-        recommended: '150+ chars each',
+        score: calculatePercentageScore(bulletInfo.avgLength, 150),
+        current: `${bulletInfo.count} bullets, ~${bulletInfo.avgLength} chars each`,
+        recommended: '5 bullets, 150+ chars each',
         max: 100
       },
       // Description
       {
         label: 'Description',
-        score: analysisResult.rankingResult?.Description?.charLim?.status === 'Success' ? 100 : 20,
-        current: analysisResult.rankingResult?.Description ? 'Present' : 'Missing',
+        score: calculatePercentageScore(descriptionLength, 1700),
+        current: `${descriptionLength} characters`,
         recommended: '1700+ characters',
         max: 100
       },
       // Reviews
       {
         label: 'Reviews',
-        score: analysisResult.reviewResult?.status === 'Success' ? 100 : 45,
-        current: `${analysisResult.ReviewsCount || 0} reviews`,
+        score: calculatePercentageScore(reviewCount, 50),
+        current: `${reviewCount} reviews`,
         recommended: '50+ reviews',
         max: 100
       },
       // Star Rating
       {
         label: 'Star Rating',
-        score: analysisResult.starRatingResult?.status === 'Success' ? 100 : 45,
-        current: `${analysisResult.starRatting || 0}/5.0 stars`,
+        score: calculatePercentageScore(starRating, 4.3),
+        current: `${starRating}/5.0 stars`,
         recommended: '4.3+ stars',
         max: 100
       }
@@ -213,7 +329,8 @@ const ASINAnalyzer = () => {
   const getIssuesData = () => {
     if (!analysisResult) return [];
 
-    const rankingErrors = analysisResult.rankingErrors || 0;
+    // Use actual TotalErrors from ranking result
+    const rankingErrors = analysisResult.rankingResult?.TotalErrors || 0;
     const conversionErrors = analysisResult.conversionErrors || 0;
     
     return [
@@ -234,6 +351,15 @@ const ASINAnalyzer = () => {
 
     // Ranking Issues
     const rankingIssues = [];
+    
+    // Title Result checks
+    if (analysisResult.rankingResult?.TitleResult?.nullCheck?.status === 'Error') {
+      rankingIssues.push({
+        id: 'title-null',
+        label: 'Title Null Check',
+        message: analysisResult.rankingResult.TitleResult.nullCheck.Message
+      });
+    }
     if (analysisResult.rankingResult?.TitleResult?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'title-charlim',
@@ -255,6 +381,29 @@ const ASINAnalyzer = () => {
         message: analysisResult.rankingResult.TitleResult.checkSpecialCharacters.Message
       });
     }
+
+    // Bullet Points checks
+    if (analysisResult.rankingResult?.BulletPoints?.nullCheck?.status === 'Error') {
+      rankingIssues.push({
+        id: 'bullets-null',
+        label: 'Bullet Points Null Check',
+        message: analysisResult.rankingResult.BulletPoints.nullCheck.Message
+      });
+    }
+    if (analysisResult.rankingResult?.BulletPoints?.emptyArray?.status === 'Error') {
+      rankingIssues.push({
+        id: 'bullets-empty',
+        label: 'Bullet Points Empty Array',
+        message: analysisResult.rankingResult.BulletPoints.emptyArray.Message
+      });
+    }
+    if (analysisResult.rankingResult?.BulletPoints?.nullItems?.status === 'Error') {
+      rankingIssues.push({
+        id: 'bullets-null-items',
+        label: 'Bullet Points Null Items',
+        message: analysisResult.rankingResult.BulletPoints.nullItems.Message
+      });
+    }
     if (analysisResult.rankingResult?.BulletPoints?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'bullets-charlim',
@@ -274,6 +423,22 @@ const ASINAnalyzer = () => {
         id: 'bullets-special-chars',
         label: 'Bullet Points Special Characters',
         message: analysisResult.rankingResult.BulletPoints.checkSpecialCharacters.Message
+      });
+    }
+
+    // Description checks
+    if (analysisResult.rankingResult?.Description?.nullCheck?.status === 'Error') {
+      rankingIssues.push({
+        id: 'description-null',
+        label: 'Description Null Check',
+        message: analysisResult.rankingResult.Description.nullCheck.Message
+      });
+    }
+    if (analysisResult.rankingResult?.Description?.emptyArray?.status === 'Error') {
+      rankingIssues.push({
+        id: 'description-empty',
+        label: 'Description Empty Array',
+        message: analysisResult.rankingResult.Description.emptyArray.Message
       });
     }
     if (analysisResult.rankingResult?.Description?.charLim?.status === 'Error') {
@@ -528,8 +693,8 @@ const ASINAnalyzer = () => {
                     <span>List Price : ${analysisResult?.price || 0}</span>
                   </div>
                   <div className="text-xs text-[#6b7280] mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>Star Ratings : {analysisResult?.starRatting || 'N/A'}/5</span>
-                    <span>Reviews Count : {analysisResult?.ReviewsCount || 'N/A'}</span>
+                    <span>Star Ratings : {analysisResult?.starRatting ?? 0}/5</span>
+                    <span>Reviews Count : {analysisResult?.ReviewsCount ?? 0}</span>
                   </div>
                 </div>
                 {/* Download Button */}

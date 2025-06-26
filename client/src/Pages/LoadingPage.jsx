@@ -16,6 +16,19 @@ function LoadingPage() {
   const [isAnimating, setIsAnimating] = useState(false);
   const [animationStarted, setAnimationStarted] = useState(false);
 
+  // Redirect to home if no ASIN is provided (direct URL access)
+  useEffect(() => {
+    if (!asin) {
+      console.log('No ASIN provided, redirecting to home');
+      navigate('/', { replace: true });
+    }
+  }, [asin, navigate]);
+
+  // Don't render anything if we're redirecting due to no ASIN
+  if (!asin) {
+    return null;
+  }
+
   // Start the animation when component mounts
   useEffect(() => {
     if (!animationStarted) {
@@ -207,18 +220,7 @@ function LoadingPage() {
               <div className="text-gray-600 text-sm mb-2">Unlock product-specific issues with full solutions in Seller QI Pro</div>
               <button className="bg-[#3B4A6B] text-white px-6 py-2 rounded hover:bg-[#2d3a52] w-max">Get Seller QI Now</button>
               
-              {/* Debug button */}
-              {isDataFetched && (
-                <button 
-                  onClick={() => {
-                    console.log('Manual navigation triggered');
-                    navigate('/results', { state: analysisResult });
-                  }}
-                  className="bg-red-500 text-white px-4 py-2 rounded mt-2"
-                >
-                  Debug: Go to Results
-                </button>
-              )}
+
             </div>
           </div>
         </div>

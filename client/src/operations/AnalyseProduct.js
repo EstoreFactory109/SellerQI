@@ -31,6 +31,8 @@ const AnalyseProduct = async (asin,country) => {
             const productVideos = data["product_videos"] || [];
             const productNumRatings = data["product_num_ratings"] || 0;
             const productStarRating = data["product_star_rating"] || 0;
+
+            
             
             const imageResult=checkNumberOfImages(productPhotos);
             const videoResult=checkIfVideoExists(productVideos);
@@ -81,8 +83,8 @@ const AnalyseProduct = async (asin,country) => {
                 Title: data["product_title"] || "N/A",
                 Brand: data["product_details"]?.["Manufacturer"] || data["product_details"]?.["Brand"] || "N/A",
                 price: parsedPrice,
-                starRatting: productStarRating || "N/A",
-                ReviewsCount: productNumRatings || "N/A",
+                starRatting: productStarRating,
+                ReviewsCount: productNumRatings,
                 unitsSold: salesVolume || "N/A",
                 orderAmount: orderAmount || 0,
                 image: data["product_photo"] || "",
@@ -95,6 +97,8 @@ const AnalyseProduct = async (asin,country) => {
                 starRatingResult,
                 rankingErrors: rankingResult.TotalErrors || 0,
                 conversionErrors: conversionErrors,
+                actualImageCount: productPhotos.length,
+                actualVideoCount: productVideos.length,
             }
         }
       } catch (error) {

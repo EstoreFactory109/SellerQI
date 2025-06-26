@@ -37,7 +37,7 @@ const ProfitabilityDashboard = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [])
+  }, []);
 
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   
@@ -190,51 +190,183 @@ const ProfitabilityDashboard = () => {
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
-    const csvData = [];
-    
-    // Add header information
-    csvData.push(['Profitability Dashboard Report']);
-    csvData.push(['Generated on:', new Date().toLocaleDateString()]);
-    csvData.push(['Date Range:', info?.startDate && info?.endDate ? `${info.startDate} to ${info.endDate}` : 'Last 30 Days']);
-    csvData.push([]);
+    try {
+      console.log('=== Starting profitability data preparation ===');
+      console.log('Input data check:', {
+        infoExists: !!info,
+        metricsExists: !!metrics,
+        chartDataExists: !!chartData,
+        cogsValuesExists: !!cogsValues,
+        metricsLength: Array.isArray(metrics) ? metrics.length : 'not array',
+        chartDataLength: Array.isArray(chartData) ? chartData.length : 'not array'
+      });
+      
+      const csvData = [];
+      
+      // Add header information
+      csvData.push(['Profitability Dashboard Report - Complete Analysis']);
+      csvData.push(['Generated on:', new Date().toLocaleDateString()]);
+      csvData.push(['Date Range:', info?.startDate && info?.endDate ? `${info.startDate} to ${info.endDate}` : 'Last 30 Days']);
+      csvData.push([]);
+      
+      // Add Executive Summary at the top
+      csvData.push(['EXECUTIVE SUMMARY']);
+      csvData.push(['='.repeat(50)]);
+      
+                    // Calculate key executive insights
+       console.log('Step 1: Starting executive insights calculation');
+       const executiveTotalRevenue = Array.isArray(chartData) ? chartData.reduce((sum, item) => sum + (item?.totalSales || 0), 0) : 0;
+       const executiveTotalCosts = Array.isArray(chartData) ? chartData.reduce((sum, item) => sum + (item?.spend || 0), 0) : 0;
+       const executiveOverallProfitMargin = executiveTotalRevenue > 0 ? ((executiveTotalRevenue - executiveTotalCosts) / executiveTotalRevenue) * 100 : 0;
+       const executiveProfitabilityData = info?.profitibilityData || [];
+       console.log('Step 1 completed: Revenue:', executiveTotalRevenue, 'Costs:', executiveTotalCosts);
+                    console.log('Step 2: Starting product categorization');
+       const criticalProducts = Array.isArray(executiveProfitabilityData) ? executiveProfitabilityData.filter(product => {
+         if (!product || typeof product !== 'object') return false;
+         const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
+         const totalCogs = cogsPerUnit * (product.quantity || 0);
+         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
+         const netProfit = grossProfit - totalCogs;
+         const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
+         return profitMargin < 0;
+       }).length : 0;
+       
+       const warningProducts = Array.isArray(executiveProfitabilityData) ? executiveProfitabilityData.filter(product => {
+         if (!product || typeof product !== 'object') return false;
+         const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
+         const totalCogs = cogsPerUnit * (product.quantity || 0);
+         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
+         const netProfit = grossProfit - totalCogs;
+         const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
+         return profitMargin >= 0 && profitMargin < 10;
+       }).length : 0;
+       
+       const healthyProducts = executiveProfitabilityData.length - criticalProducts - warningProducts;
+       console.log('Step 2 completed: Critical:', criticalProducts, 'Warning:', warningProducts, 'Healthy:', healthyProducts);
+       
+       csvData.push(['Business Health Status:', executiveOverallProfitMargin > 15 ? 'HEALTHY' : executiveOverallProfitMargin > 5 ? 'CAUTION' : 'CRITICAL']);
+       csvData.push(['Overall Profit Margin:', `${executiveOverallProfitMargin.toFixed(2)}%`]);
+       csvData.push(['Total Products Analyzed:', executiveProfitabilityData.length.toString()]);
+      csvData.push(['Products Losing Money (Critical):', criticalProducts.toString()]);
+      csvData.push(['Products with Low Margins (Warning):', warningProducts.toString()]);
+      csvData.push(['Healthy Products:', healthyProducts.toString()]);
+      csvData.push([]);
+      
+      // Key insights
+      csvData.push(['KEY INSIGHTS:']);
+      if (criticalProducts > 0) {
+        csvData.push(['• URGENT:', `${criticalProducts} products are losing money and need immediate attention`]);
+      }
+      if (warningProducts > 0) {
+        csvData.push(['• WARNING:', `${warningProducts} products have margins below 10% and should be optimized`]);
+      }
+      if (healthyProducts > 0) {
+        csvData.push(['• POSITIVE:', `${healthyProducts} products are performing well with healthy margins`]);
+      }
+      csvData.push([]);
+      
+      // Top action items
+      csvData.push(['TOP ACTION ITEMS:']);
+      csvData.push(['1. Review and fix critical profitability issues immediately']);
+      csvData.push(['2. Optimize PPC spend for low-margin products']);
+      csvData.push(['3. Negotiate better COGS with suppliers where possible']);
+      csvData.push(['4. Consider price adjustments for underperforming products']);
+      csvData.push(['5. Monitor Amazon fees and explore cost reduction opportunities']);
+      csvData.push([]);
+      csvData.push(['='.repeat(50)]);
+      csvData.push([]);
     
     // Add metrics summary (with COGS adjustments)
+    console.log('Step 3: Processing metrics');
     csvData.push(['Key Metrics (COGS-Adjusted)']);
-    metrics.forEach(metric => {
-      csvData.push([metric.label, metric.value]);
-    });
+    if (Array.isArray(metrics) && metrics.length > 0) {
+      metrics.forEach((metric, index) => {
+        if (metric && typeof metric === 'object' && metric.label && metric.value) {
+          csvData.push([metric.label, metric.value]);
+        } else {
+          console.warn('Invalid metric at index', index, metric);
+        }
+      });
+    } else {
+      csvData.push(['No metrics data available']);
+    }
+    console.log('Step 3 completed: Metrics processed');
     
-    // Add COGS summary
-    let totalCOGS = 0;
-    const profitibilityData = info?.profitibilityData || [];
-    profitibilityData.forEach(product => {
-      const cogsPerUnit = cogsValues[product.asin] || 0;
-      const quantity = product.quantity || 0;
-      totalCOGS += cogsPerUnit * quantity;
-    });
+         // Add comprehensive COGS analysis
+     console.log('Step 4: Processing COGS analysis');
+     let totalCOGS = 0;
+     let totalCOGSProducts = 0;
+     let productsWithCOGS = 0;
+     let productsWithoutCOGS = 0;
+     const cogsProfitibilityData = info?.profitibilityData || [];
+     
+     const cogsAnalysis = [];
+     if (Array.isArray(cogsProfitibilityData)) {
+       cogsProfitibilityData.forEach((product, index) => {
+         if (product && typeof product === 'object' && product.asin) {
+           const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
+           const quantity = product.quantity || 0;
+           const productCOGS = cogsPerUnit * quantity;
+           totalCOGS += productCOGS;
+           totalCOGSProducts++;
+           
+           if (cogsPerUnit > 0) {
+             productsWithCOGS++;
+             const cogsPercent = product.sales > 0 ? (productCOGS / product.sales) * 100 : 0;
+             cogsAnalysis.push({
+               asin: product.asin,
+               cogsPerUnit,
+               productCOGS,
+               cogsPercent,
+               sales: product.sales || 0
+             });
+           } else {
+             productsWithoutCOGS++;
+           }
+         } else {
+           console.warn('Invalid product in COGS analysis at index', index, product);
+         }
+       });
+     }
+     console.log('Step 4 completed: COGS analysis processed');
     
+    csvData.push(['COGS Analysis Summary']);
     csvData.push(['Total COGS Deducted', `$${totalCOGS.toFixed(2)}`]);
+    csvData.push(['Products with COGS entered', productsWithCOGS.toString()]);
+    csvData.push(['Products missing COGS', productsWithoutCOGS.toString()]);
+    csvData.push(['COGS Data Completeness', `${((productsWithCOGS / totalCOGSProducts) * 100).toFixed(1)}%`]);
+    
+    if (cogsAnalysis.length > 0) {
+      const avgCOGSPercent = cogsAnalysis.reduce((sum, item) => sum + item.cogsPercent, 0) / cogsAnalysis.length;
+      const highCOGSProducts = cogsAnalysis.filter(item => item.cogsPercent > 60).length;
+      csvData.push(['Average COGS %', `${avgCOGSPercent.toFixed(1)}%`]);
+      csvData.push(['Products with high COGS (>60%)', highCOGSProducts.toString()]);
+    }
     csvData.push([]);
     
     // Add chart data
-    if (chartData.length > 0) {
+    if (chartData && chartData.length > 0) {
       csvData.push(['Daily Spend vs Total Sales']);
       csvData.push(['Date', 'Spend', 'Total Sales']);
       chartData.forEach(day => {
         csvData.push([
-          day.date,
-          `$${day.spend.toFixed(2)}`,
-          `$${day.totalSales.toFixed(2)}`
+          day.date || 'N/A',
+          `$${(day.spend || 0).toFixed(2)}`,
+          `$${(day.totalSales || 0).toFixed(2)}`
         ]);
       });
       csvData.push([]);
+    } else {
+      csvData.push(['Daily Spend vs Total Sales']);
+      csvData.push(['No chart data available']);
+      csvData.push([]);
     }
     
-    // Add profitability table data - ALL PRODUCTS (not paginated)
+    // Add comprehensive profitability table data - ALL PRODUCTS (not paginated)
     const profitabilityTableData = info?.profitibilityData || [];
     if (profitabilityTableData.length > 0) {
       csvData.push([`Product Profitability Analysis - Total: ${profitabilityTableData.length} products`]);
-      csvData.push(['ASIN', 'Product Name', 'Units Sold', 'Sales Revenue', 'COGS/Unit', 'Total COGS', 'Ad Spend', 'Amazon Fees', 'Gross Profit', 'Net Profit (with COGS)', 'Profit Margin %', 'Status']);
+      csvData.push(['ASIN', 'Product Name', 'Units Sold', 'Sales Revenue', 'Revenue per Unit', 'COGS/Unit', 'COGS %', 'Total COGS', 'Ad Spend', 'Ad Spend %', 'Amazon Fees', 'Fees %', 'Gross Profit', 'Net Profit (with COGS)', 'Profit Margin %', 'Status', 'Issues', 'Recommendations']);
       
       // Get product details and COGS values to match the table display exactly
       const totalProducts = info?.TotalProduct || [];
@@ -243,32 +375,96 @@ const ProfitabilityDashboard = () => {
         productDetailsMap.set(product.asin, product);
       });
       
+      // Generate individual product suggestions (same logic as ProfitTable)
+      const generateProductSuggestions = (productData) => {
+        const suggestions = [];
+        const margin = productData.sales > 0 ? (productData.netProfit / productData.sales) * 100 : 0;
+        const cogsPercentage = productData.sales > 0 ? (productData.totalCogs / productData.sales) * 100 : 0;
+        
+        // Generate suggestions for products with issues
+        if (margin < 0) {
+          suggestions.push('Losing money on each sale - immediate action required');
+          suggestions.push('Consider increasing price or reducing PPC spend');
+        } else if (margin < 10) {
+          suggestions.push(`Low margin (${margin.toFixed(1)}%) - consider price increase`);
+          if (cogsPercentage > 50) {
+            suggestions.push(`High COGS (${cogsPercentage.toFixed(1)}%) - negotiate with supplier`);
+          }
+          if (productData.adSpendPercent > 20) {
+            suggestions.push(`High ad spend (${productData.adSpendPercent.toFixed(1)}%) - optimize PPC`);
+          }
+        }
+        
+        if (productData.sales > 1000 && productData.netProfit < 100) {
+          suggestions.push('High revenue but low profit - audit all fees');
+        }
+        
+        return suggestions.join('; ');
+      };
+      
       profitabilityTableData.forEach(product => {
         const productDetails = productDetailsMap.get(product.asin) || {};
-        const cogsPerUnit = cogsValues[product.asin] || 0; // Get COGS from Redux state
+        const cogsPerUnit = cogsValues[product.asin] || 0;
         const totalCogs = cogsPerUnit * (product.quantity || 0);
         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
         const netProfit = grossProfit - totalCogs;
         const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
+        const revenuePerUnit = product.quantity > 0 ? (product.sales / product.quantity) : 0;
+        const cogsPercent = product.sales > 0 ? (totalCogs / product.sales) * 100 : 0;
+        const adSpendPercent = product.sales > 0 ? ((product.ads || 0) / product.sales) * 100 : 0;
+        const feesPercent = product.sales > 0 ? ((product.amzFee || 0) / product.sales) * 100 : 0;
         
-        // Determine status
+        // Determine status and issues
         let status = 'Good';
-        if (profitMargin < 10 && profitMargin >= 0) status = 'Warning';
-        if (profitMargin < 0) status = 'Poor';
+        let issues = '';
+        if (profitMargin < 0) {
+          status = 'Critical';
+          issues = 'Negative profit';
+        } else if (profitMargin < 10) {
+          status = 'Warning';
+          issues = 'Low margin';
+        }
+        
+        if (cogsPercent > 60) {
+          issues += (issues ? ', ' : '') + 'High COGS';
+        }
+        if (adSpendPercent > 25) {
+          issues += (issues ? ', ' : '') + 'High ad spend';
+        }
+        if (feesPercent > 20) {
+          issues += (issues ? ', ' : '') + 'High fees';
+        }
+        
+        const productData = {
+          asin: product.asin,
+          sales: product.sales || 0,
+          quantity: product.quantity || 0,
+          totalCogs,
+          netProfit,
+          adSpendPercent
+        };
+        
+        const recommendations = generateProductSuggestions(productData);
         
         csvData.push([
           product.asin,
           productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
           `$${(product.sales || 0).toFixed(2)}`,
+          `$${revenuePerUnit.toFixed(2)}`,
           `$${cogsPerUnit.toFixed(2)}`,
+          `${cogsPercent.toFixed(1)}%`,
           `$${totalCogs.toFixed(2)}`,
           `$${(product.ads || 0).toFixed(2)}`,
+          `${adSpendPercent.toFixed(1)}%`,
           `$${(product.amzFee || 0).toFixed(2)}`,
+          `${feesPercent.toFixed(1)}%`,
           `$${grossProfit.toFixed(2)}`,
           `$${netProfit.toFixed(2)}`,
           `${profitMargin.toFixed(2)}%`,
-          status
+          status,
+          issues || 'None',
+          recommendations || 'Continue monitoring'
         ]);
       });
       csvData.push([]);
@@ -407,16 +603,190 @@ const ProfitabilityDashboard = () => {
       csvData.push([]);
     }
     
-    // Add additional suggestions from dynamic data if available
+    // Add Dynamic Suggestions with Priority Analysis
     if (suggestionsData && suggestionsData.length > 0) {
-      csvData.push(['Dynamic Suggestions Based on Current Data']);
-      suggestionsData.forEach((suggestion, index) => {
-        csvData.push([`${index + 1}.`, suggestion]);
+      csvData.push(['Dynamic Suggestions Based on Current Data Analysis']);
+      csvData.push(['Priority', 'Suggestion Type', 'Recommendation', 'Action Required']);
+      
+      // Convert string suggestions to objects with priority analysis
+      const prioritizedSuggestions = suggestionsData.map((suggestion) => {
+        let priority = 'Medium';
+        let actionRequired = 'Monitor';
+        let suggestionType = 'Optimization';
+        
+        if (typeof suggestion === 'string') {
+          if (suggestion.toLowerCase().includes('negative profit') || 
+              suggestion.toLowerCase().includes('losing money') ||
+              suggestion.toLowerCase().includes('unprofitable')) {
+            priority = 'Critical';
+            actionRequired = 'Immediate';
+            suggestionType = 'Profitability Crisis';
+          } else if (suggestion.toLowerCase().includes('low margin') ||
+                     suggestion.toLowerCase().includes('very low')) {
+            priority = 'High';
+            actionRequired = 'Within 1 week';
+            suggestionType = 'Margin Improvement';
+          } else if (suggestion.toLowerCase().includes('optimize') || 
+                     suggestion.toLowerCase().includes('consider')) {
+            priority = 'Medium';
+            actionRequired = 'Within 1 month';
+            suggestionType = 'General Optimization';
+          }
+        }
+        
+        return {
+          priority,
+          suggestionType,
+          message: suggestion,
+          actionRequired
+        };
+      });
+      
+      // Sort by priority (Critical first, then High, then Medium)
+      const priorityOrder = { 'Critical': 1, 'High': 2, 'Medium': 3 };
+      prioritizedSuggestions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+      
+      prioritizedSuggestions.forEach((suggestion, index) => {
+        csvData.push([
+          suggestion.priority,
+          suggestion.suggestionType,
+          suggestion.message,
+          suggestion.actionRequired
+        ]);
+      });
+      
+      csvData.push([]);
+      
+      // Add suggestions summary
+      const criticalCount = prioritizedSuggestions.filter(s => s.priority === 'Critical').length;
+      const highCount = prioritizedSuggestions.filter(s => s.priority === 'High').length;
+      const mediumCount = prioritizedSuggestions.filter(s => s.priority === 'Medium').length;
+      
+      csvData.push(['Suggestions Summary']);
+      csvData.push(['Critical Issues', criticalCount.toString()]);
+      csvData.push(['High Priority', highCount.toString()]);
+      csvData.push(['Medium Priority', mediumCount.toString()]);
+      csvData.push(['Total Suggestions', prioritizedSuggestions.length.toString()]);
+      csvData.push([]);
+    }
+    
+    // Add ProductWise Sponsored Ads Data if available
+    const productWiseSponsoredAdsGraphData = info?.ProductWiseSponsoredAdsGraphData || {};
+    if (Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
+      csvData.push(['Product-wise Sponsored Ads Performance Data']);
+      csvData.push(['ASIN', 'Product Name', 'Impressions', 'Clicks', 'CTR %', 'Spend', 'Sales', 'ACOS %', 'ROAS']);
+      
+      const totalProducts = info?.TotalProduct || [];
+      const productDetailsMap = new Map();
+      totalProducts.forEach(product => {
+        productDetailsMap.set(product.asin, product);
+      });
+      
+      Object.entries(productWiseSponsoredAdsGraphData).forEach(([asin, adsData]) => {
+        const productDetails = productDetailsMap.get(asin) || {};
+        const impressions = adsData.impressions || 0;
+        const clicks = adsData.clicks || 0;
+        const spend = adsData.spend || 0;
+        const sales = adsData.attributedSales1d || 0;
+        const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+        const acos = sales > 0 ? (spend / sales) * 100 : 0;
+        const roas = spend > 0 ? sales / spend : 0;
+        
+        csvData.push([
+          asin,
+          productDetails.title || `Product ${asin}`,
+          impressions.toString(),
+          clicks.toString(),
+          `${ctr.toFixed(2)}%`,
+          `$${spend.toFixed(2)}`,
+          `$${sales.toFixed(2)}`,
+          `${acos.toFixed(2)}%`,
+          `${roas.toFixed(2)}`
+        ]);
       });
       csvData.push([]);
     }
     
-    return csvData;
+      return csvData;
+    } catch (error) {
+      console.error('Error preparing profitability data:', error);
+      console.error('Error stack:', error.stack);
+      
+      // Return a safe, basic version of the data
+      try {
+        const basicCsvData = [];
+        
+        // Basic header
+        basicCsvData.push(['Profitability Dashboard Report - Basic Version']);
+        basicCsvData.push(['Generated on:', new Date().toLocaleDateString()]);
+        basicCsvData.push(['Note:', 'This is a simplified version due to data processing complexity']);
+        basicCsvData.push([]);
+        
+        // Basic metrics if available
+        if (Array.isArray(metrics) && metrics.length > 0) {
+          basicCsvData.push(['Key Metrics']);
+          metrics.forEach(metric => {
+            if (metric && metric.label && metric.value) {
+              basicCsvData.push([metric.label, metric.value]);
+            }
+          });
+          basicCsvData.push([]);
+        }
+        
+        // Basic chart data if available
+        if (Array.isArray(chartData) && chartData.length > 0) {
+          basicCsvData.push(['Daily Performance']);
+          basicCsvData.push(['Date', 'Spend', 'Sales']);
+          chartData.forEach(day => {
+            if (day && day.date) {
+              basicCsvData.push([
+                day.date || 'N/A',
+                `$${(day.spend || 0).toFixed(2)}`,
+                `$${(day.totalSales || 0).toFixed(2)}`
+              ]);
+            }
+          });
+          basicCsvData.push([]);
+        }
+        
+        // Basic product data if available
+        const basicProfitabilityData = info?.profitibilityData || [];
+        if (Array.isArray(basicProfitabilityData) && basicProfitabilityData.length > 0) {
+          basicCsvData.push(['Product Analysis - Basic']);
+          basicCsvData.push(['ASIN', 'Units Sold', 'Sales', 'Ad Spend', 'Fees']);
+          basicProfitabilityData.forEach(product => {
+            if (product && product.asin) {
+              basicCsvData.push([
+                product.asin,
+                (product.quantity || 0).toString(),
+                `$${(product.sales || 0).toFixed(2)}`,
+                `$${(product.ads || 0).toFixed(2)}`,
+                `$${(product.amzFee || 0).toFixed(2)}`
+              ]);
+            }
+          });
+          basicCsvData.push([]);
+        }
+        
+        // Error information
+        basicCsvData.push(['Error Information']);
+        basicCsvData.push(['Error Type:', 'Data Processing Error']);
+        basicCsvData.push(['Error Message:', error.message || 'Unknown error occurred']);
+        basicCsvData.push(['Suggestion:', 'Please try refreshing the page or contact support if the issue persists']);
+        
+        return basicCsvData;
+      } catch (fallbackError) {
+        console.error('Even basic data preparation failed:', fallbackError);
+        return [
+          ['Profitability Dashboard Report'],
+          ['Generated on:', new Date().toLocaleDateString()],
+          ['Error:', 'Unable to generate report due to critical data processing error'],
+          ['Message:', error.message || 'Unknown error occurred'],
+          ['Fallback Error:', fallbackError.message || 'Unknown fallback error'],
+          ['Suggestion:', 'Please refresh the page and try again']
+        ];
+      }
+    }
   };
 
   return (

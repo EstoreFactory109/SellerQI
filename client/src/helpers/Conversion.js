@@ -8,6 +8,8 @@ const checkNumberOfImages=(imageArr)=>{
             MainImage: null
         }
     }
+
+    console.log(imageArr.length)
     
     if(imageArr.length<7){
         return {

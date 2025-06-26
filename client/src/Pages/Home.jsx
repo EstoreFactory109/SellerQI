@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronRight, Check, X, Search, ChevronDown } from 'lucide-react';
+import { ChevronRight, Check, X, Search, ChevronDown, AlertTriangle, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useAuth } from '../hooks/useAuth';
+import axiosInstance from '../config/axios.config';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
 
@@ -10,9 +12,13 @@ export default function SellerQIHomepage() {
   const [asin, setAsin] = useState('');
   const [market, setMarket] = useState('US');
   const [showMarketDropdown, setShowMarketDropdown] = useState(false);
+  const [searchLimit, setSearchLimit] = useState(null);
+  const [limitError, setLimitError] = useState(null);
+  const [isCheckingLimit, setIsCheckingLimit] = useState(false);
   const marketDropdownRef = useRef(null);
 
   const navigate = useNavigate();
+  const { isAuthenticated, isLoading } = useAuth();
 
   // Market options
   const marketOptions = [
@@ -43,6 +49,27 @@ export default function SellerQIHomepage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // Load initial search limit for non-authenticated users
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      // Check current status without consuming a search
+      const loadInitialLimit = async () => {
+        try {
+          const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
+          if (response.status === 200) {
+            setSearchLimit(response.data.data);
+          }
+        } catch (error) {
+          if (error.response?.status === 429) {
+            setSearchLimit(error.response.data.data);
+          }
+          // Silently fail for initial load
+        }
+      };
+      loadInitialLimit();
+    }
+  }, [isAuthenticated, isLoading]);
+
   // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -56,7 +83,52 @@ export default function SellerQIHomepage() {
     };
   }, []);
 
-  const handleAnalyze = () => {
+  // Check search limit for non-authenticated users
+  const checkSearchLimit = async () => {
+    try {
+      setIsCheckingLimit(true);
+      const response = await axiosInstance.post('/app/check-search-limit');
+      
+      if (response.status === 200) {
+        setSearchLimit(response.data.data);
+        setLimitError(null);
+        return true;
+      }
+    } catch (error) {
+      if (error.response?.status === 429) {
+        // Rate limit exceeded
+        setLimitError(error.response.data.message);
+        setSearchLimit(error.response.data.data);
+        return false;
+      } else {
+        console.error('Error checking search limit:', error);
+        setLimitError('Unable to verify search limit. Please try again.');
+        return false;
+      }
+    } finally {
+      setIsCheckingLimit(false);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    // Clear previous errors
+    setLimitError(null);
+
+    // Validate ASIN input
+    if (!asin.trim()) {
+      setLimitError('Please enter a valid ASIN.');
+      return;
+    }
+
+    // If user is not authenticated, check search limit
+    if (!isAuthenticated) {
+      const limitCheckPassed = await checkSearchLimit();
+      if (!limitCheckPassed) {
+        return; // Don't proceed if limit exceeded
+      }
+    }
+
+    // Proceed with analysis
     navigate(`/loading?asin=${asin}&market=${market}`);
   }
 
@@ -125,15 +197,56 @@ export default function SellerQIHomepage() {
             </div>
           </div>
 
-          <p className="text-gray-600 mb-8 text-sm">
+          <p className="text-gray-600 mb-4 text-sm">
             Instant analysis • No credit card required • Trusted by 1000+ sellers
           </p>
 
+          {/* Search Limit Information */}
+          {!isLoading && !isAuthenticated && searchLimit && !limitError && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center max-w-md mx-auto">
+              <Info className="w-4 h-4 text-blue-600 inline mr-2" />
+              <span className="text-blue-700 text-sm">
+                {searchLimit.remainingSearches} free search{searchLimit.remainingSearches !== 1 ? 'es' : ''} remaining out of {searchLimit.maxSearches}
+              </span>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {limitError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-center max-w-lg mx-auto">
+              <AlertTriangle className="w-5 h-5 text-red-600 inline mr-2" />
+              <div className="text-red-700">
+                <p className="font-medium">{limitError}</p>
+                {searchLimit && searchLimit.remainingSearches === 0 && (
+                  <div className="mt-2">
+                    <Link 
+                      to="/sign-up" 
+                      className="text-blue-600 underline hover:text-blue-800 font-medium"
+                    >
+                      Sign up for free
+                    </Link>
+                    <span className="text-gray-600"> to continue analyzing products</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <button
-            className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors"
+            className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleAnalyze}
+            disabled={isCheckingLimit || (limitError && searchLimit?.remainingSearches === 0)}
           >
-            Analyze <ChevronRight className="w-4 h-4" />
+            {isCheckingLimit ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Checking...
+              </>
+            ) : (
+              <>
+                Analyze <ChevronRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </div>
       </section>
@@ -163,7 +276,7 @@ export default function SellerQIHomepage() {
             Get detailed issue breakdowns, smart recommendations, and a<br />
             complete Amazon growth toolkit.
           </p>
-          <button className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors">
+          <button className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors whitespace-nowrap">
             Upgrade to Seller QI PRO <ChevronRight className="w-4 h-4" />
           </button>
         </div>
@@ -367,7 +480,7 @@ export default function SellerQIHomepage() {
             Start Free, Upgrade Only When You're<br />
             Ready
           </h2>
-          <button className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors">
+          <button className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors whitespace-nowrap">
             Upgrade to Seller QI PRO <ChevronRight className="w-4 h-4" />
           </button>
         </div>

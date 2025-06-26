@@ -252,102 +252,103 @@ const checkBulletPoints = (arr) => {
     return result;
 }
 
-const checkDescription = (arr) => {
+const checkDescription = (input) => {
     let result = {};
     let errorCount = 0;
-    let pointCounter = 0;
 
-    // Check for null or undefined array
-    if (arr === null || arr === undefined || !Array.isArray(arr)) {
+    // Check for null or undefined input
+    if (input === null || input === undefined) {
         errorCount++;
         result.nullCheck = {
             status: "Error",
-            Message: "Product description array is null, undefined, or not an array. A valid product description is required.",
-            HowTOSolve: "Ensure that a valid array of description paragraphs is provided before processing."
+            Message: "Product description is null or undefined. A valid product description is required.",
+            HowTOSolve: "Ensure that a valid product description is provided before processing."
         }
         result.NumberOfErrors = errorCount;
         return result;
     }
 
-    // Check if array is empty
-    if (arr.length === 0) {
+    // Convert input to string
+    let descriptionString = "";
+    
+    if (Array.isArray(input)) {
+        // If it's an array, filter out null/undefined values and join them
+        const validItems = input.filter(item => item !== null && item !== undefined);
+        
+        if (validItems.length === 0) {
+            errorCount++;
+            result.emptyArray = {
+                status: "Error",
+                Message: "Product description array contains no valid content. At least one valid description paragraph is required.",
+                HowTOSolve: "Add at least one valid paragraph to describe your product."
+            }
+            result.NumberOfErrors = errorCount;
+            return result;
+        }
+        
+        descriptionString = validItems.join(" ");
+    } else if (typeof input === 'string') {
+        descriptionString = input;
+    } else {
         errorCount++;
-        result.emptyArray = {
+        result.invalidType = {
             status: "Error",
-            Message: "Product description array is empty. At least one description paragraph is required.",
-            HowTOSolve: "Add at least one paragraph to describe your product."
+            Message: "Product description must be a string or an array of strings.",
+            HowTOSolve: "Provide a valid string or array of strings for the product description."
         }
         result.NumberOfErrors = errorCount;
         return result;
     }
 
-    arr.forEach((str) => {
-        pointCounter++;
+    // Check character length
+    if (descriptionString.length < 1700) {
+        errorCount++;
+        result.charLim = {
+            status: "Error",
+            Message: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers.",
+            HowTOSolve: "Expand your product description to at least 1700 characters. Include benefits, use cases, and unique features, using proper formatting and keywords."
+        }
+    } else {
+        result.charLim = {
+            status: "Success",
+            Message: "Great job! Your product description is sufficiently detailed.",
+            HowTOSolve: ""
+        }
+    }
 
-        // Check for null items in array
-        if (str === null || str === undefined) {
-            errorCount++;
-            result[`nullItem_${pointCounter}`] = {
-                status: "Error",
-                Message: `Description paragraph ${pointCounter} is null or undefined.`,
-                HowTOSolve: "Ensure all description paragraphs contain valid text content.",
-                PointNumber: pointCounter
-            }
-            return; // Skip further checks for this item
+    // Check for restricted words
+    let RestictedWords = containsRestrictedWords(descriptionString);
+    if (RestictedWords.length > 0) {
+        errorCount++;
+        result.RestictedWords = {
+            status: "Error",
+            Message: `Your product description contains restricted or banned words according to Amazon's guidelines. The words used are: ${RestictedWords.join(', ')}`,
+            HowTOSolve: "Review and remove restricted words from the description. Ensure full compliance with Amazon's guidelines."
         }
+    } else {
+        result.RestictedWords = {
+            status: "Success",
+            Message: "Excellent! Your product description avoids all restricted words.",
+            HowTOSolve: ""
+        }
+    }
 
-        if (str.length < 1700) {
-            errorCount++;
-            result.charLim = {
-                status: "Error",
-                Message: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers.",
-                HowTOSolve: "Expand your product description to at least 1700 characters. Include benefits, use cases, and unique features, using proper formatting and keywords.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.charLim = {
-                status: "Success",
-                Message: "Great job! Your product description is sufficiently detailed.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
+    // Check for special characters
+    const SpecialCharacters = checkSpecialCharacters(descriptionString);
+    if (SpecialCharacters.length > 0) {
+        errorCount++;
+        result.checkSpecialCharacters = {
+            status: "Error",
+            Message: `Your product description includes restricted special characters. The special characters used are: ${SpecialCharacters.join(', ')}`,
+            HowTOSolve: "Remove all restricted characters from your product description to meet Amazon's formatting guidelines."
         }
-        let RestictedWords=containsRestrictedWords(str)
-        if (RestictedWords.length>0) {
-            errorCount++;
-            result.RestictedWords = {
-                status: "Error",
-                Message: `Your product description contains restricted or banned words according to Amazon's guidelines. The words used are: ${RestictedWords.join(', ')}`,
-                HowTOSolve: "Review and remove restricted words from the description. Ensure full compliance with Amazon's guidelines.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.RestictedWords = {
-                status: "Success",
-                Message: "Excellent! Your product description avoids all restricted words.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
+    } else {
+        result.checkSpecialCharacters = {
+            status: "Success",
+            Message: "Your product description is clean and free of restricted characters.",
+            HowTOSolve: ""
         }
-
-        const SpecialCharacters=checkSpecialCharacters(str)
-        if (SpecialCharacters.length>0) {
-            errorCount++;
-            result.checkSpecialCharacters = {
-                status: "Error",
-                Message: `Your product description includes restricted special characters. The special characters used are: ${SpecialCharacters.join(', ')}`,
-                HowTOSolve: "Remove all restricted characters from your product description to meet Amazon's formatting guidelines.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.checkSpecialCharacters = {
-                status: "Success",
-                Message: "Your product description is clean and free of restricted characters.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
-        }
-    });
+    }
 
     result.NumberOfErrors = errorCount;
     return result;
@@ -393,6 +394,7 @@ const getRankings = (ProductDetails) => {
     const titleResult = checkTitle(ProductDetails.product_title);
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);
+    
 
     const totalErrorNumbers = titleResult.NumberOfErrors + bulletPointsResult.NumberOfErrors + descriptionResult.NumberOfErrors;
 

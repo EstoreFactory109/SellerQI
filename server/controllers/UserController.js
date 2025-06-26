@@ -15,6 +15,15 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 
+// In-memory store for IP search tracking (in production, use Redis or database)
+const ipSearchTracker = new Map();
+
+// Reset search counts every 24 hours
+setInterval(() => {
+    ipSearchTracker.clear();
+    logger.info('IP search tracker cleared - daily reset');
+}, 24 * 60 * 60 * 1000); // 24 hours
+
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, whatsapp, email, password, allTermsAndConditionsAgreed } = req.body;
     console.log(firstname)
@@ -114,6 +123,7 @@ const verifyUser = asyncHandler(async (req, res) => {
     const options = {
         httpOnly: true,
         secure: true,
+        sameSite: "None"
     }
 
     res.status(200)
@@ -222,7 +232,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const option = {
         httpOnly: true,
-        secure: true
+        secure: true,
+        sameSite: "None"
     }
 
     // Prepare response data
@@ -356,7 +367,8 @@ const switchAccount = asyncHandler(async (req, res) => {
 
         const option = {
             httpOnly: true,
-            secure: true
+            secure: true,
+            sameSite: "None"
         }
 
         return res.status(200)
@@ -370,7 +382,8 @@ const switchAccount = asyncHandler(async (req, res) => {
     let LocationToken = await createLocationToken(country, region);
     const option = {
         httpOnly: true,
-        secure: true
+        secure: true,
+        sameSite: "None"
     }
 
     return res.status(200)
@@ -516,4 +529,48 @@ const resetPassword = asyncHandler(async (req, res) => {
     }
 })
 
-module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword };
+const checkSearchLimit = asyncHandler(async (req, res) => {
+    // Get client IP address
+    const clientIP = req.headers['x-forwarded-for'] || 
+                     req.headers['x-real-ip'] || 
+                     req.connection.remoteAddress || 
+                     req.socket.remoteAddress ||
+                     (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+                     req.ip;
+
+    // Clean IP address (remove IPv6 prefix if present)
+    const cleanIP = clientIP?.replace(/^::ffff:/, '') || 'unknown';
+
+    // Get current search count for this IP
+    const currentCount = ipSearchTracker.get(cleanIP) || 0;
+    const maxSearches = 3;
+
+    // Check if this is just a status check (query parameter checkOnly=true)
+    const checkOnly = req.query.checkOnly === 'true';
+
+    logger.info(`Search limit ${checkOnly ? 'status check' : 'check'} for IP: ${cleanIP}, current count: ${currentCount}`);
+
+    // Check if user has exceeded search limit
+    if (currentCount >= maxSearches) {
+        logger.warn(`Search limit exceeded for IP: ${cleanIP}`);
+        return res.status(429).json(new ApiResponse(429, {
+            remainingSearches: 0,
+            maxSearches: maxSearches,
+            resetTime: '24 hours'
+        }, "Search limit exceeded. You have reached the maximum of 3 free searches. Please sign up to continue analyzing products."));
+    }
+
+    // Only increment search count if this is not a status check
+    if (!checkOnly) {
+        ipSearchTracker.set(cleanIP, currentCount + 1);
+        logger.info(`Search consumed for IP: ${cleanIP}, new count: ${currentCount + 1}`);
+    }
+
+    return res.status(200).json(new ApiResponse(200, {
+        remainingSearches: maxSearches - (checkOnly ? currentCount : currentCount + 1),
+        maxSearches: maxSearches,
+        resetTime: '24 hours'
+    }, checkOnly ? "Search status retrieved" : "Search allowed"));
+});
+
+module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword, checkSearchLimit };

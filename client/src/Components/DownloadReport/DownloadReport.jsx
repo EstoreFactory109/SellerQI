@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from "framer-motion";
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import Download from '../../assets/Icons/download.png';
+import Download from '../../assets/Icons/Download.png';
 
 const DownloadReport = ({ 
     data, 
@@ -37,56 +37,87 @@ const DownloadReport = ({
 
     // Download as Excel
     const downloadExcel = () => {
-        const exportData = prepareExportData();
-        let ws;
-        
-        // Check if data is 2D array (like CSV format) or JSON objects
-        if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
-            // Handle 2D array format
-            ws = XLSX.utils.aoa_to_sheet(exportData);
-        } else {
-            // Handle JSON object format
-            ws = XLSX.utils.json_to_sheet(exportData);
+        try {
+            const exportData = prepareExportData();
+            console.log('Export data for Excel:', exportData);
+            
+            if (!exportData || exportData.length === 0) {
+                alert('No data available for export');
+                return;
+            }
+            
+            let ws;
+            
+            // Check if data is 2D array (like CSV format) or JSON objects
+            if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
+                // Handle 2D array format
+                ws = XLSX.utils.aoa_to_sheet(exportData);
+            } else {
+                // Handle JSON object format
+                ws = XLSX.utils.json_to_sheet(exportData);
+            }
+            
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Report');
+            
+            // Auto-size columns
+            const maxWidth = 30; // Reduced width for better viewing
+            if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
+                // For 2D array, set column width based on first row length
+                const cols = exportData[0] ? exportData[0].map(() => ({ wch: maxWidth })) : [];
+                ws['!cols'] = cols;
+            } else if (exportData.length > 0) {
+                // For JSON objects
+                const cols = Object.keys(exportData[0] || {}).map(() => ({ wch: maxWidth }));
+                ws['!cols'] = cols;
+            }
+            
+            const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+            console.log('Excel download completed:', fileName);
+        } catch (error) {
+            console.error('Error downloading Excel:', error);
+            alert('Error downloading Excel file. Please check console for details.');
         }
-        
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Report');
-        
-        // Auto-size columns
-        const maxWidth = 50;
-        if (Array.isArray(exportData[0])) {
-            // For 2D array, set column width based on first row length
-            const cols = exportData[0].map(() => ({ wch: maxWidth }));
-            ws['!cols'] = cols;
-        } else {
-            // For JSON objects
-            const cols = Object.keys(exportData[0] || {}).map(() => ({ wch: maxWidth }));
-            ws['!cols'] = cols;
-        }
-        
-        const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`;
-        XLSX.writeFile(wb, fileName);
     };
 
     // Download as CSV
     const downloadCSV = () => {
-        const exportData = prepareExportData();
-        let ws;
-        
-        // Check if data is 2D array (like CSV format) or JSON objects
-        if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
-            // Handle 2D array format
-            ws = XLSX.utils.aoa_to_sheet(exportData);
-        } else {
-            // Handle JSON object format
-            ws = XLSX.utils.json_to_sheet(exportData);
+        try {
+            const exportData = prepareExportData();
+            console.log('Export data for CSV:', exportData);
+            
+            if (!exportData || exportData.length === 0) {
+                alert('No data available for export');
+                return;
+            }
+            
+            let ws;
+            
+            // Check if data is 2D array (like CSV format) or JSON objects
+            if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
+                // Handle 2D array format
+                ws = XLSX.utils.aoa_to_sheet(exportData);
+            } else {
+                // Handle JSON object format
+                ws = XLSX.utils.json_to_sheet(exportData);
+            }
+            
+            const csv = XLSX.utils.sheet_to_csv(ws);
+            
+            if (!csv || csv.trim() === '') {
+                alert('No data could be converted to CSV format');
+                return;
+            }
+            
+            const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            saveAs(blob, fileName);
+            console.log('CSV download completed:', fileName);
+        } catch (error) {
+            console.error('Error downloading CSV:', error);
+            alert('Error downloading CSV file. Please check console for details.');
         }
-        
-        const csv = XLSX.utils.sheet_to_csv(ws);
-        
-        const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, fileName);
     };
 
 
