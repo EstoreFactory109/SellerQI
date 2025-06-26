@@ -17,11 +17,14 @@ const LeftNavSection = () => {
     const location = useLocation();
     const [loader,setLoader]=useState(false)
     const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
+    const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'overview';
+    const currentSettingsTab = searchParams.get('tab') || 'profile';
     const isIssuesPage = location.pathname === '/seller-central-checker/issues';
+    const isSettingsPage = location.pathname === '/seller-central-checker/settings';
     
     // Keep dropdown open if we're on any issues-related page
     React.useEffect(() => {
@@ -30,6 +33,13 @@ const LeftNavSection = () => {
         }
     }, [isIssuesPage, location.pathname]);
 
+    // Keep settings dropdown open if we're on settings page
+    React.useEffect(() => {
+        if (isSettingsPage) {
+            setSettingsDropdownOpen(true);
+        }
+    }, [isSettingsPage]);
+
     // Handle Issues button click
     const handleIssuesClick = () => {
         if (!isIssuesPage) {
@@ -37,6 +47,15 @@ const LeftNavSection = () => {
             navigate('/seller-central-checker/issues?tab=overview');
         }
         setIssuesDropdownOpen(!issuesDropdownOpen);
+    };
+
+    // Handle Settings button click
+    const handleSettingsClick = () => {
+        if (!isSettingsPage) {
+            // If not on settings page, navigate to profile
+            navigate('/seller-central-checker/settings?tab=profile');
+        }
+        setSettingsDropdownOpen(!settingsDropdownOpen);
     };
     
     const logoutUser=async(e)=>{
@@ -280,24 +299,98 @@ const LeftNavSection = () => {
 
             <hr className="w-11/12 mx-auto" />
 
-           {<div className="w-full pt-5 pl-2">
+            <div className="w-full pt-5 pl-2">
                 <p className="font-light mb-4">HELP</p>
-                <NavLink
-                    to="/seller-central-checker/settings"
-                    className={({ isActive }) =>
-                        isActive
-                            ? 'flex items-center gap-2 p-2 rounded-md bg-[#333651] text-white'
-                            : 'flex items-center gap-2 p-2 rounded-md'
-                    }
-                >
-                    {({ isActive }) => (
-                        <>
-                            <Settings className="w-4 h-4"/>
-                            <p className="font-medium text-xs">Settings</p>
-                        </>
-                    )}
-                </NavLink>
-            </div>}
+                
+                {/* Settings with Dropdown */}
+                <div className="space-y-1">
+                    <div
+                        className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                            isSettingsPage
+                                ? 'bg-[#333651] text-white' 
+                                : 'hover:bg-gray-100'
+                        }`}
+                        onClick={handleSettingsClick}
+                    >
+                        <Settings className="w-4 h-4"/>
+                        <p className="font-medium text-xs flex-1">Settings</p>
+                        <motion.div
+                            animate={{ rotate: settingsDropdownOpen ? 90 : 0 }}
+                            transition={{ duration: 0.2, ease: "easeInOut" }}
+                        >
+                            <ChevronRight className="w-3 h-3"/>
+                        </motion.div>
+                    </div>
+                    
+                    <AnimatePresence>
+                        {settingsDropdownOpen && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ 
+                                    duration: 0.3, 
+                                    ease: "easeInOut",
+                                    opacity: { duration: 0.2 }
+                                }}
+                                className="ml-6 space-y-1 overflow-hidden"
+                            >
+                                <motion.div
+                                    initial={{ y: -10, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    exit={{ y: -10, opacity: 0 }}
+                                    transition={{ delay: 0.1, duration: 0.2 }}
+                                >
+                                    <NavLink
+                                        to="/seller-central-checker/settings?tab=profile"
+                                        className={() =>
+                                            isSettingsPage && currentSettingsTab === 'profile'
+                                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                        }
+                                    >
+                                        User Profile
+                                    </NavLink>
+                                </motion.div>
+                                <motion.div
+                                    initial={{ y: -10, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    exit={{ y: -10, opacity: 0 }}
+                                    transition={{ delay: 0.15, duration: 0.2 }}
+                                >
+                                    <NavLink
+                                        to="/seller-central-checker/settings?tab=account-integration"
+                                        className={() =>
+                                            isSettingsPage && currentSettingsTab === 'account-integration'
+                                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                        }
+                                    >
+                                        Account Integration
+                                    </NavLink>
+                                </motion.div>
+                                <motion.div
+                                    initial={{ y: -10, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    exit={{ y: -10, opacity: 0 }}
+                                    transition={{ delay: 0.175, duration: 0.2 }}
+                                >
+                                    <NavLink
+                                        to="/seller-central-checker/settings?tab=plans-billing"
+                                        className={() =>
+                                            isSettingsPage && currentSettingsTab === 'plans-billing'
+                                                ? 'flex items-center gap-2 p-2 rounded-md bg-[#4a4d70] text-white text-xs transition-colors'
+                                                : 'flex items-center gap-2 p-2 rounded-md text-xs hover:bg-gray-100 transition-colors'
+                                        }
+                                    >
+                                        Plans & Billing
+                                    </NavLink>
+                                </motion.div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            </div>
 
             <div className="w-full pt-5 pl-2 absolute bottom-6">
                 <button className='flex items-center gap-2 p-2' onClick={(e)=>logoutUser(e)}>
