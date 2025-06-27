@@ -75,29 +75,63 @@ export default function SellerQIHomepage() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [isLoading, isAuthenticated]);
 
-  // Load initial search limit for non-authenticated users
+  // Check IP-based search limit every time homepage loads
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      // Check current status without consuming a search
-      const loadInitialLimit = async () => {
+    const checkIPSearchStatus = async () => {
+      if (!isLoading && !isAuthenticated) {
         try {
-          console.log('Loading initial search limit...');
+          console.log('🔍 Checking IP search status on homepage load...');
+          
+          // Get current IP's search status from database
           const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
+          
           if (response.status === 200) {
-            console.log('Initial search limit loaded:', response.data.data);
+            const { remainingSearches, maxSearches, currentIP, searchCount, lastResetDate } = response.data.data;
+            console.log(`✅ IP Search Status for ${currentIP}:`);
+            console.log(`   📊 Searches: ${remainingSearches}/${maxSearches} remaining (used: ${searchCount})`);
+            console.log(`   📅 Last Reset: ${lastResetDate}`);
+            
             setSearchLimit(response.data.data);
+            setLimitError(null);
+            
+            // Show appropriate message based on remaining searches
+            if (remainingSearches === 0) {
+              setLimitError(response.data.message || 'Search limit exceeded');
+            }
           }
         } catch (error) {
-          console.error('Error loading initial search limit:', error);
+          console.error('❌ Error checking IP search status:', error);
+          
           if (error.response?.status === 429) {
-            console.log('Initial load - limit exceeded:', error.response.data.data);
+            // IP has exceeded search limit
+            const { currentIP, searchCount, maxSearches, lastResetDate } = error.response.data.data;
+            console.log(`🚫 IP ${currentIP} has exceeded search limit:`);
+            console.log(`   📊 Used: ${searchCount}/${maxSearches} searches`);
+            console.log(`   📅 Last Reset: ${lastResetDate}`);
             setSearchLimit(error.response.data.data);
+            setLimitError(error.response.data.message);
+          } else {
+            // Network or other error
+            console.error('🌐 Network error checking search status');
+            setLimitError('Unable to check search status. Please try again.');
           }
-          // Silently fail for initial load
         }
-      };
-      loadInitialLimit();
-    }
+      }
+    };
+
+    // Run immediately when component mounts
+    checkIPSearchStatus();
+    
+    // Set up periodic refresh every 30 seconds to keep search count updated
+    const refreshInterval = setInterval(() => {
+      if (!isLoading && !isAuthenticated) {
+        console.log('🔄 Periodic refresh of search status...');
+        checkIPSearchStatus();
+      }
+    }, 30000); // 30 seconds
+    
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval);
   }, [isAuthenticated, isLoading]);
 
   // Handle click outside to close dropdown
@@ -239,9 +273,16 @@ export default function SellerQIHomepage() {
           {!isLoading && !isAuthenticated && searchLimit && !limitError && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center max-w-md mx-auto">
               <Info className="w-4 h-4 text-blue-600 inline mr-2" />
-              <span className="text-blue-700 text-sm">
-                {searchLimit.remainingSearches} free search{searchLimit.remainingSearches !== 1 ? 'es' : ''} remaining out of {searchLimit.maxSearches}
-              </span>
+              <div className="text-blue-700 text-sm">
+                <div className="font-medium">
+                  {searchLimit.remainingSearches} free search{searchLimit.remainingSearches !== 1 ? 'es' : ''} remaining out of {searchLimit.maxSearches}
+                </div>
+                {searchLimit.currentIP && (
+                  <div className="text-xs mt-1 opacity-70">
+                    IP: {searchLimit.currentIP.replace('localhost-testing', 'localhost')}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

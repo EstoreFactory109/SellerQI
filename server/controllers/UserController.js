@@ -570,7 +570,11 @@ const checkSearchLimit = asyncHandler(async (req, res) => {
             return res.status(429).json(new ApiResponse(429, {
                 remainingSearches: 0,
                 maxSearches: maxSearches,
-                resetTime: 'monthly'
+                resetTime: 'monthly',
+                currentIP: cleanIP,
+                searchCount: ipRecord.searchCount,
+                lastResetDate: ipRecord.lastResetDate,
+                needsReset: ipRecord.needsReset()
             }, "Search limit exceeded. You have reached the maximum of 3 free searches per month. Please sign up to continue analyzing products."));
         }
 
@@ -586,7 +590,11 @@ const checkSearchLimit = asyncHandler(async (req, res) => {
         return res.status(200).json(new ApiResponse(200, {
             remainingSearches: remainingSearches,
             maxSearches: maxSearches,
-            resetTime: 'monthly'
+            resetTime: 'monthly',
+            currentIP: cleanIP,
+            searchCount: ipRecord.searchCount,
+            lastResetDate: ipRecord.lastResetDate,
+            needsReset: ipRecord.needsReset()
         }, checkOnly ? "Search status retrieved" : "Search allowed"));
 
     } catch (error) {
@@ -617,4 +625,44 @@ const clearIPRecord = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword, checkSearchLimit, clearIPRecord };
+const getIPInfo = asyncHandler(async (req, res) => {
+    try {
+        // Get client IP address with better localhost handling
+        const clientIP = req.headers['x-forwarded-for'] || 
+                         req.headers['x-real-ip'] || 
+                         req.connection.remoteAddress || 
+                         req.socket.remoteAddress ||
+                         (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+                         req.ip;
+
+        // Clean IP address (remove IPv6 prefix if present)
+        let cleanIP = clientIP?.replace(/^::ffff:/, '') || 'unknown';
+        
+        // For localhost testing, use a consistent identifier  
+        if (cleanIP === '127.0.0.1' || cleanIP === '::1' || cleanIP === 'localhost') {
+            cleanIP = 'localhost-testing'; // Use consistent IP for testing
+        }
+
+        // Find IP record in database
+        const ipRecord = await IPSearch.findOne({ ipAddress: cleanIP });
+        
+        const ipInfo = {
+            detectedIP: cleanIP,
+            originalIP: clientIP,
+            hasRecord: !!ipRecord,
+            searchCount: ipRecord ? ipRecord.searchCount : 0,
+            remainingSearches: ipRecord ? Math.max(0, 3 - ipRecord.searchCount) : 3,
+            lastResetDate: ipRecord ? ipRecord.lastResetDate : null,
+            needsReset: ipRecord ? ipRecord.needsReset() : false
+        };
+
+        logger.info(`IP Info requested: ${JSON.stringify(ipInfo)}`);
+        
+        return res.status(200).json(new ApiResponse(200, ipInfo, "IP information retrieved successfully"));
+    } catch (error) {
+        logger.error(`Error getting IP info: ${error.message}`);
+        return res.status(500).json(new ApiResponse(500, null, "Internal server error"));
+    }
+});
+
+module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword, checkSearchLimit, clearIPRecord, getIPInfo };
