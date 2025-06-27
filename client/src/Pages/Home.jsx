@@ -47,7 +47,33 @@ export default function SellerQIHomepage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+    
+    // Refresh search limit when user focuses back on the page
+    const handleFocus = () => {
+      if (!isLoading && !isAuthenticated) {
+        const refreshLimit = async () => {
+          try {
+            console.log('Page focused - refreshing search limit...');
+            const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
+            if (response.status === 200) {
+              console.log('Refreshed search limit:', response.data.data);
+              setSearchLimit(response.data.data);
+              setLimitError(null);
+            }
+          } catch (error) {
+            if (error.response?.status === 429) {
+              setSearchLimit(error.response.data.data);
+              setLimitError(error.response.data.message);
+            }
+          }
+        };
+        refreshLimit();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [isLoading, isAuthenticated]);
 
   // Load initial search limit for non-authenticated users
   useEffect(() => {
@@ -55,12 +81,16 @@ export default function SellerQIHomepage() {
       // Check current status without consuming a search
       const loadInitialLimit = async () => {
         try {
+          console.log('Loading initial search limit...');
           const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
           if (response.status === 200) {
+            console.log('Initial search limit loaded:', response.data.data);
             setSearchLimit(response.data.data);
           }
         } catch (error) {
+          console.error('Error loading initial search limit:', error);
           if (error.response?.status === 429) {
+            console.log('Initial load - limit exceeded:', error.response.data.data);
             setSearchLimit(error.response.data.data);
           }
           // Silently fail for initial load
@@ -87,16 +117,20 @@ export default function SellerQIHomepage() {
   const checkSearchLimit = async () => {
     try {
       setIsCheckingLimit(true);
+      console.log('Checking search limit...');
       const response = await axiosInstance.post('/app/check-search-limit');
       
       if (response.status === 200) {
+        console.log('Search allowed, updating limit:', response.data.data);
         setSearchLimit(response.data.data);
         setLimitError(null);
         return true;
       }
     } catch (error) {
+      console.error('Search limit check error:', error);
       if (error.response?.status === 429) {
         // Rate limit exceeded
+        console.log('Search limit exceeded:', error.response.data);
         setLimitError(error.response.data.message);
         setSearchLimit(error.response.data.data);
         return false;

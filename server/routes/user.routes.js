@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,checkSearchLimit}=require('../controllers/UserController.js')
+const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,checkSearchLimit,clearIPRecord}=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -22,5 +22,6 @@ router.post('/verify-reset-password-code',verifyResetPasswordCode);
 router.post('/reset-password', resetPassword);
 router.get('/check-search-limit', checkSearchLimit);
 router.post('/check-search-limit', checkSearchLimit);
+router.post('/clear-ip-record', clearIPRecord);
 
 module.exports=router;

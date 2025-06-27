@@ -238,38 +238,6 @@ function ResultsPage() {
         current: `${titleLength} characters`,
         recommended: '80+ characters',
         max: 100
-      },
-      // Bullet Points
-      {
-        label: 'Bullet Points',
-        score: calculatePercentageScore(bulletInfo.avgLength, 150),
-        current: `${bulletInfo.count} bullets, ~${bulletInfo.avgLength} chars each`,
-        recommended: '5 bullets, 150+ chars each',
-        max: 100
-      },
-      // Description
-      {
-        label: 'Description',
-        score: calculatePercentageScore(descriptionLength, 1700),
-        current: `${descriptionLength} characters`,
-        recommended: '1700+ characters',
-        max: 100
-      },
-      // Reviews
-      {
-        label: 'Reviews',
-        score: calculatePercentageScore(reviewCount, 50),
-        current: `${reviewCount} reviews`,
-        recommended: '50+ reviews',
-        max: 100
-      },
-      // Star Rating
-      {
-        label: 'Star Rating',
-        score: calculatePercentageScore(starRating, 4.3),
-        current: `${starRating}/5.0 stars`,
-        recommended: '4.3+ stars',
-        max: 100
       }
     ];
   };
@@ -278,23 +246,7 @@ function ResultsPage() {
   const getKeyMetrics = () => {
     if (!analysisResult) return [];
 
-    // Extract number from units sold string
-    const extractUnitsNumber = (unitsSoldString) => {
-      if (!unitsSoldString || unitsSoldString === 'N/A') return 'N/A';
-      // Extract number from strings like "1,234 sold in past month" or "1,234+"
-      const match = unitsSoldString.match(/[\d,]+/);
-      return match ? match[0] : 'N/A';
-    };
-
     return [
-      {
-        label: 'Units Sold',
-        value: extractUnitsNumber(analysisResult.unitsSold)
-      },
-      {
-        label: 'Revenue',
-        value: analysisResult.orderAmount ? `$${analysisResult.orderAmount.toLocaleString()}` : 'N/A'
-      },
       {
         label: 'Price',
         value: analysisResult.price ? `$${analysisResult.price.toFixed(2)}` : 'N/A'
