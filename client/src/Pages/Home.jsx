@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronRight, Check, X, Search, ChevronDown, AlertTriangle, Info } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ChevronRight, Check, X, Search, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
-import axiosInstance from '../config/axios.config';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
 
@@ -12,9 +10,7 @@ export default function SellerQIHomepage() {
   const [asin, setAsin] = useState('');
   const [market, setMarket] = useState('US');
   const [showMarketDropdown, setShowMarketDropdown] = useState(false);
-  const [searchLimit, setSearchLimit] = useState(null);
-  const [limitError, setLimitError] = useState(null);
-  const [isCheckingLimit, setIsCheckingLimit] = useState(false);
+
   const marketDropdownRef = useRef(null);
 
   const navigate = useNavigate();
@@ -47,92 +43,9 @@ export default function SellerQIHomepage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Refresh search limit when user focuses back on the page
-    const handleFocus = () => {
-      if (!isLoading && !isAuthenticated) {
-        const refreshLimit = async () => {
-          try {
-            console.log('Page focused - refreshing search limit...');
-            const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
-            if (response.status === 200) {
-              console.log('Refreshed search limit:', response.data.data);
-              setSearchLimit(response.data.data);
-              setLimitError(null);
-            }
-          } catch (error) {
-            if (error.response?.status === 429) {
-              setSearchLimit(error.response.data.data);
-              setLimitError(error.response.data.message);
-            }
-          }
-        };
-        refreshLimit();
-      }
-    };
+  }, []);
 
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [isLoading, isAuthenticated]);
 
-  // Check IP-based search limit every time homepage loads
-  useEffect(() => {
-    const checkIPSearchStatus = async () => {
-      if (!isLoading && !isAuthenticated) {
-        try {
-          console.log('🔍 Checking IP search status on homepage load...');
-          
-          // Get current IP's search status from database
-          const response = await axiosInstance.get('/app/check-search-limit?checkOnly=true');
-          
-          if (response.status === 200) {
-            const { remainingSearches, maxSearches, currentIP, searchCount, lastResetDate } = response.data.data;
-            console.log(`✅ IP Search Status for ${currentIP}:`);
-            console.log(`   📊 Searches: ${remainingSearches}/${maxSearches} remaining (used: ${searchCount})`);
-            console.log(`   📅 Last Reset: ${lastResetDate}`);
-            
-            setSearchLimit(response.data.data);
-            setLimitError(null);
-            
-            // Show appropriate message based on remaining searches
-            if (remainingSearches === 0) {
-              setLimitError(response.data.message || 'Search limit exceeded');
-            }
-          }
-        } catch (error) {
-          console.error('❌ Error checking IP search status:', error);
-          
-          if (error.response?.status === 429) {
-            // IP has exceeded search limit
-            const { currentIP, searchCount, maxSearches, lastResetDate } = error.response.data.data;
-            console.log(`🚫 IP ${currentIP} has exceeded search limit:`);
-            console.log(`   📊 Used: ${searchCount}/${maxSearches} searches`);
-            console.log(`   📅 Last Reset: ${lastResetDate}`);
-            setSearchLimit(error.response.data.data);
-            setLimitError(error.response.data.message);
-          } else {
-            // Network or other error
-            console.error('🌐 Network error checking search status');
-            setLimitError('Unable to check search status. Please try again.');
-          }
-        }
-      }
-    };
-
-    // Run immediately when component mounts
-    checkIPSearchStatus();
-    
-    // Set up periodic refresh every 30 seconds to keep search count updated
-    const refreshInterval = setInterval(() => {
-      if (!isLoading && !isAuthenticated) {
-        console.log('🔄 Periodic refresh of search status...');
-        checkIPSearchStatus();
-      }
-    }, 30000); // 30 seconds
-    
-    // Cleanup interval on unmount
-    return () => clearInterval(refreshInterval);
-  }, [isAuthenticated, isLoading]);
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -147,53 +60,13 @@ export default function SellerQIHomepage() {
     };
   }, []);
 
-  // Check search limit for non-authenticated users
-  const checkSearchLimit = async () => {
-    try {
-      setIsCheckingLimit(true);
-      console.log('Checking search limit...');
-      const response = await axiosInstance.post('/app/check-search-limit');
-      
-      if (response.status === 200) {
-        console.log('Search allowed, updating limit:', response.data.data);
-        setSearchLimit(response.data.data);
-        setLimitError(null);
-        return true;
-      }
-    } catch (error) {
-      console.error('Search limit check error:', error);
-      if (error.response?.status === 429) {
-        // Rate limit exceeded
-        console.log('Search limit exceeded:', error.response.data);
-        setLimitError(error.response.data.message);
-        setSearchLimit(error.response.data.data);
-        return false;
-      } else {
-        console.error('Error checking search limit:', error);
-        setLimitError('Unable to verify search limit. Please try again.');
-        return false;
-      }
-    } finally {
-      setIsCheckingLimit(false);
-    }
-  };
+
 
   const handleAnalyze = async () => {
-    // Clear previous errors
-    setLimitError(null);
-
     // Validate ASIN input
     if (!asin.trim()) {
-      setLimitError('Please enter a valid ASIN.');
+      alert('Please enter a valid ASIN.');
       return;
-    }
-
-    // If user is not authenticated, check search limit
-    if (!isAuthenticated) {
-      const limitCheckPassed = await checkSearchLimit();
-      if (!limitCheckPassed) {
-        return; // Don't proceed if limit exceeded
-      }
     }
 
     // Proceed with analysis
@@ -269,59 +142,13 @@ export default function SellerQIHomepage() {
             Instant analysis • No credit card required • Trusted by 1000+ sellers
           </p>
 
-          {/* Search Limit Information */}
-          {!isLoading && !isAuthenticated && searchLimit && !limitError && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center max-w-md mx-auto">
-              <Info className="w-4 h-4 text-blue-600 inline mr-2" />
-              <div className="text-blue-700 text-sm">
-                <div className="font-medium">
-                  {searchLimit.remainingSearches} free search{searchLimit.remainingSearches !== 1 ? 'es' : ''} remaining out of {searchLimit.maxSearches}
-                </div>
-                {searchLimit.currentIP && (
-                  <div className="text-xs mt-1 opacity-70">
-                    IP: {searchLimit.currentIP.replace('localhost-testing', 'localhost')}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
-          {/* Error Message */}
-          {limitError && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-center max-w-lg mx-auto">
-              <AlertTriangle className="w-5 h-5 text-red-600 inline mr-2" />
-              <div className="text-red-700">
-                <p className="font-medium">{limitError}</p>
-                {searchLimit && searchLimit.remainingSearches === 0 && (
-                  <div className="mt-2">
-                    <Link 
-                      to="/sign-up" 
-                      className="text-blue-600 underline hover:text-blue-800 font-medium"
-                    >
-                      Sign up for free
-                    </Link>
-                    <span className="text-gray-600"> to continue analyzing products</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           <button
-            className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors"
             onClick={handleAnalyze}
-            disabled={isCheckingLimit || (limitError && searchLimit?.remainingSearches === 0)}
           >
-            {isCheckingLimit ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Checking...
-              </>
-            ) : (
-              <>
-                Analyze <ChevronRight className="w-4 h-4" />
-              </>
-            )}
+            Analyze <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </section>

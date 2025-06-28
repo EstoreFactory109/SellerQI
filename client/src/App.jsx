@@ -36,6 +36,11 @@ import SubscriptionSuccess from './Pages/SubscriptionSuccess.jsx';
 import SubscriptionCancel from './Pages/SubscriptionCancel.jsx';
 import ASINAnalyzer from './Pages/ASINAnalyzer.jsx';
 import AboutUs from './Pages/AboutUs.jsx';
+import HowItWorks from './Pages/HowItWorks.jsx';
+import PromotionsPage from './Pages/PromotionsPage.jsx';
+import Advertisement from './Pages/advertisement.jsx';
+import Features from './Pages/features.jsx';
+import InventoryManagement from './Pages/inventoryManagement.jsx';
 
 const App = () => {
 
@@ -68,6 +73,11 @@ const App = () => {
         <Route path='/subscription-success' element={<SubscriptionSuccess />} />
         <Route path='/subscription-cancel' element={<SubscriptionCancel />} />
         <Route path='/about-us' element={<AboutUs />} />
+        <Route path='/how-it-works' element={<HowItWorks />} />
+        <Route path='/promotions' element={<PromotionsPage />} />
+        <Route path='/advertisement' element={<Advertisement />} />
+        <Route path='/features' element={<Features />} />
+        <Route path='/inventory-management' element={<InventoryManagement />} />
         <Route
           element={
             <ProtectedRouteWrapper>
