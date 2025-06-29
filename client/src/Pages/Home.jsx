@@ -5,12 +5,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
+import GetIP from '../operations/GetIP';
+import axios from 'axios';
 
 export default function SellerQIHomepage() {
   const [asin, setAsin] = useState('');
   const [market, setMarket] = useState('US');
   const [showMarketDropdown, setShowMarketDropdown] = useState(false);
-
+  const [searchesLeft, setSearchesLeft] = useState(0);
   const marketDropdownRef = useRef(null);
 
   const navigate = useNavigate();
@@ -61,8 +63,34 @@ export default function SellerQIHomepage() {
   }, []);
 
 
+  let ipToSend=null;
+  useEffect(()=>{
+    
+    GetIP().then((ip)=>{
+      ipToSend=ip;
+    }).catch((err)=>{
+      console.log(err);
+    })
+
+    axios.post(`${import.meta.env.VITE_BASE_URI}/app/get-ip-tracking`,{ip:ipToSend})
+    .then((res)=>{
+    
+      setSearchesLeft(res.data.data.searchesLeft);
+    })
+    .catch((err)=>{
+      console.log(err);
+    })
+
+  },[])
+
 
   const handleAnalyze = async () => {
+    // Check if searches are available
+    if (searchesLeft <= 0) {
+      alert('No free searches remaining. Please upgrade to Seller QI PRO to continue.');
+      return;
+    }
+
     // Validate ASIN input
     if (!asin.trim()) {
       alert('Please enter a valid ASIN.');
@@ -70,7 +98,11 @@ export default function SellerQIHomepage() {
     }
 
     // Proceed with analysis
-    navigate(`/loading?asin=${asin}&market=${market}`);
+    navigate(`/loading?asin=${asin}&market=${market}`,{
+      state:{
+        ip:ipToSend
+      }
+    });
   }
 
   return (
@@ -89,27 +121,37 @@ export default function SellerQIHomepage() {
           <div className="max-w-2xl mx-auto mb-4">
             <div className="relative flex gap-0">
               <div className="relative flex-1">
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <Search className={`absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 ${searchesLeft <= 0 ? 'text-gray-300' : 'text-gray-400'}`} />
                 <input
                   type="text"
                   value={asin}
                   onChange={(e) => setAsin(e.target.value)}
                   placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW (US)"
-                  className="w-full pl-12 pr-4 py-4 border border-gray-300 rounded-l-lg focus:outline-none focus:border-blue-500"
+                  className={`w-full pl-12 pr-4 py-4 border border-gray-300 rounded-l-lg focus:outline-none focus:border-blue-500 ${
+                    searchesLeft <= 0 
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                      : 'bg-white text-gray-900'
+                  }`}
+                  disabled={searchesLeft <= 0}
                 />
               </div>
               <div className="relative" ref={marketDropdownRef}>
                 <button
                   type="button"
-                  className="flex items-center justify-between gap-2 px-6 py-4 border border-l-0 border-gray-300 rounded-r-lg bg-white hover:bg-gray-50 focus:outline-none font-medium text-center min-w-[180px]"
-                  onClick={() => setShowMarketDropdown(!showMarketDropdown)}
+                  className={`flex items-center justify-between gap-2 px-6 py-4 border border-l-0 border-gray-300 rounded-r-lg focus:outline-none font-medium text-center min-w-[180px] ${
+                    searchesLeft <= 0 
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                      : 'bg-white hover:bg-gray-50 text-gray-900'
+                  }`}
+                  onClick={() => searchesLeft > 0 && setShowMarketDropdown(!showMarketDropdown)}
+                  disabled={searchesLeft <= 0}
                 >
                   <span>{marketOptions.find(option => option.value === market)?.label || 'Select Market'}</span>
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                  <ChevronDown className={`w-4 h-4 ${searchesLeft <= 0 ? 'text-gray-300' : 'text-gray-400'}`} />
                 </button>
                 
                 <AnimatePresence>
-                  {showMarketDropdown && (
+                  {showMarketDropdown && searchesLeft > 0 && (
                     <motion.div
                       className="absolute top-full -mt-px w-full bg-white border border-gray-300 border-t-white rounded-b-md shadow-lg z-50 overflow-hidden max-h-60 overflow-y-auto"
                       initial={{ opacity: 0, height: 0 }}
@@ -142,14 +184,54 @@ export default function SellerQIHomepage() {
             Instant analysis • No credit card required • Trusted by 1000+ sellers
           </p>
 
-
-
           <button
-            className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-colors"
+            className={`px-8 py-3 rounded-lg flex items-center gap-2 mx-auto transition-colors ${
+              searchesLeft <= 0 
+                ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                : 'bg-[#3B4A6B] text-white hover:bg-[#2d3a52]'
+            }`}
             onClick={handleAnalyze}
+            disabled={searchesLeft <= 0}
           >
             Analyze <ChevronRight className="w-4 h-4" />
           </button>
+
+          {/* Searches Left Display */}
+          <div className="mt-6 max-w-md mx-auto">
+            {searchesLeft > 0 ? (
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-lg px-4 py-3 shadow-sm">
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <Search className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <p className="text-blue-800 font-semibold text-base">
+                      {searchesLeft} Free Searches Remaining
+                    </p>
+                  </div>
+                  <p className="text-blue-600 text-xs">
+                    No credit card required
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-red-50 border-2 border-red-200 rounded-lg px-4 py-3 shadow-sm">
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                      <X className="w-4 h-4 text-red-600" />
+                    </div>
+                    <p className="text-red-800 font-semibold text-base">
+                      No Free Searches Remaining
+                    </p>
+                  </div>
+                  <p className="text-red-600 text-xs">
+                    Upgrade to Seller QI PRO to continue
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

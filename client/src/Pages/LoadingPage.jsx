@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate,useLocation } from 'react-router-dom';
 import { AnalyseProduct } from '../operations/AnalyseProduct';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
 import { motion } from 'framer-motion';
+import axios from 'axios';
 
 function LoadingPage() {
   const [searchParams] = useSearchParams();
@@ -15,6 +16,18 @@ function LoadingPage() {
   const [currentBar, setCurrentBar] = useState(-1);
   const [isAnimating, setIsAnimating] = useState(false);
   const [animationStarted, setAnimationStarted] = useState(false);
+  const location = useLocation();
+  const ip = location.state.ip || null;
+
+  useEffect(()=>{
+    axios.post(`${import.meta.env.VITE_BASE_URI}/app/track-ip`,{ip:ip})
+    .then((res)=>{
+      console.log(res.data.data.searchesLeft);
+    })
+    .catch((err)=>{
+      console.log(err);
+    })
+  },[]);
 
   // Redirect to home if no ASIN is provided (direct URL access)
   useEffect(() => {

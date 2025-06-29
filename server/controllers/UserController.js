@@ -15,6 +15,7 @@ const { sendEmailResetLink } = require('../Services/Email/SendResetLink.js');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
+const IPTrackingModel = require('../models/IPTrackingModel.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, whatsapp, email, password, allTermsAndConditionsAgreed } = req.body;
@@ -521,10 +522,64 @@ const resetPassword = asyncHandler(async (req, res) => {
     }
 })
 
+const getIPTracking = asyncHandler(async (req, res) => {
+  
+    const ip = req.ip;
+    console.log(ip);
+    if(!ip){
+        logger.error(new ApiError(400, "IP is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "IP is missing"));
+    }
+    const checkIp = await IPTrackingModel.findOne({ ip });
+    if(!checkIp){
+        const newIp = await IPTrackingModel.create({ ip });
+        return res.status(200).json(new ApiResponse(200, {searchesLeft:newIp.searchesLeft}, "IP tracking created successfully"));
+    }else{
+        return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "IP tracking fetched successfully"));
+    }
+})
+
+const TrackIP = asyncHandler(async (req, res) => {
+    const ip = req.ip;
+    if(!ip){
+        logger.error(new ApiError(400, "IP is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "IP is missing"));
+    }
+
+   try {
+        const checkIp = await IPTrackingModel.findOne({ ip });
+       
+        if(!checkIp){
+            const newIp = await IPTrackingModel.create({ ip });
+            return res.status(200).json(new ApiResponse(200,{searchesLeft:newIp.searchesLeft} , "IP tracking created successfully"));
+        }else{
+            if(checkIp.searchesLeft === 0){
+                if(checkIp.renewalDate < new Date()){
+                    checkIp.searchesLeft = 3;
+                    checkIp.renewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                    await checkIp.save();
+                    return res.status(200).json(new ApiResponse(200,{searchesLeft:checkIp.searchesLeft}, "Number of searches renewed successfully"));
+                }else{
+                    return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "Number of searches expired"));
+                }
+            }else{
+                checkIp.searchesLeft--;
+                console.log("searchesLeft",checkIp.searchesLeft);
+                await checkIp.save();
+                return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "Number of searches updated successfully"));
+            }
+        }
+        
+        
+   } catch (error) {
+        logger.error(new ApiError(500, "Internal server error in getting IP tracking"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting IP tracking"));
+   }
+
+    
+})
 
 
 
 
-
-
-module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword };
+module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword, TrackIP,getIPTracking };
