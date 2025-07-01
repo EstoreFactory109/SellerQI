@@ -1,5 +1,5 @@
 const {generateSPAPITokens,SaveAllDetails,addNewAccount}=require('../controllers/TokenControllers');
-const auth =require('../middlewares/Auth/auth.js')
+const {auth} =require('../middlewares/Auth/auth.js')
 const express=require('express');
 const router=express.Router();
 

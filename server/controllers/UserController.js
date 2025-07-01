@@ -236,7 +236,8 @@ const loginUser = asyncHandler(async (req, res) => {
         email: checkUserIfExists.email,
         phone: checkUserIfExists.phone,
         whatsapp: checkUserIfExists.whatsapp,
-        accessType: checkUserIfExists.accessType
+        accessType: checkUserIfExists.accessType,
+        subscriptionPlan: checkUserIfExists.subscriptionPlan
     };
 
     // Add all seller accounts data if user is superAdmin
@@ -249,12 +250,18 @@ const loginUser = asyncHandler(async (req, res) => {
         };
     }
 
-    res.status(200)
+    let response = res.status(200)
         .cookie("AdminToken", adminToken, option)
         .cookie("IBEXAccessToken", AccessToken, option)
         .cookie("IBEXRefreshToken", RefreshToken, option)
-        .cookie("IBEXLocationToken", LocationToken, option)
-        .json(new ApiResponse(200, responseData, "User Loggedin successfully"))
+        .cookie("IBEXLocationToken", LocationToken, option);
+
+    // Set agency owner cookie if user has AGENCY plan
+    if (checkUserIfExists.subscriptionPlan === 'AGENCY' && checkUserIfExists.agencyOwnerToken) {
+        response = response.cookie("agencyOwnerCookie", checkUserIfExists.agencyOwnerToken, option);
+    }
+
+    response.json(new ApiResponse(200, responseData, "User Loggedin successfully"))
 })
 
 const logoutUser = asyncHandler(async (req, res) => {
@@ -281,6 +288,7 @@ const logoutUser = asyncHandler(async (req, res) => {
     res.clearCookie("IBEXAccessToken");
     res.clearCookie("IBEXRefreshToken");
     res.clearCookie("IBEXLocationToken");
+    res.clearCookie("agencyOwnerCookie");
     res.status(200).json(new ApiResponse(200, "", "User logged out successfully"));
 })
 

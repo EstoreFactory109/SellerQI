@@ -70,6 +70,15 @@ const userSchema = new mongoose.Schema(
         type: String,
         required: false,
       },
+      agencyOwnerToken: {
+        type: String,
+        required: false,
+      },
+      owner: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: false,
+      },
       spiAccessToken: {
         type: String,
         required: false,

@@ -16,6 +16,7 @@ const accountHistoryRoute=require('./routes/AccountHistory.routes.js')
 const cacheRoute=require('./routes/cache.routes.js')
 const backgroundJobsRoute=require('./routes/backgroundJobs.routes.js')
 const stripeRoute=require('./routes/stripe.routes.js')
+const agencyRoute=require('./routes/agency.routes.js')
 
 
 const dbConnect=require('./config/dbConn.js')
@@ -39,6 +40,7 @@ app.use('/app/accountHistory',accountHistoryRoute)
 app.use('/app/cache',cacheRoute)
 app.use('/app/jobs',backgroundJobsRoute)
 app.use('/app/stripe',stripeRoute)
+app.use('/app/agency',agencyRoute)
 
 
 

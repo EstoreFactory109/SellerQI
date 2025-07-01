@@ -72,15 +72,15 @@ export default function PricingPage() {
     setLoading(prev => ({ ...prev, [planType]: true }));
 
         try {
-      // Create checkout session for all plans
+      // Create checkout session for all plans (AGENCY will be handled without Stripe redirect)
       const session = await stripeService.createCheckoutSession(planType);
       
       if (session && session.url) {
-        if (planType === 'LITE') {
-          // For LITE plan, redirect to success page
+        if (planType === 'LITE' || planType === 'AGENCY') {
+          // For LITE and AGENCY plans, redirect to success page
           navigate('/subscription-success');
         } else {
-          // For paid plans, redirect to Stripe Checkout
+          // For PRO plan, redirect to Stripe Checkout
           window.location.href = session.url;
         }
       } else {

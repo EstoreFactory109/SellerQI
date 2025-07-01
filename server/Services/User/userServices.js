@@ -6,7 +6,7 @@ const logger = require("../../utils/Logger.js");
 
 const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed) => {
 
-    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp){
+    if(!firstname || !lastname || !phone || !whatsapp || !email || !password){
         logger.error(new ApiError(404,"Details and credentials are missing"));
         return false;
     }

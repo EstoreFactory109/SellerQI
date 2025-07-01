@@ -37,6 +37,7 @@ const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsMo
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
+  
     if (!userId) {
         return res.status(400).json(new ApiError(400, "User id is missing"));
     }

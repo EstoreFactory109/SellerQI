@@ -3,7 +3,7 @@ const router=express.Router();
 const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking}=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
-const auth=require('../middlewares/Auth/auth.js')
+const {auth}=require('../middlewares/Auth/auth.js')
 const upload=require('../middlewares/multer/multer.js')
 const {verifyResetPasswordCode}=require('../controllers/UserController.js')
 

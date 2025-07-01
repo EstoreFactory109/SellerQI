@@ -1,5 +1,66 @@
 # File Changes Documentation
 
+## Latest Changes (Current Session)
+
+### Client Directory Changes
+
+#### Modified Files
+1. `client/src/Pages/Pricing.jsx` - Pricing page updated
+2. `client/src/Pages/SubscriptionSuccess.jsx` - Subscription success page modified
+
+#### Newly Added Files
+1. `client/src/Components/Agency/` - New agency components directory
+   - Contains agency-related UI components
+2. `client/src/services/agencyService.js` - New agency service for API calls
+
+### Server Directory Changes
+
+#### Modified Files
+1. `server/app.js` - Main application file updated
+2. `server/Services/Stripe/StripeWebhookService.js` - Stripe webhook service modified
+3. `server/Services/User/userServices.js` - User services updated
+4. `server/controllers/AnalysingController.js` - Analysis controller modified
+5. `server/controllers/SpApiDataController.js` - SP API data controller updated
+6. `server/controllers/StripeController.js` - Stripe controller modified
+7. `server/controllers/UserController.js` - User controller updated
+8. `server/middlewares/Auth/auth.js` - Authentication middleware modified
+9. `server/models/userModel.js` - User model updated
+10. `server/routes/AccountHistory.routes.js` - Account history routes modified
+11. `server/routes/analysing.routes.js` - Analysis routes updated
+12. `server/routes/backgroundJobs.routes.js` - Background jobs routes modified
+13. `server/routes/cache.routes.js` - Cache routes updated
+14. `server/routes/spi.routes.js` - SP API routes modified
+15. `server/routes/spi.tokens.routes.js` - SP API tokens routes updated
+16. `server/routes/stripe.routes.js` - Stripe routes modified
+17. `server/routes/user.routes.js` - User routes updated
+18. `server/utils/Tokens.js` - Token utilities modified
+
+#### Newly Added Files
+1. `server/controllers/AgencyController.js` - New agency controller for agency management
+2. `server/models/AgencySellerModel.js` - New agency seller model for database operations
+3. `server/routes/agency.routes.js` - New agency routes for API endpoints
+
+### Current Session Summary
+
+#### Client Changes
+- **Modified**: 2 files
+- **Added**: 2 files/directories
+
+#### Server Changes
+- **Modified**: 18 files
+- **Added**: 3 files
+
+#### Key Updates in Current Session
+1. **Agency Management**: Added comprehensive agency functionality including components, services, controllers, models, and routes
+2. **Payment Integration**: Updated Pricing page and Subscription success handling
+3. **Authentication & Security**: Modified auth middleware and token utilities
+4. **API Enhancement**: Updated multiple controllers and routes for improved functionality
+5. **Database Models**: Enhanced user model and added agency seller model
+
+---
+
+## Previous Changes (Historical)
+
 ## Client Directory Changes
 
 ### Modified Files
