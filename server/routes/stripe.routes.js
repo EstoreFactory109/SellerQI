@@ -6,7 +6,7 @@ const StripeController = require('../controllers/StripeController.js');
 const StripeWebhookController = require('../controllers/StripeWebhookController.js');
 
 // Import middleware
-const {auth} = require('../middlewares/Auth/auth.js');
+const auth = require('../middlewares/Auth/auth.js');
 
 // Webhook endpoint (must be before express.json middleware and auth)
 router.post('/webhook', express.raw({ type: 'application/json' }), StripeWebhookController.handleWebhook);
@@ -31,8 +31,5 @@ router.get('/invoices', StripeController.getInvoices);
 
 // Payment methods
 router.get('/payment-methods', StripeController.getPaymentMethods);
-
-// Agency owner cookie management
-router.post('/check-agency-owner', StripeController.checkAndSetAgencyOwnerCookie);
 
 module.exports = router; 

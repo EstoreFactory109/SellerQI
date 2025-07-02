@@ -7,7 +7,7 @@ const {
     getCacheStats
 } = require('../controllers/CacheController.js');
 
-const {auth} = require('../middlewares/Auth/auth.js');
+const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
 
 // Clear cache for specific user, country, region

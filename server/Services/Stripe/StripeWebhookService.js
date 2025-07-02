@@ -2,7 +2,6 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/userModel.js');
 const SubscriptionModel = require('../../models/SubscriptionModel.js');
-const { createAgencyOwnerToken } = require('../../utils/Tokens.js');
 
 class StripeWebhookService {
     constructor() {
@@ -43,18 +42,6 @@ class StripeWebhookService {
             user.stripeSubscriptionId = subscriptionId;
             user.subscriptionStatus = 'active';
             user.subscriptionPlan = planType;
-
-            // Generate agency owner token for AGENCY plan
-            if (planType === 'AGENCY') {
-                const agencyOwnerToken = await createAgencyOwnerToken(userId);
-                if (agencyOwnerToken) {
-                    user.agencyOwnerToken = agencyOwnerToken;
-                    logger.info(`Agency owner token generated for user ${userId}`);
-                } else {
-                    logger.error(`Failed to generate agency owner token for user ${userId}`);
-                }
-            }
-
             await user.save();
 
             // Create subscription record

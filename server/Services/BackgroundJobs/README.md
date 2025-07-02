@@ -12,34 +12,37 @@ The system consists of three main components:
 
 ## Features
 
-### Daily Updates (24-hour intervals)
-- **Data Updated**: Profitability dashboard and sponsored ads data
+### Daily Comprehensive Updates (24-hour intervals)
+- **Data Updated**: All comprehensive data including:
+  - Profitability dashboard data
+  - Sponsored ads data
+  - V1/V2 seller performance reports
+  - Financial data
+  - GET_FBA_INVENTORY_PLANNING_DATA
+  - GET_STRANDED_INVENTORY_UI_DATA
+  - GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA
+  - Product listings data
+  - All other comprehensive API data
+  - **Note**: Competitive pricing feature is disabled
 - **Distribution**: Users are distributed across 24 hours (one user per hour slot)
 - **Cache Update**: Redis cache is updated with fresh analyzed data
 - **Gap Enforcement**: Exactly 24 hours between each user's updates
 
-### Weekly Updates (7-day intervals)  
-- **Data Updated**: All other data (V1/V2 reports, financial data, inventory, etc.)
-- **Distribution**: Users are distributed across 7 days
-- **Gap Enforcement**: Exactly 7 days between each user's updates
-
 ### Load Distribution
-- Users are automatically assigned time slots to spread load evenly
+- Users are automatically assigned time slots to spread load evenly across 24 hours
 - Daily updates run every hour (checking for users scheduled for that hour)
-- Weekly updates run daily at midnight (checking for users scheduled for that day)
+- All data is refreshed daily to ensure maximum data freshness
 
 ## How It Works
 
 ### 1. User Registration
 When a user verifies their account, they are automatically:
 - Assigned a daily update hour (0-23)
-- Assigned a weekly update day (0-6)
 - Added to the scheduling system
 
 ### 2. Data Updates
 The system runs scheduled jobs:
-- **Hourly**: Checks for users needing daily updates
-- **Daily at midnight**: Checks for users needing weekly updates
+- **Hourly**: Checks for users needing daily comprehensive updates
 - **Every 6 hours**: Cleans up old cache entries
 - **Every 30 minutes**: Health check and monitoring
 
@@ -52,7 +55,7 @@ The system runs scheduled jobs:
 
 ### User Endpoints
 - `GET /app/jobs/user/schedule` - Get user's scheduling information
-- `POST /app/jobs/user/manual-update` - Manually trigger update for current user
+- `POST /app/jobs/user/manual-update` - Manually trigger comprehensive update for current user
 - `PUT /app/jobs/user/update-accounts` - Update seller accounts in scheduling system
 
 ### Admin Endpoints
@@ -64,8 +67,7 @@ The system runs scheduled jobs:
 - `POST /app/jobs/admin/restart-jobs` - Restart all background jobs
 
 ### Available Job Names
-- `dailyUpdates` - Process daily updates for all eligible users
-- `weeklyUpdates` - Process weekly updates for all eligible users
+- `dailyUpdates` - Process daily comprehensive updates for all eligible users
 - `cacheCleanup` - Clean up old cache entries
 - `healthCheck` - Get system statistics
 
@@ -75,8 +77,7 @@ The system runs scheduled jobs:
 - `TIMEZONE` - Set the timezone for job scheduling (default: UTC)
 
 ### Job Schedules
-- **Daily Updates**: `0 * * * *` (every hour)
-- **Weekly Updates**: `0 0 * * *` (daily at midnight)
+- **Daily Comprehensive Updates**: `0 * * * *` (every hour)
 - **Cache Cleanup**: `30 */6 * * *` (every 6 hours at :30)
 - **Health Check**: `*/30 * * * *` (every 30 minutes)
 
@@ -86,15 +87,12 @@ The system runs scheduled jobs:
 ```javascript
 {
   userId: ObjectId,              // Reference to User
-  dailyUpdateHour: Number,       // Hour (0-23) for daily updates
-  weeklyUpdateDay: Number,       // Day (0-6) for weekly updates
+  dailyUpdateHour: Number,       // Hour (0-23) for daily comprehensive updates
   lastDailyUpdate: Date,         // Last daily update timestamp
-  lastWeeklyUpdate: Date,        // Last weekly update timestamp
   sellerAccounts: [{             // User's seller accounts
     country: String,
     region: String,
-    lastDailyUpdate: Date,
-    lastWeeklyUpdate: Date
+    lastDailyUpdate: Date
   }]
 }
 ```
@@ -106,8 +104,7 @@ The system runs scheduled jobs:
 POST /app/jobs/user/manual-update
 {
   "country": "US",
-  "region": "NA",
-  "updateType": "both"  // "daily", "weekly", or "both"
+  "region": "NA"
 }
 ```
 
@@ -141,8 +138,7 @@ The system provides several monitoring endpoints:
 
 - Users are processed in batches to avoid overwhelming the system
 - Delays are added between batches to reduce load
-- Daily updates use batch size of 5 users
-- Weekly updates use batch size of 3 users (more intensive)
+- Daily comprehensive updates use batch size of 5 users with 2-second delays
 
 ## Maintenance
 
@@ -162,7 +158,8 @@ The background job system integrates with:
 1. **User Registration**: Auto-scheduling on verification
 2. **Seller Account Management**: Auto-updating schedules when accounts change
 3. **Analyzing Controller**: Uses existing analysis logic
-4. **Redis Cache**: Updates cache with same format as existing middleware
-5. **Existing API Logic**: Leverages current data fetching and processing
+4. **SpApiDataController**: Fetches fresh comprehensive data from all APIs
+5. **Redis Cache**: Updates cache with same format as existing middleware
+6. **Existing API Logic**: Leverages current data fetching and processing
 
-This system ensures that all users get fresh data regularly while maintaining system performance and reliability. 
+This system ensures that all users get fresh comprehensive data daily while maintaining system performance and reliability. The scheduling prevents API rate limiting and distributes computational load effectively across time. 

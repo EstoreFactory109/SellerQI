@@ -37,6 +37,8 @@ const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsMo
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
+
+    console.log("userId: ",userId)
   
     if (!userId) {
         return res.status(400).json(new ApiError(400, "User id is missing"));
@@ -249,48 +251,54 @@ const getSpApiData = asyncHandler(async (req, res) => {
     console.log("Ad Group IDs count:", adGroupIdArray.length);
     console.log("========================================================");
 
-        let competitivePriceData = [];
+    // COMPETITIVE PRICING FEATURE DISABLED
+    // let competitivePriceData = [];
 
-        if (Array.isArray(asinArray) && asinArray.length > 0) {
-            let start = 0;
-            let end = 20;
+    // if (Array.isArray(asinArray) && asinArray.length > 0) {
+    //     let start = 0;
+    //     let end = 20;
+    
+    //     while (start < asinArray.length) {
+    //         const asinArrayChunk = asinArray.slice(start, end);
+    
+    //         try {
+    //             const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
+    //                 getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
+    //             )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
         
-            while (start < asinArray.length) {
-                const asinArrayChunk = asinArray.slice(start, end);
-        
-                try {
-                    const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
-                        getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
-                    )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
-            
-                    if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
-                        competitivePriceData.push(...competitiveResponseData);
-                    }
-                } catch (error) {
-                    logger.error(`Competitive Pricing Error for chunk ${start}-${end}: ${error.message}`);
-                }
-        
-                start = end;
-                end = Math.min(end + 20, asinArray.length);
-                console.log(`Processed indices ${start} to ${end}`);
-            }
-        } else {
-            // Skip competitive pricing if no ASINs available
-            console.log("No ASINs available for competitive pricing");
-        }
-        
-        let CreateCompetitivePricing;
-        try {
-            CreateCompetitivePricing = await CompetitivePricing.create({
-                User: userId,
-                region: Region,
-                country: Country,
-                Products: Array.isArray(competitivePriceData) ? competitivePriceData : []
-            });
-        } catch (error) {
-            logger.error(`Competitive Pricing DB Error: ${error.message}`);
-            CreateCompetitivePricing = null;
-        }
+    //             if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
+    //                 competitivePriceData.push(...competitiveResponseData);
+    //             }
+    //         } catch (error) {
+    //             logger.error(`Competitive Pricing Error for chunk ${start}-${end}: ${error.message}`);
+    //         }
+    
+    //         start = end;
+    //         end = Math.min(end + 20, asinArray.length);
+    //         console.log(`Processed indices ${start} to ${end}`);
+    //     }
+    // } else {
+    //     // Skip competitive pricing if no ASINs available
+    //     console.log("No ASINs available for competitive pricing");
+    // }
+    
+    // let CreateCompetitivePricing;
+    // try {
+    //     CreateCompetitivePricing = await CompetitivePricing.create({
+    //         User: userId,
+    //         region: Region,
+    //         country: Country,
+    //         Products: Array.isArray(competitivePriceData) ? competitivePriceData : []
+    //     });
+    // } catch (error) {
+    //     logger.error(`Competitive Pricing DB Error: ${error.message}`);
+    //     CreateCompetitivePricing = null;
+    // }
+
+    // COMPETITIVE PRICING DISABLED - Setting default values
+    const competitivePriceData = [];
+    const CreateCompetitivePricing = null;
+    logger.info("Competitive pricing feature is disabled - using default empty data");
 
     const [
         RestockinventoryData,
@@ -540,9 +548,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
     // Optional data validation - log warnings but don't fail the entire request
-    if (!CreateCompetitivePricing) {
-        logger.warn("Competitive pricing data not available - continuing without it");
-    }
+    // Note: Competitive pricing is intentionally disabled
+    // if (!CreateCompetitivePricing) {
+    //     logger.warn("Competitive pricing data not available - continuing without it");
+    // }
 
     if (!WeeklySales) {
         logger.warn("Weekly sales data not available - continuing without it");

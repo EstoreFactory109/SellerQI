@@ -1,25 +1,30 @@
-import React,{useState} from 'react'
-import issue from '../../../assets/Icons/error.png'
-import { useSelector } from 'react-redux';
-import TooltipBox from '../../ToolTipBox/TootTipBoxTop.jsx';
+import React from 'react'
+import { DollarSign, TrendingUp } from 'lucide-react'
+import { useSelector } from 'react-redux'
+
 const ExpectedReimbursement = () => {
   const info = useSelector(state => state.Dashboard.DashBoardInfo)
-  const [opentToottip,setOpenToolTip]=useState(false)
+  
   return (
-    <div className='w-full lg:w-[20vw] bg-white p-4 border-2 border-gray-200 rounded-md'>
-        <div className='w-full h-[1vh] flex items-center  gap-2 mb-3'>
-            <p className='text-sm'>Expected Reimbursement</p>
-            <div className='relative fit-content'>
-            <img src={issue} alt='' className='w-4 h-4 cursor-pointer'
-            onMouseEnter={() => setOpenToolTip(true)}
-            onMouseLeave={() => setOpenToolTip(false)}
-            />
-            {opentToottip && <TooltipBox Information='The estimated amount you may be eligible to recover from Amazon for lost, damaged, or overcharged items.'/>}
-            </div>
+    <div className='p-6 h-full'>
+      <div className='flex items-center gap-2 mb-4'>
+        <DollarSign className='w-5 h-5 text-emerald-600' />
+        <h3 className='text-lg font-semibold text-gray-900'>Expected Reimbursement</h3>
+      </div>
+      
+      <div className='space-y-4'>
+        <div className='text-center'>
+          <div className='text-3xl font-bold text-emerald-600 mb-1'>
+            ${Number(info?.reimbustment?.totalReimbursement || 0).toFixed(2)}
+          </div>
+          <p className='text-sm text-gray-500'>Total expected</p>
         </div>
-        <div className='w-full '>
-          <p className='font-bold text-base'>${info.reimbustment.totalReimbursement}</p>
+        
+        <div className='flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium w-fit mx-auto'>
+          <TrendingUp className='w-4 h-4' />
+          <span>Available for claim</span>
         </div>
+      </div>
     </div>
   )
 }

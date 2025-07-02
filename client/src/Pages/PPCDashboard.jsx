@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
@@ -89,6 +89,7 @@ const PPCDashboard = () => {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  const [expandedSuggestions, setExpandedSuggestions] = useState(new Set());
   const CalenderRef = useRef(null);
   
   // Pagination states for each table
@@ -791,7 +792,19 @@ const PPCDashboard = () => {
   const suggestions = analyzeKeywordsAndGenerateSuggestions();
   
   // Get suggestions to display based on showAllSuggestions state
-  const suggestionsToDisplay = showAllSuggestions ? suggestions : suggestions.slice(0, 5);
+  const suggestionsToDisplay = showAllSuggestions ? suggestions : suggestions.slice(0, 10);
+
+  // Prepare data for CSV/Excel export
+  // Function to toggle suggestion expansion
+  const toggleSuggestionExpansion = (index) => {
+    const newExpanded = new Set(expandedSuggestions);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    setExpandedSuggestions(newExpanded);
+  };
 
   // Prepare data for CSV/Excel export
   const preparePPCData = () => {
@@ -963,621 +976,735 @@ const PPCDashboard = () => {
   };
 
   return (
-    <div className="h-[90vh] overflow-y-auto bg-[#eeeeee] p-6">
-              <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="text-sm  text-gray-900">SPONSORED ADS</h1>
-          <div className="flex gap-4 flex-wrap">
-            <div className='fit-content relative' ref={CalenderRef}>
-              <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200  cursor-pointer' onClick={() => setOpenCalender(!openCalender)}>
-                <p className='font-semi-bold text-xs'>Last 30 Days</p>
-                <img src={calenderIcon} alt='' className='w-4 h-4' />
+    <div className='min-h-screen w-full bg-gray-50/50 lg:mt-0 mt-[12vh]'>
+      {/* Header Section */}
+      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
+        <div className='px-4 lg:px-6 py-4'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
+            <div className='flex items-center gap-4'>
+              <div>
+                <h1 className='text-2xl font-bold text-gray-900'>Sponsored Ads</h1>
+                <p className='text-sm text-gray-600 mt-1'>Monitor your Amazon PPC performance and optimize campaigns</p>
               </div>
-              <AnimatePresence>
-                {openCalender && (
-                  <motion.div
-                    initial={{ opacity: 0, scaleY: 0 }}
-                    animate={{ opacity: 1, scaleY: 1 }}
-                    exit={{ opacity: 0, scaleY: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="absolute top-full right-0 z-50 bg-white shadow-md rounded-md origin-top"
-                  >
-                    <Calender setOpenCalender={setOpenCalender} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium'>
+                <div className='w-2 h-2 bg-blue-500 rounded-full'></div>
+                PPC campaigns active
+              </div>
             </div>
-                          <DownloadReport
+            
+            <div className='flex items-center gap-3'>
+              <div className='relative' ref={CalenderRef}>
+                <button 
+                  onClick={() => setOpenCalender(!openCalender)}
+                  className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+                >
+                  <img src={calenderIcon} alt='' className='w-4 h-4' />
+                  <span className='text-sm font-medium text-gray-700'>Last 30 Days</span>
+                </button>
+                
+                <AnimatePresence>
+                  {openCalender && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
+                    >
+                      <Calender setOpenCalender={setOpenCalender} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              
+              <DownloadReport
                 prepareDataFunc={preparePPCData}
                 filename="PPC_Dashboard_Report"
-                buttonText="Download Report"
-                buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
+                buttonText="Export"
+                buttonClass="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium"
                 showIcon={true}
               />
+            </div>
           </div>
         </div>
-        
-        {/* KPI Cards */}
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          {kpiData.map((kpi, index) => (
-            <div 
-              key={kpi.label} 
-              className="bg-white rounded-xl p-4"
-            >
-              <p className="text-xs text-gray-500 mb-1">{kpi.label}</p>
-              <p className="text-lg font-bold text-gray-900">{kpi.value}</p>
-            </div>
-          ))}
-        </div>
-        
-        {/* Line Chart */}
-        <div className="bg-white rounded-xl p-6 mb-6">
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart 
-              data={chartData} 
-              margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
-            >
-              <XAxis 
-                dataKey="date" 
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-                stroke="#E5E7EB"
-                tickLine={false}
-              />
-              <YAxis 
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-                stroke="#E5E7EB"
-                tickLine={false}
-                tickFormatter={formatYAxis}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
-                  border: 'none',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  padding: '12px'
-                }}
-                formatter={(value, name) => {
-                  if (name === 'PPC Sales' || name === 'PPC Spend') {
-                    return [`$${value}`, name];
-                  }
-                  return [value, name];
-                }}
-              />
-              <Legend 
-                wrapperStyle={{ 
-                  fontSize: '12px', 
-                  paddingTop: '20px' 
-                }}
-                iconType="line"
-              />
-              <Line 
-                type="monotone" 
-                dataKey="ppcSales" 
-                name="PPC Sales"
-                stroke="#3B82F6" 
-                strokeWidth={2.5} 
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="spend" 
-                name="PPC Spend"
-                stroke="#F97316" 
-                strokeWidth={2.5} 
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        
-        {/* Tabs */}
-        <div className="flex gap-6 mb-6 relative">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className="relative pb-3 cursor-pointer"
-              onClick={() => handleTabClick(tab.id)}
-            >
-              <p
-                className={`text-sm font-medium transition-colors ${
-                  selectedTab === tab.id 
-                    ? 'text-gray-900 font-bold' 
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
+      </div>
+
+      {/* Main Content - Scrollable */}
+      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
+        <div className='px-4 lg:px-6 py-6 pb-20'>
+          
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            {kpiData.map((kpi, index) => (
+              <motion.div
+                key={kpi.label}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                className="bg-white rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg"
               >
-                {tab.label}
-              </p>
-              
-              {/* Animated underline */}
-              {selectedTab === tab.id && (
-                <motion.div
-                  layoutId="ppcUnderline"
-                  className="absolute bottom-0 left-0 right-0 h-[3px] bg-gray-900 rounded-full"
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                />
-              )}
-            </div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                      <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">{kpi.label}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">{kpi.value}</div>
+              </motion.div>
             ))}
           </div>
         
-        {/* Tables based on selected tab */}
-        <div className="bg-white rounded-xl p-6 mb-6 relative overflow-hidden" style={{ minHeight: '400px' }}>
-          <AnimatePresence custom={direction} mode="sync">
-            <motion.div
-              key={selectedTab}
-              custom={direction}
-              variants={pageVariants}
-              initial={hasInteracted ? "enter" : false}
-              animate="center"
-              exit="exit"
-              className="w-full"
-            >
-              {/* High ACOS Campaigns Tab */}
-              {selectedTab === 0 && (
-                <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">High ACOS Campaigns</h2>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {highAcosCampaigns.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="text-center py-12 text-gray-400">
-                        No data available
-                      </td>
-                    </tr>
-                  ) : (
-                    (() => {
-                      const startIndex = (highAcosPage - 1) * itemsPerPage;
-                      const endIndex = startIndex + itemsPerPage;
-                      return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
-                        <tr key={idx} className="border-b border-gray-200">
-                          <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
-                          <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center font-medium text-red-600">
-                            {campaign.acos.toFixed(2)}%
-                          </td>
-                        </tr>
-                      ));
-                    })()
-                  )}
-                </tbody>
-              </table>
-              <TablePagination
-                currentPage={highAcosPage}
-                totalPages={Math.ceil(highAcosCampaigns.length / itemsPerPage)}
-                onPageChange={setHighAcosPage}
-                totalItems={highAcosCampaigns.length}
-                itemsPerPage={itemsPerPage}
-              />
-            </>
-          )}
-          
-          {/* Wasted Spend Keywords Tab */}
-          {selectedTab === 1 && (
-            <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Wasted Spend Keywords</h2>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Keywords</th>
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {wastedSpendKeywords.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="text-center py-12 text-gray-400">
-                        No data available
-                      </td>
-                    </tr>
-                  ) : (
-                    (() => {
-                      const startIndex = (wastedSpendPage - 1) * itemsPerPage;
-                      const endIndex = startIndex + itemsPerPage;
-                      return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                        <tr key={idx} className="border-b border-gray-200">
-                          <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                          <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                          <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center font-medium text-red-600">
-                            ${keyword.spend.toFixed(2)}
-                          </td>
-                          <td className="py-4 text-sm text-center font-medium text-gray-600">
-                            {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
-                          </td>
-                        </tr>
-                      ));
-                    })()
-                  )}
-                </tbody>
-              </table>
-              <TablePagination
-                currentPage={wastedSpendPage}
-                totalPages={Math.ceil(wastedSpendKeywords.length / itemsPerPage)}
-                onPageChange={setWastedSpendPage}
-                totalItems={wastedSpendKeywords.length}
-                itemsPerPage={itemsPerPage}
-              />
-            </>
-          )}
-          
-          {/* Negative Keywords Tab */}
-          {selectedTab === 2 && (
-            <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords</h2>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
-                <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS</th>
-              </tr>
-            </thead>
-            <tbody>
-                  {negativeKeywordsMetrics.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-12 text-gray-400">
-                    No data available
-                  </td>
-                </tr>
-              ) : (
-                    (() => {
-                      const startIndex = (negativePage - 1) * itemsPerPage;
-                      const endIndex = startIndex + itemsPerPage;
-                      return negativeKeywordsMetrics.slice(startIndex, endIndex).map((row, idx) => {
-                        // Find keyword details
-                        const keywordDetail = keywords.find(k => 
-                          k.keywordText === row.keyword && 
-                          productWiseSponsoredAds.some(p => 
-                            p.campaignName === row.campaignName && 
-                            p.campaignId === k.campaignId
-                          )
-                        );
-                        
-                        return (
-                          <tr key={idx} className="border-b border-gray-200">
-                      <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
-                      <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
-                      <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
-                      <td className="py-4 text-sm text-center">${row.spend.toFixed(2)}</td>
-                      <td className={`py-4 text-sm text-center font-medium ${
-                        row.acos === 0 ? 'text-gray-400' : 
-                        row.acos > 100 ? 'text-red-600' : 'text-gray-900'
-                      }`}>
-                        {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
-                      </td>
-                    </tr>
-                        );
-                      });
-                    })()
-                  )}
-                </tbody>
-              </table>
-              <TablePagination
-                currentPage={negativePage}
-                totalPages={Math.ceil(negativeKeywordsMetrics.length / itemsPerPage)}
-                onPageChange={setNegativePage}
-                totalItems={negativeKeywordsMetrics.length}
-                itemsPerPage={itemsPerPage}
-              />
-            </>
-          )}
-          
-          {/* Top Performing Keywords Tab */}
-          {selectedTab === 3 && (
-            <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topPerformingKeywords.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-gray-400">
-                        No data available
-                      </td>
-                    </tr>
-                  ) : (
-                    (() => {
-                      const startIndex = (topPerformingPage - 1) * itemsPerPage;
-                      const endIndex = startIndex + itemsPerPage;
-                      return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                        <tr key={idx} className="border-b border-gray-200">
-                          <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                          <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                          <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center font-medium text-green-600">
-                            ${keyword.sales.toFixed(2)}
-                          </td>
-                          <td className="py-4 text-sm text-center font-medium text-green-600">
-                            {keyword.acos.toFixed(2)}%
-                          </td>
-                        </tr>
-                      ));
-                    })()
-                  )}
-                </tbody>
-              </table>
-              <TablePagination
-                currentPage={topPerformingPage}
-                totalPages={Math.ceil(topPerformingKeywords.length / itemsPerPage)}
-                onPageChange={setTopPerformingPage}
-                totalItems={topPerformingKeywords.length}
-                itemsPerPage={itemsPerPage}
-              />
-            </>
-          )}
-          
-          {/* Search Terms Tab */}
-          {selectedTab === 4 && (
-            <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms</h2>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
-                    <th className="text-left py-3 text-sm font-medium text-gray-700">Matched Keyword</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Clicks</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                    <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSearchTerms.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-gray-400">
-                        No data available
-                      </td>
-                    </tr>
-                  ) : (
-                    (() => {
-                      const startIndex = (searchTermsPage - 1) * itemsPerPage;
-                      const endIndex = startIndex + itemsPerPage;
-                      return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
-                        <tr key={idx} className="border-b border-gray-200">
-                          <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
-                          <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
-                          <td className="py-4 text-sm text-center">{term.clicks}</td>
-                          <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
-                          <td className="py-4 text-sm text-center font-medium text-red-600">
-                            ${term.spend.toFixed(2)}
-                          </td>
-                        </tr>
-                      ));
-                    })()
-                  )}
-                </tbody>
-              </table>
-              <TablePagination
-                currentPage={searchTermsPage}
-                totalPages={Math.ceil(filteredSearchTerms.length / itemsPerPage)}
-                onPageChange={setSearchTermsPage}
-                totalItems={filteredSearchTerms.length}
-                itemsPerPage={itemsPerPage}
-              />
-            </>
-          )}
-          
-                      {/* Auto Campaign Insights Tab */}
-            {selectedTab === 5 && (
-              <>
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Auto Campaign Insights</h2>
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
-                      <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
-                      <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                      <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {autoCampaignInsights.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="text-center py-12 text-gray-400">
-                          No data available
-                        </td>
-                      </tr>
-                    ) : (
-                      (() => {
-                        const startIndex = (autoCampaignPage - 1) * itemsPerPage;
-                        const endIndex = startIndex + itemsPerPage;
-                        return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => (
-                          <tr key={idx} className="border-b border-gray-200">
-                            <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
-                            <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
-                            <td className="py-4 text-sm text-center font-medium text-green-600">
-                              ${insight.sales.toFixed(2)}
-                            </td>
-                            <td className="py-4 text-sm text-center font-medium">
-                              {insight.acos.toFixed(2)}%
-                            </td>
-                          </tr>
-                        ));
-                      })()
-                    )}
-                  </tbody>
-                </table>
-                <TablePagination
-                  currentPage={autoCampaignPage}
-                  totalPages={Math.ceil(autoCampaignInsights.length / itemsPerPage)}
-                  onPageChange={setAutoCampaignPage}
-                  totalItems={autoCampaignInsights.length}
-                  itemsPerPage={itemsPerPage}
-                />
-              </>
-            )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-        
-        {/* UI Suggestion Section */}
-        <div className="bg-white rounded-xl p-6 mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            {/* Bulb Icon */}
-            <div className="flex items-center justify-center w-8 h-8 bg-yellow-100 rounded-full">
-              <svg 
-                className="w-5 h-5 text-yellow-600" 
-                fill="currentColor" 
-                viewBox="0 0 20 20" 
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 6.343a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464a1 1 0 10-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM6 10a1 1 0 01-1 1H4a1 1 0 110-2h1a1 1 0 011 1zM10 14a4 4 0 100-8 4 4 0 000 8zM8 18a1 1 0 100-2h4a1 1 0 100 2H8z"/>
-              </svg>
+          {/* Performance Chart */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+            className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8"
+          >
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">PPC Performance Over Time</h3>
+                  <p className="text-sm text-gray-600 mt-1">Track your advertising spend and sales trends</p>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart 
+                  data={chartData} 
+                  margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+                >
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 12, fill: '#6B7280' }}
+                    stroke="#E5E7EB"
+                    tickLine={false}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 12, fill: '#6B7280' }}
+                    stroke="#E5E7EB"
+                    tickLine={false}
+                    tickFormatter={formatYAxis}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: 'none',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                      padding: '12px'
+                    }}
+                    formatter={(value, name) => {
+                      if (name === 'PPC Sales' || name === 'PPC Spend') {
+                        return [`$${value}`, name];
+                      }
+                      return [value, name];
+                    }}
+                  />
+                  <Legend 
+                    wrapperStyle={{ 
+                      fontSize: '12px', 
+                      paddingTop: '20px' 
+                    }}
+                    iconType="line"
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="ppcSales" 
+                    name="PPC Sales"
+                    stroke="#3B82F6" 
+                    strokeWidth={2.5} 
+                    dot={false}
+                    activeDot={{ r: 5 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="spend" 
+                    name="PPC Spend"
+                    stroke="#F97316" 
+                    strokeWidth={2.5} 
+                    dot={false}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900">UI Suggestion</h3>
-          </div>
-          
-          {/* Different suggestions based on selected tab */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            {selectedTab === 1 && (
-              <p className="text-sm text-blue-800">
-                <span className="font-medium">Wasted Spend Keywords:</span> Consider pausing or lowering bids for unprofitable keywords to reduce unnecessary ad spend and improve overall campaign efficiency.
-              </p>
-            )}
-            
-            {selectedTab === 2 && (
-              <p className="text-sm text-blue-800">
-                <span className="font-medium">Negative Keywords:</span> Consider adding as a negative keyword or revising listing content to prevent irrelevant traffic and improve ad relevance.
-              </p>
-            )}
-            
-            {selectedTab === 4 && (
-              <p className="text-sm text-blue-800">
-                <span className="font-medium">Search Terms:</span> You haven't blocked irrelevant terms - consider analysing your search term report to identify and exclude non-converting search queries.
-              </p>
-            )}
-            
-            {selectedTab === 5 && (
-              <p className="text-sm text-blue-800">
-                <span className="font-medium">Auto Campaign:</span> Promote high-performing search terms to manual campaigns for better control over bids, keywords, and targeting strategies.
-              </p>
-            )}
-            
-            {/* Default message for tabs without specific suggestions */}
-            {![1, 2, 4, 5].includes(selectedTab) && (
-              <p className="text-sm text-blue-800">
-                <span className="font-medium">Optimization Tip:</span> Monitor your campaign performance regularly and adjust bids, keywords, and targeting based on performance data to maximize ROI.
-              </p>
-            )}
-          </div>
-        </div>
+          </motion.div>
         
-        {/* Suggestions */}
-        <div className="bg-white rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Suggestions</h3>
-          {suggestionsToDisplay.length > 0 ? (
-            <div>
-              {/* Summary of potential impact */}
-              {(() => {
-                const highPrioritySuggestions = suggestions.filter(s => s.priority === 'high');
-                let potentialSavings = 0;
-                let campaignsToOptimize = new Set();
-                let keywordsToNegative = 0;
-                
-                highPrioritySuggestions.forEach(suggestion => {
-                  if (suggestion.type === 'keyword-wasted-spend') {
-                    potentialSavings += suggestion.metrics?.spend || 0;
-                    keywordsToNegative++;
-                  } else if (suggestion.type === 'campaign-high-acos') {
-                    campaignsToOptimize.add(suggestion.campaign);
-                    potentialSavings += (suggestion.metrics?.spend || 0) * 0.2; // Assume 20% savings from optimization
-                  } else if (suggestion.type === 'keyword-extreme-acos' || suggestion.type === 'high-spend-no-sales') {
-                    potentialSavings += suggestion.metrics?.spend || 0;
-                    keywordsToNegative++;
-                  }
-                });
-                
-                if (potentialSavings > 0 || campaignsToOptimize.size > 0) {
-                  return (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                      <p className="text-sm font-medium text-red-900">
-                        Potential Monthly Savings: ${potentialSavings.toFixed(2)}
-                      </p>
-                      <div className="text-xs text-red-700 mt-1 space-y-1">
-                        {campaignsToOptimize.size > 0 && (
-                          <p>• {campaignsToOptimize.size} campaigns need optimization</p>
-                        )}
-                        {keywordsToNegative > 0 && (
-                          <p>• {keywordsToNegative} keywords should be added as negative</p>
-                        )}
-                        <p>By implementing {highPrioritySuggestions.length} high-priority suggestions</p>
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
+          {/* Campaign Analysis Tabs */}
+          <div className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Campaign Analysis</h3>
+                  <p className="text-sm text-gray-600 mt-1">Detailed insights across different campaign aspects</p>
+                </div>
+              </div>
               
-              {/* Individual suggestions */}
-              <div className="space-y-3">
-                {suggestionsToDisplay.map((suggestion, index) => (
-                  <div key={index} className="flex items-start gap-2 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                      suggestion.priority === 'high' ? 'bg-red-500' : 
-                      suggestion.priority === 'medium' ? 'bg-yellow-500' : 'bg-gray-400'
-                    }`} />
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-600">{suggestion.message}</p>
-                    </div>
+              {/* Tabs */}
+              <div className="flex gap-6 relative overflow-x-auto">
+                {tabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
+                    onClick={() => handleTabClick(tab.id)}
+                  >
+                    <p
+                      className={`text-sm font-medium transition-colors ${
+                        selectedTab === tab.id 
+                          ? 'text-blue-600 font-semibold' 
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {tab.label}
+                    </p>
+                    
+                    {/* Animated underline */}
+                    {selectedTab === tab.id && (
+                      <motion.div
+                        layoutId="ppcUnderline"
+                        className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
+                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      />
+                    )}
                   </div>
                 ))}
-                {!showAllSuggestions && suggestions.length > 5 && (
-                  <button 
-                    onClick={() => setShowAllSuggestions(true)}
-                    className="text-sm text-blue-600 hover:text-blue-700 mt-3 font-medium transition-colors"
-                  >
-                    + {suggestions.length - 5} more suggestions available
-                  </button>
-                )}
-                {showAllSuggestions && suggestions.length > 5 && (
-                  <button 
-                    onClick={() => setShowAllSuggestions(false)}
-                    className="text-sm text-gray-600 hover:text-gray-700 mt-3 font-medium transition-colors"
-                  >
-                    Show less
-                  </button>
-                )}
               </div>
             </div>
-          ) : (
-            <div className="space-y-2 text-sm text-gray-600">
-              <p>No specific optimization suggestions at this time.</p>
-              <p>Continue monitoring keyword performance for optimization opportunities.</p>
+            
+            {/* Tab Content */}
+            <div className="p-6 relative overflow-hidden" style={{ minHeight: '400px' }}>
+              <AnimatePresence custom={direction} mode="sync">
+                <motion.div
+                  key={selectedTab}
+                  custom={direction}
+                  variants={pageVariants}
+                  initial={hasInteracted ? "enter" : false}
+                  animate="center"
+                  exit="exit"
+                  className="w-full"
+                >
+                  {/* High ACOS Campaigns Tab */}
+                  {selectedTab === 0 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">High ACOS Campaigns</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {highAcosCampaigns.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (highAcosPage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
+                                  <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center font-medium text-red-600">
+                                    {campaign.acos.toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ));
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={highAcosPage}
+                        totalPages={Math.ceil(highAcosCampaigns.length / itemsPerPage)}
+                        onPageChange={setHighAcosPage}
+                        totalItems={highAcosCampaigns.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                  
+                  {/* Wasted Spend Keywords Tab */}
+                  {selectedTab === 1 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Wasted Spend Keywords</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keywords</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wastedSpendKeywords.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (wastedSpendPage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                                  <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                                  <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center font-medium text-red-600">
+                                    ${keyword.spend.toFixed(2)}
+                                  </td>
+                                  <td className="py-4 text-sm text-center font-medium text-gray-600">
+                                    {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
+                                  </td>
+                                </tr>
+                              ));
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={wastedSpendPage}
+                        totalPages={Math.ceil(wastedSpendKeywords.length / itemsPerPage)}
+                        onPageChange={setWastedSpendPage}
+                        totalItems={wastedSpendKeywords.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                  
+                  {/* Negative Keywords Tab */}
+                  {selectedTab === 2 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {negativeKeywordsMetrics.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (negativePage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return negativeKeywordsMetrics.slice(startIndex, endIndex).map((row, idx) => {
+                                // Find keyword details
+                                const keywordDetail = keywords.find(k => 
+                                  k.keywordText === row.keyword && 
+                                  productWiseSponsoredAds.some(p => 
+                                    p.campaignName === row.campaignName && 
+                                    p.campaignId === k.campaignId
+                                  )
+                                );
+                                
+                                return (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
+                                    <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
+                                    <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
+                                    <td className="py-4 text-sm text-center">${row.spend.toFixed(2)}</td>
+                                    <td className={`py-4 text-sm text-center font-medium ${
+                                      row.acos === 0 ? 'text-gray-400' : 
+                                      row.acos > 100 ? 'text-red-600' : 'text-gray-900'
+                                    }`}>
+                                      {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={negativePage}
+                        totalPages={Math.ceil(negativeKeywordsMetrics.length / itemsPerPage)}
+                        onPageChange={setNegativePage}
+                        totalItems={negativeKeywordsMetrics.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                  
+                  {/* Top Performing Keywords Tab */}
+                  {selectedTab === 3 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topPerformingKeywords.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (topPerformingPage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
+                                  <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
+                                  <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center font-medium text-green-600">
+                                    ${keyword.sales.toFixed(2)}
+                                  </td>
+                                  <td className="py-4 text-sm text-center font-medium text-green-600">
+                                    {keyword.acos.toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ));
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={topPerformingPage}
+                        totalPages={Math.ceil(topPerformingKeywords.length / itemsPerPage)}
+                        onPageChange={setTopPerformingPage}
+                        totalItems={topPerformingKeywords.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                  
+                  {/* Search Terms Tab */}
+                  {selectedTab === 4 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Matched Keyword</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Clicks</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredSearchTerms.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (searchTermsPage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
+                                  <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
+                                  <td className="py-4 text-sm text-center">{term.clicks}</td>
+                                  <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center font-medium text-red-600">
+                                    ${term.spend.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ));
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={searchTermsPage}
+                        totalPages={Math.ceil(filteredSearchTerms.length / itemsPerPage)}
+                        onPageChange={setSearchTermsPage}
+                        totalItems={filteredSearchTerms.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                  
+                  {/* Auto Campaign Insights Tab */}
+                  {selectedTab === 5 && (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Auto Campaign Insights</h2>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {autoCampaignInsights.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="text-center py-12 text-gray-400">
+                                No data available
+                              </td>
+                            </tr>
+                          ) : (
+                            (() => {
+                              const startIndex = (autoCampaignPage - 1) * itemsPerPage;
+                              const endIndex = startIndex + itemsPerPage;
+                              return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
+                                  <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
+                                  <td className="py-4 text-sm text-center font-medium text-green-600">
+                                    ${insight.sales.toFixed(2)}
+                                  </td>
+                                  <td className="py-4 text-sm text-center font-medium">
+                                    {insight.acos.toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ));
+                            })()
+                          )}
+                        </tbody>
+                      </table>
+                      <TablePagination
+                        currentPage={autoCampaignPage}
+                        totalPages={Math.ceil(autoCampaignInsights.length / itemsPerPage)}
+                        onPageChange={setAutoCampaignPage}
+                        totalItems={autoCampaignInsights.length}
+                        itemsPerPage={itemsPerPage}
+                      />
+                    </>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
-          )}
+          </div>
+        
+          {/* Optimization Suggestions */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.7 }}
+            className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden"
+          >
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Optimization Suggestions</h3>
+                  <p className="text-sm text-gray-600 mt-1">AI-powered recommendations to improve your campaign performance</p>
+                </div>
+              </div>
+              {suggestions.length > 0 ? (
+                <div>
+                  {/* Priority Summary Cards */}
+                  <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-red-900">High Priority</p>
+                          <p className="text-2xl font-bold text-red-700">
+                            {suggestions.filter(s => s.priority === 'high').length}
+                          </p>
+                        </div>
+                        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                          <span className="text-red-600 font-bold">!</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-red-600 mt-1">Issues requiring immediate attention</p>
+                    </div>
+                    
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-yellow-900">Medium Priority</p>
+                          <p className="text-2xl font-bold text-yellow-700">
+                            {suggestions.filter(s => s.priority === 'medium').length}
+                          </p>
+                        </div>
+                        <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                          <span className="text-yellow-600 font-bold">⚠</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-yellow-700 mt-1">Optimization opportunities</p>
+                    </div>
+                    
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">Low Priority</p>
+                          <p className="text-2xl font-bold text-gray-600">
+                            {suggestions.filter(s => s.priority === 'low').length}
+                          </p>
+                        </div>
+                        <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+                          <span className="text-gray-600 font-bold">i</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-700 mt-1">Minor improvements</p>
+                    </div>
+                  </div>
+
+                  {/* Organized Suggestions Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="text-left py-3 text-sm font-medium text-gray-700">Type</th>
+                          <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign/Keyword</th>
+                          <th className="text-center py-3 text-sm font-medium text-gray-700">Priority</th>
+                          <th className="text-center py-3 text-sm font-medium text-gray-700">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(showAllSuggestions ? suggestions : suggestions.slice(0, 10)).map((suggestion, index) => (
+                          <React.Fragment key={index}>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-4 text-sm text-gray-900 capitalize">
+                                {suggestion.type.replace('-', ' ')}
+                              </td>
+                              <td className="py-4 text-sm text-gray-900">
+                                {suggestion.campaign || suggestion.keyword || suggestion.asin || 'N/A'}
+                              </td>
+                              <td className="py-4 text-center">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  suggestion.priority === 'high' ? 'bg-red-100 text-red-800' : 
+                                  suggestion.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {suggestion.priority === 'high' ? '🚨 High' : 
+                                   suggestion.priority === 'medium' ? '⚠️ Medium' : 
+                                   '📊 Low'}
+                                </span>
+                              </td>
+                              <td className="py-4 text-center">
+                                <button
+                                  onClick={() => toggleSuggestionExpansion(index)}
+                                  className="inline-flex items-center px-3 py-1 bg-yellow-400 text-black text-xs font-medium rounded hover:bg-yellow-500 transition-colors"
+                                >
+                                  {expandedSuggestions.has(index) ? 'HIDE' : 'SHOW'}
+                                </button>
+                              </td>
+                            </tr>
+                            
+                            {/* Expanded suggestion details */}
+                            {expandedSuggestions.has(index) && (
+                              <tr className="bg-blue-50 border-b border-gray-200">
+                                <td colSpan={4} className="py-4 px-4">
+                                  <div className="space-y-3">
+                                    <div>
+                                      <h4 className="text-sm font-medium text-gray-900 mb-2">Suggestion Details:</h4>
+                                      <p className="text-sm text-gray-700">{suggestion.message}</p>
+                                    </div>
+                                    
+                                    {/* Show metrics if available */}
+                                    {suggestion.metrics && (
+                                      <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-2">Performance Metrics:</h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                          {suggestion.metrics.spend && (
+                                            <div>
+                                              <span className="text-gray-600">Spend:</span>
+                                              <span className="font-medium ml-1">${suggestion.metrics.spend.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                          {suggestion.metrics.sales && (
+                                            <div>
+                                              <span className="text-gray-600">Sales:</span>
+                                              <span className="font-medium ml-1">${suggestion.metrics.sales.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                          {suggestion.metrics.acos && (
+                                            <div>
+                                              <span className="text-gray-600">ACOS:</span>
+                                              <span className="font-medium ml-1">{suggestion.metrics.acos.toFixed(2)}%</span>
+                                            </div>
+                                          )}
+                                          {suggestion.metrics.bid && (
+                                            <div>
+                                              <span className="text-gray-600">Current Bid:</span>
+                                              <span className="font-medium ml-1">${suggestion.metrics.bid.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Action buttons */}
+                                    <div className="flex gap-2 pt-2">
+                                      <button className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors">
+                                        Apply Suggestion
+                                      </button>
+                                      <button className="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 transition-colors">
+                                        Ignore
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                    
+                    {/* Show More/Show Less Button */}
+                    {suggestions.length > 10 && (
+                      <div className="mt-4 text-center">
+                        <button
+                          onClick={() => setShowAllSuggestions(!showAllSuggestions)}
+                          className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                        >
+                          {showAllSuggestions ? 
+                            `Show Less` : 
+                            `Show More (${suggestions.length - 10} more)`
+                          }
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>No specific optimization suggestions at this time.</p>
+                  <p>Continue monitoring keyword performance for optimization opportunities.</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
         </div>
       </div>
-      <div className='w-full h-[3rem]'></div>
-
-
-     
     </div>
   );
 };

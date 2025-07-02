@@ -10,45 +10,11 @@ const SpApiDataController = require('../../controllers/SpApiDataController.js');
 class DataUpdateService {
 
     /**
-     * Update daily data (profitability and sponsored ads) for a specific user
+     * Update daily data (all comprehensive data including profitability, sponsored ads, and all API data) for a specific user
      */
     static async updateDailyDataForUser(userId, country, region) {
         try {
             logger.info(`Starting daily data update for user ${userId}, ${country}-${region}`);
-
-            // First, fetch fresh data from APIs (this would typically involve calling the API controllers)
-            // For now, we'll just trigger the analysis with existing data
-            // In a production system, you would call the appropriate API fetching methods here
-
-            // Run the analysis to get processed data
-            const analysisResult = await Analyse(userId, country, region);
-            
-            if (analysisResult.status !== 200) {
-                logger.error(`Analysis failed for user ${userId}: ${analysisResult.message}`);
-                return false;
-            }
-
-            // Store the processed data in Redis cache
-            await this.updateRedisCache(userId, country, region, analysisResult.message);
-
-            // Mark the update as complete
-            await UserSchedulingService.markDailyUpdateComplete(userId, country, region);
-
-            logger.info(`Daily data update completed for user ${userId}, ${country}-${region}`);
-            return true;
-
-        } catch (error) {
-            logger.error(`Error updating daily data for user ${userId}, ${country}-${region}:`, error);
-            return false;
-        }
-    }
-
-    /**
-     * Update weekly data (all other data) for a specific user
-     */
-    static async updateWeeklyDataForUser(userId, country, region) {
-        try {
-            logger.info(`Starting weekly data update for user ${userId}, ${country}-${region}`);
 
             // Create mock request object for SpApiDataController
             const mockReq = {
@@ -69,15 +35,22 @@ class DataUpdateService {
             };
 
             try {
-                // Fetch fresh data from all APIs including the three new inventory services:
+                // Fetch fresh data from all APIs including:
+                // - Profitability dashboard data
+                // - Sponsored ads data  
+                // - V1/V2 seller performance reports
+                // - Financial data
                 // - GET_FBA_INVENTORY_PLANNING_DATA
                 // - GET_STRANDED_INVENTORY_UI_DATA  
                 // - GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA
-                logger.info(`Fetching fresh API data for user ${userId}, ${country}-${region}`);
+                // - Product listings data
+                // - All other comprehensive API data
+                // NOTE: Competitive pricing feature is disabled
+                logger.info(`Fetching fresh comprehensive API data for user ${userId}, ${country}-${region}`);
                 await SpApiDataController.getSpApiData(mockReq, mockRes);
                 
                 if (spApiResult && spApiResult.statusCode === 200) {
-                    logger.info(`Fresh API data fetched successfully for user ${userId}, ${country}-${region}`);
+                    logger.info(`Fresh comprehensive API data fetched successfully for user ${userId}, ${country}-${region}`);
                 } else {
                     logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}`);
                 }
@@ -86,7 +59,7 @@ class DataUpdateService {
                 // Continue with analysis using existing data if API fetch fails
             }
 
-            // Run the analysis to get processed data (this will use the fresh data we just fetched)
+            // Run the analysis to get processed data (this will use the fresh comprehensive data we just fetched)
             const analysisResult = await Analyse(userId, country, region);
             
             if (analysisResult.status !== 200) {
@@ -98,13 +71,13 @@ class DataUpdateService {
             await this.updateRedisCache(userId, country, region, analysisResult.message);
 
             // Mark the update as complete
-            await UserSchedulingService.markWeeklyUpdateComplete(userId, country, region);
+            await UserSchedulingService.markDailyUpdateComplete(userId, country, region);
 
-            logger.info(`Weekly data update completed for user ${userId}, ${country}-${region}`);
+            logger.info(`Daily comprehensive data update completed for user ${userId}, ${country}-${region}`);
             return true;
 
         } catch (error) {
-            logger.error(`Error updating weekly data for user ${userId}, ${country}-${region}:`, error);
+            logger.error(`Error updating daily data for user ${userId}, ${country}-${region}:`, error);
             return false;
         }
     }
@@ -132,14 +105,14 @@ class DataUpdateService {
     }
 
     /**
-     * Process daily updates for all eligible users
+     * Process daily updates for all eligible users (now includes all comprehensive data)
      */
     static async processDailyUpdates() {
         try {
-            logger.info('Starting daily updates process');
+            logger.info('Starting daily comprehensive updates process');
             
             const usersNeedingUpdate = await UserSchedulingService.getUsersNeedingDailyUpdate();
-            logger.info(`Found ${usersNeedingUpdate.length} users needing daily updates`);
+            logger.info(`Found ${usersNeedingUpdate.length} users needing daily comprehensive updates`);
 
             let successCount = 0;
             let failureCount = 0;
@@ -159,7 +132,7 @@ class DataUpdateService {
                         return;
                     }
 
-                    // Update data for each seller account
+                    // Update comprehensive data for each seller account
                     for (const account of seller.sellerAccount) {
                         if (account.country && account.region) {
                             const success = await this.updateDailyDataForUser(userId, account.country, account.region);
@@ -178,89 +151,25 @@ class DataUpdateService {
                 }
             }
 
-            logger.info(`Daily updates completed: ${successCount} successful, ${failureCount} failed`);
+            logger.info(`Daily comprehensive updates completed: ${successCount} successful, ${failureCount} failed`);
             return { successCount, failureCount };
 
         } catch (error) {
-            logger.error('Error in daily updates process:', error);
+            logger.error('Error in daily comprehensive updates process:', error);
             return { successCount: 0, failureCount: 0 };
         }
     }
 
     /**
-     * Process weekly updates for all eligible users
+     * Manually trigger update for a specific user (now only daily comprehensive updates)
      */
-    static async processWeeklyUpdates() {
+    static async manualUpdateUser(userId, country, region) {
         try {
-            logger.info('Starting weekly updates process');
+            logger.info(`Manual comprehensive update triggered for user ${userId}, ${country}-${region}`);
+
+            const result = await this.updateDailyDataForUser(userId, country, region);
+            return { success: result };
             
-            const usersNeedingUpdate = await UserSchedulingService.getUsersNeedingWeeklyUpdate();
-            logger.info(`Found ${usersNeedingUpdate.length} users needing weekly updates`);
-
-            let successCount = 0;
-            let failureCount = 0;
-
-            // Process users in batches
-            const batchSize = 3; // Smaller batch for weekly updates as they're more intensive
-            for (let i = 0; i < usersNeedingUpdate.length; i += batchSize) {
-                const batch = usersNeedingUpdate.slice(i, i + batchSize);
-                
-                await Promise.all(batch.map(async (userSchedule) => {
-                    const userId = userSchedule.userId._id;
-                    
-                    // Get user's seller accounts
-                    const seller = await Seller.findOne({ User: userId });
-                    if (!seller || !seller.sellerAccount) {
-                        logger.warn(`No seller accounts found for user ${userId}`);
-                        return;
-                    }
-
-                    // Update data for each seller account
-                    for (const account of seller.sellerAccount) {
-                        if (account.country && account.region) {
-                            const success = await this.updateWeeklyDataForUser(userId, account.country, account.region);
-                            if (success) {
-                                successCount++;
-                            } else {
-                                failureCount++;
-                            }
-                        }
-                    }
-                }));
-
-                // Add longer delay between batches for weekly updates
-                if (i + batchSize < usersNeedingUpdate.length) {
-                    await this.delay(5000); // 5 second delay
-                }
-            }
-
-            logger.info(`Weekly updates completed: ${successCount} successful, ${failureCount} failed`);
-            return { successCount, failureCount };
-
-        } catch (error) {
-            logger.error('Error in weekly updates process:', error);
-            return { successCount: 0, failureCount: 0 };
-        }
-    }
-
-    /**
-     * Manually trigger update for a specific user (for testing or immediate needs)
-     */
-    static async manualUpdateUser(userId, country, region, updateType = 'both') {
-        try {
-            logger.info(`Manual update triggered for user ${userId}, ${country}-${region}, type: ${updateType}`);
-
-            let results = {};
-
-            if (updateType === 'daily' || updateType === 'both') {
-                results.daily = await this.updateDailyDataForUser(userId, country, region);
-            }
-
-            if (updateType === 'weekly' || updateType === 'both') {
-                results.weekly = await this.updateWeeklyDataForUser(userId, country, region);
-            }
-
-            return results;
         } catch (error) {
             logger.error(`Error in manual update for user ${userId}:`, error);
             throw error;
@@ -306,7 +215,6 @@ class DataUpdateService {
             const UserUpdateSchedule = require('../../models/UserUpdateScheduleModel.js');
             const totalUsers = await UserUpdateSchedule.countDocuments();
             const usersNeedingDaily = await UserSchedulingService.getUsersNeedingDailyUpdate();
-            const usersNeedingWeekly = await UserSchedulingService.getUsersNeedingWeeklyUpdate();
             
             const redisClient = getRedisClient();
             const cacheKeys = await redisClient.keys('analyse_data:*');
@@ -314,10 +222,9 @@ class DataUpdateService {
             return {
                 totalUsers,
                 usersNeedingDailyUpdate: usersNeedingDaily.length,
-                usersNeedingWeeklyUpdate: usersNeedingWeekly.length,
                 totalCacheEntries: cacheKeys.length,
                 currentHour: new Date().getUTCHours(),  // Use UTC for consistency
-                currentDay: new Date().getUTCDay()      // Use UTC for consistency
+                systemType: 'daily_comprehensive_updates'
             };
         } catch (error) {
             logger.error('Error getting update stats:', error);

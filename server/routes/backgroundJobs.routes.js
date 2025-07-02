@@ -20,7 +20,7 @@ const {
     getDetailedScheduleStats
 } = require('../controllers/BackgroundJobController.js');
 
-const {auth} = require('../middlewares/Auth/auth.js');
+const auth = require('../middlewares/Auth/auth.js');
 const adminAuth = require('../middlewares/Auth/adminAuth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
 

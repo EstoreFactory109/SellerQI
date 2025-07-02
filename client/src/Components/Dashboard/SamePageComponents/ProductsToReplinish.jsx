@@ -1,24 +1,31 @@
-import React,{useState} from 'react'
-import issue from '../../../assets/Icons/error.png'
-import { useSelector } from 'react-redux';
-import TooltipBox from '../../ToolTipBox/TootTipBoxTop.jsx';
+import React from 'react'
+import { RefreshCw, AlertTriangle } from 'lucide-react'
+import { useSelector } from 'react-redux'
 
 const ProductsToReplinish = () => {
-   const info = useSelector(state => state.Dashboard.DashBoardInfo)
-   const [opentToottip,setOpenToolTip]=useState(false)
+  const info = useSelector(state => state.Dashboard.DashBoardInfo)
+  
   return (
-    <div className='w-full lg:w-[20vw] bg-white p-4 border-2 border-gray-200 rounded-md'>
-            <div className='w-full h-[1vh] flex items-center  gap-2 mb-3'>
-                <p className='text-sm'>Products To Replinish</p>
-                <div className='relative fit-content'>
-                <img src={issue} alt='' className='w-4 h-4 cursor-pointer' onMouseEnter={() => setOpenToolTip(true)} onMouseLeave={() => setOpenToolTip(false)} />
-                {opentToottip &&<TooltipBox Information='Number of products with low inventory.'/>}
-                </div>
-            </div>
-            <div className='w-full '>
-                <p className='font-bold text-base'>{info?.InventoryAnalysis?.replenishment?.length || 0}</p>
-            </div>
+    <div className='p-6 h-full'>
+      <div className='flex items-center gap-2 mb-4'>
+        <RefreshCw className='w-5 h-5 text-amber-600' />
+        <h3 className='text-lg font-semibold text-gray-900'>To Replenish</h3>
+      </div>
+      
+      <div className='space-y-4'>
+        <div className='text-center'>
+          <div className='text-3xl font-bold text-amber-600 mb-1'>
+            {info?.InventoryAnalysis?.replenishment?.length || 0}
+          </div>
+          <p className='text-sm text-gray-500'>Products low in stock</p>
         </div>
+        
+        <div className='flex items-center justify-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-sm font-medium w-fit mx-auto'>
+          <AlertTriangle className='w-4 h-4' />
+          <span>Action needed</span>
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -44,7 +44,7 @@ const getJobStatus = asyncHandler(async (req, res) => {
 const triggerJob = asyncHandler(async (req, res) => {
     const { jobName } = req.params;
     
-    const validJobs = ['dailyUpdates', 'weeklyUpdates', 'cacheCleanup', 'healthCheck'];
+    const validJobs = ['dailyUpdates', 'cacheCleanup', 'healthCheck'];
     if (!validJobs.includes(jobName)) {
         throw new ApiError(400, `Invalid job name. Valid jobs: ${validJobs.join(', ')}`);
     }
@@ -98,21 +98,17 @@ const controlJob = asyncHandler(async (req, res) => {
  */
 const manualUserUpdate = asyncHandler(async (req, res) => {
     const userId = req.userId; // From auth middleware
-    const { country, region, updateType = 'both' } = req.body;
+    const { country, region } = req.body;
 
     if (!country || !region) {
         throw new ApiError(400, "Country and region are required");
     }
 
-    if (!['daily', 'weekly', 'both'].includes(updateType)) {
-        throw new ApiError(400, "Update type must be 'daily', 'weekly', or 'both'");
-    }
-
     try {
-        const results = await DataUpdateService.manualUpdateUser(userId, country, region, updateType);
+        const results = await DataUpdateService.manualUpdateUser(userId, country, region);
         
         res.status(200).json(
-            new ApiResponse(200, results, `Manual update completed for user data`)
+            new ApiResponse(200, results, `Manual comprehensive update completed for user data`)
         );
     } catch (error) {
         logger.error(`Error in manual user update for ${userId}:`, error);

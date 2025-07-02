@@ -29,9 +29,8 @@ class JobScheduler {
                 // Don't fail entire initialization if schedule setup fails
             }
 
-            // Setup scheduled jobs
+            // Setup scheduled jobs (only daily comprehensive updates now)
             this.setupDailyUpdateJob();
-            this.setupWeeklyUpdateJob();
             this.setupCacheCleanupJob();
             this.setupHealthCheckJob();
 
@@ -45,17 +44,17 @@ class JobScheduler {
     }
 
     /**
-     * Setup daily update job - runs every hour to check for users needing updates
+     * Setup daily update job - runs every hour to check for users needing comprehensive updates
      */
     setupDailyUpdateJob() {
         // Run every hour at minute 0 (e.g., 1:00, 2:00, 3:00...)
         const dailyJob = cron.schedule('0 * * * *', async () => {
             try {
-                logger.info('Running daily update job');
+                logger.info('Running daily comprehensive update job');
                 const results = await DataUpdateService.processDailyUpdates();
-                logger.info(`Daily update job completed: ${results.successCount} successful, ${results.failureCount} failed`);
+                logger.info(`Daily comprehensive update job completed: ${results.successCount} successful, ${results.failureCount} failed`);
             } catch (error) {
-                logger.error('Error in daily update job:', error);
+                logger.error('Error in daily comprehensive update job:', error);
             }
         }, {
             scheduled: false, // Don't start immediately
@@ -64,30 +63,7 @@ class JobScheduler {
 
         this.jobs.set('dailyUpdates', dailyJob);
         dailyJob.start();
-        logger.info('Daily update job scheduled (runs every hour)');
-    }
-
-    /**
-     * Setup weekly update job - runs daily at midnight to check for users needing weekly updates
-     */
-    setupWeeklyUpdateJob() {
-        // Run daily at midnight (00:00)
-        const weeklyJob = cron.schedule('0 0 * * *', async () => {
-            try {
-                logger.info('Running weekly update job');
-                const results = await DataUpdateService.processWeeklyUpdates();
-                logger.info(`Weekly update job completed: ${results.successCount} successful, ${results.failureCount} failed`);
-            } catch (error) {
-                logger.error('Error in weekly update job:', error);
-            }
-        }, {
-            scheduled: false,
-            timezone: process.env.TIMEZONE || "UTC"
-        });
-
-        this.jobs.set('weeklyUpdates', weeklyJob);
-        weeklyJob.start();
-        logger.info('Weekly update job scheduled (runs daily at midnight)');
+        logger.info('Daily comprehensive update job scheduled (runs every hour)');
     }
 
     /**
@@ -209,8 +185,6 @@ class JobScheduler {
             switch (jobName) {
                 case 'dailyUpdates':
                     return await DataUpdateService.processDailyUpdates();
-                case 'weeklyUpdates':
-                    return await DataUpdateService.processWeeklyUpdates();
                 case 'cacheCleanup':
                     return await DataUpdateService.cleanupOldCache();
                 case 'healthCheck':
@@ -269,7 +243,8 @@ class JobScheduler {
                     initialized: this.isInitialized,
                     totalJobs: this.jobs.size,
                     currentTime: new Date().toISOString(),
-                    timezone: process.env.TIMEZONE || "UTC"
+                    timezone: process.env.TIMEZONE || "UTC",
+                    updateType: 'daily_comprehensive_only'
                 }
             };
         } catch (error) {

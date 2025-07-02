@@ -3,7 +3,6 @@ const logger = require('../utils/Logger.js');
 const { ApiError } = require('../utils/ApiError.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const Seller = require('../models/sellerCentralModel.js');
-const User = require('../models/userModel.js');
 const V2_Model = require('../models/V2_Seller_Performance_ReportModel.js');
 const V1_Model = require('../models/V1_Seller_Performance_Report_Model.js');
 const numberofproductreviews = require('../models/NumberOfProductReviewsModel.js');
@@ -41,7 +40,7 @@ const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../models
 const GET_STRANDED_INVENTORY_UI_DATA_Model = require('../models/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
 const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../models/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 
-const Analyse = async (userId, country, region, adminId = null, agencyOwnerId = null) => {
+const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
         logger.error(new ApiError(400, "User id is missing"));
         return {
@@ -91,69 +90,6 @@ const Analyse = async (userId, country, region, adminId = null, agencyOwnerId = 
                     userId,
                     sellerId,
                     brand,
-                    country: Details.country,
-                    region: Details.region,
-                    NoOfProducts: Details.products.length
-                })
-
-                if (Details.country === country && Details.region === region) {
-                    SellerAccount = Details;
-                }
-            })
-        })
-    } else if (agencyOwnerId !== null) {
-        // Agency owner logic - get only clients that belong to this agency owner
-        const agencyClients = await User.find({ owner: agencyOwnerId });
-        
-        if (!agencyClients || agencyClients.length === 0) {
-            logger.error(new ApiError(404, "No agency clients found"));
-            return {
-                status: 404,
-                message: "No agency clients found"
-            }
-        }
-
-        // Get all client user IDs
-        const clientUserIds = agencyClients.map(client => client._id);
-
-        // Get seller accounts for all agency clients
-        const getAgencySellerAccounts = await Seller.find({ User: { $in: clientUserIds } });
-        
-        if (!getAgencySellerAccounts || getAgencySellerAccounts.length === 0) {
-            logger.error(new ApiError(404, "No seller accounts found for agency clients"));
-            return {
-                status: 404,
-                message: "No seller accounts found for agency clients"
-            }
-        }
-
-        // Find the specific seller central for the requested userId
-        sellerCentral = getAgencySellerAccounts.find(item => item.User.toString() === userId);
-
-        if (!sellerCentral) {
-            logger.error(new ApiError(404, "Seller central not found for this client"));
-            return {
-                status: 404,
-                message: "Seller central not found for this client"
-            }
-        }
-
-        // Build the seller accounts array for agency clients only
-        getAgencySellerAccounts.forEach(item => {
-            const clientUserId = item.User;
-            const sellerId = item.selling_partner_id;
-            const brand = item.brand || "Brand Name";
-
-            // Find the client user details for additional info
-            const clientUser = agencyClients.find(client => client._id.toString() === clientUserId.toString());
-            const clientName = clientUser ? `${clientUser.firstName} ${clientUser.lastName}` : "Unknown Client";
-
-            item.sellerAccount.forEach(Details => {
-                allSellerAccounts.push({
-                    userId: clientUserId,
-                    sellerId,
-                    brand,
-                    clientName, // Add client name for better identification
                     country: Details.country,
                     region: Details.region,
                     NoOfProducts: Details.products.length
@@ -227,7 +163,9 @@ const Analyse = async (userId, country, region, adminId = null, agencyOwnerId = 
         restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-        competitivePricingModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        // NOTE: Competitive pricing feature is disabled, using empty default data
+        // competitivePricingModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        Promise.resolve({ Products: [] }), // Default empty competitive pricing data
         APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -290,7 +228,6 @@ const Analyse = async (userId, country, region, adminId = null, agencyOwnerId = 
     if (!restockInventoryRecommendationsData) missingDataWarnings.push('restockInventoryRecommendationsData');
     if (!numberOfProductReviews) missingDataWarnings.push('numberOfProductReviews');
     if (!GetlistingAllItems) missingDataWarnings.push('GetlistingAllItems');
-    if (!getCompetitiveData) missingDataWarnings.push('getCompetitiveData');
     if (!aplusResponse) missingDataWarnings.push('aplusResponse');
     if (!TotalSales) missingDataWarnings.push('TotalSales');
     if (!shipmentdata) missingDataWarnings.push('shipmentdata');
@@ -936,8 +873,7 @@ const analysingController = asyncHandler(async (req, res) => {
     const country = req.country;
     const region = req.region;
     const adminId = req.adminId;
-    const agencyOwnerId = req.agencyOwnerId;
-    const result = await Analyse(userId, country, region, adminId, agencyOwnerId);
+    const result = await Analyse(userId, country, region, adminId);
     res.status(result.status).json(new ApiResponse(result.status, result.message, "Data is fetched successfully"));
 });
 

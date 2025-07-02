@@ -23,47 +23,6 @@ const createRefreshToken=async(userId)=>{
     return refreshToken;
 }
 
-// Agency owner token functions
-const createAgencyOwnerToken=async(userId)=>{
-    if(!userId){
-        logger.error(new ApiError(400,"User ID is missing"));
-        return false;
-    }
-    const agencyOwnerToken=jwt.sign({agencyOwnerId:userId},process.env.JWT_SECRET,{expiresIn:'30d'});
-   
-    return agencyOwnerToken;
-}
-
-const verifyAgencyOwnerToken=async(token)=>{
-    if(!token){
-        logger.error(new ApiError(400,"Agency owner token is missing"));
-        return false;
-    }
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        if(!decoded || !decoded.agencyOwnerId){
-            logger.error(new ApiError(400,"Invalid agency owner token"));
-            return false;
-        }
-        const tokenResponse={
-            agencyOwnerId:decoded.agencyOwnerId,
-            isvalid:true
-        }   
-        return tokenResponse;
-    } catch (error) {
-        if (error.name === "TokenExpiredError") {
-            const tokenResponse={
-                agencyOwnerId:null,
-                isvalid:false
-            }
-            return tokenResponse;
-        }else{
-            logger.error(new ApiError(500,"Internal server error in verifying agency owner token"));
-            return false;
-        } 
-    }
-}
-
 const createLocationToken=async(country,region)=>{
     if(!country || !region){
         logger.error(new ApiError(400,"Country and region is missing"));
@@ -142,4 +101,4 @@ const verifyLocationToken=async(token)=>{
     }
 }
 
-module.exports={createAccessToken,createRefreshToken,createAgencyOwnerToken,verifyAgencyOwnerToken,createLocationToken,verifyAccessToken,refreshAccess,verifyLocationToken}
+module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken};

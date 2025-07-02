@@ -6,11 +6,58 @@ const UserModel = require('../../models/userModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 
+// Rate limiting constants
+const RATE_LIMIT = {
+    BURST_LIMIT: 10,
+    REQUESTS_PER_SECOND: 0.5,
+    MIN_REQUEST_INTERVAL: 2000, // 2 seconds (1/0.5)
+    MAX_RETRY_ATTEMPTS: 3,
+    MAX_BACKOFF_DELAY: 30000 // 30 seconds
+};
+
+// Helper function for delays
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper function to make API request with retry logic
+async function makeAPIRequestWithRetry(url, headers, retryAttempt = 0) {
+    try {
+        const response = await axios.get(url, { headers });
+        return response;
+    } catch (error) {
+        // Handle rate limit error (429)
+        if (error.response?.status === 429 && retryAttempt < RATE_LIMIT.MAX_RETRY_ATTEMPTS) {
+            const retryAfter = error.response.headers['retry-after'];
+            const baseDelay = retryAfter ? parseInt(retryAfter) * 1000 : RATE_LIMIT.MIN_REQUEST_INTERVAL;
+            
+            // Exponential backoff with jitter
+            const backoffDelay = Math.min(
+                baseDelay * Math.pow(2, retryAttempt) + Math.random() * 1000,
+                RATE_LIMIT.MAX_BACKOFF_DELAY
+            );
+            
+            logger.warn(`Rate limit hit. Retry attempt ${retryAttempt + 1}/${RATE_LIMIT.MAX_RETRY_ATTEMPTS}. Waiting ${backoffDelay/1000}s...`);
+            await delay(backoffDelay);
+            
+            return makeAPIRequestWithRetry(url, headers, retryAttempt + 1);
+        }
+        
+        // For other errors or max retries reached
+        throw error;
+    }
+}
 
 const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country, region) => {
     const host = baseuri;
 
-    console.log("📥 Incoming data:", dataToReceive);
+    logger.info("Starting listFinancialEventsMethod", {
+        userId,
+        country,
+        region,
+        dateRange: {
+            after: dataToReceive?.after,
+            before: dataToReceive?.before
+        }
+    });
 
     // Validate required parameters
     if (!dataToReceive || !userId || !baseuri || !country || !region) {
@@ -18,12 +65,32 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         return [];
     }
 
+    // Rate limiting state
+    let requestCount = 0;
+    let lastRequestTime = 0;
+    
     // Collect all transactions
     let allTransactions = [];
     let nextToken = null;
+    let totalPages = 0;
 
     try {
         do {
+            requestCount++;
+            totalPages++;
+            
+            // Rate limiting logic
+            if (requestCount > RATE_LIMIT.BURST_LIMIT) {
+                const timeSinceLastRequest = Date.now() - lastRequestTime;
+                const requiredDelay = RATE_LIMIT.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+                
+                if (requiredDelay > 0) {
+                    logger.info(`Rate limiting: Waiting ${requiredDelay}ms before request #${requestCount}`);
+                    await delay(requiredDelay);
+                }
+            }
+            
+            // Build query parameters
             const queryParams = new URLSearchParams({
                 postedAfter: dataToReceive.after,
                 postedBefore: dataToReceive.before,
@@ -33,6 +100,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
             const path = `/finances/2024-06-19/transactions?${queryParams}`;
 
+            // Prepare request
             let request = {
                 host: host,
                 path: path,
@@ -45,15 +113,22 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 }
             };
 
+            // Sign request
             aws4.sign(request, {
                 accessKeyId: process.env.AWS_ACCESS_KEY,
                 secretAccessKey: process.env.AWS_SECRET_KEY,
-                sessionToken: dataToReceive.SessionToken // Only needed if temporary creds
+                sessionToken: dataToReceive.SessionToken
             });
 
-            const response = await axios.get(`https://${request.host}${request.path}`, {
-                headers: request.headers
-            });
+            // Record request time
+            lastRequestTime = Date.now();
+            
+            // Make API request with retry logic
+            logger.info(`Making API request #${requestCount} (Page ${totalPages})`);
+            const response = await makeAPIRequestWithRetry(
+                `https://${request.host}${request.path}`,
+                request.headers
+            );
 
             const responseData = response.data?.payload;
 
@@ -62,21 +137,31 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 break;
             }
 
-            console.log("responseData: ",responseData)
+            // Log response info
+            logger.info(`Page ${totalPages} received:`, {
+                transactionCount: responseData.transactions?.length || 0,
+                hasNextToken: !!responseData.nextToken
+            });
             
+            // Collect transactions
             if (responseData.transactions && Array.isArray(responseData.transactions)) {
                 allTransactions.push(...responseData.transactions);
             }
             
             nextToken = responseData.nextToken;
             
-                } while (nextToken);
+        } while (nextToken);
 
-        console.log(`📊 Total transactions fetched: ${allTransactions.length}`);
+        logger.info(`Financial events fetch completed:`, {
+            totalRequests: requestCount,
+            totalPages: totalPages,
+            totalTransactions: allTransactions.length
+        });
         
+        // Handle empty results
         if (allTransactions.length === 0) {
             logger.warn("No financial transactions found for the specified date range");
-            // Return default financial data structure instead of empty array
+            
             const emptyFinanceData = await listFinancialEvents.create({
                 User: userId,
                 region: region,
@@ -90,7 +175,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 Storage: "0.00",
             });
 
-            const emptySalesData = await ProductWiseSales.create({
+            await ProductWiseSales.create({
                 User: userId,
                 region: region,
                 country: country,
@@ -100,27 +185,18 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
             return emptyFinanceData;
         }
 
+        // Calculate fees
         const dataObj = calculateAmazonFees(allTransactions);
 
-        // Log the calculated data for debugging
-        console.log("📊 Calculated Amazon Fees Summary:");
-        console.log("Total Transactions:", allTransactions.length);
-        console.log("Total Sales:", dataObj.Total_Sales);
-        console.log("Gross Profit:", dataObj.Gross_Profit);
-        console.log("Product Ads Payment:", dataObj.ProductAdsPayment);
-        console.log("FBA Fees:", dataObj.FBA_Fees);
-        console.log("Amazon Charges:", dataObj.Amazon_Charges);
-        console.log("Refunds:", dataObj.Refunds);
-        console.log("Storage:", dataObj.Storage);
-        console.log("Product-wise Sales Count:", dataObj.ProductWiseSales.length);
-        
-        if (dataObj._debug) {
-            console.log("📋 Debug Information:");
-            console.log("Debt Recovery:", dataObj._debug.debtRecovery);
-            console.log("Adjustments:", dataObj._debug.adjustment);
-            console.log("Other Service Fees:", dataObj._debug.otherServiceFees);
-        }
+        // Log summary
+        logger.info("Amazon Fees Calculated:", {
+            transactionCount: allTransactions.length,
+            totalSales: dataObj.Total_Sales,
+            grossProfit: dataObj.Gross_Profit,
+            productCount: dataObj.ProductWiseSales.length
+        });
 
+        // Save to database
         let addToDb, addToSalesDb;
         
         try {
@@ -143,55 +219,70 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 country: country,
                 productWiseSales: dataObj.ProductWiseSales
             });
+            
+            logger.info("Data saved to database successfully");
         } catch (dbError) {
             logger.error(`Database operation failed: ${dbError.message}`);
-            return [];
+            throw new ApiError(500, "Failed to save financial data to database");
         }
 
-        if (!addToDb || !addToSalesDb ) {
-            logger.error(new ApiError(500, "Error in adding to DB"));
-            return [];
-        }
-
+        // Update user record
         try {
             const getUser = await UserModel.findById(userId);
             if (getUser) {
                 getUser.listFinancialEvents = addToDb._id;
                 await getUser.save();
+                logger.info("User record updated with financial events ID");
             }
         } catch (userUpdateError) {
             logger.error(`Failed to update user with financial events ID: ${userUpdateError.message}`);
-            // Continue processing even if user update fails
+            // Continue - non-critical error
         }
 
         return addToDb;
 
     } catch (error) {
-        console.error("❌ Error Fetching Financial Events:", error.response?.data || error.message);
-        logger.error(`Finance API Error: ${error.message}`);
-        return [];
+        // Log detailed error information
+        if (error.response) {
+            logger.error("API Error Response:", {
+                status: error.response.status,
+                statusText: error.response.statusText,
+                data: error.response.data,
+                headers: error.response.headers
+            });
+            
+            // Handle specific error codes
+            if (error.response.status === 403) {
+                throw new ApiError(403, "Access denied. Please check your credentials and permissions.");
+            } else if (error.response.status === 400) {
+                throw new ApiError(400, "Invalid request parameters. Please check your date range and marketplace ID.");
+            }
+        } else {
+            logger.error("Request Error:", error.message);
+        }
+        
+        throw new ApiError(500, `Failed to fetch financial events: ${error.message}`);
     }
 };
 
 const calculateAmazonFees = (dataArray) => {
     // Initialize all fee categories
-    let totalSales = 0;  // Shipment transactions (positive)
-    let totalFBAFees = 0;  // FBA service fees (negative)
-    let totalRefunds = 0;  // Refund transactions (negative)
-    let productAdsPayment = 0;  // Product ads payments (negative)
-    let amazonCharges = 0;  // Amazon subscription fees (negative)
-    let storageCharges = 0;  // Storage fees (negative)
-    let debtRecovery = 0;  // Debt recovery (negative)
-    let adjustment = 0;  // Adjustments (can be positive or negative)
-    let otherServiceFees = 0;  // Other service fees not categorized
+    let totalSales = 0;
+    let totalFBAFees = 0;
+    let totalRefunds = 0;
+    let productAdsPayment = 0;
+    let amazonCharges = 0;
+    let storageCharges = 0;
+    let debtRecovery = 0;
+    let adjustment = 0;
+    let otherServiceFees = 0;
     let productWiseSales = [];
     
-    // Track unique ASINs to aggregate sales
     const asinSalesMap = new Map();
 
-    // Validate input array
+    // Validate input
     if (!Array.isArray(dataArray) || dataArray.length === 0) {
-        console.log("No transactions to process or invalid data array");
+        logger.warn("No transactions to process");
         return {
             Total_Sales: "0.00",
             Gross_Profit: "0.00",
@@ -200,113 +291,101 @@ const calculateAmazonFees = (dataArray) => {
             Amazon_Charges: "0.00",
             Refunds: "0.00",
             Storage: "0.00",
-            ProductWiseSales: [],
-            _debug: {
-                debtRecovery: "0.00",
-                adjustment: "0.00",
-                otherServiceFees: "0.00",
-                transactionCount: 0
-            }
+            ProductWiseSales: []
         };
     }
 
-    dataArray.forEach(transaction => {
-        // Skip invalid transactions
-        if (!transaction || typeof transaction !== 'object') {
-            console.log("Skipping invalid transaction:", transaction);
-            return;
-        }
-        
-        const amount = transaction.totalAmount?.currencyAmount || 0;
-        const transactionType = transaction.transactionType;
-        const description = transaction.description || '';
+    // Process each transaction
+    dataArray.forEach((transaction, index) => {
+        try {
+            if (!transaction || typeof transaction !== 'object') {
+                logger.warn(`Skipping invalid transaction at index ${index}`);
+                return;
+            }
+            
+            const amount = transaction.totalAmount?.currencyAmount || 0;
+            const transactionType = transaction.transactionType;
+            const description = transaction.description || '';
 
-        switch (transactionType) {
-            case "Shipment":
-                // Sales are positive amounts
-                totalSales += amount;
-                
-                // Extract product details for product-wise sales
-                if (transaction.items && transaction.items.length > 0) {
-                    transaction.items.forEach(item => {
-                        if (item.contexts && item.contexts.length > 0) {
-                            const context = item.contexts[0];
-                            const asin = context.asin;
-                            const quantity = context.quantityShipped || 0;
-                            const itemAmount = item.totalAmount?.currencyAmount || amount;
-                            
-                            if (asin) {
-                                if (asinSalesMap.has(asin)) {
-                                    const existing = asinSalesMap.get(asin);
-                                    existing.quantity += quantity;
-                                    existing.amount += itemAmount;
-                                } else {
-                                    asinSalesMap.set(asin, {
-                                        asin: asin,
-                                        quantity: quantity,
-                                        amount: itemAmount
-                                    });
+            switch (transactionType) {
+                case "Shipment":
+                    totalSales += amount;
+                    
+                    // Process items for product-wise sales
+                    if (transaction.items && transaction.items.length > 0) {
+                        transaction.items.forEach(item => {
+                            if (item.contexts && item.contexts.length > 0) {
+                                const context = item.contexts[0];
+                                const asin = context.asin;
+                                const quantity = context.quantityShipped || 0;
+                                const itemAmount = item.totalAmount?.currencyAmount || 0;
+                                
+                                if (asin) {
+                                    if (asinSalesMap.has(asin)) {
+                                        const existing = asinSalesMap.get(asin);
+                                        existing.quantity += quantity;
+                                        existing.amount += itemAmount;
+                                    } else {
+                                        asinSalesMap.set(asin, {
+                                            asin: asin,
+                                            quantity: quantity,
+                                            amount: itemAmount
+                                        });
+                                    }
                                 }
                             }
-                        }
-                    });
-                }
-                break;
-
-            case "Refund":
-                // Refunds are negative amounts
-                totalRefunds += amount;
-                break;
-
-            case "ProductAdsPayment":
-                // Product ads are negative amounts
-                productAdsPayment += amount;
-                break;
-
-            case "DebtRecovery":
-                // Debt recovery is typically negative
-                debtRecovery += amount;
-                break;
-
-            case "Adjustment":
-                // Adjustments can be positive or negative
-                adjustment += amount;
-                break;
-
-            case "ServiceFee":
-                // Categorize service fees based on description
-                if (description.toLowerCase().includes("subscription")) {
-                    amazonCharges += amount;
-                } else if (description.toLowerCase().includes("storage") || 
-                          description === "FBAStorageBilling") {
-                    storageCharges += amount;
-                } else if (description.toLowerCase().includes("fba")) {
-                    totalFBAFees += amount;
-                } else {
-                    // Other service fees
-                    otherServiceFees += amount;
-                }
-                break;
-
-            case "Tax":
-                // Tax transactions - add to appropriate category based on description
-                if (description.toLowerCase().includes("sales tax") || 
-                    description.toLowerCase().includes("marketplace tax")) {
-                    // Sales tax collected (positive) - part of sales
-                    if (amount > 0) {
-                        totalSales += amount;
+                        });
                     }
-                }
-                break;
+                    break;
 
-            default:
-                // Log unhandled transaction types for debugging
-                console.log(`Unhandled transaction type: ${transactionType}, amount: ${amount}`);
-                break;
+                case "Refund":
+                    totalRefunds += amount;
+                    break;
+
+                case "ProductAdsPayment":
+                    productAdsPayment += amount;
+                    break;
+
+                case "DebtRecovery":
+                    debtRecovery += amount;
+                    break;
+
+                case "Adjustment":
+                    adjustment += amount;
+                    break;
+
+                case "ServiceFee":
+                    if (description.toLowerCase().includes("subscription")) {
+                        amazonCharges += amount;
+                    } else if (description.toLowerCase().includes("storage") || 
+                              description === "FBAStorageBilling") {
+                        storageCharges += amount;
+                    } else if (description.toLowerCase().includes("fba")) {
+                        totalFBAFees += amount;
+                    } else {
+                        otherServiceFees += amount;
+                    }
+                    break;
+
+                case "Tax":
+                    if (description.toLowerCase().includes("sales tax") || 
+                        description.toLowerCase().includes("marketplace tax")) {
+                        if (amount > 0) {
+                            totalSales += amount;
+                        }
+                    }
+                    break;
+
+                default:
+                    logger.debug(`Unhandled transaction type: ${transactionType}, amount: ${amount}`);
+                    break;
+            }
+        } catch (error) {
+            logger.error(`Error processing transaction at index ${index}:`, error);
         }
     });
 
-    // Convert Map to array for product-wise sales
+    // Convert Map to array
     productWiseSales = Array.from(asinSalesMap.values()).map(item => ({
         asin: item.asin,
         quantity: item.quantity,
@@ -314,28 +393,19 @@ const calculateAmazonFees = (dataArray) => {
     }));
 
     // Calculate gross profit
-    // Gross Profit = Total Sales - All Fees and Charges
     const totalGrossProfit = totalSales + totalRefunds + productAdsPayment + 
                            totalFBAFees + amazonCharges + storageCharges + 
                            debtRecovery + adjustment + otherServiceFees;
 
-    // Prepare return object with proper formatting
     return {
         Total_Sales: totalSales.toFixed(2),
         Gross_Profit: totalGrossProfit.toFixed(2),
         ProductAdsPayment: Math.abs(productAdsPayment).toFixed(2),
-        FBA_Fees: Math.abs(totalFBAFees + otherServiceFees).toFixed(2),  // Include other service fees
+        FBA_Fees: Math.abs(totalFBAFees + otherServiceFees).toFixed(2),
         Amazon_Charges: Math.abs(amazonCharges).toFixed(2),
         Refunds: Math.abs(totalRefunds).toFixed(2),
         Storage: Math.abs(storageCharges).toFixed(2),
-        ProductWiseSales: productWiseSales,
-        // Additional data for debugging/reporting (not stored in DB)
-        _debug: {
-            debtRecovery: debtRecovery.toFixed(2),
-            adjustment: adjustment.toFixed(2),
-            otherServiceFees: otherServiceFees.toFixed(2),
-            transactionCount: dataArray.length
-        }
+        ProductWiseSales: productWiseSales
     };
 };
 

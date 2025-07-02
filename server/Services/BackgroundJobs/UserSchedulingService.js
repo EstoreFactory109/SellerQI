@@ -25,26 +25,21 @@ class UserSchedulingService {
                 sellerAccounts = seller.sellerAccount.map(account => ({
                     country: account.country,
                     region: account.region,
-                    lastDailyUpdate: null,
-                    lastWeeklyUpdate: null
+                    lastDailyUpdate: null
                 }));
             }
 
             // Find the hour with the least number of users (optimal distribution)
             const dailyUpdateHour = await this.findOptimalDailyHour();
-            
-            // Find the day with the least number of users (optimal distribution)
-            const weeklyUpdateDay = await this.findOptimalWeeklyDay();
 
             const schedule = new UserUpdateSchedule({
                 userId,
                 dailyUpdateHour,
-                weeklyUpdateDay,
                 sellerAccounts
             });
 
             await schedule.save();
-            logger.info(`Initialized schedule for user ${userId}: daily hour ${dailyUpdateHour}, weekly day ${weeklyUpdateDay}`);
+            logger.info(`Initialized daily schedule for user ${userId}: daily hour ${dailyUpdateHour}`);
             
             return schedule;
         } catch (error) {
@@ -54,7 +49,7 @@ class UserSchedulingService {
     }
 
     /**
-     * Get users that need daily updates (profitability and sponsored ads)
+     * Get users that need daily updates (comprehensive data including profitability, sponsored ads, and all API data)
      * Only returns users whose scheduled hour matches current hour and haven't been updated in 24h
      */
     static async getUsersNeedingDailyUpdate() {
@@ -80,36 +75,6 @@ class UserSchedulingService {
     }
 
     /**
-     * Get users that need weekly updates (all other data)
-     * Only returns users whose scheduled day matches current day and haven't been updated in 7 days
-     */
-    static async getUsersNeedingWeeklyUpdate() {
-        try {
-            // Use UTC timezone for consistency across servers
-            const now = new Date();
-            const currentDay = now.getUTCDay();
-            const currentHour = now.getUTCHours();
-            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-            // Only run weekly updates during the first hour of the day to avoid conflicts
-            if (currentHour !== 0) return [];
-
-            const users = await UserUpdateSchedule.find({
-                weeklyUpdateDay: currentDay,
-                $or: [
-                    { lastWeeklyUpdate: null },
-                    { lastWeeklyUpdate: { $lt: sevenDaysAgo } }
-                ]
-            }).populate('userId');
-
-            return users.filter(user => user.userId && user.userId.isVerified);
-        } catch (error) {
-            logger.error('Error getting users needing weekly update:', error);
-            return [];
-        }
-    }
-
-    /**
      * Update the last daily update timestamp for a user
      */
     static async markDailyUpdateComplete(userId, country, region) {
@@ -130,36 +95,9 @@ class UserSchedulingService {
                 }
             );
 
-            logger.info(`Marked daily update complete for user ${userId}, ${country}-${region}`);
+            logger.info(`Marked daily comprehensive update complete for user ${userId}, ${country}-${region}`);
         } catch (error) {
             logger.error(`Error marking daily update complete for user ${userId}:`, error);
-        }
-    }
-
-    /**
-     * Update the last weekly update timestamp for a user
-     */
-    static async markWeeklyUpdateComplete(userId, country, region) {
-        try {
-            const updateData = {
-                lastWeeklyUpdate: new Date(),
-                'sellerAccounts.$[elem].lastWeeklyUpdate': new Date()
-            };
-
-            await UserUpdateSchedule.updateOne(
-                { userId },
-                { $set: updateData },
-                { 
-                    arrayFilters: [{ 
-                        'elem.country': country, 
-                        'elem.region': region 
-                    }]
-                }
-            );
-
-            logger.info(`Marked weekly update complete for user ${userId}, ${country}-${region}`);
-        } catch (error) {
-            logger.error(`Error marking weekly update complete for user ${userId}:`, error);
         }
     }
 
@@ -176,8 +114,7 @@ class UserSchedulingService {
             const sellerAccounts = seller.sellerAccount.map(account => ({
                 country: account.country,
                 region: account.region,
-                lastDailyUpdate: null,
-                lastWeeklyUpdate: null
+                lastDailyUpdate: null
             }));
 
             await UserUpdateSchedule.updateOne(
@@ -208,7 +145,7 @@ class UserSchedulingService {
                 }
             }
 
-            logger.info(`Initialized schedules for ${initialized} users`);
+            logger.info(`Initialized daily schedules for ${initialized} users`);
             return initialized;
         } catch (error) {
             logger.error('Error initializing all user schedules:', error);
@@ -263,81 +200,22 @@ class UserSchedulingService {
     }
 
     /**
-     * Find the optimal day (0-6) with the least number of users assigned
-     */
-    static async findOptimalWeeklyDay() {
-        try {
-            // Get user count for each day
-            const dailyDistribution = await UserUpdateSchedule.aggregate([
-                {
-                    $group: {
-                        _id: '$weeklyUpdateDay',
-                        count: { $sum: 1 }
-                    }
-                },
-                {
-                    $sort: { count: 1, _id: 1 } // Sort by count ascending, then by day
-                }
-            ]);
-
-            // If no users exist yet, start with day 0 (Sunday)
-            if (dailyDistribution.length === 0) {
-                return 0;
-            }
-
-            // Create an array to track all 7 days
-            const dayCounts = new Array(7).fill(0);
-            
-            // Fill in actual counts
-            dailyDistribution.forEach(item => {
-                dayCounts[item._id] = item.count;
-            });
-
-            // Find the day with minimum users
-            const minCount = Math.min(...dayCounts);
-            const optimalDay = dayCounts.indexOf(minCount);
-
-            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            logger.info(`Optimal weekly day selected: ${dayNames[optimalDay]} (Day ${optimalDay}, current count: ${minCount})`);
-            return optimalDay;
-
-        } catch (error) {
-            logger.error('Error finding optimal weekly day:', error);
-            // Fallback to simple modulo distribution
-            const totalUsers = await UserUpdateSchedule.countDocuments();
-            return totalUsers % 7;
-        }
-    }
-
-    /**
      * Get detailed statistics about user distribution across time slots
      */
     static async getScheduleStats() {
         try {
-            const [hourlyStats, dailyStats] = await Promise.all([
-                // Get hourly distribution
-                UserUpdateSchedule.aggregate([
-                    {
-                        $group: {
-                            _id: '$dailyUpdateHour',
-                            count: { $sum: 1 }
-                        }
-                    },
-                    { $sort: { _id: 1 } }
-                ]),
-                // Get daily distribution
-                UserUpdateSchedule.aggregate([
-                    {
-                        $group: {
-                            _id: '$weeklyUpdateDay',
-                            count: { $sum: 1 }
-                        }
-                    },
-                    { $sort: { _id: 1 } }
-                ])
+            // Get hourly distribution only (no more weekly)
+            const hourlyStats = await UserUpdateSchedule.aggregate([
+                {
+                    $group: {
+                        _id: '$dailyUpdateHour',
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { _id: 1 } }
             ]);
 
-            // Create complete arrays for all hours (0-23) and days (0-6)
+            // Create complete array for all hours (0-23)
             const hourlyDistribution = new Array(24).fill(0).map((_, hour) => {
                 const found = hourlyStats.find(item => item._id === hour);
                 return {
@@ -347,43 +225,26 @@ class UserSchedulingService {
                 };
             });
 
-            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const dailyDistribution = new Array(7).fill(0).map((_, day) => {
-                const found = dailyStats.find(item => item._id === day);
-                return {
-                    day,
-                    dayName: dayNames[day],
-                    count: found ? found.count : 0
-                };
-            });
-
             // Calculate statistics
             const totalUsers = await UserUpdateSchedule.countDocuments();
             const hourCounts = hourlyDistribution.map(h => h.count);
-            const dayCounts = dailyDistribution.map(d => d.count);
 
             return {
                 totalUsers,
                 hourlyDistribution,
-                dailyDistribution,
+                updateType: 'daily_comprehensive_only',
                 balance: {
                     hourly: {
                         min: Math.min(...hourCounts),
                         max: Math.max(...hourCounts),
                         average: totalUsers / 24,
                         variance: this.calculateVariance(hourCounts)
-                    },
-                    daily: {
-                        min: Math.min(...dayCounts),
-                        max: Math.max(...dayCounts),
-                        average: totalUsers / 7,
-                        variance: this.calculateVariance(dayCounts)
                     }
                 }
             };
         } catch (error) {
             logger.error('Error getting schedule stats:', error);
-            return { hourlyDistribution: [], dailyDistribution: [], totalUsers: 0 };
+            return { hourlyDistribution: [], totalUsers: 0, updateType: 'daily_comprehensive_only' };
         }
     }
 
@@ -403,7 +264,7 @@ class UserSchedulingService {
      */
     static async rebalanceAllUsers() {
         try {
-            logger.info('Starting user rebalancing process...');
+            logger.info('Starting user rebalancing process for daily comprehensive updates...');
             
             const allUsers = await UserUpdateSchedule.find().sort({ createdAt: 1 }); // Oldest first
             let rebalanced = 0;
@@ -411,8 +272,7 @@ class UserSchedulingService {
             // Clear all assignments first to avoid race conditions
             await UserUpdateSchedule.updateMany({}, {
                 $set: {
-                    dailyUpdateHour: -1,  // Temporary invalid value
-                    weeklyUpdateDay: -1   // Temporary invalid value
+                    dailyUpdateHour: -1  // Temporary invalid value
                 }
             });
 
@@ -426,27 +286,25 @@ class UserSchedulingService {
                 for (const user of batch) {
                     // Calculate optimal slots without querying database (to avoid race conditions)
                     const dailyUpdateHour = rebalanced % 24;
-                    const weeklyUpdateDay = rebalanced % 7;
 
                     await UserUpdateSchedule.updateOne(
                         { _id: user._id },
                         {
                             $set: {
-                                dailyUpdateHour,
-                                weeklyUpdateDay
+                                dailyUpdateHour
                             }
                         }
                     );
 
                     rebalanced++;
-                    logger.info(`Rebalanced user ${user.userId}: Hour ${dailyUpdateHour}, Day ${weeklyUpdateDay}`);
+                    logger.info(`Rebalanced user ${user.userId}: Hour ${dailyUpdateHour}`);
                 }
 
                 // Add small delay between batches
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            logger.info(`Rebalancing completed: ${rebalanced} users redistributed`);
+            logger.info(`Rebalancing completed: ${rebalanced} users redistributed for daily comprehensive updates`);
             return rebalanced;
 
         } catch (error) {

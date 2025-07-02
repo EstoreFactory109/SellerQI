@@ -1,5 +1,5 @@
 import React,{useState} from 'react'
-import issue from '../../../assets/Icons/error.png';
+import { AlertCircle, TrendingUp, BarChart3 } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
 import {useNavigate} from 'react-router-dom'
@@ -11,77 +11,117 @@ const [tooltip,setToolTip] = useState(false)
 console.log(info)
 const navigatie = useNavigate()
 
+  const healthPercentage = info?.accountHealthPercentage?.Percentage || 50;
+  const healthStatus = info?.accountHealthPercentage?.status || 'GOOD';
+
   const options = {
     chart: {
       type: "radialBar",
+      sparkline: {
+        enabled: false
+      }
     },
     plotOptions: {
       radialBar: {
-        startAngle: -130, // Start the arc from this angle
-        endAngle: 130, // End at this angle
+        startAngle: -135,
+        endAngle: 135,
         track: {
-          background: "#EEEEEE", // Light grey background track
-          strokeWidth: "100%", // Thickness of background
+          background: "#f1f5f9",
+          strokeWidth: "100%",
         },
         hollow: {
-          size: "60%", // Controls the inner empty space (higher means thinner arc)
+          size: "75%",
         },
         dataLabels: {
           name: {
-            show: false, // Hide the label (optional)
+            show: false,
           },
           value: {
-            fontSize: "25px",
-            fontWeight: "bold",
-            color: "#1E1E3F",
-            offsetY:0.5,
-            formatter: function (val) {
-              return `${val}%`;
-            },
+            show: false,
           },
         },
       },
     },
     fill: {
-      colors: ["#1E1E3F"], // Dark color for progress bar
+      type: "gradient",
+      gradient: {
+        shade: "light",
+        type: "horizontal",
+        shadeIntensity: 0.25,
+        gradientToColors: ["#3b82f6"],
+        inverseColors: false,
+        opacityFrom: 1,
+        opacityTo: 1,
+        stops: [0, 100]
+      }
     },
     stroke: {
-      lineCap: "round", // Rounded edges
+      lineCap: "round",
     },
-    labels: ["Progress"],
+    colors: ["#2563eb"],
+    labels: ["Health"],
   };
 
-  const series = [info?.accountHealthPercentage?.Percentage];
-
+  const series = [healthPercentage];
 
   const viewFullReport=(e)=>{
     e.preventDefault();
     navigatie('/seller-central-checker/reports')
   }
 
-  
-
   return (
-    <div className='min-h-[35vh] bg-white p-3 border-2 border-gray-200 rounded-md pb-4 overflow-visible relative'>
-      <div className='w-full flex items-center justify-between'>
+    <div className='p-6 h-full min-h-[400px]'>
+      <div className='flex items-center justify-between mb-4'>
         <div className='flex items-center gap-3'>
-          <h2 className='text-sm'>ACCOUNT HEALTH</h2>
-         <div className='relative fit-content '> 
-          {tooltip && <TooltipBox Information='Overall account health score reflects key performance metrics such as feedback, policy compliance, shipping reliability, and customer service responsiveness.​ ' />}
-          <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
-            onMouseEnter={() => setToolTip(true)}
-            onMouseLeave={() => setToolTip(false)}
-          />
-         </div>
+          <div className='flex items-center gap-2'>
+            <BarChart3 className='w-5 h-5 text-blue-600' />
+            <h2 className='text-lg font-semibold text-gray-900'>Account Health</h2>
+          </div>
+          <div className='relative'> 
+            {tooltip && <TooltipBox Information='Overall account health score reflects key performance metrics such as feedback, policy compliance, shipping reliability, and customer service responsiveness.​ ' />}
+            <AlertCircle 
+              className='w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors'
+              onMouseEnter={() => setToolTip(true)}
+              onMouseLeave={() => setToolTip(false)}
+            />
+          </div>
         </div>
-        <button onClick={viewFullReport} className='bg-[#333651] text-xs text-white font-bold px-2 py-2 rounded-md'>
-          View Full Report
+        <button 
+          onClick={viewFullReport} 
+          className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+        >
+          View Report
         </button>
       </div>
-      <div className='relative w-fit m-auto'>
-        <Chart options={options} series={series} type="radialBar" height={250} />
-        <p className='absolute text-xs bottom-8 left-[40%] text-[#82b4a5]'>{info?.accountHealthPercentage?.status.toUpperCase()}</p>
-        <p className='absolute text-xs text-[#82b4a5] bg-[#edfef0] px-1 rounded-full left-[40%] bottom-0'>+2.00%</p>
+      
+      <div className='flex flex-col items-center justify-center h-full'>
+        <div className='relative'>
+          <Chart options={options} series={series} type="radialBar" height={280} width={280} />
+          {/* Percentage Text */}
+          <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
+            <div className='text-center'>
+              <p className='text-3xl font-bold text-gray-800' style={{ marginTop: '-15px' }}>
+                {healthPercentage}%
+              </p>
+            </div>
+          </div>
+          {/* Status Text */}
+          <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
+            <div className='text-center'>
+              <p className={`text-sm font-semibold ${
+                healthStatus === 'GOOD' ? 'text-emerald-600' : 
+                healthStatus === 'FAIR' ? 'text-amber-600' : 'text-red-600'
+              }`} style={{ marginTop: '25px' }}>
+                {healthStatus?.toUpperCase()}
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        <div className='mt-4 flex items-center gap-1 justify-center'>
+          <TrendingUp className='w-3 h-3 text-emerald-600' />
+          <span className='text-xs text-emerald-600 font-medium'>+2.00% from last month</span>
+        </div>
       </div>
     </div>
   )
