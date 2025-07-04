@@ -5,15 +5,14 @@ const ProductWiseSales = require('../../models/ProductWiseSalesModel.js');
 const UserModel = require('../../models/userModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
-const getReport = require('../Finance/GetOrdersAndRevenue.js');
 
 // Rate limiting constants
 const RATE_LIMIT = {
     BURST_LIMIT: 10,
-    REQUESTS_PER_SECOND: 1,
-    MIN_REQUEST_INTERVAL: 60000, // 2 seconds (1/0.5)
+    REQUESTS_PER_SECOND: 0.5,
+    MIN_REQUEST_INTERVAL: 2000, // 2 seconds (1/0.5)
     MAX_RETRY_ATTEMPTS: 3,
-    MAX_BACKOFF_DELAY: 120000 // 30 seconds
+    MAX_BACKOFF_DELAY: 30000 // 30 seconds
 };
 
 // Helper function for delays
@@ -49,7 +48,7 @@ async function makeAPIRequestWithRetry(url, headers, retryAttempt = 0) {
 
 const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country, region) => {
     const host = baseuri;
-    console.log("dataToReceive", dataToReceive);
+
     logger.info("Starting listFinancialEventsMethod", {
         userId,
         country,
@@ -66,12 +65,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         return [];
     }
 
-    const {totalSales,productWiseSales} = await getReport(dataToReceive.AccessToken, dataToReceive.marketplaceId, userId, country, region, baseuri);
-    if(!totalSales){
-        logger.error("Failed to get total sales");
-        return [];
-    }
-   
     // Rate limiting state
     let requestCount = 0;
     let lastRequestTime = 0;
@@ -191,9 +184,10 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
             return emptyFinanceData;
         }
+       
 
         // Calculate fees
-        const dataObj = calculateAmazonFees(allTransactions,totalSales,productWiseSales);
+        const dataObj = calculateAmazonFees(allTransactions);
 
         // Log summary
         logger.info("Amazon Fees Calculated:", {
@@ -272,9 +266,9 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
     }
 };
 
-const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
+const calculateAmazonFees = (dataArray) => {
     // Initialize all fee categories
-    let totalSales = Sales;
+    let totalSales = 0;
     let totalFBAFees = 0;
     let totalRefunds = 0;
     let productAdsPayment = 0;
@@ -291,6 +285,7 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
     if (!Array.isArray(dataArray) || dataArray.length === 0) {
         logger.warn("No transactions to process");
         return {
+            Total_Sales: "0.00",
             Gross_Profit: "0.00",
             ProductAdsPayment: "0.00",
             FBA_Fees: "0.00",
@@ -314,6 +309,36 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
             const description = transaction.description || '';
 
             switch (transactionType) {
+                case "Shipment":
+                    totalSales += amount;
+                    
+                    // Process items for product-wise sales
+                    if (transaction.items && transaction.items.length > 0) {
+                        transaction.items.forEach(item => {
+                            if (item.contexts && item.contexts.length > 0) {
+                                const context = item.contexts[0];
+                                const asin = context.asin;
+                                const quantity = context.quantityShipped || 0;
+                                const itemAmount = item.totalAmount?.currencyAmount || 0;
+                                
+                                if (asin) {
+                                    if (asinSalesMap.has(asin)) {
+                                        const existing = asinSalesMap.get(asin);
+                                        existing.quantity += quantity;
+                                        existing.amount += itemAmount;
+                                    } else {
+                                        asinSalesMap.set(asin, {
+                                            asin: asin,
+                                            quantity: quantity,
+                                            amount: itemAmount
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    break;
+
                 case "Refund":
                     totalRefunds += amount;
                     break;
@@ -362,12 +387,14 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
     });
 
     // Convert Map to array
-    productWiseSales = Array.from(ProductWiseSales);
-
-    totalSales = totalSales+totalRefunds;
+    productWiseSales = Array.from(asinSalesMap.values()).map(item => ({
+        asin: item.asin,
+        quantity: item.quantity,
+        amount: parseFloat(item.amount.toFixed(2))
+    }));
 
     // Calculate gross profit
-    const totalGrossProfit = totalSales + productAdsPayment + 
+    const totalGrossProfit = totalSales + totalRefunds + productAdsPayment + 
                            totalFBAFees + amazonCharges + storageCharges + 
                            debtRecovery + adjustment + otherServiceFees;
 
