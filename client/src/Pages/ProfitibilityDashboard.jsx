@@ -138,55 +138,27 @@ const ProfitabilityDashboard = () => {
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
   
   const metrics = useMemo(() => {
-    // Calculate metrics from filtered data if available
-    const totalSalesData = info?.TotalSales;
-    const filteredAccountFinance = info?.accountFinance || accountFinance;
-    let filteredTotalSales = 0;
-    let totalOverallSpend = 0;
+    // Use the exact same values as the main dashboard for consistency
+    const totalSales = Number(info?.TotalWeeklySale || 0);
+    const grossProfitRaw = Number(info?.accountFinance?.Gross_Profit) || 0;
     
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      // Calculate totals from filtered date range
-      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-    }
+    // Calculate other metrics
+    const adSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
+    const amazonFees = (Number(info?.accountFinance?.FBA_Fees || 0) + 
+                       Number(info?.accountFinance?.Storage || 0) + 
+                       Number(info?.accountFinance?.Amazon_Charges || 0));
     
-    // Calculate total COGS from all products that have COGS entered
-    let totalCOGS = 0;
-    const profitibilityData = info?.profitibilityData || [];
-    
-    profitibilityData.forEach(product => {
-      const cogsPerUnit = cogsValues[product.asin] || 0;
-      const quantity = product.quantity || 0;
-      totalCOGS += cogsPerUnit * quantity;
-    });
-    
-    // Calculate total overall spend including all Amazon fees
-    totalOverallSpend = (Number(filteredAccountFinance?.FBA_Fees || 0) + 
-                        Number(filteredAccountFinance?.Storage || 0) + 
-                        Number(filteredAccountFinance?.Amazon_Charges || 0) +
-                        Number(filteredAccountFinance?.ProductAdsPayment || 0) +
-                        Number(filteredAccountFinance?.Refunds || 0));
-    
-    // Use filtered data if available, otherwise fall back to original data
-    const totalSales = filteredTotalSales > 0 ? filteredTotalSales : Number(info?.TotalWeeklySale || 0);
-    const originalGrossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
-    
-    // Adjust gross profit by subtracting total COGS (only for profitability page)
-    const adjustedGrossProfit = originalGrossProfit - totalCOGS;
-    
-    const adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
-    const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0) + Number(filteredAccountFinance?.Amazon_Charges || 0));
-    
-    // Calculate adjusted profit margin using COGS-adjusted gross profit
-    const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
+    // Calculate profit margin using the same gross profit as main dashboard
+    const profitMargin = totalSales > 0 ? ((grossProfitRaw / totalSales) * 100) : 0;
     
     return [
       { label: 'Total Sales', value: `$${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `$${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Avg Profit Margin', value: `${adjustedProfitMargin.toFixed(2)}%`, icon: 'percent' },
+      { label: 'Gross Profit', value: `$${grossProfitRaw.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Avg Profit Margin', value: `${profitMargin.toFixed(2)}%`, icon: 'percent' },
       { label: 'Total Ad Spend', value: `$${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Amazon Fees', value: `$${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.TotalSales, info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
+  }, [info?.TotalWeeklySale, info?.accountFinance]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -276,9 +248,9 @@ const ProfitabilityDashboard = () => {
       csvData.push(['='.repeat(50)]);
       csvData.push([]);
     
-    // Add metrics summary (with COGS adjustments)
+    // Add metrics summary (matching main dashboard)
     console.log('Step 3: Processing metrics');
-    csvData.push(['Key Metrics (COGS-Adjusted)']);
+    csvData.push(['Key Metrics (Matching Main Dashboard)']);
     if (Array.isArray(metrics) && metrics.length > 0) {
       metrics.forEach((metric, index) => {
         if (metric && typeof metric === 'object' && metric.label && metric.value) {
@@ -526,11 +498,10 @@ const ProfitabilityDashboard = () => {
       });
       const adjustedGrossProfitSummary = originalGrossProfit - totalCOGSSummary;
       
-      csvData.push(['Financial Summary (COGS-Adjusted for Profitability Dashboard)']);
-      csvData.push(['Total Sales', `$${info.TotalWeeklySale || 0}`]);
-      csvData.push(['Original Gross Profit (from Amazon)', `$${originalGrossProfit}`]);
+      csvData.push(['Financial Summary (Matching Main Dashboard)']);
+      csvData.push(['Total Sales', `$${Number(info.TotalWeeklySale || 0).toFixed(2)}`]);
+      csvData.push(['Gross Profit', `$${Number(info.accountFinance.Gross_Profit || 0).toFixed(2)}`]);
       csvData.push(['Total COGS Entered', `$${totalCOGSSummary.toFixed(2)}`]);
-      csvData.push(['Adjusted Gross Profit (Original - COGS)', `$${adjustedGrossProfitSummary.toFixed(2)}`]);
       csvData.push(['FBA Fees', `$${info.accountFinance.FBA_Fees || 0}`]);
       csvData.push(['Storage Fees', `$${info.accountFinance.Storage || 0}`]);
       csvData.push(['Amazon Charges', `$${info.accountFinance.Amazon_Charges || 0}`]);
