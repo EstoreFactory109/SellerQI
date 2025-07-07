@@ -42,9 +42,13 @@ async function getReportId(accessToken, profileId, region) {
             return date.toISOString().split('T')[0];
         };
 
+        // Generate unique report name to prevent duplicate requests
+        const timestamp = Date.now();
+        const uniqueReportName = `ASIN/SKU Performance Report - ${timestamp}`;
+
         // Set up request body for ASIN/SKU level data
         const body = {
-            "name": "ASIN/SKU Performance Report",
+            "name": uniqueReportName,
             "startDate": formatDate(startDate),
             "endDate": formatDate(endDate),
             "configuration": {
@@ -264,6 +268,9 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) 
     console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
     try {
+        // Add a small delay to prevent rapid successive requests
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // Get the report ID first
         const reportData = await getReportId(accessToken, profileId, region);
 
@@ -310,6 +317,12 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) 
 
     } catch (error) {
         console.error('Error in getPPCSpendsBySKU:', error.message);
+        
+        // Handle specific 425 errors with more helpful messaging
+        if (error.message.includes('425')) {
+            throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');
+        }
+        
         throw error;
     }
 }

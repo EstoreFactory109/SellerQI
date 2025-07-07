@@ -85,83 +85,134 @@ const ProtectedRouteWrapper = ({ children }) => {
     };
 
     const fetchData = async () => {
+      let hasAnyData = false;
+      let dashboardData = null;
+
       try {
         const response = await axiosInstance.get('/app/analyse/getData');
 
         // Check if component is still mounted
         if (!isMountedRef.current) return;
 
-        let dashboardData = null;
-
-        if (response?.status !== 200) {
-          navigate(`/error/${response?.status}`);
-          return;
-        }
-
-        dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
-        
-        dispatch(addBrand(response.data.data.Brand));
-        dashboardData = analyseData(response.data.data).dashboardData;
-        dispatch(setDashboardInfo(dashboardData));
-        
-        // Also dispatch error details to the errors slice
-        dispatch(setProfitabilityErrorDetails({
-            totalErrors: dashboardData.totalProfitabilityErrors,
-            errorDetails: dashboardData.profitabilityErrorDetails
-        }));
-        dispatch(setSponsoredAdsErrorDetails({
-            totalErrors: dashboardData.totalSponsoredAdsErrors,
-            errorDetails: dashboardData.sponsoredAdsErrorDetails
-        }));
-
-        const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
-
-        // Check if component is still mounted
-        if (!isMountedRef.current) return;
-
-        if (historyResponse?.status === 200 && historyResponse.data?.data && dashboardData) {
-          const historyList = historyResponse.data.data;
+        // Handle different response scenarios gracefully
+        if (response?.status === 200 && response.data?.data) {
+          hasAnyData = true;
           
-          // Add safety check for empty history list
-          if (historyList.length === 0) {
-            dispatch(setHistoryInfo([]));
+          // Set available data even if some parts are missing
+          if (response.data.data.AllSellerAccounts) {
+            dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
+          }
+          
+          if (response.data.data.Brand) {
+            dispatch(addBrand(response.data.data.Brand));
+          }
+          
+          // Process dashboard data even if incomplete
+          try {
+            dashboardData = analyseData(response.data.data).dashboardData;
+            dispatch(setDashboardInfo(dashboardData));
+            
+            // Dispatch error details if available
+            if (dashboardData.totalProfitabilityErrors !== undefined) {
+              dispatch(setProfitabilityErrorDetails({
+                totalErrors: dashboardData.totalProfitabilityErrors || 0,
+                errorDetails: dashboardData.profitabilityErrorDetails || []
+              }));
+            }
+            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
+              dispatch(setSponsoredAdsErrorDetails({
+                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
+                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
+              }));
+            }
+          } catch (analyseError) {
+            console.error("❌ Error processing dashboard data:", analyseError);
+            // Still continue with partial data
+          }
+        } else if (response?.status && response.status !== 200) {
+          console.warn(`⚠️ Non-200 response: ${response.status}`);
+          // Only redirect to error page if it's a critical error and no data is available
+          if (response.status >= 500 && !hasAnyData) {
+            navigate(`/error/${response.status}`);
             return;
           }
-          
-          const currentDate = new Date();
-          const lastExpireDate = new Date(historyList[historyList.length - 1].expireDate);
-
-          if (currentDate > lastExpireDate) {
-            const expireDate = new Date();
-            expireDate.setDate(currentDate.getDate() + 7);
-
-            const newHistory = {
-              Date: currentDate,
-              HealthScore: dashboardData.accountHealthPercentage.Percentage,
-              TotalProducts: dashboardData.TotalProduct.length,
-              ProductsWithIssues: dashboardData.productWiseError.length,
-              TotalNumberOfIssues:
-                dashboardData.TotalRankingerrors +
-                dashboardData.totalErrorInConversion +
-                dashboardData.totalErrorInAccount,
-              expireDate: expireDate
-            };
-
-            const updateRes = await axiosInstance.post(
-              '/app/accountHistory/addAccountHistory',
-              newHistory
-            );
-
-            if (isMountedRef.current && updateRes?.status === 200 && updateRes.data?.data) {
-              dispatch(setHistoryInfo(updateRes.data.data));
-            }
-          } else {
-            dispatch(setHistoryInfo(historyList));
-          }
         }
+
+        // Try to fetch history data independently
+        try {
+          const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
+
+          // Check if component is still mounted
+          if (!isMountedRef.current) return;
+
+          if (historyResponse?.status === 200 && historyResponse.data?.data) {
+            const historyList = historyResponse.data.data || [];
+            
+            // Handle empty history list gracefully
+            if (historyList.length === 0) {
+              dispatch(setHistoryInfo([]));
+            } else if (dashboardData) {
+              // Only update history if we have dashboard data
+              const currentDate = new Date();
+              const lastExpireDate = new Date(historyList[historyList.length - 1].expireDate);
+
+              if (currentDate > lastExpireDate) {
+                const expireDate = new Date();
+                expireDate.setDate(currentDate.getDate() + 7);
+
+                const newHistory = {
+                  Date: currentDate,
+                  HealthScore: dashboardData.accountHealthPercentage?.Percentage || 0,
+                  TotalProducts: dashboardData.TotalProduct?.length || 0,
+                  ProductsWithIssues: dashboardData.productWiseError?.length || 0,
+                  TotalNumberOfIssues: 
+                    (dashboardData.TotalRankingerrors || 0) +
+                    (dashboardData.totalErrorInConversion || 0) +
+                    (dashboardData.totalErrorInAccount || 0),
+                  expireDate: expireDate
+                };
+
+                try {
+                  const updateRes = await axiosInstance.post(
+                    '/app/accountHistory/addAccountHistory',
+                    newHistory
+                  );
+
+                  if (isMountedRef.current && updateRes?.status === 200 && updateRes.data?.data) {
+                    dispatch(setHistoryInfo(updateRes.data.data));
+                  } else {
+                    // Use existing history if update fails
+                    dispatch(setHistoryInfo(historyList));
+                  }
+                } catch (historyUpdateError) {
+                  console.error("❌ History update failed:", historyUpdateError);
+                  // Use existing history if update fails
+                  dispatch(setHistoryInfo(historyList));
+                }
+              } else {
+                dispatch(setHistoryInfo(historyList));
+              }
+            } else {
+              // Use existing history even without dashboard data
+              dispatch(setHistoryInfo(historyList));
+            }
+          }
+        } catch (historyError) {
+          console.error("❌ History fetch failed:", historyError);
+          // Continue without history data
+        }
+
+        // Only redirect to error page if absolutely no data is available
+        if (!hasAnyData && !dashboardData) {
+          console.error("❌ No data available, redirecting to error page");
+          navigate("/error/500");
+        }
+
       } catch (error) {
         console.error("❌ Data fetch failed:", error);
-        if (isMountedRef.current) {
+        
+        // Only redirect to error page if we have no data at all
+        if (!hasAnyData && isMountedRef.current) {
           navigate("/error/500");
         }
       }

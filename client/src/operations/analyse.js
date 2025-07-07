@@ -101,31 +101,63 @@ const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMe
 
 const analyseData = (data) => {
     console.log(data)
-    const TotalProducts = data.TotalProducts;
-    const accountHealthPercentage = data.AccountData.getAccountHealthPercentge;
-    const accountFinance = data.FinanceData;
-    const totalErrorInAccount = data.AccountData.accountHealth.TotalErrors;
-    const amazonReadyProducts = data.ConversionData.AmazonReadyproducts;
+    
+    // Safely extract data with fallbacks
+    const TotalProducts = data.TotalProducts || [];
+    const accountHealthPercentage = data.AccountData?.getAccountHealthPercentge || { Percentage: 0, status: 'UNKNOWN' };
+    const accountFinance = data.FinanceData || {};
+    const totalErrorInAccount = data.AccountData?.accountHealth?.TotalErrors || 0;
+    const amazonReadyProducts = data.ConversionData?.AmazonReadyproducts || [];
     
     // Get active products first - this will be used to filter all analysis
     const activeProducts = [];
     const activeProductSet = new Set();
-    TotalProducts.forEach(elm => {
-        if (elm.status === "Active") {
-            activeProducts.push(elm.asin);
-            activeProductSet.add(elm.asin);
-        }
-    });
+    
+    // Safely process TotalProducts
+    if (Array.isArray(TotalProducts)) {
+        TotalProducts.forEach(elm => {
+            if (elm && elm.asin && elm.status === "Active") {
+                activeProducts.push(elm.asin);
+                activeProductSet.add(elm.asin);
+            }
+        });
+    }
 
-    // Filter all input data to only include active products
-    const activeSalesByProducts = data.SalesByProducts ? data.SalesByProducts.filter(product => activeProductSet.has(product.asin)) : [];
-    const activeProductWiseSponsoredAds = data.ProductWiseSponsoredAds ? data.ProductWiseSponsoredAds.filter(product => activeProductSet.has(product.asin)) : [];
-    const activeProductWiseFBAData = data.ProductWiseFBAData ? data.ProductWiseFBAData.filter(product => activeProductSet.has(product.asin)) : [];
+    // Filter all input data to only include active products with better error handling
+    const activeSalesByProducts = Array.isArray(data.SalesByProducts) ? 
+        data.SalesByProducts.filter(product => product && product.asin && activeProductSet.has(product.asin)) : [];
+    const activeProductWiseSponsoredAds = Array.isArray(data.ProductWiseSponsoredAds) ? 
+        data.ProductWiseSponsoredAds.filter(product => product && product.asin && activeProductSet.has(product.asin)) : [];
+    const activeProductWiseFBAData = Array.isArray(data.ProductWiseFBAData) ? 
+        data.ProductWiseFBAData.filter(product => product && product.asin && activeProductSet.has(product.asin)) : [];
+    const activeFBAFeesData = Array.isArray(data.FBAFeesData) ? 
+        data.FBAFeesData.filter(product => product && product.asin && activeProductSet.has(product.asin)) : [];
 
-    // Only calculate profitability for active products
-    const profitibilityData = Profitiblity(activeSalesByProducts, activeProductWiseSponsoredAds, activeProductWiseFBAData);
-    const sponsoredAdsMetrics = calculateSponsoredAdsMetrics(activeProductWiseSponsoredAds);
-    const negativeKeywordsMetrics = calculateNegativeKeywordsMetrics(data.negetiveKeywords, activeProductWiseSponsoredAds);
+    // Only calculate profitability for active products with error handling
+    let profitibilityData = [];
+    let sponsoredAdsMetrics = [];
+    let negativeKeywordsMetrics = [];
+    
+    try {
+        profitibilityData = Profitiblity(activeSalesByProducts, activeProductWiseSponsoredAds, activeProductWiseFBAData, activeFBAFeesData);
+    } catch (error) {
+        console.error("❌ Error calculating profitability data:", error);
+        profitibilityData = [];
+    }
+    
+    try {
+        sponsoredAdsMetrics = calculateSponsoredAdsMetrics(activeProductWiseSponsoredAds);
+    } catch (error) {
+        console.error("❌ Error calculating sponsored ads metrics:", error);
+        sponsoredAdsMetrics = [];
+    }
+    
+    try {
+        negativeKeywordsMetrics = calculateNegativeKeywordsMetrics(data.negetiveKeywords || [], data.adsKeywordsPerformanceData || []);
+    } catch (error) {
+        console.error("❌ Error calculating negative keywords metrics:", error);
+        negativeKeywordsMetrics = [];
+    }
 
     // Process inventory analysis data (filter for active products)
     const inventoryAnalysis = data.InventoryAnalysis || {
@@ -137,10 +169,10 @@ const analyseData = (data) => {
     
     // Filter inventory analysis to only include active products
     const activeInventoryAnalysis = {
-        inventoryPlanning: inventoryAnalysis.inventoryPlanning ? inventoryAnalysis.inventoryPlanning.filter(item => activeProductSet.has(item.asin)) : [],
-        strandedInventory: inventoryAnalysis.strandedInventory ? inventoryAnalysis.strandedInventory.filter(item => activeProductSet.has(item.asin)) : [],
-        inboundNonCompliance: inventoryAnalysis.inboundNonCompliance ? inventoryAnalysis.inboundNonCompliance.filter(item => activeProductSet.has(item.asin)) : [],
-        replenishment: inventoryAnalysis.replenishment ? inventoryAnalysis.replenishment.filter(item => activeProductSet.has(item.asin)) : []
+        inventoryPlanning: inventoryAnalysis.inventoryPlanning ? inventoryAnalysis.inventoryPlanning.filter(item => item && item.asin && activeProductSet.has(item.asin)) : [],
+        strandedInventory: inventoryAnalysis.strandedInventory ? inventoryAnalysis.strandedInventory.filter(item => item && item.asin && activeProductSet.has(item.asin)) : [],
+        inboundNonCompliance: inventoryAnalysis.inboundNonCompliance ? inventoryAnalysis.inboundNonCompliance.filter(item => item && item.asin && activeProductSet.has(item.asin)) : [],
+        replenishment: inventoryAnalysis.replenishment ? inventoryAnalysis.replenishment.filter(item => item && item.asin && activeProductSet.has(item.asin)) : []
     };
     
     console.log("Frontend received InventoryAnalysis: ", {
@@ -158,7 +190,7 @@ const analyseData = (data) => {
     const totalInventoryErrors = (activeInventoryAnalysis.inventoryPlanning?.length || 0) + 
                                (activeInventoryAnalysis.strandedInventory?.length || 0) + 
                                (activeInventoryAnalysis.inboundNonCompliance?.length || 0) +
-                               (activeInventoryAnalysis.replenishment?.filter(item => item.status === "Error").length || 0);
+                               (activeInventoryAnalysis.replenishment?.filter(item => item && item.status === "Error").length || 0);
 
     console.log("negativeKeywordsMetrics: ",negativeKeywordsMetrics)
 
@@ -171,17 +203,23 @@ const analyseData = (data) => {
 
     const seenAsins = new Set();
 
-    // Conversion error arrays (filter for active products only)
-    const aplusError = data.ConversionData.aPlusResult.filter(p => p.data.status === "Error" && activeProductSet.has(p.asin));
-    const imageResultError = data.ConversionData.imageResult.filter(p => p.data.status === "Error" && activeProductSet.has(p.asin));
-    const videoResultError = data.ConversionData.videoResult.filter(p => p.data.status === "Error" && activeProductSet.has(p.asin));
-    const productReviewResultError = data.ConversionData.productReviewResult.filter(p => p.data.status === "Error" && activeProductSet.has(p.asin));
-    const productStarRatingResultError = data.ConversionData.productStarRatingResult.filter(p => p.data.status === "Error" && activeProductSet.has(p.asin));
+    // Conversion error arrays (filter for active products only) with safe data access
+    const aplusError = Array.isArray(data.ConversionData?.aPlusResult) ? 
+        data.ConversionData.aPlusResult.filter(p => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
+    const imageResultError = Array.isArray(data.ConversionData?.imageResult) ? 
+        data.ConversionData.imageResult.filter(p => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
+    const videoResultError = Array.isArray(data.ConversionData?.videoResult) ? 
+        data.ConversionData.videoResult.filter(p => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
+    const productReviewResultError = Array.isArray(data.ConversionData?.productReviewResult) ? 
+        data.ConversionData.productReviewResult.filter(p => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
+    const productStarRatingResultError = Array.isArray(data.ConversionData?.productStarRatingResult) ? 
+        data.ConversionData.productStarRatingResult.filter(p => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
 
     // FIXED: wrap each product without buybox error with a `.data` property to match the structure (filter for active products)
-    const productsWithOutBuyboxError = data.ConversionData.ProductWithOutBuybox
-        .filter(p => p.status === "Error" && activeProductSet.has(p.asin))
-        .map(p => ({ asin: p.asin, data: p }));
+    const productsWithOutBuyboxError = Array.isArray(data.ConversionData?.ProductWithOutBuybox) ? 
+        data.ConversionData.ProductWithOutBuybox
+            .filter(p => p && p.status === "Error" && p.asin && activeProductSet.has(p.asin))
+            .map(p => ({ asin: p.asin, data: p })) : [];
 
     const totalErrorInConversion =
         aplusError.length +
@@ -245,7 +283,7 @@ const analyseData = (data) => {
         }
 
         // Check replenishment/restock errors
-        const replenishmentError = activeInventoryAnalysis.replenishment?.find(item => item.asin === asin && item.status === "Error");
+        const replenishmentError = activeInventoryAnalysis.replenishment?.find(item => item && item.asin === asin && item.status === "Error");
         if (replenishmentError) {
             data.replenishmentErrorData = replenishmentError;
             errorCount++;
@@ -257,130 +295,143 @@ const analyseData = (data) => {
     let TotalRankingerrors = 0;
     let index=0;
 
-    // Process ranking data only for active products
-    data.RankingsData.RankingResultArray.forEach(elm => {
-        const asin = elm.asin;
-        
-        // Skip if product is not active
-        if (!activeProductSet.has(asin)) {
-            return;
-        }
-        
-        if (seenAsins.has(asin)) return;
-        seenAsins.add(asin);
+    // Process ranking data only for active products with safe data access
+    const rankingResultArray = data.RankingsData?.RankingResultArray || [];
+    if (Array.isArray(rankingResultArray)) {
+        rankingResultArray.forEach(elm => {
+            if (!elm || !elm.asin) return;
+            
+            const asin = elm.asin;
+            
+            // Skip if product is not active
+            if (!activeProductSet.has(asin)) {
+                return;
+            }
+            
+            if (seenAsins.has(asin)) return;
+            seenAsins.add(asin);
 
-        const title = elm.data.Title?.substring(0, 50) || "N/A";
-        const productDetails = activeSalesByProducts.find(p => p.asin === asin);
-        const sales = productDetails?.amount || 0;
-        const quantity = productDetails?.quantity || 0;
+            const title = elm.data?.Title?.substring(0, 50) || "N/A";
+            const productDetails = activeSalesByProducts.find(p => p.asin === asin);
+            const sales = productDetails?.amount || 0;
+            const quantity = productDetails?.quantity || 0;
 
-        const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
-        const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
+            const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
+            const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
 
-        // Find the product in TotalProducts by ASIN
-        const totalProduct = TotalProducts.find(p => p.asin === asin);
+            // Find the product in TotalProducts by ASIN
+            const totalProduct = TotalProducts.find(p => p.asin === asin);
 
-        let productwiseTotalError = elm.data.TotalErrors + conversionErrors + inventoryErrors;
-        if (elm.data.TotalErrors > 0) {
-            TotalRankingerrors += elm.data.TotalErrors;
-        }
+            const elmTotalErrors = elm.data?.TotalErrors || 0;
+            let productwiseTotalError = elmTotalErrors + conversionErrors + inventoryErrors;
+            if (elmTotalErrors > 0) {
+                TotalRankingerrors += elmTotalErrors;
+            }
 
-        conversionProductWiseErrors.push(conversionData);
-        conversionProductWiseErrors[conversionProductWiseErrors.length - 1].Title = elm.data.Title;
+            conversionProductWiseErrors.push(conversionData);
+            conversionProductWiseErrors[conversionProductWiseErrors.length - 1].Title = elm.data?.Title || "N/A";
 
-        // Add inventory errors to inventoryProductWiseErrors array
-        if (inventoryErrors > 0) {
-            inventoryProductWiseErrors.push({
-                ...inventoryData,
-                Title: elm.data.Title
-            });
-        }
-
-        rankingProductWiseErrors.push(
-            elm.data.TotalErrors > 0
-                ? elm
-                : { asin, data: { Title: title } }
-        );
-
-        console.log(index)
-        
-        productWiseError.push({
-            asin,
-            sku: totalProduct?.sku || "N/A",
-            name: title,
-            price: totalProduct?.price || 0,
-            MainImage: data.ConversionData.imageResult.find(item=>item.asin===elm.asin)?.data?.MainImage || null,
-            errors: productwiseTotalError,
-            rankingErrors: elm.data.TotalErrors > 0 ? elm : undefined,
-            conversionErrors: conversionData,
-            inventoryErrors: inventoryData,
-            sales,
-            quantity
-        });
-        index++;
-    });
-
-    // Backend keyword errors (only for active products)
-   data.RankingsData.BackendKeywordResultArray.forEach(elm => {
-        const asin = elm.asin;
-        
-        // Skip if product is not active
-        if (!activeProductSet.has(asin)) {
-            return;
-        }
-        
-        if (elm.data.NumberOfErrors > 0) {
-            TotalRankingerrors += elm.data.NumberOfErrors;
-
-            const productWiseErrorElm = productWiseError.find(p => p.asin === asin);
-            if (productWiseErrorElm) {
-                productWiseErrorElm.errors += elm.data.NumberOfErrors;
-            } else {
-                // If product doesn't exist in productWiseError array yet, create it
-                const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
-                const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
-                const totalProduct = TotalProducts.find(p => p.asin === asin);
-                const title = totalProduct?.title?.substring(0, 50) || "N/A";
-                
-                productWiseError.push({
-                    asin,
-                    sku: totalProduct?.sku || "N/A",
-                    name: title,
-                    price: totalProduct?.price || 0,
-                    MainImage: data.ConversionData.imageResult.find(item=>item.asin===asin)?.data?.MainImage || null,
-                    errors: elm.data.NumberOfErrors + conversionErrors + inventoryErrors,
-                    rankingErrors: undefined,
-                    conversionErrors: conversionData,
-                    inventoryErrors: inventoryData,
-                    sales: 0,
-                    quantity: 0
+            // Add inventory errors to inventoryProductWiseErrors array
+            if (inventoryErrors > 0) {
+                inventoryProductWiseErrors.push({
+                    ...inventoryData,
+                    Title: elm.data?.Title || "N/A"
                 });
             }
 
-            let rankingErrors = rankingProductWiseErrors.find(p => p.asin === asin);
-            if (!rankingErrors) {
-                const fallbackTitle =
-                    TotalProducts.find(p => p.asin === asin)?.title?.substring(0, 50) ||
-                    elm.data?.Title?.substring(0, 50) ||
-                    "N/A";
+            rankingProductWiseErrors.push(
+                elmTotalErrors > 0
+                    ? elm
+                    : { asin, data: { Title: title } }
+            );
 
-                rankingErrors = {
-                    asin,
-                    data: {
-                        Title: fallbackTitle
-                    }
-                };
-                rankingProductWiseErrors.push(rankingErrors);
-            }
+            console.log(index)
+            
+            productWiseError.push({
+                asin,
+                sku: totalProduct?.sku || "N/A",
+                name: title,
+                price: totalProduct?.price || 0,
+                MainImage: data.ConversionData?.imageResult?.find(item=>item.asin===elm.asin)?.data?.MainImage || null,
+                errors: productwiseTotalError,
+                rankingErrors: elmTotalErrors > 0 ? elm : undefined,
+                conversionErrors: conversionData,
+                inventoryErrors: inventoryData,
+                sales,
+                quantity
+            });
+            index++;
+        });
+    }
 
-            if (elm.data.charLim?.status === "Error") {
-                rankingErrors.data.charLim = elm.data.charLim;
+    // Backend keyword errors (only for active products) with safe data access
+    const backendKeywordResultArray = data.RankingsData?.BackendKeywordResultArray || [];
+    if (Array.isArray(backendKeywordResultArray)) {
+        backendKeywordResultArray.forEach(elm => {
+            if (!elm || !elm.asin || !elm.data) return;
+            
+            const asin = elm.asin;
+            
+            // Skip if product is not active
+            if (!activeProductSet.has(asin)) {
+                return;
             }
-            if (elm.data.dublicateWords === "Error") {
-                rankingErrors.data.dublicateWords = elm.data.dublicateWords;
+            
+            const numberOfErrors = elm.data.NumberOfErrors || 0;
+            if (numberOfErrors > 0) {
+                TotalRankingerrors += numberOfErrors;
+
+                const productWiseErrorElm = productWiseError.find(p => p.asin === asin);
+                if (productWiseErrorElm) {
+                    productWiseErrorElm.errors += numberOfErrors;
+                } else {
+                    // If product doesn't exist in productWiseError array yet, create it
+                    const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
+                    const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
+                    const totalProduct = TotalProducts.find(p => p.asin === asin);
+                    const title = totalProduct?.itemName || totalProduct?.title?.substring(0, 50) || "N/A";
+                    
+                    productWiseError.push({
+                        asin,
+                        sku: totalProduct?.sku || "N/A",
+                        name: title,
+                        price: totalProduct?.price || 0,
+                        MainImage: data.ConversionData?.imageResult?.find(item=>item.asin===asin)?.data?.MainImage || null,
+                        errors: numberOfErrors + conversionErrors + inventoryErrors,
+                        rankingErrors: undefined,
+                        conversionErrors: conversionData,
+                        inventoryErrors: inventoryData,
+                        sales: 0,
+                        quantity: 0
+                    });
+                }
+
+                let rankingErrors = rankingProductWiseErrors.find(p => p.asin === asin);
+                if (!rankingErrors) {
+                    const fallbackTitle =
+                        TotalProducts.find(p => p.asin === asin)?.itemName?.substring(0, 50) ||
+                        TotalProducts.find(p => p.asin === asin)?.title?.substring(0, 50) ||
+                        elm.data?.Title?.substring(0, 50) ||
+                        "N/A";
+
+                    rankingErrors = {
+                        asin,
+                        data: {
+                            Title: fallbackTitle
+                        }
+                    };
+                    rankingProductWiseErrors.push(rankingErrors);
+                }
+
+                if (elm.data.charLim?.status === "Error") {
+                    rankingErrors.data.charLim = elm.data.charLim;
+                }
+                if (elm.data.dublicateWords === "Error") {
+                    rankingErrors.data.dublicateWords = elm.data.dublicateWords;
+                }
             }
-        }
-    });
+        });
+    }
 
   
     // Top ranking error products
@@ -404,13 +455,14 @@ const analyseData = (data) => {
     const third = getTopErrorProduct(UniqueProductWisError, 2);
     const fourth = getTopErrorProduct(UniqueProductWisError, 3);
 
-    // Add backend keyword errors to top 4 if applicable (only for active products)
-    const uniqueBackendKeywordData = Array.from(
-        new Map(data.RankingsData.BackendKeywordResultArray.filter(obj => activeProductSet.has(obj.asin)).map(obj => [obj.asin, obj])).values()
-    );
+    // Add backend keyword errors to top 4 if applicable (only for active products) with safe data access
+    const uniqueBackendKeywordData = Array.isArray(backendKeywordResultArray) ? 
+        Array.from(
+            new Map(backendKeywordResultArray.filter(obj => obj && obj.asin && activeProductSet.has(obj.asin)).map(obj => [obj.asin, obj])).values()
+        ) : [];
 
     uniqueBackendKeywordData.forEach(elm => {
-        if (elm.data.NumberOfErrors === 1) {
+        if (elm.data?.NumberOfErrors === 1) {
             [first, second, third, fourth].forEach(slot => {
                 if (slot && slot.asin === elm.asin) {
                     slot.errors++;
@@ -419,12 +471,24 @@ const analyseData = (data) => {
         }
     });
 
-    // Calculate profitability and sponsored ads errors (already filtered for active products)
-    const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData);
-    const sponsoredAdsErrorsData = calculateSponsoredAdsErrors(activeProductWiseSponsoredAds, negativeKeywordsMetrics);
+    // Calculate profitability and sponsored ads errors (already filtered for active products) with error handling
+    let profitabilityErrorsData = { totalErrors: 0, errorDetails: [] };
+    let sponsoredAdsErrorsData = { totalErrors: 0, errorDetails: [] };
+    
+    try {
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData);
+    } catch (error) {
+        console.error("❌ Error calculating profitability errors:", error);
+    }
+    
+    try {
+        sponsoredAdsErrorsData = calculateSponsoredAdsErrors(activeProductWiseSponsoredAds, negativeKeywordsMetrics);
+    } catch (error) {
+        console.error("❌ Error calculating sponsored ads errors:", error);
+    }
 
     const dashboardData = {
-        Country:data.Country,
+        Country: data.Country || "US",
         accountHealthPercentage,
         accountFinance,
         totalErrorInAccount,
@@ -439,21 +503,21 @@ const analyseData = (data) => {
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
-        TotalWeeklySale: data.FinanceData.Total_Sales,
-        TotalSales: data.TotalSales,
-        reimbustment: data.Reimburstment,
+        TotalWeeklySale: data.FinanceData?.Total_Sales || 0,
+        TotalSales: data.TotalSales || [],
+        reimbustment: data.Reimburstment || { totalReimbursement: 0 },
         productWiseError: productWiseError,
         rankingProductWiseErrors: rankingProductWiseErrors,
         conversionProductWiseErrors: conversionProductWiseErrors,
         inventoryProductWiseErrors: inventoryProductWiseErrors,
         InventoryAnalysis: activeInventoryAnalysis,
-        AccountErrors: data.AccountData.accountHealth,
-        startDate:data.startDate,
-        endDate:data.endDate,
+        AccountErrors: data.AccountData?.accountHealth || {},
+        startDate: data.startDate || new Date().toISOString().split('T')[0],
+        endDate: data.endDate || new Date().toISOString().split('T')[0],
         profitibilityData: profitibilityData,
         sponsoredAdsMetrics: sponsoredAdsMetrics,
         negativeKeywordsMetrics: negativeKeywordsMetrics,
-        ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData,
+        ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData || [],
         totalProfitabilityErrors: profitabilityErrorsData.totalErrors,
         totalSponsoredAdsErrors: sponsoredAdsErrorsData.totalErrors,
         ProductWiseSponsoredAds: activeProductWiseSponsoredAds,
@@ -461,7 +525,8 @@ const analyseData = (data) => {
         sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
         keywords: data.keywords || [],
         searchTerms: data.searchTerms || [],
-        campaignData: data.campaignData || []
+        campaignData: data.campaignData || [],
+        adsKeywordsPerformanceData: data.adsKeywordsPerformanceData || []
     };
 
     return { dashboardData };

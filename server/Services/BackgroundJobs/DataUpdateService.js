@@ -36,16 +36,25 @@ class DataUpdateService {
 
             try {
                 // Fetch fresh data from all APIs including:
-                // - Profitability dashboard data
-                // - Sponsored ads data  
+                // - Merchant listings data (GET_MERCHANT_LISTINGS_ALL_DATA)
                 // - V1/V2 seller performance reports
-                // - Financial data
-                // - GET_FBA_INVENTORY_PLANNING_DATA
-                // - GET_STRANDED_INVENTORY_UI_DATA  
-                // - GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA
-                // - Product listings data
+                // - Financial data (listFinancialEventsMethod)
+                // - Competitive pricing data (getCompetitivePricing)
+                // - Restock inventory recommendations
+                // - Product reviews data
+                // - Sponsored ads data (getPPCSpendsBySKU)
+                // - Campaign and ad group keywords
+                // - Negative keywords processing
+                // - Search keywords data
+                // - FBA inventory planning data
+                // - Stranded inventory data
+                // - Inbound non-compliance data
+                // - Weekly sales data
+                // - Shipment data
+                // - Brand data
+                // - Amazon fees calculation
+                // - Listing items with generic keyword processing
                 // - All other comprehensive API data
-                // NOTE: Competitive pricing feature is disabled
                 logger.info(`Fetching fresh comprehensive API data for user ${userId}, ${country}-${region}`);
                 await SpApiDataController.getSpApiData(mockReq, mockRes);
                 

@@ -163,6 +163,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             ProductData.push({
                 asin: data.asin1,
                 sku: data["seller-sku"],
+                itemName:data["item-name"]|| "Unknown Product",
                 price:data.price||0,
                 status: data.status,
             });

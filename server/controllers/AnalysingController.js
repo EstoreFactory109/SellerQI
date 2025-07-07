@@ -39,6 +39,8 @@ const Campaign = require('../models/CampaignModel.js');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../models/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
 const GET_STRANDED_INVENTORY_UI_DATA_Model = require('../models/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
 const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../models/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
+const FBAFeesModel = require('../models/FBAFees.js');
+const adsKeywordsPerformanceModel = require('../models/adsKeywordsPerformanceModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -155,7 +157,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         campaignData,
         inventoryPlanningData,
         inventoryStrandedData,
-        inboundNonComplianceData
+        inboundNonComplianceData,
+        FBAFeesData,
+        adsKeywordsPerformanceData
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -187,12 +191,14 @@ const Analyse = async (userId, country, region, adminId = null) => {
         GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+        FBAFeesModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 })
     ]);
 
-    console.log("userId: ", userId);
-    console.log("inventoryPlanningData: ", inventoryPlanningData);
-    console.log("inventoryStrandedData: ", inventoryStrandedData);
-    console.log("inboundNonComplianceData: ", inboundNonComplianceData);
+    // console.log("userId: ", userId);
+    // console.log("inventoryPlanningData: ", inventoryPlanningData);
+    // console.log("inventoryStrandedData: ", inventoryStrandedData);
+    // console.log("inboundNonComplianceData: ", inboundNonComplianceData);
 
     // Create default values for missing data instead of returning error
     const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
@@ -219,7 +225,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const safeKeywords = keywords || { keywordData: [] };
     const safeSearchTerms = searchTerms || { searchTermData: [] };
     const safeCampaignData = campaignData || { campaignData: [] };
-
+    const safeAdsKeywordsPerformanceData = adsKeywordsPerformanceData || { keywordsData: [] };
+    const safeFBAFeesData = FBAFeesData || { FbaData: [] };
+    
     // Log warnings for missing data instead of failing
     const missingDataWarnings = [];
     if (!v2Data) missingDataWarnings.push('v2Data');
@@ -240,7 +248,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (!inventoryPlanningData) missingDataWarnings.push('inventoryPlanningData');
     if (!inventoryStrandedData) missingDataWarnings.push('inventoryStrandedData');
     if (!inboundNonComplianceData) missingDataWarnings.push('inboundNonComplianceData');
+    if (!FBAFeesData) missingDataWarnings.push('FBAFeesData');
+    if (!adsKeywordsPerformanceData) missingDataWarnings.push('adsKeywordsPerformanceData');
     
+    // Log missing data warnings
     if (missingDataWarnings.length > 0) {
         logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
     }
@@ -355,7 +366,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         sponsoredAdsGraphData = asinDataMap;
     }
 
-    console.log("negetiveKeywords: ", safeNegetiveKeywords.negativeKeywordsData);
+    // console.log("negetiveKeywords: ", safeNegetiveKeywords.negativeKeywordsData);
+    // console.log("FBAFeesData: ", FBAFeesData);
 
     const result = {
         Brand: sellerCentral.brand,
@@ -376,7 +388,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         keywords: safeKeywords.keywordData,
         searchTerms: safeSearchTerms.searchTermData,
         campaignData: safeCampaignData.campaignData,
-        missingDataWarnings: missingDataWarnings // Include warnings in response
+        FBAFeesData: safeFBAFeesData.FbaData,
+        adsKeywordsPerformanceData: safeAdsKeywordsPerformanceData.keywordsData
     };
 
 
@@ -469,7 +482,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
                     const planningResult = processInventoryPlanningData(item);
                     inventoryAnalysis.inventoryPlanning.push(planningResult);
                 } catch (error) {
-                    console.error(`Error processing inventory planning data for ASIN ${item.asin}:`, error);
+                    // console.error(`Error processing inventory planning data for ASIN ${item.asin}:`, error);
                     logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);
                 }
             }
@@ -486,7 +499,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
                             const strandedResult = processInventoryStrandedData(item);
                             inventoryAnalysis.strandedInventory.push(strandedResult);
                         } catch (error) {
-                            console.error(`Error processing stranded inventory data for ASIN ${item.asin}:`, error);
+                            // console.error(`Error processing stranded inventory data for ASIN ${item.asin}:`, error);
                             logger.error(`Error processing stranded inventory data for ASIN ${item.asin}: ${error.message}`);
                         }
                     }
@@ -503,7 +516,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
                     const complianceResult = processInboundNonComplianceData(item);
                     inventoryAnalysis.inboundNonCompliance.push(complianceResult);
                 } catch (error) {
-                    console.error(`Error processing inbound non-compliance data for ASIN ${item.asin}:`, error);
+                    // console.error(`Error processing inbound non-compliance data for ASIN ${item.asin}:`, error);
                     logger.error(`Error processing inbound non-compliance data for ASIN ${item.asin}: ${error.message}`);
                 }
             }
@@ -516,7 +529,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
             const replenishmentResults = replenishmentQty(safeRestockData.Products);
             inventoryAnalysis.replenishment = replenishmentResults || [];
         } catch (error) {
-            console.error(`Error processing replenishment data:`, error);
+            // console.error(`Error processing replenishment data:`, error);
             logger.error(`Error processing replenishment data: ${error.message}`);
             inventoryAnalysis.replenishment = [];
         }
@@ -596,7 +609,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (safeShipmentData && safeShipmentData.shipmentData && SellerAccount && SellerAccount.products) {
         reimburstmentData = calculateTotalReimbursement(safeShipmentData.shipmentData, SellerAccount.products);
     } else {
-        console.log('No shipment data available or products data missing for reimbursement calculation - using defaults');
+        // console.log('No shipment data available or products data missing for reimbursement calculation - using defaults');
         reimburstmentData = {
             productWiseReimburstment: [],
             totalReimbursement: 0
@@ -754,7 +767,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
     if (!shipmentdata || shipmentdata.length === 0) missingDataWarnings.push('shipmentdata');
     
     if (missingDataWarnings.length > 0) {
-        logger.warn(`Missing data for date range (using defaults): ${missingDataWarnings.join(', ')}`);
+        logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
     }
 
     function formatDate(date) {
@@ -807,7 +820,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
         
         // Validate that SellerAccount and products exist
         if (!SellerAccount || !SellerAccount.products) {
-            console.log('Invalid SellerAccount or products data for getTotalReimbursement - using defaults');
+            // console.log('Invalid SellerAccount or products data for getTotalReimbursement - using defaults');
             return totalReimburstment;
         }
         
@@ -817,7 +830,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate)
                     const reimbursementResult = calculateTotalReimbursement(item.shipmentData, SellerAccount.products);
                     totalReimburstment += reimbursementResult.totalReimbursement;
                 } else {
-                    console.log('Invalid shipment data item in getTotalReimbursement - skipping');
+                    // console.log('Invalid shipment data item in getTotalReimbursement - skipping');
                 }
             })
         }

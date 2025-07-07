@@ -42,9 +42,13 @@ async function getReportId(accessToken, profileId, region) {
             return date.toISOString().split('T')[0];
         };
 
+        // Generate unique report name to prevent duplicate requests
+        const timestamp = Date.now();
+        const uniqueReportName = `Search Terms With Zero Sales - ${timestamp}`;
+
         // Set up request body for ASIN/SKU level data
         const body = {
-            "name": "Search Terms With Zero Sales",
+            "name": uniqueReportName,
             "startDate": formatDate(startDate),
             "endDate": formatDate(endDate),
             "configuration": {
@@ -243,9 +247,12 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 async function getSearchKeywords(accessToken, profileId, userId, country, region) {
-    console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
+    console.log(`Getting search keywords for region: ${region}`);
 
     try {
+        // Add a small delay to prevent rapid successive requests
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // Get the report ID first
         const reportData = await getReportId(accessToken, profileId, region);
 
@@ -262,22 +269,22 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             // Download and parse the report data
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
 
-            const CreateSearchTerms = await SearchTerms.create({
+            const createSearchTermsData = await SearchTerms.create({
                 userId: userId,
                 country: country,
                 region: region,
-                searchTermData: reportContent
+                searchTerms: reportContent
             })
-            if (!CreateSearchTerms) {
+            if(!createSearchTermsData){
                 return {
                     success: false,
-                    message: "Error in creating product wise sponsored ads data",
+                    message: "Error in creating search terms data",
                 };
             }
             return {
                 success: true,
-                message: "Product wise sponsored ads data fetched successfully",
-                data: CreateSearchTerms
+                message: "Search terms data fetched successfully",
+                data: createSearchTermsData
             };
         } else {
             console.error('Report generation failed:', reportStatus.error);
@@ -289,7 +296,13 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         }
 
     } catch (error) {
-        console.error('Error in getPPCSpendsBySKU:', error.message);
+        console.error('Error in getSearchKeywords:', error.message);
+        
+        // Handle specific 425 errors with more helpful messaging
+        if (error.message.includes('425')) {
+            throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');
+        }
+        
         throw error;
     }
 }

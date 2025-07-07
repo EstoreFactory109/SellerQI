@@ -32,8 +32,9 @@ const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 const GET_FBA_INVENTORY_PLANNING_DATA = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
 const GET_STRANDED_INVENTORY_UI_DATA = require('../Services/Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
-
+const getAmazonFees = require('../Services/Finance/AmazonFees.js');
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
+const GetWastedSpendKeywords = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -134,8 +135,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
     }
 
+    // ASIN and SKU extraction
     const asinArray = [];
     const skuArray = [];
+    const ProductDetails = [];
 
     // Safer access to merchant listings data
     const merchantSellerAccounts = Array.isArray(merchantListingsData.sellerAccount) ? merchantListingsData.sellerAccount : [];
@@ -151,11 +154,17 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (activeProducts.length > 0) {
         asinArray.push(...activeProducts.map(e => e.asin).filter(Boolean));
         skuArray.push(...activeProducts.map(e => e.sku).filter(Boolean));
+        ProductDetails.push(...activeProducts.map(e=>{return {asin:e.asin,price:e.price}}));
     }
 
+    // Calculate dynamic dates
+    const now = new Date();
+    const before = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours before now
+    const after = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000); // 31 days before now
+
     const dataToSend = {
-        before: "2025-06-30T23:59:59Z", // 2 minutes before now
-        after: "2025-06-1T23:59:59Z", // 7 days before now
+        before: before.toISOString(), // 24 hours before now
+        after: after.toISOString(), // 31 days before now
         marketplaceId: Marketplace_Id,
         AccessToken: AccessToken,
         AccessKey: credentials.AccessKey,
@@ -167,14 +176,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
         SellerId: sellerId
     };
 
-
-
-
-    
-
+    // First Promise.all block
     const [v2data,
         v1data,
-        ppcSpendsBySKU
+        ppcSpendsBySKU,
+        adsKeywordsPerformanceData
     ] = await Promise.all([
        tokenManager.wrapSpApiFunction(
            GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
@@ -193,6 +199,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
        )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
            logger.error(`PPC Spends Error: ${err.message}`);
            return { sponsoredAds: [] };
+       }),
+       tokenManager.wrapAdsFunction(
+           GetWastedSpendKeywords, userId, RefreshToken, AdsRefreshToken
+       )(AdsAccessToken, ProfileId,dataToSend.after, dataToSend.before , userId, Country, Region).catch(err => {
+           logger.error(`Ads Keywords Performance Data Error: ${err.message}`);
+           return null;
        })
     ]);
 
@@ -251,6 +263,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     console.log("Ad Group IDs count:", adGroupIdArray.length);
     console.log("========================================================");
 
+    // Competitive pricing logic
     let competitivePriceData = [];
 
     if (Array.isArray(asinArray) && asinArray.length > 0) {
@@ -294,6 +307,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         CreateCompetitivePricing = null;
     }
 
+    // Second Promise.all block
     const [
         RestockinventoryData,
         productReview,
@@ -302,7 +316,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         fbaInventoryPlanningData,
         strandedInventoryData,
         inboundNonComplianceData
-   ] = await Promise.all([
+    ] = await Promise.all([
        tokenManager.wrapSpApiFunction(
           GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
        )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
@@ -345,13 +359,22 @@ const getSpApiData = asyncHandler(async (req, res) => {
             logger.error(`Inbound Non-Compliance Error: ${err.message}`);
             return null;
        })
-  ])
+    ])
 
-      let [
+    // FINANCE FUNCTION
+    let financeData = await tokenManager.wrapDataToSendFunction(
+        listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
+    )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
+        logger.error(`Finance Data Error: ${err.message}`);
+        return [];
+    });
+
+    // Third Promise.all block
+    let [
        WeeklySales, 
     shipment,
-       financeData,
-       brandData
+       brandData,
+       feesResult
        ] = await Promise.all([
        tokenManager.wrapDataToSendFunction(
            TotalSales, userId, RefreshToken, AdsRefreshToken
@@ -366,22 +389,20 @@ const getSpApiData = asyncHandler(async (req, res) => {
            return null;
        }),
        tokenManager.wrapDataToSendFunction(
-           listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
-           logger.error(`Finance Data Error: ${err.message}`);
-           return [];
-       }),
-       tokenManager.wrapDataToSendFunction(
            getBrand, userId, RefreshToken, AdsRefreshToken
        )(dataToSend, userId, Base_URI).catch(err => {
            logger.error(`Brand Data Error: ${err.message}`);
            return null;
+       }),
+       tokenManager.wrapDataToSendFunction(
+           getAmazonFees, userId, RefreshToken, AdsRefreshToken
+       )(dataToSend, userId, Base_URI, Country, Region, ProductDetails).catch(err => {
+           logger.error(`Fees Result Error: ${err.message}`);
+           return null;
        })
     ])
 
-
-
-    // CALLING getNegativeKeywords WITH DATABASE-SOURCED IDs
+    // Fourth Promise.all block
     console.log("=== CALLING getNegativeKeywords ===");
     console.log("Parameters being passed:");
     console.log("- Profile ID:", ProfileId);
@@ -438,7 +459,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
     console.log("==================================");
 
-
+    // Generic keyword processing
     function delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -506,7 +527,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
     }
 
-    // Critical data validation - log errors but continue processing
+    // Critical data validation
     if (!v2data) {
         logger.error("Failed to fetch V2 seller performance report - continuing with null data");
     }
@@ -541,7 +562,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
     }
 
-    // Optional data validation - log warnings but don't fail the entire request
+    // Optional data validation
     if (!CreateCompetitivePricing) {
         logger.warn("Competitive pricing data not available - continuing without it");
     }
@@ -610,7 +631,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("No financial data found - continuing with empty finance data");
     }
 
-    return res.status(200).json(new ApiResponse(200,result, "Data has been fetched successfully"));
+    return res.status(200).json(new ApiResponse(200,result, "All SP-API data has been fetched successfully"));
 
 })
 

@@ -100,7 +100,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
         if (profitMargin < 0) status = 'bad';
         
         const productData = {
-          name: productDetails.title || `Product ${item.asin}`,
+          name: productDetails.itemName || productDetails.title || `Product ${item.asin}`,
           asin: item.asin,
           units: item.quantity || 0,
           sales: item.sales || 0,
@@ -205,7 +205,6 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 <tr key={indexOfFirstProduct + index} className="border-b border-gray-200">
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 bg-blue-500 rounded-full"></div>
                       <span className="text-sm font-medium text-gray-900 truncate max-w-[200px]" title={product.name}>
                         {product.name.length > 40 ? `${product.name.substring(0, 40)}...` : product.name}
                       </span>

@@ -5,7 +5,7 @@ const getshipment = require('../Services/Sp_API/shipment.js');
 const puppeteer = require("puppeteer");
 const { generateAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
 const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js');
-const { getPPCSpendsSalesUnitsSold } = require('../Services/AmazonAds/PPCSpendsSalesUnitsSold.js');
+const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 
 const {getAdGroups} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
@@ -149,8 +149,8 @@ const testAmazonAds = async (req, res) => {
 }
 
 const testPPCSpendsSalesUnitsSold = async (req, res) => {
-    const { accessToken,profileId, region,date } = req.body;
-    const result = await getPPCSpendsSalesUnitsSold(accessToken, profileId, date, region);
+    const { accessToken } = req.body;
+    const result = await getKeywordPerformanceReport(accessToken, "4009758203350767", "2025-04-02", "2025-04-30", "681b7e41525925e8abb7d3c6", "US", "NA");
     return res.status(200).json({
         data: result
     })

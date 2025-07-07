@@ -369,6 +369,8 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         
         const totalAfterDiscounts = totalSales - totalItemPromotionDiscount - totalShippingPromotionDiscount;
 
+        console.log("totalAfterDiscounts: ", totalAfterDiscounts);
+
         const productWiseSales= transformedData.map(order=>{
             if(order.orderStatus === 'Shipped' || order.orderStatus === 'Unshipped' || order.orderStatus === 'PartiallyShipped'){
                 return {
@@ -379,16 +381,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             }
         })
         
-        console.log(`📊 Orders processed: ${transformedData.length} total, ${validOrders.length} valid (shipped/Unshipped/PartiallyShipped)`);
-        console.log(`💰 Total Sales: $${totalSales.toFixed(2)}`);
-        console.log(`🎁 Total Item Promotion Discount: $${totalItemPromotionDiscount.toFixed(2)}`);
-        console.log(`🚚 Total Shipping Promotion Discount: $${totalShippingPromotionDiscount.toFixed(2)}`);
-        console.log(`💵 Total Sales After Discounts: $${totalAfterDiscounts.toFixed(2)}`);
-        
-        logger.info(`💰 Total Sales: $${totalSales.toFixed(2)}`);
-        logger.info(`🎁 Total Item Promotion Discount: $${totalItemPromotionDiscount.toFixed(2)}`);
-        logger.info(`🚚 Total Shipping Promotion Discount: $${totalShippingPromotionDiscount.toFixed(2)}`);
-        logger.info(`💵 Total Sales After Discounts: $${totalAfterDiscounts.toFixed(2)}`);
+
 
         // Save to database
         logger.info("💾 Saving order data to database...");
@@ -396,7 +389,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         
         logger.info(`✅ Successfully processed and saved ${transformedData.length} orders to database`);
         
-        return {totalSales,productWiseSales};
+        return {totalAfterDiscounts,productWiseSales,transformedData};
 
     } catch (error) {
         logger.error("❌ Error in getReport:", error.message);

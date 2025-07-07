@@ -9,6 +9,9 @@ import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductCh
 import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
 import Calender from '../Components/Calender/Calender.jsx'
+import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
+import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
+import { useSelector } from 'react-redux'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -16,6 +19,19 @@ const Dashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
   const ExportRef = useRef(null)
+
+  // Get dashboard data from Redux
+  const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
+  
+  // Check data availability
+  const { hasAnyData, hasAllData, missingItems, availableItems } = useDataAvailability({
+    accountHealth: dashboardInfo?.accountHealthPercentage,
+    financeData: dashboardInfo?.accountFinance,
+    totalSales: dashboardInfo?.TotalWeeklySale,
+    products: dashboardInfo?.TotalProduct,
+    reimbursement: dashboardInfo?.reimbustment,
+    inventoryAnalysis: dashboardInfo?.InventoryAnalysis
+  });
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -184,8 +200,26 @@ const Dashboard = () => {
       {/* Main Content - Scrollable */}
       <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
         <div className='px-4 lg:px-6 py-6 pb-20'>
-          {/* Quick Stats */}
-          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
+          {/* Show partial data notice if some data is missing */}
+          {hasAnyData && !hasAllData && (
+            <PartialDataNotice 
+              missingItems={missingItems} 
+              availableItems={availableItems}
+              className="mb-6"
+            />
+          )}
+
+          {/* Show fallback if no data at all */}
+          {!hasAnyData ? (
+            <DataFallback 
+              type="database"
+              message="Dashboard data is currently unavailable. Please try refreshing the page or contact support if the issue persists."
+              size="large"
+            />
+          ) : (
+            <>
+              {/* Quick Stats */}
+              <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
             {quickStats.map((stat, index) => {
               const Icon = stat.icon
               return (
@@ -220,59 +254,96 @@ const Dashboard = () => {
             })}
           </div>
 
-          {/* Main Dashboard Grid */}
-          <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8'>
-            {/* Left Column - Account Health */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
-            >
-              <AccountHealth />
-            </motion.div>
+              {/* Main Dashboard Grid */}
+              <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8'>
+                {/* Left Column - Account Health */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.6, delay: 0.2 }}
+                  className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
+                >
+                  <ErrorBoundary
+                    title="Account Health Unavailable"
+                    message="Unable to load account health data. Showing available information."
+                  >
+                    <AccountHealth />
+                  </ErrorBoundary>
+                </motion.div>
 
-            {/* Middle Column - Total Sales */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className='lg:col-span-2 bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
-            >
-              <TotalSales />
-            </motion.div>
-          </div>
+                {/* Middle Column - Total Sales */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.3 }}
+                  className='lg:col-span-2 bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
+                >
+                  <ErrorBoundary
+                    title="Sales Data Unavailable"
+                    message="Unable to load sales data. Showing available information."
+                  >
+                    <TotalSales />
+                  </ErrorBoundary>
+                </motion.div>
+              </div>
 
-          {/* Second Row - Product Checker */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8'
-          >
-            <ProductChecker />
-          </motion.div>
+              {/* Second Row - Product Checker */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.4 }}
+                className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8'
+              >
+                <ErrorBoundary
+                  title="Product Analysis Unavailable"
+                  message="Unable to load product analysis data. Showing available information."
+                >
+                  <ProductChecker />
+                </ErrorBoundary>
+              </motion.div>
 
-          {/* Third Row - Small Cards */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.5 }}
-            className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'
-          >
-            <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
-              <ExpectedReimbursement />
-            </div>
-            <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
-              <AmazonReadyProducts />
-            </div>
-            <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
-              <ProductsToReplinish />
-            </div>
-            <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
-              <ProductsWithoutBuybox />
-            </div>
-          </motion.div>
+              {/* Third Row - Small Cards */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.5 }}
+                className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'
+              >
+                <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
+                  <ErrorBoundary
+                    title="Reimbursement Data Unavailable"
+                    message="Unable to load reimbursement data."
+                  >
+                    <ExpectedReimbursement />
+                  </ErrorBoundary>
+                </div>
+                <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
+                  <ErrorBoundary
+                    title="Product Data Unavailable"
+                    message="Unable to load Amazon ready products data."
+                  >
+                    <AmazonReadyProducts />
+                  </ErrorBoundary>
+                </div>
+                <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
+                  <ErrorBoundary
+                    title="Inventory Data Unavailable"
+                    message="Unable to load inventory replenishment data."
+                  >
+                    <ProductsToReplinish />
+                  </ErrorBoundary>
+                </div>
+                <div className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'>
+                  <ErrorBoundary
+                    title="Buy Box Data Unavailable"
+                    message="Unable to load buy box data."
+                  >
+                    <ProductsWithoutBuybox />
+                  </ErrorBoundary>
+                </div>
+              </motion.div>
+            </>
+          )}
         </div>
       </div>
     </div>

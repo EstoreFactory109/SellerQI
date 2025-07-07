@@ -43,9 +43,13 @@ async function getSearchTermReportId(accessToken, profileId, region) {
             return date.toISOString().split('T')[0];
         };
 
+        // Generate unique report name to prevent duplicate requests
+        const timestamp = Date.now();
+        const uniqueReportName = `Auto Campaign Search Terms Report - ${timestamp}`;
+
         // Set up request body for Search Term Report with AUTO campaigns filter
         const body = {
-            "name": "Auto Campaign Search Terms Report",
+            "name": uniqueReportName,
             "startDate": formatDate(startDate),
             "endDate": formatDate(endDate),
             "configuration": {
@@ -284,6 +288,9 @@ async function getAutoSearchTermsWithSales(accessToken, profileId, userId, count
     console.log(`Getting search terms for auto campaigns in region: ${region}`);
 
     try {
+        // Add a small delay to prevent rapid successive requests
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // Get the report ID first
         const reportData = await getSearchTermReportId(accessToken, profileId, region);
 
@@ -349,6 +356,12 @@ async function getAutoSearchTermsWithSales(accessToken, profileId, userId, count
 
     } catch (error) {
         console.error('Error in getAutoSearchTermsWithSales:', error.message);
+        
+        // Handle specific 425 errors with more helpful messaging
+        if (error.message.includes('425')) {
+            throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');
+        }
+        
         throw error;
     }
 }

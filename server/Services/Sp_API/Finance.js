@@ -12,8 +12,8 @@ const RATE_LIMIT = {
     BURST_LIMIT: 10,
     REQUESTS_PER_SECOND: 1,
     MIN_REQUEST_INTERVAL: 60000, // 2 seconds (1/0.5)
-    MAX_RETRY_ATTEMPTS: 3,
-    MAX_BACKOFF_DELAY: 120000 // 30 seconds
+    MAX_RETRY_ATTEMPTS: 10,
+    MAX_BACKOFF_DELAY: 300000 // 5 minutes
 };
 
 // Helper function for delays
@@ -66,11 +66,15 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         return [];
     }
 
-    const {totalSales,productWiseSales} = await getReport(dataToReceive.AccessToken, dataToReceive.marketplaceId, userId, country, region, baseuri);
-    if(!totalSales){
-        logger.error("Failed to get total sales");
-        return [];
-    }
+    const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
+
+    
+    console.log("reportResult", reportResult.totalAfterDiscounts);
+    
+
+  
+
+    
    
     // Rate limiting state
     let requestCount = 0;
@@ -193,8 +197,10 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         }
 
         // Calculate fees
-        const dataObj = calculateAmazonFees(allTransactions,totalSales,productWiseSales);
+        const dataObj = calculateAmazonFees(allTransactions,reportResult.totalAfterDiscounts,reportResult.productWiseSales);
 
+        
+      
         // Log summary
         logger.info("Amazon Fees Calculated:", {
             transactionCount: allTransactions.length,
@@ -204,7 +210,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         });
 
         // Save to database
-        let addToDb, addToSalesDb;
+        let addToDb
         
         try {
             addToDb = await listFinancialEvents.create({
@@ -285,7 +291,7 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
     let otherServiceFees = 0;
     let productWiseSales = [];
     
-    const asinSalesMap = new Map();
+    //const asinSalesMap = new Map();
 
     // Validate input
     if (!Array.isArray(dataArray) || dataArray.length === 0) {
@@ -343,17 +349,10 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
                     }
                     break;
 
-                case "Tax":
-                    if (description.toLowerCase().includes("sales tax") || 
-                        description.toLowerCase().includes("marketplace tax")) {
-                        if (amount > 0) {
-                            totalSales += amount;
-                        }
-                    }
-                    break;
+                
 
                 default:
-                    logger.debug(`Unhandled transaction type: ${transactionType}, amount: ${amount}`);
+                   // logger.debug(`Unhandled transaction type: ${transactionType}, amount: ${amount}`);
                     break;
             }
         } catch (error) {
@@ -364,7 +363,10 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
     // Convert Map to array
     productWiseSales = Array.from(ProductWiseSales);
 
-    totalSales = totalSales+totalRefunds;
+    // Subtract refunds from total sales (refunds reduce total sales)
+    totalSales = totalSales - Math.abs(totalRefunds);
+    console.log("totalSales after refunds:", totalSales);
+    console.log("totalRefunds:", totalRefunds);
 
     // Calculate gross profit
     const totalGrossProfit = totalSales + productAdsPayment + 

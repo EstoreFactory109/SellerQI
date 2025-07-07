@@ -448,7 +448,7 @@ const ProfitabilityDashboard = () => {
         
         csvData.push([
           product.asin,
-          productDetails.title || `Product ${product.asin}`,
+          productDetails.itemName || productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
           `$${(product.sales || 0).toFixed(2)}`,
           `$${revenuePerUnit.toFixed(2)}`,
@@ -486,7 +486,7 @@ const ProfitabilityDashboard = () => {
         const productDetails = productDetailsMap.get(product.asin) || {};
         csvData.push([
           product.asin,
-          productDetails.title || `Product ${product.asin}`,
+          productDetails.itemName || productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
           `$${(product.amount || 0).toFixed(2)}`
         ]);
@@ -503,7 +503,7 @@ const ProfitabilityDashboard = () => {
       totalProducts.forEach(product => {
         csvData.push([
           product.asin || 'N/A',
-          product.title || 'N/A',
+          product.itemName || product.title || 'N/A',
           product.brand || 'N/A',
           product.itemClassification || 'N/A',
           `$${(product.price || 0).toFixed(2)}`,
@@ -694,7 +694,7 @@ const ProfitabilityDashboard = () => {
         
         csvData.push([
           asin,
-          productDetails.title || `Product ${asin}`,
+          productDetails.itemName || productDetails.title || `Product ${asin}`,
           impressions.toString(),
           clicks.toString(),
           `${ctr.toFixed(2)}%`,

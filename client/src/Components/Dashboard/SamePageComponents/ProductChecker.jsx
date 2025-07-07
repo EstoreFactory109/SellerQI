@@ -10,29 +10,33 @@ const ProductChecker = () => {
    console.log(info)
    const navigate = useNavigate()
    
-   // Get error counts from Redux - these are now pre-calculated during analysis
+   // Get error counts from Redux with better fallbacks - these are now pre-calculated during analysis
    const profitabilityErrors = info?.totalProfitabilityErrors || 0;
    const sponsoredAdsErrors = info?.totalSponsoredAdsErrors || 0;
    const inventoryErrors = info?.totalInventoryErrors || 0;
+   const rankingErrors = info?.TotalRankingerrors || 0;
+   const conversionErrors = info?.totalErrorInConversion || 0;
+   const accountErrors = info?.totalErrorInAccount || 0;
    
-   const [seriesData,setSeriesData]=useState([info.TotalRankingerrors, info.totalErrorInConversion, inventoryErrors, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
+   const [seriesData,setSeriesData]=useState([rankingErrors, conversionErrors, inventoryErrors, accountErrors, profitabilityErrors, sponsoredAdsErrors]);
    const [LableData, setDableData] = useState(["Rankings", "Conversion", "Inventory", "Account Health", "Profitability", "Sponsored Ads"])
    const [productErrors, setProductErrors] = useState([]);
    
    useEffect(() => {
      let tempArr = [];
-     tempArr.push(info.first);
-     tempArr.push(info.second);
-     tempArr.push(info.third);
-     tempArr.push(info.fourth);
+     // Safely add product error data with fallbacks
+     if (info?.first) tempArr.push(info.first);
+     if (info?.second) tempArr.push(info.second);
+     if (info?.third) tempArr.push(info.third);
+     if (info?.fourth) tempArr.push(info.fourth);
      console.log("Product errors data:", tempArr);
      setProductErrors(tempArr)
    }, [info])
  
   useEffect(() => {
-    // Update series data when info changes
-    setSeriesData([info.TotalRankingerrors, info.totalErrorInConversion, inventoryErrors, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors]);
-  }, [info.TotalRankingerrors, info.totalErrorInConversion, info.totalErrorInAccount, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
+    // Update series data when info changes with safe fallbacks
+    setSeriesData([rankingErrors, conversionErrors, inventoryErrors, accountErrors, profitabilityErrors, sponsoredAdsErrors]);
+  }, [rankingErrors, conversionErrors, accountErrors, profitabilityErrors, sponsoredAdsErrors, inventoryErrors]);
   
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);

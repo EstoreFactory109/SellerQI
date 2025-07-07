@@ -137,6 +137,16 @@ const PPCDashboard = () => {
   // Get campaignData from Redux store
   const campaignData = useSelector((state) => state.Dashboard.DashBoardInfo?.campaignData) || [];
   
+  // Get adsKeywordsPerformanceData from Redux store
+  const adsKeywordsPerformanceData = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
+  
+  // Debug: Log the data to console for troubleshooting
+  console.log('=== PPC Dashboard Debug - Raw Data ===');
+  console.log('adsKeywordsPerformanceData Length:', adsKeywordsPerformanceData.length);
+  console.log('adsKeywordsPerformanceData Full Array:', adsKeywordsPerformanceData);
+  console.log('Sample Keywords (first 3):', adsKeywordsPerformanceData.slice(0, 3));
+  console.log('All Dashboard Keys:', Object.keys(useSelector((state) => state.Dashboard.DashBoardInfo) || {}));
+  
   // Filter search terms where clicks >= 10 and sales = 0
   const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
@@ -272,8 +282,75 @@ const PPCDashboard = () => {
     .filter(campaign => campaign.acos > 40 && campaign.totalSales > 0)
     .sort((a, b) => b.acos - a.acos);
   
-  // Wasted Spend Keywords - cost > 5 && salesIn30Days < 1
-  // First, create a map of campaignId to campaign data for easier lookup
+  // Wasted Spend Keywords - cost > 5 && attributedSales30d < 1
+  // Use the new adsKeywordsPerformanceData structure directly
+  console.log('=== Starting Wasted Keywords Processing ===');
+  console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
+
+  const wastedSpendKeywords = adsKeywordsPerformanceData
+    .filter((keyword, index) => {
+      // Apply filter: cost > 5 && attributedSales30d < 1
+      const cost = parseFloat(keyword.cost) || 0;
+      const attributedSales = parseFloat(keyword.attributedSales30d) || 0;
+      const matchesCriteria = cost > 5 && attributedSales < 1;
+      
+      // Debug: Log every keyword for first 10, then log only matches
+      if (index < 10 || matchesCriteria) {
+        console.log(`Keyword ${index + 1}:`, {
+          keyword: keyword.keyword,
+          rawCost: keyword.cost,
+          parsedCost: cost,
+          rawAttributedSales30d: keyword.attributedSales30d,
+          parsedAttributedSales30d: attributedSales,
+          costOver5: cost > 5,
+          attributedSales30dUnder1: attributedSales < 1,
+          matchesCriteria: matchesCriteria,
+          campaignName: keyword.campaignName,
+          matchType: keyword.matchType
+        });
+      }
+      
+      return matchesCriteria;
+    })
+    .map((keyword, index) => {
+      // Process keyword data
+      const cost = parseFloat(keyword.cost) || 0;
+      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+      
+      const processedKeyword = {
+        keyword: keyword.keyword,
+        campaignName: keyword.campaignName,
+        campaignId: keyword.campaignId,
+        sales: attributedSales30d,
+        spend: cost
+      };
+      
+      console.log(`Processed Wasted Keyword ${index + 1}:`, processedKeyword);
+      return processedKeyword;
+    })
+    .sort((a, b) => b.spend - a.spend);
+
+  // Debug: Final results
+  console.log('=== Final Wasted Keywords Results ===');
+  console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
+  console.log('Filtered Wasted Keywords:', wastedSpendKeywords.length);
+  console.log('Wasted Keywords Data:', wastedSpendKeywords);
+  
+  if (adsKeywordsPerformanceData.length > 0) {
+    console.log('=== Data Analysis ===');
+    console.log('Cost Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
+    console.log('AttributedSales30d Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
+    
+    const highCostKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.cost) > 5);
+    const lowAttributedSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) < 1);
+    
+    console.log(`Keywords with cost > 5: ${highCostKeywords.length}`);
+    console.log(`Keywords with attributedSales30d < 1: ${lowAttributedSalesKeywords.length}`);
+    console.log('High cost keywords sample:', highCostKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
+    console.log('Low attributedSales30d keywords sample:', lowAttributedSalesKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
+  }
+  
+  // First, create a map of campaignId to campaign data for easier lookup (still needed for top performing keywords)
   const campaignMap = new Map();
   productWiseSponsoredAds.forEach(product => {
     if (!campaignMap.has(product.campaignId)) {
@@ -285,124 +362,101 @@ const PPCDashboard = () => {
     campaignMap.get(product.campaignId).products.push(product);
   });
   
-  // Process keywords to find wasted spend
-  const wastedSpendKeywords = keywords
-    .map(keyword => {
-      // Get campaign info
-      const campaignInfo = campaignMap.get(keyword.campaignId);
-      if (!campaignInfo) return null;
+  // Top Performing Keywords - Use adsKeywordsPerformanceData directly
+  // Filter: ACOS < 20%, sales > 100, impressions > 1000
+  console.log('=== Starting Top Performing Keywords Processing ===');
+  console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for top performance analysis');
+
+  const topPerformingKeywords = adsKeywordsPerformanceData
+    .filter((keyword, index) => {
+      // Calculate ACOS using attributedSales30d and cost
+      const cost = parseFloat(keyword.cost) || 0;
+      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+      const impressions = parseFloat(keyword.impressions) || 0;
+      const acos = attributedSales30d > 0 ? (cost / attributedSales30d) * 100 : 0;
       
-      // Calculate total spend and sales for this keyword across all products in the campaign
-      let totalSpend = 0;
-      let totalSales = 0;
+      // Apply filters: ACOS < 20%, sales > 100, impressions > 1000
+      const matchesCriteria = acos < 20 && attributedSales30d > 100 && impressions > 1000;
       
-      // Find matching data from negativeKeywordsMetrics
-      const keywordMetrics = negativeKeywordsMetrics.find(k => 
-        k.keyword === keyword.keywordText && 
-        k.campaignName === campaignInfo.campaignName
-      );
-      
-      if (keywordMetrics) {
-        totalSpend = keywordMetrics.spend;
-        totalSales = keywordMetrics.sales;
-      } else {
-        // If not in negativeKeywordsMetrics, aggregate from products
-        campaignInfo.products.forEach(product => {
-          totalSpend += parseFloat(product.spend) || 0;
-          totalSales += parseFloat(product.salesIn30Days) || 0;
+      // Debug: Log every keyword for first 10, then log only matches
+      if (index < 10 || matchesCriteria) {
+        console.log(`Top Performance Keyword ${index + 1}:`, {
+          keyword: keyword.keyword,
+          rawCost: keyword.cost,
+          parsedCost: cost,
+          rawAttributedSales30d: keyword.attributedSales30d,
+          parsedAttributedSales30d: attributedSales30d,
+          rawImpressions: keyword.impressions,
+          parsedImpressions: impressions,
+          calculatedAcos: acos,
+          acosUnder20: acos < 20,
+          salesOver100: attributedSales30d > 100,
+          impressionsOver1000: impressions > 1000,
+          matchesCriteria: matchesCriteria,
+          campaignName: keyword.campaignName,
+          matchType: keyword.matchType
         });
       }
       
-      // Apply filter: cost > 5 && salesIn30Days < 1
-      if (totalSpend > 5 && totalSales < 1) {
-        const acos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
-        
-        return {
-          keyword: keyword.keywordText,
-          campaignName: campaignInfo.campaignName,
-          campaignId: keyword.campaignId,
-          bid: keyword.bid || 0,
-          sales: totalSales,
-          spend: totalSpend,
-          acos: acos,
-          matchType: keyword.matchType,
-          state: keyword.state
-        };
-      }
-      
-      return null;
+      return matchesCriteria;
     })
-    .filter(keyword => keyword !== null)
-    .sort((a, b) => b.spend - a.spend);
-  
-  // Top Performing Keywords - ACOS < 20%, sales > 100, impressions > 10,000
-  const topPerformingKeywords = keywords
-    .map(keyword => {
-      // Get campaign info from the campaign map we already created
-      const campaignInfo = campaignMap.get(keyword.campaignId);
-      if (!campaignInfo) return null;
+    .map((keyword, index) => {
+      // Process top performing keyword data
+      const cost = parseFloat(keyword.cost) || 0;
+      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+      const impressions = parseFloat(keyword.impressions) || 0;
+      const acos = attributedSales30d > 0 ? (cost / attributedSales30d) * 100 : 0;
       
-      // Calculate aggregated metrics for this keyword across all products in the campaign
-      let totalSpend = 0;
-      let totalSales = 0;
-      let totalImpressions = 0;
+      const processedKeyword = {
+        keyword: keyword.keyword,
+        campaignName: keyword.campaignName,
+        campaignId: keyword.campaignId,
+        bid: 0, // Bid information not available in adsKeywordsPerformanceData
+        sales: attributedSales30d,
+        spend: cost,
+        acos: acos,
+        impressions: impressions,
+        matchType: keyword.matchType,
+        state: 'enabled', // Default state
+        clicks: keyword.clicks || 0,
+        adGroupName: keyword.adGroupName,
+        keywordId: keyword.keywordId
+      };
       
-      // First check if we have keyword-specific metrics in negativeKeywordsMetrics
-      const keywordMetrics = negativeKeywordsMetrics.find(k => 
-        k.keyword === keyword.keywordText && 
-        k.campaignName === campaignInfo.campaignName
-      );
-      
-      if (keywordMetrics) {
-        // Use keyword-specific metrics if available
-        totalSpend = keywordMetrics.spend;
-        totalSales = keywordMetrics.sales;
-        totalImpressions = keywordMetrics.impressions || 0;
-      }
-      
-      // If we don't have keyword metrics or impressions, aggregate from all products in the campaign
-      if (!keywordMetrics || totalImpressions === 0) {
-        // Reset totals if we're going to aggregate from products
-        if (!keywordMetrics) {
-          totalSpend = 0;
-          totalSales = 0;
-        }
-        
-        // Aggregate impressions from ALL products in the campaign (30-day data)
-        campaignInfo.products.forEach(product => {
-          if (!keywordMetrics) {
-            // If no keyword metrics, aggregate all metrics
-            totalSpend += parseFloat(product.spend) || 0;
-            totalSales += parseFloat(product.salesIn30Days) || 0;
-          }
-          // Always aggregate impressions from all products
-          totalImpressions += parseFloat(product.impressions) || 0;
-        });
-      }
-      
-      // Calculate ACOS
-      const acos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
-      
-      // Apply filters: ACOS < 20%, sales > 100, impressions > 3,000
-      if (acos < 20 && totalSales > 100 && totalImpressions > 3000) {
-        return {
-          keyword: keyword.keywordText,
-          campaignName: campaignInfo.campaignName,
-          campaignId: keyword.campaignId,
-          bid: keyword.bid || 0,
-          sales: totalSales,
-          spend: totalSpend,
-          acos: acos,
-          impressions: totalImpressions,
-          matchType: keyword.matchType,
-          state: keyword.state
-        };
-      }
-      
-      return null;
+      console.log(`Processed Top Performing Keyword ${index + 1}:`, processedKeyword);
+      return processedKeyword;
     })
-    .filter(keyword => keyword !== null)
     .sort((a, b) => b.sales - a.sales);
+
+  // Debug: Final results for top performing keywords
+  console.log('=== Final Top Performing Keywords Results ===');
+  console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
+  console.log('Filtered Top Performing Keywords:', topPerformingKeywords.length);
+  console.log('Top Performing Keywords Data:', topPerformingKeywords);
+  
+  if (adsKeywordsPerformanceData.length > 0) {
+    console.log('=== Top Performance Analysis ===');
+    const highPerformanceKeywords = adsKeywordsPerformanceData.filter(k => {
+      const cost = parseFloat(k.cost) || 0;
+      const sales = parseFloat(k.attributedSales30d) || 0;
+      const impressions = parseFloat(k.impressions) || 0;
+      const acos = sales > 0 ? (cost / sales) * 100 : 0;
+      return acos < 20;
+    });
+    const highSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) > 100);
+    const highImpressionsKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.impressions) > 1000);
+    
+    console.log(`Keywords with ACOS < 20%: ${highPerformanceKeywords.length}`);
+    console.log(`Keywords with sales > $100: ${highSalesKeywords.length}`);
+    console.log(`Keywords with impressions > 1000: ${highImpressionsKeywords.length}`);
+    console.log('High performance keywords sample:', highPerformanceKeywords.slice(0, 5).map(k => ({ 
+      keyword: k.keyword, 
+      cost: k.cost, 
+      attributedSales30d: k.attributedSales30d,
+      impressions: k.impressions,
+      acos: parseFloat(k.attributedSales30d) > 0 ? (parseFloat(k.cost) / parseFloat(k.attributedSales30d)) * 100 : 0
+    })));
+  }
   
   // Auto Campaign Insights Processing
   /*
@@ -572,12 +626,13 @@ const PPCDashboard = () => {
         type: 'keyword-optimize',
         keyword: keyword.keyword,
         campaign: keyword.campaignName,
-        message: `"${keyword.keyword}" performing well (${keyword.acos.toFixed(0)}% ACOS). Consider increasing bid from $${keyword.bid.toFixed(2)} to capture more traffic.`,
+        message: `"${keyword.keyword}" performing well (${keyword.acos.toFixed(0)}% ACOS, ${keyword.impressions.toLocaleString()} impressions). High-performing keyword with potential for increased investment.`,
         priority: 'low',
         metrics: {
           sales: keyword.sales,
           acos: keyword.acos,
-          currentBid: keyword.bid
+          impressions: keyword.impressions,
+          spend: keyword.spend
         }
       });
     });
@@ -844,16 +899,13 @@ const PPCDashboard = () => {
     // Add Wasted Spend Keywords - ALL DATA (not paginated)
     if (wastedSpendKeywords.length > 0) {
       csvData.push([`Wasted Spend Keywords (>$5 spend, <$1 sales) - Total: ${wastedSpendKeywords.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Bid', 'Sales', 'Spend', 'ACOS %', 'Match Type']);
+      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend']);
       wastedSpendKeywords.forEach(keyword => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `$${keyword.bid.toFixed(2)}`,
           `$${keyword.sales.toFixed(2)}`,
-          `$${keyword.spend.toFixed(2)}`,
-          `${keyword.acos.toFixed(2)}%`,
-          keyword.matchType
+          `$${keyword.spend.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -861,18 +913,18 @@ const PPCDashboard = () => {
     
     // Add Top Performing Keywords - ALL DATA (not paginated)
     if (topPerformingKeywords.length > 0) {
-      csvData.push([`Top Performing Keywords (<20% ACOS, >$100 sales) - Total: ${topPerformingKeywords.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Bid', 'Sales', 'Spend', 'ACOS %', 'Impressions', 'Match Type']);
+      csvData.push([`Top Performing Keywords (<20% ACOS, >$100 sales, >1000 impressions) - Total: ${topPerformingKeywords.length} keywords`]);
+      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend', 'ACOS %', 'Impressions', 'Match Type', 'Clicks']);
       topPerformingKeywords.forEach(keyword => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `$${keyword.bid.toFixed(2)}`,
           `$${keyword.sales.toFixed(2)}`,
           `$${keyword.spend.toFixed(2)}`,
           `${keyword.acos.toFixed(2)}%`,
           keyword.impressions.toLocaleString(),
-          keyword.matchType
+          keyword.matchType || 'N/A',
+          keyword.clicks.toString()
         ]);
       });
       csvData.push([]);
@@ -898,18 +950,15 @@ const PPCDashboard = () => {
     
     // Add Negative Keywords Metrics - ALL DATA (not paginated)
     if (negativeKeywordsMetrics.length > 0) {
-      csvData.push([`Negative Keywords Analysis - Total: ${negativeKeywordsMetrics.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
+      csvData.push([`Negative Keywords Analysis (using adsKeywordsPerformanceData) - Total: ${negativeKeywordsMetrics.length} keywords`]);
+      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend', 'ACOS %']);
       negativeKeywordsMetrics.forEach(keyword => {
-        const acos = keyword.sales > 0 ? (keyword.spend / keyword.sales) * 100 : 0;
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
           `$${keyword.sales.toFixed(2)}`,
           `$${keyword.spend.toFixed(2)}`,
-          keyword.clicks || 0,
-          keyword.impressions || 0,
-          `${acos.toFixed(2)}%`
+          keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`
         ]);
       });
       csvData.push([]);
@@ -1245,19 +1294,30 @@ const PPCDashboard = () => {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keywords</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
                           </tr>
                         </thead>
-                        <tbody>
+                                                <tbody>
                           {wastedSpendKeywords.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="text-center py-12 text-gray-400">
-                                No data available
+                              <td colSpan={4} className="text-center py-12 text-gray-400">
+                                {adsKeywordsPerformanceData.length === 0 ? (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No keyword performance data available</div>
+                                    <div className="text-xs">Check if keywords performance data has been synced</div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No wasted keywords found</div>
+                                    <div className="text-xs">
+                                       No keywords with cost &gt; $5 and sales &lt; $1 
+                                       (Total keywords: {adsKeywordsPerformanceData.length})
+                                    </div>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           ) : (
@@ -1268,13 +1328,9 @@ const PPCDashboard = () => {
                                 <tr key={idx} className="border-b border-gray-200">
                                   <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
                                   <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                                  <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
                                   <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
                                   <td className="py-4 text-sm text-center font-medium text-red-600">
                                     ${keyword.spend.toFixed(2)}
-                                  </td>
-                                  <td className="py-4 text-sm text-center font-medium text-gray-600">
-                                    {keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`}
                                   </td>
                                 </tr>
                               ));
@@ -1360,21 +1416,38 @@ const PPCDashboard = () => {
                   {selectedTab === 3 && (
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Bid</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Impressions</th>
                           </tr>
                         </thead>
                         <tbody>
                           {topPerformingKeywords.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="text-center py-12 text-gray-400">
-                                No data available
+                              <td colSpan={6} className="text-center py-12 text-gray-400">
+                                {adsKeywordsPerformanceData.length === 0 ? (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No keyword performance data available</div>
+                                    <div className="text-xs">Check if keywords performance data has been synced</div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No top performing keywords found</div>
+                                    <div className="text-xs">
+                                      No keywords meeting criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
+                                      (Total keywords: {adsKeywordsPerformanceData.length})
+                                    </div>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           ) : (
@@ -1385,12 +1458,17 @@ const PPCDashboard = () => {
                                 <tr key={idx} className="border-b border-gray-200">
                                   <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
                                   <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                                  <td className="py-4 text-sm text-center">${keyword.bid.toFixed(2)}</td>
                                   <td className="py-4 text-sm text-center font-medium text-green-600">
                                     ${keyword.sales.toFixed(2)}
                                   </td>
+                                  <td className="py-4 text-sm text-center">
+                                    ${keyword.spend.toFixed(2)}
+                                  </td>
                                   <td className="py-4 text-sm text-center font-medium text-green-600">
                                     {keyword.acos.toFixed(2)}%
+                                  </td>
+                                  <td className="py-4 text-sm text-center">
+                                    {keyword.impressions.toLocaleString()}
                                   </td>
                                 </tr>
                               ));
