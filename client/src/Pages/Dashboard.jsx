@@ -353,38 +353,20 @@ const Dashboard = () => {
                     `
                   }}
                 >
-                  <div className='flex items-center justify-between mb-4'>
-                    <div className='flex items-center gap-3'>
-                      <div className={`w-12 h-12 ${colors.iconBg} rounded-xl flex items-center justify-center shadow-lg ${colors.shadow} border-2 border-white/90 ring-1 ring-gray-300/30 transform transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5`} 
-                           style={{
-                             boxShadow: `
-                               0 4px 6px -1px rgba(0, 0, 0, 0.1),
-                               0 2px 4px -1px rgba(0, 0, 0, 0.06),
-                               inset 0 1px 0 rgba(255, 255, 255, 0.6),
-                               inset 0 -1px 0 rgba(0, 0, 0, 0.1)
-                             `
-                           }}>
-                        <Icon className={`w-6 h-6 ${colors.iconColor} drop-shadow-sm`} />
-                      </div>
-                      <div>
-                        <p className='text-sm font-medium text-gray-600'>{stat.label}</p>
-                      </div>
+                  <div className='flex items-center gap-3 mb-4'>
+                    <div className={`w-12 h-12 ${colors.iconBg} rounded-xl flex items-center justify-center shadow-lg ${colors.shadow} border-2 border-white/90 ring-1 ring-gray-300/30 transform transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5`} 
+                         style={{
+                           boxShadow: `
+                             0 4px 6px -1px rgba(0, 0, 0, 0.1),
+                             0 2px 4px -1px rgba(0, 0, 0, 0.06),
+                             inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                             inset 0 -1px 0 rgba(0, 0, 0, 0.1)
+                           `
+                         }}>
+                      <Icon className={`w-6 h-6 ${colors.iconColor} drop-shadow-sm`} />
                     </div>
-                    <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold shadow-lg transform transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${
-                      stat.trend === 'up' 
-                        ? `${colors.badge} ${colors.badgeShadow}`
-                        : 'bg-gradient-to-br from-red-100 via-red-50 to-red-200 text-red-800 border border-red-200/80 shadow-red-200/60'
-                    }`}
-                    style={{
-                      boxShadow: `
-                        0 3px 6px -1px rgba(0, 0, 0, 0.1),
-                        0 2px 4px -1px rgba(0, 0, 0, 0.06),
-                        inset 0 1px 0 rgba(255, 255, 255, 0.5),
-                        inset 0 -1px 0 rgba(0, 0, 0, 0.08)
-                      `
-                    }}>
-                      <TrendingUp className={`w-3 h-3 drop-shadow-sm ${stat.trend === 'down' ? 'rotate-180' : ''}`} />
-                      <span className="drop-shadow-sm">{stat.change}</span>
+                    <div>
+                      <p className='text-sm font-medium text-gray-600'>{stat.label}</p>
                     </div>
                   </div>
                   <div className='text-2xl font-bold text-gray-900'>{stat.value}</div>

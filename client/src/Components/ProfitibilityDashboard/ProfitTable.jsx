@@ -245,58 +245,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-600">Total Products</div>
-              <div className="text-2xl font-bold text-gray-900">{products.length}</div>
+              <div className="text-2xl font-bold text-gray-900">{totalProducts.length}</div>
             </div>
           </div>
 
-          {/* Summary Stats Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-blue-600" />
-                <span className="text-xs font-medium text-gray-600">Total Sales</span>
-              </div>
-              <div className="text-lg font-bold text-gray-900">${summaryStats.totalSales.toLocaleString()}</div>
-            </div>
-            
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingDown className="w-4 h-4 text-green-600" />
-                <span className="text-xs font-medium text-gray-600">Net Profit</span>
-              </div>
-              <div className={`text-lg font-bold ${summaryStats.totalNetProfit < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                ${summaryStats.totalNetProfit.toLocaleString()}
-              </div>
-            </div>
-            
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span className="text-xs font-medium text-gray-600">Profitable</span>
-              </div>
-              <div className="text-lg font-bold text-emerald-600">
-                {summaryStats.profitableProducts}/{summaryStats.totalProducts}
-              </div>
-            </div>
-            
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <X className="w-4 h-4 text-red-600" />
-                <span className="text-xs font-medium text-gray-600">Critical</span>
-              </div>
-              <div className="text-lg font-bold text-red-600">{summaryStats.criticalProducts}</div>
-            </div>
-            
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <Target className="w-4 h-4 text-purple-600" />
-                <span className="text-xs font-medium text-gray-600">Avg Margin</span>
-              </div>
-              <div className="text-lg font-bold text-purple-600">
-                {summaryStats.totalSales > 0 ? ((summaryStats.totalNetProfit / summaryStats.totalSales) * 100).toFixed(1) : '0.0'}%
-              </div>
-            </div>
-          </div>
+
         </div>
 
         {/* Enhanced Table */}
