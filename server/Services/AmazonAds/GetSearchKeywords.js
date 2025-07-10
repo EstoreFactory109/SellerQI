@@ -1,9 +1,7 @@
 const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
-const { generateAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
-const userModel = require('../../models/userModel.js');
 const SearchTerms = require('../../models/SearchTermsModel.js');
 
 // Base URIs for different regions
@@ -83,7 +81,12 @@ async function getReportId(accessToken, profileId, region) {
                 data: error.response.data,
                 headers: error.response.headers
             });
-            throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Preserve the original error structure for TokenManager to detect 401s
+            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            throw enhancedError;
         } else if (error.request) {
             console.error('No response received:', error.request);
             throw new Error('No response received from Amazon Ads API');
@@ -124,19 +127,9 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                if (attempts === 58 || attempts === 118 || attempts === 178) {
-                    const user = await userModel.findById(userId).select('spiRefreshToken');
-                    if (!user || !user.spiRefreshToken) {
-                        return {
-                            status: 'FAILURE',
-                            reportId: reportId,
-                            error: 'Report generation failed - unable to refresh token'
-                        }
-                    }
-                    accessToken = await generateAccessToken(user.spiRefreshToken);
-                }
+                // Token refresh is now handled automatically by TokenManager
 
-                console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                 console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
@@ -185,7 +178,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 data: error.response.data,
                 headers: error.response.headers
             });
-            throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Preserve the original error structure for TokenManager to detect 401s
+            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            throw enhancedError;
         } else if (error.request) {
             console.error('No response received:', error.request);
             throw new Error('No response received from Amazon Ads API');
@@ -218,20 +216,24 @@ async function downloadReportData(location, accessToken, profileId) {
             };
         }
 
+        console.log(`Downloaded report with ${Array.isArray(reportJson) ? reportJson.length : 'unknown number of'} items`);
+
+        // 4) Format the data to match the model schema
         const sponsoredAdsData = [];
 
         reportJson.forEach(item => {
             sponsoredAdsData.push({
-                campaignId: item.campaignId,
-                campaignName: item.campaignName,
-                searchTerm: item.searchTerm,
-                  keyword: item.keyword,
-                  clicks:item.clicks,
-                  sales:item.sales30d,
-                  spend:item.cost
+                campaignId: item.campaignId || '',
+                campaignName: item.campaignName || '',
+                searchTerm: item.searchTerm || '',
+                keyword: item.keyword || '',
+                clicks: item.clicks || 0,
+                sales: item.sales30d || 0,
+                spend: item.cost || 0
             })
-        })
+        });
 
+        console.log(`Formatted ${sponsoredAdsData.length} search terms for database storage`);
         return sponsoredAdsData;
 
     } catch (err) {
@@ -247,7 +249,7 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 async function getSearchKeywords(accessToken, profileId, userId, country, region) {
-    console.log(`Getting search keywords for region: ${region}`);
+            // console.log(`Getting search keywords for region: ${region}`);
 
     try {
         // Add a small delay to prevent rapid successive requests
@@ -260,7 +262,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             throw new Error('Failed to get report ID');
         }
 
-        console.log(`Report ID generated: ${reportData.reportId}`);
+        // console.log(`Report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);
@@ -269,23 +271,48 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             // Download and parse the report data
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
 
-            const createSearchTermsData = await SearchTerms.create({
-                userId: userId,
-                country: country,
-                region: region,
-                searchTerms: reportContent
-            })
-            if(!createSearchTermsData){
+            // Add validation and logging
+            console.log(`Processing ${reportContent.length} search terms for user ${userId}`);
+            
+            if (!reportContent || reportContent.length === 0) {
+                console.log('No search terms data to save');
                 return {
-                    success: false,
-                    message: "Error in creating search terms data",
+                    success: true,
+                    message: "No search terms data available for the specified period",
+                    data: null
                 };
             }
-            return {
-                success: true,
-                message: "Search terms data fetched successfully",
-                data: createSearchTermsData
-            };
+
+            try {
+                const createSearchTermsData = await SearchTerms.create({
+                    userId: userId,
+                    country: country,
+                    region: region,
+                    searchTermData: reportContent
+                });
+                
+                if (!createSearchTermsData) {
+                    console.error('Failed to create search terms data - no data returned from database');
+                    return {
+                        success: false,
+                        message: "Error in creating search terms data",
+                    };
+                }
+                
+                console.log(`Successfully saved search terms data with ID: ${createSearchTermsData._id}`);
+                return {
+                    success: true,
+                    message: "Search terms data fetched successfully",
+                    data: createSearchTermsData
+                };
+            } catch (dbError) {
+                console.error('Database error while saving search terms:', dbError);
+                return {
+                    success: false,
+                    message: `Database error: ${dbError.message}`,
+                    error: dbError
+                };
+            }
         } else {
             console.error('Report generation failed:', reportStatus.error);
             return {

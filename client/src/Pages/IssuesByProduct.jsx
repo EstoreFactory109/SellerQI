@@ -720,7 +720,7 @@ const IssuesByProduct = () => {
                                     </div>
                                     
                                     {/* Stats Cards */}
-                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="grid grid-cols-2 gap-4">
                                         <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
                                             <div className="text-2xl font-bold text-white mb-1">{stats.totalProducts}</div>
                                             <div className="text-xs text-gray-300">Products</div>
@@ -728,14 +728,6 @@ const IssuesByProduct = () => {
                                         <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
                                             <div className="text-2xl font-bold text-orange-300 mb-1">{stats.totalIssues}</div>
                                             <div className="text-xs text-gray-300">Total Issues</div>
-                                        </div>
-                                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                                            <div className="text-2xl font-bold text-red-300 mb-1">{stats.highPriority}</div>
-                                            <div className="text-xs text-gray-300">High Priority</div>
-                                        </div>
-                                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                                            <div className="text-2xl font-bold text-yellow-300 mb-1">{stats.criticalProducts}</div>
-                                            <div className="text-xs text-gray-300">Critical</div>
                                         </div>
                                     </div>
                                 </div>

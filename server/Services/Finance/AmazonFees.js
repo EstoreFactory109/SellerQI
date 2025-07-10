@@ -51,7 +51,7 @@ const getAmazonFeesDetails = async (asin, itemPrice, accessToken, credentials, m
         // Log rate limit info if available
         const rateLimit = response.headers['x-amzn-ratelimit-limit'];
         if (rateLimit) {
-            console.log(`Rate limit info: ${rateLimit}`);
+            // console.log(`Rate limit info: ${rateLimit}`);
         }
 
         if (response && response.data && response.data.payload) {
@@ -93,7 +93,7 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
     const totalProducts = OrderDetails.length;
     let processedCount = 0;
 
-    console.log(`Starting to process ${totalProducts} products with rate limiting...`);
+    // console.log(`Starting to process ${totalProducts} products with rate limiting...`);
 
     try {
         // Process products one by one with rate limiting
@@ -121,7 +121,7 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
                         });
                         success = true;
                         processedCount++;
-                        console.log(`✓ Processed ${processedCount}/${totalProducts} - ASIN: ${order.asin}`);
+                        // console.log(`✓ Processed ${processedCount}/${totalProducts} - ASIN: ${order.asin}`);
                     }
                 } catch (error) {
                     if (error.response && error.response.status === 429) {
@@ -129,7 +129,7 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
                         retries++;
                         if (retries < maxRetries) {
                             const waitTime = Math.pow(2, retries) * 1000; // 2s, 4s, 8s
-                            console.log(`⚠ Rate limited on ASIN ${order.asin}. Waiting ${waitTime/1000}s before retry ${retries}/${maxRetries}`);
+                            // console.log(`⚠ Rate limited on ASIN ${order.asin}. Waiting ${waitTime/1000}s before retry ${retries}/${maxRetries}`);
                             await delay(waitTime);
                         } else {
                             failedASINs.push({

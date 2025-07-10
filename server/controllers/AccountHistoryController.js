@@ -56,7 +56,7 @@ const getAccountHistory=asyncHandler(async(req,res)=>{
     const  userId=req.userId;
     const country=req.country;
     const region  = req.region;
-    console.log(userId,country,region)
+            // console.log(userId,country,region)
     if(!userId || !country || !region){
         logger.error(new ApiError(400,"User id, country and region is missing"));
         return res.status(400).json(new ApiResponse(400,"","User id, country and region is missing"));

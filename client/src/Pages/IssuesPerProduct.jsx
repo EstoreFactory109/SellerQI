@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
+import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle } from 'lucide-react';
 import './IssuesPerProduct.css';
 
 // Reusable component for conversion issues
@@ -502,125 +503,239 @@ const Dashboard = () => {
 
 
     return (
-        <>
-            <div className="p-6 bg-gray-100 max-h-[90vh] overflow-y-auto text-gray-800 lg:mt-0 mt-[10vh]" ref={contentRef}>
-                {/* Header */}
-                <div className="bg-white p-6 rounded-xl shadow mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-center space-x-4">
-                        <LazyLoadImage
-                            src={product.MainImage || noImage}
-                            alt="Product"
-                            className="w-20 h-20 rounded-md object-cover"
-                            effect="blur"
-                            placeholderSrc={noImage}
-                            threshold={100}
-                            wrapperClassName="w-20 h-20 rounded-md mr-4 product-image-wrapper"
-                        />
-                        <div>
-                            <h2 className="text-xl font-semibold mb-4">{product.name} ...</h2>
-                            <p className="text-sm">ASIN: {product.asin}</p>
-                            <p className="text-sm">SKU: {product.sku}</p>
-                            <p className="text-sm">List Price: ${product.price}</p>
+        <div className="bg-gray-50/50 lg:mt-0 mt-[10vh] h-screen overflow-y-auto">
+            <div className="p-6">
+                {/* Header Section */}
+                <div className="bg-gradient-to-r from-slate-800 via-gray-900 to-slate-900 rounded-2xl shadow-lg mb-8">
+                    <div className="px-6 py-8">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                            <div className="text-white">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
+                                    <div className="flex items-center gap-3">
+                                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                                            Product Issues
+                                        </h1>
+                                        <HelpCircle className='w-5 h-5 text-gray-300 hover:text-white cursor-pointer transition-colors' />
+                                    </div>
+                                </div>
+                                <p className="text-gray-300 text-lg mb-4">Detailed analysis of product optimization opportunities</p>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                                        <span>Live analysis active</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm text-orange-300">
+                                        <AlertTriangle className="w-4 h-4" />
+                                        <span>Issues detected</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-6 text-white">
+                                <div className="text-center lg:text-right">
+                                    <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent mb-1">
+                                        {product.asin}
+                                    </div>
+                                    <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Product ASIN</div>
+                                    <div className="text-xs text-orange-300 mt-1">Requires optimization</div>
+                                </div>
+                                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
+                                    <Package className="w-8 h-8 text-white" />
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div className='flex items-center gap-2 relative w-fit'>
-                        <div className="relative" ref={downloadRef}>
-                            <button 
-                                className="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
-                                onClick={() => setShowDownloadOptions(!showDownloadOptions)}
-                            >
-                                Download Report
-                                <img src={DropDown} className="w-[7px] h-[7px] invert" />
-                            </button>
-                            <AnimatePresence>
-                                {showDownloadOptions && (
-                                    <motion.div
-                                        initial={{ opacity: 0, scaleY: 0 }}
-                                        animate={{ opacity: 1, scaleY: 1 }}
-                                        exit={{ opacity: 0, scaleY: 0 }}
-                                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                                        style={{ transformOrigin: "top" }}
-                                        className="absolute left-0 top-10 bg-white border border-gray-300 rounded-md shadow-lg z-50 overflow-hidden"
-                                    >
-                                        <button
-                                            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors"
-                                            onClick={() => {
-                                                downloadExcel();
-                                                setShowDownloadOptions(false);
-                                            }}
-                                        >
-                                            Download as Excel (.xlsx)
-                                        </button>
-                                        <button
-                                            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors border-t border-gray-200"
-                                            onClick={() => {
-                                                downloadCSV();
-                                                setShowDownloadOptions(false);
-                                            }}
-                                        >
-                                            Download as CSV (.csv)
-                                        </button>
-
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                        <div className="w-[9rem] bg-white flex justify-center items-center px-2 py-1 border-[1px] border-gray-300 rounded-md text-sm text-gray-400 gap-3 cursor-pointer" onClick={() => setOpenSelector(!openSelector)} ref={dropdownRef}><p>Switch Product</p><img src={DropDown} /></div>
-                        <AnimatePresence mode="wait">
-                            {openSelector && (
-                                <motion.ul
-                                    initial={{ opacity: 0, scaleY: 0 }}
-                                    animate={{ opacity: 1, scaleY: 1 }}
-                                    exit={{ opacity: 0, scaleY: 0 }}
-                                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                                    style={{ transformOrigin: "top", pointerEvents: openSelector ? 'auto' : 'none' }}
-                                    className="w-[30rem] h-[30rem] overflow-x-hidden overflow-y-auto z-[99] bg-white absolute right-0 top-12 py-2 px-2 border-[1px] border-gray-300 shadow-md origin-top"
-                                >
-                                    {info.productWiseError.map((item, index) => (
-                                        <li
-                                            key={index}
-                                            className="flex justify-center items-center py-2 px-2 cursor-pointer hover:bg-[#333651] hover:text-white rounded-md text-sm"
-                                            onMouseDown={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                
-                                                if (item.asin === asin) {
-                                                    setOpenSelector(false);
-                                                    return;
-                                                }
-                                                
-                                                // Navigate immediately
-                                                navigate(`/seller-central-checker/issues/${item.asin}`);
-                                                setOpenSelector(false);
-                                            }}
-                                        >
-                                            {item.asin} | {item.name}...
-                                        </li>
-                                    ))}
-                                </motion.ul>
-                            )}
-                        </AnimatePresence>
                     </div>
                 </div>
 
-                {/* Key Metrics */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    {[
-                        { label: 'Unit Sold', value: product.quantity },
-                        { label: 'Sales', value: `$${product.sales}` },
-                        {label:'Duration', value:`${info?.startDate} - ${info?.endDate}`},
-                    ].map((metric, idx) => (
-                        <div key={idx} className="bg-white p-4 rounded-lg shadow">
-                            <p className="text-sm text-gray-500">{metric.label}</p>
-                            <p className="text-lg font-semibold">{metric.value}</p>
+                <div className="space-y-8 pb-8" ref={contentRef}>
+                {/* Product Information Card */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="bg-white rounded-2xl shadow-lg border-0 p-6 mb-8 hover:shadow-xl transition-all duration-300"
+                >
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div className="flex items-center space-x-6">
+                            <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl overflow-hidden shadow-md">
+                                <LazyLoadImage
+                                    src={product.MainImage || noImage}
+                                    alt="Product"
+                                    className="w-full h-full object-cover"
+                                    effect="blur"
+                                    placeholderSrc={noImage}
+                                    threshold={100}
+                                    wrapperClassName="w-full h-full"
+                                />
+                            </div>
+                            <div className="space-y-3">
+                                <h2 className="text-xl font-bold text-gray-900 leading-tight">{product.name}</h2>
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 font-medium">ASIN:</span>
+                                        <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{product.asin}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 font-medium">SKU:</span>
+                                        <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{product.sku}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 font-medium">Price:</span>
+                                        <span className="font-semibold text-green-600">${product.price}</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    ))}
+
+                        <div className='flex items-center gap-3 relative'>
+                            {/* Download Report Button */}
+                            <div className="relative" ref={downloadRef}>
+                                <button 
+                                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg text-sm font-medium"
+                                    onClick={() => setShowDownloadOptions(!showDownloadOptions)}
+                                >
+                                    <Download className="w-4 h-4" />
+                                    Download Report
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showDownloadOptions ? 'rotate-180' : ''}`} />
+                                </button>
+                                <AnimatePresence>
+                                    {showDownloadOptions && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-full right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
+                                        >
+                                            <button
+                                                className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 transition-colors duration-200 flex items-center gap-2 text-gray-700"
+                                                onClick={() => {
+                                                    downloadExcel();
+                                                    setShowDownloadOptions(false);
+                                                }}
+                                            >
+                                                Download as Excel (.xlsx)
+                                            </button>
+                                            <button
+                                                className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 transition-colors duration-200 border-t border-gray-200 flex items-center gap-2 text-gray-700"
+                                                onClick={() => {
+                                                    downloadCSV();
+                                                    setShowDownloadOptions(false);
+                                                }}
+                                            >
+                                                Download as CSV (.csv)
+                                            </button>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Switch Product Button */}
+                            <div className="relative" ref={dropdownRef}>
+                                <button
+                                    className="flex items-center justify-between gap-3 px-4 py-2 bg-white border border-gray-300 rounded-xl hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700 min-w-[160px]"
+                                    onClick={() => setOpenSelector(!openSelector)}
+                                >
+                                    <span>Switch Product</span>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSelector ? 'rotate-180' : ''}`} />
+                                </button>
+                                <AnimatePresence>
+                                    {openSelector && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-full right-0 mt-2 w-96 max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-50"
+                                        >
+                                            <div className="py-2">
+                                                {info.productWiseError.map((item, index) => (
+                                                    <button
+                                                        key={index}
+                                                        className="w-full px-4 py-3 text-left text-sm hover:bg-blue-50 transition-all duration-150 text-gray-700 hover:text-blue-600 border-b border-gray-100 last:border-b-0"
+                                                        onMouseDown={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            
+                                                            if (item.asin === asin) {
+                                                                setOpenSelector(false);
+                                                                return;
+                                                            }
+                                                            
+                                                            navigate(`/seller-central-checker/issues/${item.asin}`);
+                                                            setOpenSelector(false);
+                                                        }}
+                                                    >
+                                                        <div className="font-mono text-xs text-blue-600 mb-1">{item.asin}</div>
+                                                        <div className="truncate">{item.name}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+                {/* Key Metrics */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    {[
+                        { label: 'Units Sold', value: product.quantity, icon: BarChart3, color: 'blue' },
+                        { label: 'Revenue', value: `$${product.sales}`, icon: TrendingUp, color: 'green' },
+                        { label: 'Analysis Period', value: `${info?.startDate} - ${info?.endDate}`, icon: Calendar, color: 'purple' },
+                    ].map((metric, idx) => {
+                        const Icon = metric.icon;
+                        const colorMap = {
+                            blue: 'from-blue-500 to-blue-600',
+                            green: 'from-green-500 to-green-600',
+                            purple: 'from-purple-500 to-purple-600'
+                        };
+                        
+                        return (
+                            <motion.div
+                                key={idx}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.5, delay: 0.1 + idx * 0.1 }}
+                                className="bg-white rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600 mb-1">{metric.label}</p>
+                                        <p className="text-2xl font-bold text-gray-900">{metric.value}</p>
+                                    </div>
+                                    <div className={`w-12 h-12 bg-gradient-to-br ${colorMap[metric.color]} rounded-lg flex items-center justify-center shadow-lg`}>
+                                        <Icon className="w-6 h-6 text-white" />
+                                    </div>
+                                </div>
+                            </motion.div>
+                        );
+                    })}
                 </div>
 
                 {/* Ranking Issues */}
-                <div className="mb-4">
-                    <div className="bg-[#333651] text-white px-4 py-2 rounded-t-md font-medium">RANKING ISSUES</div>
-                    <div className="border border-t-0 rounded-b-md p-4 space-y-4">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.4 }}
+                    className="mb-8"
+                >
+                    <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
+                        <div className="bg-gradient-to-r from-red-50 via-red-50 to-orange-50 px-6 py-4 border-b border-red-100">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-md">
+                                    <TrendingUp className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-gray-900">Ranking Issues</h2>
+                                    <p className="text-sm text-gray-600">Optimization opportunities for better search rankings</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-6">
                         {(product.rankingErrors.data.TitleResult.charLim?.status === "Error" || product.rankingErrors.data.TitleResult.RestictedWords.status === "Error" || product.rankingErrors.data.TitleResult.checkSpecialCharacters.status === "Error") && (<div>
                             <p className="font-semibold">Titles</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
@@ -800,17 +915,32 @@ const Dashboard = () => {
 
                             </ul>
                         </div>)}
+                        </div>
                     </div>
-                </div>
+                </motion.div>
 
 
                 {/* Conversion Issues */}
                 {hasAnyConversionError && (
-                    <div>
-                        <div className="bg-[#333651] text-white px-4 py-2 rounded-t-md font-medium">
-                            CONVERSION ISSUES
-                        </div>
-                        <div className="border border-t-0 rounded-b-md p-4">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, delay: 0.5 }}
+                        className="mb-8"
+                    >
+                        <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
+                            <div className="bg-gradient-to-r from-blue-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-blue-100">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-md">
+                                        <BarChart3 className="w-5 h-5 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-xl font-bold text-gray-900">Conversion Issues</h2>
+                                        <p className="text-sm text-gray-600">Enhance product appeal and customer conversion rates</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6">
                             <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
                                 {product.conversionErrors.imageResultErrorData?.status === "Error" && (
                                     <IssueItem
@@ -873,17 +1003,32 @@ const Dashboard = () => {
                                     />
                                 )}
                             </ul>
+                            </div>
                         </div>
-                    </div>
+                    </motion.div>
                 )}
 
                 {/* Inventory Issues */}
                 {hasAnyInventoryError && (
-                    <div className="mb-4">
-                        <div className="bg-[#333651] text-white px-4 py-2 rounded-t-md font-medium">
-                            INVENTORY ISSUES
-                        </div>
-                        <div className="border border-t-0 rounded-b-md p-4">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, delay: 0.6 }}
+                        className="mb-8"
+                    >
+                        <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
+                            <div className="bg-gradient-to-r from-green-50 via-green-50 to-emerald-50 px-6 py-4 border-b border-green-100">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-md">
+                                        <Package className="w-5 h-5 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-xl font-bold text-gray-900">Inventory Issues</h2>
+                                        <p className="text-sm text-gray-600">Manage inventory levels and warehouse operations</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6">
                             <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
                                 {/* Inventory Planning Issues */}
                                 {product.inventoryErrors?.inventoryPlanningErrorData && (
@@ -947,24 +1092,27 @@ const Dashboard = () => {
                                     />
                                 )}
                             </ul>
+                            </div>
                         </div>
-                    </div>
+                    </motion.div>
                 )}
+                
                 {/*Empty div*/}
-                <div className='py-2w-full h-5'></div>
+                <div className='py-2 w-full h-5'></div>
+                </div>
             </div>
             
             {/* Loading overlay for PDF generation */}
             {isGeneratingPDF && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
                     <div className="bg-white rounded-lg p-6 flex flex-col items-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#333651] mb-4"></div>
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
                         <p className="text-gray-700">Generating PDF...</p>
                         <p className="text-sm text-gray-500 mt-2">Please wait, this may take a moment</p>
                     </div>
                 </div>
             )}
-        </>
+        </div>
     );
 };
 

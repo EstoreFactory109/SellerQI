@@ -39,7 +39,7 @@ const verifyAccessToken=async(token)=>{
     }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        console.log(decoded)
+        // console.log(decoded)
         if(!decoded){
             logger.error(new ApiError(400,"Invalid token"));
             return false;

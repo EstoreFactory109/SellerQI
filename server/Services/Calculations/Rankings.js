@@ -89,7 +89,7 @@ const checkTitle = (str) => {
     }
 
     const SpecialCharacters=checkSpecialCharacters(str)
-    console.log(SpecialCharacters)
+          // console.log(SpecialCharacters)
 
     if (SpecialCharacters.length>0) {
         errorCount++;
@@ -316,7 +316,7 @@ const BackendKeyWordOrAttributesStatus = (str) => {
 }
 
 const getRankings = (ProductDetails) => {
-    console.log(ProductDetails.product_title)
+    // console.log(ProductDetails.product_title)
     const titleResult = checkTitle(ProductDetails.product_title);
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);

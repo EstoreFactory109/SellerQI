@@ -9,7 +9,7 @@ const auth=asyncHandler(async(req,res,next)=>{
     const adminToken=req.cookies.AdminToken;
     
     if(adminToken) {
-        console.log("adminToken: ",adminToken.length)
+        // console.log("adminToken: ",adminToken.length)
     }
     
     if(!accesstoken){

@@ -11,7 +11,6 @@ import ProtectedAuthRouteWrapper from './Layout/ProtectedAuthRouteWrapper.jsx';
 import MainLayout from './Layout/MainPagesLayout.jsx';
 import DashBoard from './Pages/Dashboard.jsx';
 import Issues from './Pages/Issues.jsx';
-import Reports from './Pages/Reports.jsx';
 import AccountHistory from './Pages/Account.jsx';
 import Settings from './Pages/Settings.jsx';
 import IssuesByProducts from './Pages/IssuesPerProduct.jsx';
@@ -94,7 +93,6 @@ const App = () => {
             <Route path='issues' element={<Issues />} />
             <Route path='issues-by-product' element={<IssuesByProduct />} />
             <Route path='issues/:asin' element={<IssuesByProducts />} />
-            <Route path='reports' element={<Reports />} />
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />

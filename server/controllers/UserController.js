@@ -19,7 +19,7 @@ const IPTrackingModel = require('../models/IPTrackingModel.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, whatsapp, email, password, allTermsAndConditionsAgreed } = req.body;
-    console.log(firstname)
+    // console.log(firstname)
 
     if (!firstname || !lastname || !phone || !whatsapp || !email || !password) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
@@ -286,9 +286,9 @@ const logoutUser = asyncHandler(async (req, res) => {
 
 const updateProfilePic = asyncHandler(async (req, res) => {
     const userId = req.userId;
-    console.log(userId)
+    // console.log(userId)
     const avatar = req.file?.path;
-    console.log(avatar)
+    // console.log(avatar)
     if (!userId || !avatar) {
         logger.error(new ApiError(400, "User id or avater is missing"));
         return res.status(400).json(new ApiResponse(400, "", "User id is missing"));
@@ -408,7 +408,7 @@ const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
 
     const link=`${process.env.RESET_LINK_BASE_URI}/${code}`
 
-    console.log(link, email, user.firstName);
+    // console.log(link, email, user.firstName);
 
     const emailSent = await sendEmailResetLink(email, user.firstName, link);
 
@@ -468,7 +468,7 @@ const verifyResetPasswordCode = asyncHandler(async (req, res) => {
 
 const resetPassword = asyncHandler(async (req, res) => {
     const { code, newPassword } = req.body;
-    console.log(code, newPassword);
+    // console.log(code, newPassword);
 
     if (!code || !newPassword) {
         logger.error(new ApiError(400, "Code or new password is missing"));
@@ -525,7 +525,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 const getIPTracking = asyncHandler(async (req, res) => {
   
     const ip = req.ip;
-    console.log(ip);
+    // console.log(ip);
     if(!ip){
         logger.error(new ApiError(400, "IP is missing"));
         return res.status(400).json(new ApiResponse(400, "", "IP is missing"));
@@ -564,7 +564,7 @@ const TrackIP = asyncHandler(async (req, res) => {
                 }
             }else{
                 checkIp.searchesLeft--;
-                console.log("searchesLeft",checkIp.searchesLeft);
+                // console.log("searchesLeft",checkIp.searchesLeft);
                 await checkIp.save();
                 return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "Number of searches updated successfully"));
             }

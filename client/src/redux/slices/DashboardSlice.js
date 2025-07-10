@@ -18,6 +18,7 @@ const DashboardDataSlice = createSlice({
         state.DashBoardInfo.reimbustment=action.payload.reimburstmentData;
         state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales;
         state.DashBoardInfo.TotalSales=action.payload.TotalSales;
+        state.DashBoardInfo.GetOrderData=action.payload.GetOrderData;
       }
     },
   });

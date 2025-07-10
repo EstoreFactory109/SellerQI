@@ -16,7 +16,7 @@ const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 
 const testReport = async (req, res) => {
     const { accessToken, marketplaceIds } = req.body;
-    console.log(accessToken, marketplaceIds)
+    // console.log(accessToken, marketplaceIds)
     if (!accessToken || !marketplaceIds) {
         return res.status(400).json({ message: "Credentials are missing" })
     }
@@ -189,7 +189,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
   const testGetPPCSpendsBySKU = async (req, res) => {
     const { accessToken, region,profileId } = req.body;
    
-    const result = await getSearchKeywords(accessToken,"3813192246011322","684b2156d5c2340ff1b7bd2b","US",region);
+    const result = await getSearchKeywords(accessToken,profileId,"684b2156d5c2340ff1b7bd2b","US",region);
     return res.status(200).json({
         data: result
     })

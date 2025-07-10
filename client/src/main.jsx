@@ -5,12 +5,15 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import { BrowserRouter } from "react-router-dom";
+import DeviceWrapper from './Components/DeviceWrapper/DeviceWrapper.jsx';
 
 createRoot(document.getElementById('root')).render(
  
     <Provider store={store}>
       <BrowserRouter>
-        <App />
+        <DeviceWrapper>
+          <App />
+        </DeviceWrapper>
       </BrowserRouter>
     </Provider>
  

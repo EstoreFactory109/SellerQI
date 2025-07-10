@@ -6,6 +6,7 @@ const UserModel = require('../../models/userModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 const getReport = require('../Finance/GetOrdersAndRevenue.js');
+const {processWeeklyFinanceData} = require('../Finance/WeeklyFinaceData.js');
 
 // Rate limiting constants
 const RATE_LIMIT = {
@@ -49,7 +50,7 @@ async function makeAPIRequestWithRetry(url, headers, retryAttempt = 0) {
 
 const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country, region) => {
     const host = baseuri;
-    console.log("dataToReceive", dataToReceive);
+    // console.log("dataToReceive", dataToReceive);
     logger.info("Starting listFinancialEventsMethod", {
         userId,
         country,
@@ -66,10 +67,9 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         return [];
     }
 
-    const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
+   // const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
+    const weeklyFinanceData = await processWeeklyFinanceData(dataToReceive, userId, baseuri, country, region);
 
-    
-    console.log("reportResult", reportResult.totalAfterDiscounts);
     
 
   
@@ -365,8 +365,8 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
 
     // Subtract refunds from total sales (refunds reduce total sales)
     totalSales = totalSales - Math.abs(totalRefunds);
-    console.log("totalSales after refunds:", totalSales);
-    console.log("totalRefunds:", totalRefunds);
+            // console.log("totalSales after refunds:", totalSales);
+        // console.log("totalRefunds:", totalRefunds);
 
     // Calculate gross profit
     const totalGrossProfit = totalSales + productAdsPayment + 

@@ -5,8 +5,8 @@ const SellerModel = require('../../models/sellerCentralModel.js');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
     logger.info(marketplaceIds);
-    console.log(accessToken)
-    console.log(baseURI)
+    // console.log(accessToken)
+    // console.log(baseURI)
     try {
         const response = await axios.post(
             `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports`,

@@ -100,8 +100,8 @@ const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMe
 };
 
 const analyseData = (data) => {
-    console.log(data)
-    
+
+    console.log("data: ",data)
     // Safely extract data with fallbacks
     const TotalProducts = data.TotalProducts || [];
     const accountHealthPercentage = data.AccountData?.getAccountHealthPercentge || { Percentage: 0, status: 'UNKNOWN' };
@@ -526,7 +526,8 @@ const analyseData = (data) => {
         keywords: data.keywords || [],
         searchTerms: data.searchTerms || [],
         campaignData: data.campaignData || [],
-        adsKeywordsPerformanceData: data.adsKeywordsPerformanceData || []
+        adsKeywordsPerformanceData: data.adsKeywordsPerformanceData || [],
+        GetOrderData: data.GetOrderData || []
     };
 
     return { dashboardData };

@@ -133,19 +133,9 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                if (attempts === 58 || attempts === 118 || attempts === 178) {
-                    const user = await userModel.findById(userId).select('spiRefreshToken');
-                    if (!user || !user.spiRefreshToken) {
-                        return {
-                            status: 'FAILURE',
-                            reportId: reportId,
-                            error: 'Report generation failed - unable to refresh token'
-                        }
-                    }
-                    accessToken = await generateAccessToken(user.spiRefreshToken);
-                }
+                // Token refresh is now handled automatically by TokenManager
 
-                console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
@@ -265,7 +255,7 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) {
-    console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
+            // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
     try {
         // Add a small delay to prevent rapid successive requests
@@ -278,7 +268,7 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) 
             throw new Error('Failed to get report ID');
         }
 
-        console.log(`Report ID generated: ${reportData.reportId}`);
+        // console.log(`Report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);

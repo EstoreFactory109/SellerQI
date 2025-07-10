@@ -12,11 +12,11 @@ const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedu
 const SaveAllDetails=asyncHandler(async(req,res)=>{
     const {region,country}=req.body;
     const userId=req.userId;
-    console.log(req.userId);
+            // console.log(req.userId);
     if(!country || !region){
         return res.status(400).json(new ApiResponse(400,"","Credentials are missing"));
     }
-    console.log(region,country);
+            // console.log(region,country);
     const getUser=await User.findById(userId);
     if(!getUser){
         return res.status(404).json(new ApiResponse(404,"","User not found"));

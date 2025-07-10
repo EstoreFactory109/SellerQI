@@ -6,7 +6,7 @@ const { ApiError } = require('../../utils/ApiError');
 
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
-    console.log(marketplaceIds);
+    // console.log(marketplaceIds);
     try {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
@@ -27,7 +27,7 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             }
         );
 
-        console.log(`✅ Report Requested! Report ID: ${response.data.reportId}`);
+        // console.log(`✅ Report Requested! Report ID: ${response.data.reportId}`);
         return response.data.reportId;
     } catch (error) {
         console.error("❌ Error generating report:", error.response ? error.response.data : error.message);
@@ -47,11 +47,11 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
         const status = response.data.processingStatus;
         const reportDocumentId = response.data.reportDocumentId || null;
 
-        console.log(`🔄 Report Status: ${status}`);
+        // console.log(`🔄 Report Status: ${status}`);
 
-        switch (status) {
-            case "DONE":
-                console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+                  switch (status) {
+              case "DONE":
+                  // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
                 return reportDocumentId;
 
             case "FATAL":
@@ -63,7 +63,7 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
                 return false;
 
             case "IN_PROGRESS":
-                console.log("⏳ Report is still processing...");
+                // console.log("⏳ Report is still processing...");
                 return null;
 
             case "DONE_NO_DATA":
@@ -108,7 +108,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
     }
 
     try {
-        console.log("📄 Generating Report...");
+        // console.log("📄 Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -119,7 +119,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         let retries = 30; 
 
         while (!reportDocumentId && retries > 0) {
-            console.log(`⏳ Checking report status... (Retries left: ${retries})`);
+            // console.log(`⏳ Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
@@ -139,9 +139,9 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
             };
         }
 
-        console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+        // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
 
-        console.log("📥 Downloading Report...");
+        // console.log("📥 Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
 
         const fullReport = await axios({

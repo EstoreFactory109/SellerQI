@@ -5,7 +5,7 @@ const UserModel= require('../../models/userModel.js');
 
 const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,country,region) => {
     const host = baseuri;  // Correct SP-API host
-    console.log("asin-block: ",asinArray)
+    // console.log("asin-block: ",asinArray)
 
     // ✅ Fixed API Path & Required Params
 
@@ -52,14 +52,14 @@ const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,count
         response.data.payload.forEach(element => {
             
             if(element.Product.CompetitivePricing.CompetitivePrices.length===0){
-            console.log(element.Product.CompetitivePricing.CompetitivePrices)
-            console.log(element.Product.CompetitivePricing.CompetitivePrices.length)
+                                // console.log(element.Product.CompetitivePricing.CompetitivePrices)
+                    // console.log(element.Product.CompetitivePricing.CompetitivePrices.length)
                 Products.push({
                 asin: element.ASIN,
                 belongsToRequester:false
             })
             }else{
-                console.log(element.Product.CompetitivePricing.CompetitivePrices)
+                                    // console.log(element.Product.CompetitivePricing.CompetitivePrices)
                  Products.push({
                 asin: element.ASIN,
                 belongsToRequester:element.Product?.CompetitivePricing.CompetitivePrices[0].belongsToRequester

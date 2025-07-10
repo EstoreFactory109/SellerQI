@@ -19,7 +19,7 @@ const listFinancialEventsMethod = async () => {
 
     try {
         const temporaryCredentials = await getTemporaryCredentials("us-east-1");
-        console.log("temporaryCredentials: ",temporaryCredentials)
+        // console.log("temporaryCredentials: ",temporaryCredentials)
         do {
             const queryParams = new URLSearchParams({
                 postedAfter: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -54,7 +54,7 @@ const listFinancialEventsMethod = async () => {
 
             const responseData = response.data.payload;
 
-            console.log("responseData: ",responseData)
+                            // console.log("responseData: ",responseData)
             
             if (responseData.transactions) {
                 allTransactions.push(...responseData.transactions);

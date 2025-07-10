@@ -6,12 +6,12 @@ import { useSelector, useDispatch } from 'react-redux';
 import { loginSuccess } from '../../../redux/slices/authSlice.js';
 import axios from 'axios';
 import BeatLoader from "react-spinners/BeatLoader";
+import { User, Phone, Mail, Edit3 } from "lucide-react";
 
 export default function ProfileForm() {
   const dispatch = useDispatch();
   const Details = useSelector((state) => state.Auth.user);
   const pic = useSelector(state => state.profileImage?.imageLink);
-
 
   const [firstname, setFirstname] = useState('');
   const [lastname, setLastname] = useState('');
@@ -104,125 +104,170 @@ export default function ProfileForm() {
   };
 
   return (
-    <div className="max-w-full mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-base font-light mb-1">PROFILE DETAILS</h2>
-      <p className="text-sm text-gray-500 mb-6">Edit your profile details</p>
+    <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
+      {/* Header Section */}
+      <div className="bg-gradient-to-r from-slate-900 via-purple-900 to-slate-900 px-6 py-8 text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-20" style={{backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")"}}></div>
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
+            <div className="flex items-center gap-3">
+              <User className="w-6 h-6 text-white" />
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                Profile Details
+              </h2>
+            </div>
+          </div>
+          <p className="text-gray-300 text-sm">Manage your personal information and account settings</p>
+        </div>
+      </div>
 
-      {(!pic || pic.length === 0) && <Upload handleFile={handleFile} />}
-      {!close && <Preview image={image} setImage={setImage} setClose={setClose} />}
-      {(pic !== null && pic.length !== 0) && <ProfilePic handleFile={handleFile} setClose={setClose} />}
+      {/* Content Section */}
+      <div className="p-6">
+        {/* Profile Image Section */}
+        <div className="mb-8">
+          {(!pic || pic.length === 0) && <Upload handleFile={handleFile} />}
+          {!close && <Preview image={image} setImage={setImage} setClose={setClose} />}
+          {(pic !== null && pic.length !== 0) && <ProfilePic handleFile={handleFile} setClose={setClose} />}
+        </div>
 
-      <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleSubmit}>
-        {/* First Name */}
-        <InputField
-          label="First Name"
-          value={firstname}
-          editable={firstNameStatus}
-          color={firstNameColor}
-          name="firstName"
-          func={(e) => setFirstname(e.target.value)}
-          onEdit={(e) => {
-            e.preventDefault();
-            toggleEdit(setFirstNameStatus, setFirstNameColor, firstNameStatus);
-          }}
-        />
+        {/* Form Section */}
+        <form className="space-y-6" onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* First Name */}
+            <InputField
+              label="First Name"
+              value={firstname}
+              editable={firstNameStatus}
+              color={firstNameColor}
+              name="firstName"
+              func={(e) => setFirstname(e.target.value)}
+              onEdit={(e) => {
+                e.preventDefault();
+                toggleEdit(setFirstNameStatus, setFirstNameColor, firstNameStatus);
+              }}
+              icon={User}
+            />
 
-        {/* Last Name */}
-        <InputField
-          label="Last Name"
-          value={lastname}
-          editable={lastNameStatus}
-          color={lastNameColor}
-          name="lastName"
-          func={(e) => setLastname(e.target.value)}
-          onEdit={(e) => {
-            e.preventDefault();
-            toggleEdit(setLastNameStatus, setLastNameColor, lastNameStatus);
-          }}
-        />
+            {/* Last Name */}
+            <InputField
+              label="Last Name"
+              value={lastname}
+              editable={lastNameStatus}
+              color={lastNameColor}
+              name="lastName"
+              func={(e) => setLastname(e.target.value)}
+              onEdit={(e) => {
+                e.preventDefault();
+                toggleEdit(setLastNameStatus, setLastNameColor, lastNameStatus);
+              }}
+              icon={User}
+            />
 
-        {/* Phone */}
-        <InputField
-          label="Phone"
-          value={phone}
-          editable={phoneStatus}
-          color={phoneColor}
-          name="phone"
-          func={(e) => setPhone(e.target.value)}
-          onEdit={(e) => {
-            e.preventDefault();
-            toggleEdit(setPhoneStatus, setPhoneColor, phoneStatus);
-          }}
-        />
+            {/* Phone */}
+            <InputField
+              label="Phone"
+              value={phone}
+              editable={phoneStatus}
+              color={phoneColor}
+              name="phone"
+              func={(e) => setPhone(e.target.value)}
+              onEdit={(e) => {
+                e.preventDefault();
+                toggleEdit(setPhoneStatus, setPhoneColor, phoneStatus);
+              }}
+              icon={Phone}
+            />
 
-        {/* Whatsapp */}
-        <InputField
-          label="Whatsapp"
-          value={whatsapp}
-          editable={whatsappStatus}
-          color={whatsappColor}
-          name="whatsapp"
-          func={(e) => setWhatsapp(e.target.value)}
-          onEdit={(e) => {
-            e.preventDefault();
-            toggleEdit(setWhatsappStatus, setWhatsappColor, whatsappStatus);
-          }}
-        />
+            {/* Whatsapp */}
+            <InputField
+              label="Whatsapp"
+              value={whatsapp}
+              editable={whatsappStatus}
+              color={whatsappColor}
+              name="whatsapp"
+              func={(e) => setWhatsapp(e.target.value)}
+              onEdit={(e) => {
+                e.preventDefault();
+                toggleEdit(setWhatsappStatus, setWhatsappColor, whatsappStatus);
+              }}
+              icon={Phone}
+            />
 
-        {/* Email */}
-        <InputField
-          label="Email"
-          value={email}
-          editable={emailStatus}
-          color={emailColor}
-          name="email"
-          func={(e) => setEmail(e.target.value)}
-          onEdit={(e) => {
-            e.preventDefault();
-            toggleEdit(setEmailStatus, setEmailColor, emailStatus);
-          }}
-        />
-        
-        <button type="submit" className="hidden" ref={submitBtn}></button>
-      </form>
+            {/* Email */}
+            <div className="lg:col-span-2">
+              <InputField
+                label="Email"
+                value={email}
+                editable={emailStatus}
+                color={emailColor}
+                name="email"
+                func={(e) => setEmail(e.target.value)}
+                onEdit={(e) => {
+                  e.preventDefault();
+                  toggleEdit(setEmailStatus, setEmailColor, emailStatus);
+                }}
+                icon={Mail}
+              />
+            </div>
+          </div>
+          
+          <button type="submit" className="hidden" ref={submitBtn}></button>
+        </form>
 
-      <div className="flex justify-end gap-4 mt-8">
-        <button
-          type="submit"
-          className="w-[10rem] h-10  bg-[#333651] text-white rounded-md"
-          onClick={clickSave}
-        >
-          {loading ? <BeatLoader color="#fff" size={8} /> : <p>Save Information</p>}
-        </button>
+        {/* Save Button */}
+        <div className="flex justify-end pt-6 border-t border-gray-200/80 mt-8">
+          <button
+            type="submit"
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[160px] justify-center"
+            onClick={clickSave}
+          >
+            {loading ? <BeatLoader color="#fff" size={8} /> : (
+              <>
+                <User className="w-4 h-4" />
+                Save Information
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// Reusable InputField component
-const InputField = ({ label, value, editable, color, name, func, onEdit }) => (
-  <div>
-    <label className="block text-sm font-medium text-gray-700">{label}</label>
-    <div className="mt-1 flex w-full h-10 rounded-md border-2 pl-2" style={{ borderColor: color }}>
+// Updated InputField component with modern styling
+const InputField = ({ label, value, editable, color, name, func, onEdit, icon: Icon }) => (
+  <div className="space-y-2">
+    <label className="block text-sm font-semibold text-gray-900">{label}</label>
+    <div className="relative">
+      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        <Icon className="w-5 h-5 text-gray-400" />
+      </div>
       <input
         type="text"
         disabled={editable}
         value={value}
         onChange={func}
         name={name}
-        className="w-[93%] outline-none"
-        style={{ color }}
+        className={`w-full pl-10 pr-12 py-3 border-2 rounded-xl transition-all duration-200 font-medium ${
+          editable 
+            ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' 
+            : 'bg-white border-blue-200 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none'
+        }`}
+        style={{ 
+          borderColor: editable ? '#e5e7eb' : (color === '#333651' ? '#3b82f6' : '#e5e7eb')
+        }}
       />
       <button
         type="button"
-        className="bg-gray-300 w-[7%] px-2 border-l-2"
-        style={{ borderColor: color }}
+        className={`absolute inset-y-0 right-0 px-3 flex items-center transition-all duration-200 rounded-r-xl ${
+          editable 
+            ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' 
+            : 'bg-blue-50 hover:bg-blue-100 text-blue-600'
+        }`}
         onClick={onEdit}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-        </svg>
+        <Edit3 className="w-4 h-4" />
       </button>
     </div>
   </div>

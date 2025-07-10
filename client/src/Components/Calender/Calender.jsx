@@ -79,7 +79,6 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     }
   }
 
-
   const submitdateRange = async (e) => {
     e.preventDefault();
     
@@ -93,35 +92,32 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       setSelectedPeriod(`${formatDate(selectedRange.startDate)} - ${formatDate(selectedRange.endDate)}`);
     }
 
-    await applyDateRange(selectedRange);
+    await applyDateRange(selectedRange, 'custom');
   }
 
   const handlePreset = async (type) => {
-    const today = new Date();// hide calendar unless 'custom' is selected
+    const today = new Date();
 
     let newRange;
     switch (type) {
       case 'last7':
         handleActive('last7');
+        // End date: 24 hours from now, Start date: 8 days from now
         newRange = {
-          startDate: subDays(today, 7),
-          endDate: subDays(today, 1),
+          startDate: subDays(today, 8),
+          endDate: subDays(today, 1), // 24 hours from now means yesterday
           key: 'selection',
         };
         setSelectedRange(newRange);
         if (setSelectedPeriod) setSelectedPeriod('Last 7 Days');
-        await applyDateRange(newRange);
+        await applyDateRange(newRange, 'last7');
         break;
       case 'last30':
         handleActive('last30');
-        newRange = {
-          startDate: subDays(today, 30),
-          endDate: subDays(today, 1),
-          key: 'selection',
-        };
-        setSelectedRange(newRange);
+        // For 30 days, just close the calendar and keep default data
         if (setSelectedPeriod) setSelectedPeriod('Last 30 Days');
-        await applyDateRange(newRange);
+        setOpenCalender(false);
+        // Don't make API call, keep the default dashboard data
         break;
       case 'thisMonth':
         handleActive('thisMonth');
@@ -132,7 +128,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         };
         setSelectedRange(newRange);
         if (setSelectedPeriod) setSelectedPeriod('This Month');
-        await applyDateRange(newRange);
+        await applyDateRange(newRange, 'thisMonth');
         break;
       case 'lastMonth':
         handleActive('lastMonth');
@@ -144,7 +140,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         };
         setSelectedRange(newRange);
         if (setSelectedPeriod) setSelectedPeriod('Last Month');
-        await applyDateRange(newRange);
+        await applyDateRange(newRange, 'lastMonth');
         break;
       case 'custom':
         handleActive('custom');
@@ -159,13 +155,15 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     }
   };
 
-  const applyDateRange = async (range) => {
+  const applyDateRange = async (range, periodType = null) => {
     setLoader(true);
     const startDate = range.startDate;
     const endDate = range.endDate;
 
     try {
-      const dateResponse = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${startDate}&endDate=${endDate}`, {withCredentials: true});
+      // Add periodType as query parameter
+      const url = `${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${startDate}&endDate=${endDate}${periodType ? `&periodType=${periodType}` : ''}`;
+      const dateResponse = await axios.get(url, {withCredentials: true});
 
       if (dateResponse.status !== 200) {
         navigate(`/error/${dateResponse.status}`);
@@ -177,10 +175,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         financeData: dateResponse.data.data.FinanceData,
         reimburstmentData: dateResponse.data.data.reimburstmentData,
         WeeklySales: dateResponse.data.data.TotalSales.totalSales,
-        TotalSales: dateResponse.data.data.TotalSales.dateWiseSales
+        TotalSales: dateResponse.data.data.TotalSales.dateWiseSales,
+        GetOrderData: dateResponse.data.data.GetOrderData
       }));
 
     } catch (error) {
+      console.error('Calendar API Error:', error);
       navigate('/error/500');
     } finally {
       setLoader(false);

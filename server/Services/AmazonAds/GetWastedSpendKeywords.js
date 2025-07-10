@@ -98,7 +98,12 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
                 data: error.response.data,
                 headers: error.response.headers
             });
-            throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Preserve the original error structure for TokenManager to detect 401s
+            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            throw enhancedError;
         } else if (error.request) {
             throw new Error('No response received from Amazon Ads API');
         } else {
@@ -131,7 +136,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
             const data = response.data;
             const status = data.status;
 
-            console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                            // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
             if (status === 'COMPLETED') {
                 return { status: 'SUCCESS', location:data.url, reportId };
@@ -150,7 +155,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
                 attempts++;
             } else if (error.response) {
                 console.error('API Error Response:', error.response);
-                throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+                // Preserve the original error structure for TokenManager to detect 401s
+                const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+                enhancedError.response = error.response;
+                enhancedError.status = error.response.status;
+                enhancedError.statusCode = error.response.status;
+                throw enhancedError;
             } else {
                 throw error;
             }
@@ -172,9 +182,9 @@ async function downloadReportData(location, accessToken, profileId) {
         const payloadText = inflatedBuffer.toString('utf8');
         const reportJson = JSON.parse(payloadText);
 
-        console.log('Successfully downloaded report:', {
-            totalRows: reportJson.metadata?.totalRows ?? reportJson.length
-        });
+        // console.log('Successfully downloaded report:', {
+        //     totalRows: reportJson.metadata?.totalRows ?? reportJson.length
+        // });
 
         return reportJson;
     } catch (err) {
@@ -189,7 +199,24 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 // Orchestrator function
-async function getKeywordPerformanceReport(accessToken, profileId, startDate, endDate,userId,country, region) {
+async function getKeywordPerformanceReport(accessToken, profileId,userId,country, region) {
+    const now = new Date();
+    
+    // End date: 24 hours before now (yesterday)
+    const endDateObj = new Date(now);
+    endDateObj.setDate(now.getDate() - 1);
+    
+    // Start date: 31 days before now
+    const startDateObj = new Date(now);
+    startDateObj.setDate(now.getDate() - 31);
+    
+    // Format as YYYY-MM-DD
+    const formatDate = (date) => {
+        return date.toISOString().split('T')[0];
+    };
+    
+    const startDate = formatDate(startDateObj);
+    const endDate = formatDate(endDateObj);
     try {
         const reportData = await getKeywordReportId(accessToken, profileId, startDate, endDate, region);
 
@@ -197,12 +224,12 @@ async function getKeywordPerformanceReport(accessToken, profileId, startDate, en
             throw new Error('Failed to get report ID');
         }
 
-        console.log(`Report ID: ${reportData.reportId}`);
+        // console.log(`Report ID: ${reportData.reportId}`);
 
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region);
 
         if (reportStatus.status === 'SUCCESS') {
-            console.log('Downloading report from:', reportStatus.location);
+            // console.log('Downloading report from:', reportStatus.location);
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
 
             const data = reportContent

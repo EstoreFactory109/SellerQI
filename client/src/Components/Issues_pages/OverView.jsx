@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, TrendingUp, Package, DollarSign, BarChart3, Search, ArrowRight, Eye, Filter, ChevronDown, Activity, Clock, Star } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Package, DollarSign, BarChart3, Search, ArrowRight, Eye, Filter, ChevronDown, Activity, Clock, Star, HelpCircle } from 'lucide-react';
 import Chart from 'react-apexcharts';
 
 const OverView = () => {
@@ -18,13 +18,16 @@ const OverView = () => {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
 
+  // Tooltip states
+  const [hoveredTooltip, setHoveredTooltip] = useState(null);
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
 
   // Dropdown options
   const sortOptions = [
-    { value: 'issues', label: 'Products by Issues' },
+    { value: 'issues', label: 'Issues by Product' },
     { value: 'revenue', label: 'Products by Revenue' },
     { value: 'units', label: 'Products by Unit Sold' }
   ];
@@ -63,7 +66,75 @@ const OverView = () => {
   const warningErrors = accountErrors + sponsoredAdsErrors;
   const infoErrors = inventoryErrors;
 
+  // Issue categories data for chart
+  const issueCategories = [
+    { name: 'Rankings', count: rankingErrors, color: '#fad12a' },
+    { name: 'Conversion', count: conversionErrors, color: '#b92533' },
+    { name: 'Inventory', count: inventoryErrors, color: '#ff6b35' },
+    { name: 'Account Health', count: accountErrors, color: '#90acc7' },
+    { name: 'Profitability', count: profitabilityErrors, color: '#05724e' },
+    { name: 'Sponsored Ads', count: sponsoredAdsErrors, color: '#333651' }
+  ];
 
+  // Chart data for issues breakdown
+  const chartData = {
+    series: issueCategories.map(cat => cat.count),
+    options: {
+      chart: {
+        type: "donut",
+        fontFamily: "'Inter', sans-serif",
+        height: 280,
+        animations: {
+          enabled: true,
+          easing: 'easeinout',
+          speed: 800,
+        }
+      },
+      labels: issueCategories.map(cat => cat.name),
+      colors: issueCategories.map(cat => cat.color),
+      legend: {
+        show: false
+      },
+      dataLabels: {
+        enabled: false,
+      },
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              name: {
+                show: false
+              },
+              value: {
+                show: false
+              },
+              total: {
+                show: false
+              }
+            }
+          }
+        }
+      },
+      stroke: {
+        width: 3,
+        colors: ['#ffffff']
+      },
+      tooltip: {
+        enabled: false
+      },
+      responsive: [{
+        breakpoint: 480,
+        options: {
+          chart: {
+            width: 200,
+            height: 200
+          }
+        }
+      }]
+    }
+  };
 
 
 
@@ -141,178 +212,6 @@ const OverView = () => {
     getSearchFilteredProducts(sortedProducts)
   );
 
-  // Calculate priority-based product counts from processed products
-  const highPriorityCount = processedProducts.filter(product => getPriority(product, sortedProducts) === 'high').length;
-  const mediumPriorityCount = processedProducts.filter(product => getPriority(product, sortedProducts) === 'medium').length;
-  const lowPriorityCount = processedProducts.filter(product => getPriority(product, sortedProducts) === 'low').length;
-
-  // Issue categories with enhanced data and improved fallbacks
-  const issueCategories = [
-    {
-      id: 'critical',
-      name: 'Critical Issues',
-      count: highPriorityCount,
-      description: 'High priority products requiring immediate attention',
-      color: 'bg-red-500',
-      bgColor: 'bg-gradient-to-br from-red-50 to-red-100',
-      textColor: 'text-red-700',
-      borderColor: 'border-red-200',
-      icon: AlertTriangle,
-      subcategories: [
-        { name: 'High Priority Products', count: highPriorityCount, color: '#ef4444' }
-      ]
-    },
-    {
-      id: 'warning',
-      name: 'Warning Issues',
-      count: mediumPriorityCount,
-      description: 'Medium priority products needing attention soon',
-      color: 'bg-yellow-500',
-      bgColor: 'bg-gradient-to-br from-yellow-50 to-yellow-100',
-      textColor: 'text-yellow-700',
-      borderColor: 'border-yellow-200',
-      icon: TrendingUp,
-      subcategories: [
-        { name: 'Medium Priority Products', count: mediumPriorityCount, color: '#eab308' }
-      ]
-    },
-    {
-      id: 'info',
-      name: 'Info Issues',
-      count: lowPriorityCount,
-      description: 'Low priority products with optimization opportunities',
-      color: 'bg-blue-500',
-      bgColor: 'bg-gradient-to-br from-blue-50 to-blue-100',
-      textColor: 'text-blue-700',
-      borderColor: 'border-blue-200',
-      icon: Package,
-      subcategories: [
-        { name: 'Low Priority Products', count: lowPriorityCount, color: '#8b5cf6' }
-      ]
-    }
-  ];
-
-  // Chart data for donut chart with priority-based data (after priority counts are calculated)
-  const totalPriorityProducts = highPriorityCount + mediumPriorityCount + lowPriorityCount;
-  const chartData = {
-    series: totalPriorityProducts > 0 ? [highPriorityCount, mediumPriorityCount, lowPriorityCount] : [1],
-    options: {
-      chart: {
-        type: 'donut',
-        height: 280,
-        animations: {
-          enabled: true,
-          easing: 'easeinout',
-          speed: 800,
-        }
-      },
-      labels: totalPriorityProducts > 0 ? ['High Priority', 'Medium Priority', 'Low Priority'] : ['No Issues'],
-      colors: totalPriorityProducts > 0 ? ['#ef4444', '#eab308', '#3b82f6'] : ['#e5e7eb'],
-      legend: {
-        show: false,
-      },
-      dataLabels: {
-        enabled: true,
-        formatter: function (val, opts) {
-          const value = opts.w.config.series[opts.seriesIndex];
-          if (val > 5) {
-            return Math.round(val) + '%';
-          }
-          return '';
-        },
-        style: {
-          fontSize: '12px',
-          fontWeight: '600',
-          colors: ['#ffffff']
-        },
-        dropShadow: {
-          enabled: true,
-          top: 1,
-          left: 1,
-          blur: 1,
-          opacity: 0.8
-        }
-      },
-      plotOptions: {
-        pie: {
-          donut: {
-            size: '60%',
-            labels: {
-              show: true,
-              name: {
-                show: true,
-                fontSize: '14px',
-                fontWeight: 600,
-                color: '#374151',
-                offsetY: -10,
-                formatter: function () {
-                  return 'Total Products';
-                }
-              },
-              value: {
-                show: true,
-                fontSize: '28px',
-                fontWeight: 'bold',
-                color: '#1f2937',
-                offsetY: 10,
-                formatter: function () {
-                  return totalPriorityProducts;
-                }
-              },
-              total: {
-                show: true,
-                showAlways: true,
-                label: 'Total Products',
-                fontSize: '14px',
-                fontWeight: 600,
-                color: '#374151',
-                formatter: function () {
-                  return totalPriorityProducts;
-                }
-              }
-            }
-          },
-          expandOnClick: false,
-          offsetX: 0,
-          offsetY: 0
-        }
-      },
-      stroke: {
-        width: 3,
-        colors: ['#ffffff']
-      },
-      tooltip: {
-        enabled: true,
-        y: {
-          formatter: function(value, { seriesIndex, w }) {
-            const label = w.config.labels[seriesIndex];
-            const percentage = ((value / totalPriorityProducts) * 100).toFixed(1);
-            return `${value} products (${percentage}%)`;
-          }
-        },
-        style: {
-          fontSize: '12px',
-        }
-      },
-      responsive: [{
-        breakpoint: 480,
-        options: {
-          chart: {
-            width: 200,
-            height: 200
-          },
-          plotOptions: {
-            pie: {
-              donut: {
-                size: '70%'
-              }
-            }
-          }
-        }
-      }]
-    }
-  };
-
   // Calculate pagination
   const totalPages = Math.ceil(processedProducts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -323,8 +222,6 @@ const OverView = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterBy, sortBy]);
-
-
 
   const handleViewAllIssues = () => {
     navigate('/seller-central-checker/issues?tab=category');
@@ -351,6 +248,17 @@ const OverView = () => {
     };
   }, []);
 
+  // Custom Tooltip Component
+  const CustomTooltip = ({ content, children }) => (
+    <div className="relative group">
+      {children}
+      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 w-64 text-center">
+        {content}
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-8 p-2">
       {/* Header Section */}
@@ -361,9 +269,14 @@ const OverView = () => {
             <div className="space-y-2">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-                  Issues Overview
-                </h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                    Issues Overview
+                  </h1>
+                  <CustomTooltip content="Comprehensive dashboard showing all identified issues across your Amazon account including product problems, performance concerns, and optimization opportunities organized by priority levels.">
+                    <HelpCircle className='w-5 h-5 text-gray-300 hover:text-white cursor-pointer transition-colors' />
+                  </CustomTooltip>
+                </div>
               </div>
               <p className="text-gray-300 text-lg">Monitor and prioritize your account issues for optimal performance</p>
               <div className="flex items-center gap-4 mt-4">
@@ -392,6 +305,180 @@ const OverView = () => {
               <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <BarChart3 className="w-8 h-8 text-white" />
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Issues Analysis Section */}
+      <div className="relative overflow-hidden rounded-2xl shadow-2xl border-0 p-6 bg-gradient-to-br from-slate-50 via-white to-blue-50 hover:shadow-3xl transition-all duration-500 group">
+        {/* Geometric Background Pattern */}
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute top-0 left-0 w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full transform rotate-45 translate-x-16 -translate-y-16"></div>
+          <div className="absolute bottom-0 right-0 w-40 h-40 bg-gradient-to-tl from-indigo-500 to-cyan-500 rounded-full transform -rotate-12 -translate-x-20 translate-y-20"></div>
+          <div className="absolute top-1/2 left-1/4 w-20 h-20 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full transform rotate-12"></div>
+        </div>
+        
+                  <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow-lg flex items-center justify-center transform hover:scale-110 transition-transform duration-300">
+                  <BarChart3 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-800 via-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    Product Issues Analysis
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Real-time insights & recommendations</p>
+                </div>
+              </div>
+                          <button
+                onClick={handleViewAllIssues}
+                className="relative px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-sm font-semibold rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center gap-2 overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 transform -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
+                <span className="relative">View All Issues</span>
+                <ArrowRight className="w-4 h-4 relative transform group-hover:translate-x-1 transition-transform duration-300" />
+              </button>
+            </div>
+
+            <p className="text-gray-600 mb-6 text-base">Comprehensive analysis of account issues categorized by type and priority</p>
+
+                      {/* Chart and Legend Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            {/* Chart */}
+            <div className="lg:col-span-1 flex justify-center items-center">
+                              <div className="relative">
+                  {/* Enhanced Chart Container */}
+                  <div className="relative bg-gradient-to-br from-white to-gray-50 rounded-2xl p-6 shadow-2xl border-2 border-transparent bg-clip-padding transform hover:scale-105 transition-all duration-500 group">
+                    {/* Animated gradient border */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-500 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 animate-pulse"></div>
+                    <div className="absolute inset-[2px] bg-gradient-to-br from-white to-gray-50 rounded-2xl"></div>
+                    
+                    {/* Decorative corner elements */}
+                    <div className="absolute top-2 right-2 w-2 h-2 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full opacity-60"></div>
+                    <div className="absolute bottom-2 left-2 w-1.5 h-1.5 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full opacity-60"></div>
+                    
+                    <div className="relative z-10">
+                      <Chart 
+                        options={chartData.options} 
+                        series={chartData.series} 
+                        type="donut" 
+                        width={240} 
+                        height={240}
+                      />
+                      {/* Enhanced Center Text */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <div className="text-3xl font-black bg-gradient-to-r from-red-500 via-orange-500 to-red-600 bg-clip-text text-transparent">
+                          {totalErrors}
+                        </div>
+                        <div className="text-xs font-bold text-red-600 uppercase tracking-wider mt-1">
+                          Total Issues
+                        </div>
+                        {/* Subtle accent line */}
+                        <div className="w-12 h-0.5 bg-gradient-to-r from-red-400 to-orange-400 mt-1.5 rounded-full"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+            </div>
+
+                          {/* Enhanced Legend */}
+              <div className="lg:col-span-2 flex flex-col justify-center space-y-3">
+              {issueCategories.map((category, index) => (
+                                 <motion.div
+                   key={index}
+                   initial={{ opacity: 0, x: 20 }}
+                   animate={{ opacity: 1, x: 0 }}
+                   transition={{ duration: 0.5, delay: index * 0.1 }}
+                   className="group relative"
+                 >
+                   {/* Card with enhanced effects */}
+                   <div className="relative p-4 bg-gradient-to-br from-white to-gray-50/50 rounded-xl border-2 border-gray-200/50 shadow-lg hover:shadow-2xl transition-all duration-500 cursor-pointer transform hover:scale-[1.02] hover:-translate-y-1 hover:border-gray-300">
+                     {/* Animated gradient border on hover */}
+                     <div 
+                       className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-xl border-2 -m-[2px]"
+                       style={{ 
+                         borderImage: `linear-gradient(135deg, ${category.color}40, ${category.color}20, ${category.color}40) 1`,
+                         background: `linear-gradient(135deg, ${category.color}05, transparent, ${category.color}05)`
+                       }}
+                     ></div>
+                     
+                     {/* Diagonal stripe pattern */}
+                     <div 
+                       className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity duration-500 rounded-xl"
+                       style={{
+                         backgroundImage: `repeating-linear-gradient(45deg, ${category.color}, ${category.color} 2px, transparent 2px, transparent 12px)`
+                       }}
+                     ></div>
+                    
+                                         <div className="relative z-10 flex items-center justify-between">
+                       <div className="flex items-center gap-3">
+                         {/* Enhanced Color indicator */}
+                         <div className="relative">
+                           <div 
+                             className="w-6 h-6 rounded-xl shadow-lg transform group-hover:scale-125 group-hover:rotate-12 transition-all duration-300 border-2 border-white"
+                             style={{ 
+                               background: `linear-gradient(135deg, ${category.color}, ${category.color}cc)`,
+                             }}
+                           ></div>
+                           {/* Layered depth effect */}
+                           <div 
+                             className="absolute inset-0.5 w-5 h-5 rounded-xl opacity-60"
+                             style={{ 
+                               background: `linear-gradient(315deg, ${category.color}80, transparent)`
+                             }}
+                           ></div>
+                         </div>
+                         
+                         <div>
+                           <p className="text-sm font-bold text-gray-800 group-hover:text-gray-900 transition-colors">
+                             {category.name}
+                           </p>
+                           <p className="text-xs text-gray-500 mt-0.5">
+                             {category.count === 1 ? '1 issue detected' : `${category.count} issues detected`}
+                           </p>
+                         </div>
+                       </div>
+                      
+                                             {/* Enhanced count badge */}
+                       <div className="relative">
+                         <div 
+                           className="px-3 py-1.5 rounded-xl font-bold text-white shadow-xl transform group-hover:scale-110 transition-all duration-300 border-2 border-white/20"
+                           style={{ 
+                             background: `linear-gradient(135deg, ${category.color}, ${category.color}dd)`,
+                           }}
+                         >
+                           <span className="relative z-10 text-sm">{category.count || 0}</span>
+                           {/* Inner highlight */}
+                           <div 
+                             className="absolute inset-0 rounded-xl opacity-30"
+                             style={{ 
+                               background: `linear-gradient(135deg, white, transparent)`
+                             }}
+                           ></div>
+                         </div>
+                         {/* Subtle shadow base */}
+                         <div 
+                           className="absolute inset-0 px-3 py-1.5 rounded-xl opacity-20 transform translate-y-1"
+                           style={{ backgroundColor: category.color }}
+                         ></div>
+                       </div>
+                    </div>
+                    
+                                         {/* Progress bar effect */}
+                     <div className="mt-2.5 h-1 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full rounded-full transition-all duration-1000 ease-out"
+                        style={{ 
+                          width: totalErrors > 0 ? `${Math.min((category.count / totalErrors) * 100, 100)}%` : '0%',
+                          background: `linear-gradient(90deg, ${category.color}, ${category.color}aa)`
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
             </div>
           </div>
         </div>
@@ -439,233 +526,18 @@ const OverView = () => {
         </motion.div>
       )}
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        
-        {/* Issues Chart Section - Enhanced Layout */}
-        <div className="xl:col-span-1">
-          <div className="bg-white rounded-2xl shadow-lg border-0 p-6 hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Issues Distribution</h2>
-                <p className="text-sm text-gray-500">Breakdown by category</p>
-              </div>
-              <button
-                onClick={() => setShowDetails(!showDetails)}
-                className="px-3 py-2 text-sm font-medium text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded-lg flex items-center gap-2 transition-all duration-200"
-              >
-                <Eye className="w-4 h-4" />
-                {showDetails ? 'Hide' : 'Details'}
-              </button>
-            </div>
-            
-            {totalPriorityProducts > 0 ? (
-              <div className="space-y-6">
-                {/* Chart Container */}
-                <div className="flex items-center justify-center p-4 bg-gray-50 rounded-xl">
-                  <Chart 
-                    options={chartData.options} 
-                    series={chartData.series} 
-                    type="donut" 
-                    width={260} 
-                    height={260}
-                  />
-                </div>
-                
-                {/* Chart Legend - Enhanced Custom Implementation */}
-                <div className="space-y-3 bg-gray-50 rounded-xl p-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Legend</h4>
-                  {chartData.options.labels.map((label, index) => {
-                    const value = chartData.series[index];
-                    const color = chartData.options.colors[index];
-                    const percentage = ((value / totalPriorityProducts) * 100).toFixed(1);
-                    return (
-                      <div key={label} className="flex items-center justify-between text-sm hover:bg-white p-2 rounded-lg transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div 
-                            className="w-4 h-4 rounded-full shadow-sm" 
-                            style={{ backgroundColor: color }}
-                          ></div>
-                          <span className="text-gray-700 font-medium">{label}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-bold text-gray-900">{value}</span>
-                          <span className="text-xs text-gray-500 ml-1">({percentage}%)</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-                <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
-                  <Star className="w-10 h-10 text-white" />
-                </div>
-                <p className="text-lg font-semibold text-gray-700 mb-2">No issues detected</p>
-                <p className="text-sm text-gray-500 text-center">Your account is performing excellently!<br />Keep up the great work.</p>
-              </div>
-            )}
-
-            <AnimatePresence>
-              {showDetails && totalPriorityProducts > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="mt-6 pt-6 border-t border-gray-200"
-                >
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Activity className="w-4 h-4" />
-                    Detailed Breakdown
-                  </h3>
-                  <div className="space-y-4">
-                    {issueCategories.map(category => (
-                      <div key={category.id} className="p-4 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-semibold text-gray-900">{category.name}</span>
-                          <span className="text-lg font-bold text-gray-700">{category.count}</span>
-                        </div>
-                        <div className="space-y-2">
-                          {category.subcategories.map(sub => (
-                            <div key={sub.name} className="flex justify-between items-center text-xs bg-white p-2 rounded-lg">
-                              <div className="flex items-center gap-2">
-                                <div 
-                                  className="w-3 h-3 rounded-full" 
-                                  style={{ backgroundColor: sub.color }}
-                                ></div>
-                                <span className="text-gray-600 font-medium">{sub.name}</span>
-                              </div>
-                              <span className="font-bold" style={{ color: sub.color }}>{sub.count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Issue Categories Cards - Enhanced Layout */}
-        <div className="xl:col-span-2">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 mb-1">Issue Categories</h2>
-              <p className="text-sm text-gray-500">Prioritized by severity level</p>
-            </div>
-            <button
-              onClick={handleViewAllIssues}
-              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium rounded-lg hover:from-blue-700 hover:to-blue-800 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
-            >
-              View All <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            {issueCategories.map((category) => {
-              const IconComponent = category.icon;
-              return (
-                <motion.div
-                  key={category.id}
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  whileTap={{ scale: 0.98 }}
-                  className={`${category.bgColor} ${category.borderColor} border-2 rounded-2xl p-6 cursor-pointer transition-all duration-300 hover:shadow-xl group`}
-                  onClick={() => handleViewAllIssues()}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className={`w-14 h-14 ${category.color} rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-200`}>
-                      <IconComponent className="w-7 h-7 text-white" />
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-3xl font-bold ${category.textColor} mb-1`}>
-                        {category.count}
-                      </div>
-                      <div className="text-xs text-gray-500 font-medium">
-                        {category.count === 1 ? 'Issue' : 'Issues'}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <h3 className={`font-bold text-lg ${category.textColor}`}>
-                      {category.name}
-                    </h3>
-                    <p className="text-sm text-gray-600 leading-relaxed">
-                      {category.description}
-                    </p>
-                    
-                    {/* Subcategory breakdown */}
-                    <div className="pt-4 border-t border-gray-200 space-y-2">
-                      {category.subcategories.map((sub, index) => (
-                        <div key={index} className="flex justify-between items-center text-sm bg-white/60 p-2 rounded-lg">
-                          <div className="flex items-center gap-2">
-                            <div 
-                              className="w-3 h-3 rounded-full shadow-sm" 
-                              style={{ backgroundColor: sub.color }}
-                            ></div>
-                            <span className="text-gray-700 font-medium">{sub.name}</span>
-                          </div>
-                          <span className="font-bold text-gray-800">{sub.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-
-          {/* Enhanced Quick Stats Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 rounded-2xl p-6 border border-blue-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-md">
-                  <DollarSign className="w-6 h-6 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm text-blue-600 font-medium mb-1">Revenue Impact</div>
-                  <div className="text-xl font-bold text-gray-900">
-                    {criticalErrors > 0 ? 'High Risk' : warningErrors > 0 ? 'Medium Risk' : 'Low Risk'}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {criticalErrors > 0 ? 'Immediate action needed' : 'Monitor closely'}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-gradient-to-r from-green-50 via-emerald-50 to-green-50 rounded-2xl p-6 border border-green-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-md">
-                  <TrendingUp className="w-6 h-6 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm text-green-600 font-medium mb-1">Account Health</div>
-                  <div className="text-xl font-bold text-gray-900">
-                    {totalErrors === 0 ? 'Excellent' : totalErrors < 10 ? 'Good' : totalErrors < 25 ? 'Fair' : 'Needs Attention'}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Based on {totalErrors} total issues
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      
-      </div>
-
       {/* Enhanced Top Products Section */}
       <div className="bg-white rounded-2xl shadow-lg border-0 p-8 hover:shadow-xl transition-shadow duration-300">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              {sortOptions.find(opt => opt.value === sortBy)?.label || 'Products with Issues'}
-            </h2>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-2xl font-bold text-gray-900">
+                {sortOptions.find(opt => opt.value === sortBy)?.label || 'Issues by Product'}
+              </h2>
+              <CustomTooltip content="Detailed table showing individual products with issues. You can sort by number of issues, revenue, or units sold to prioritize which products to address first. Use search and filters to find specific products.">
+                <HelpCircle className='w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors' />
+              </CustomTooltip>
+            </div>
             <p className="text-gray-600">
               Showing <span className="font-semibold text-blue-600">{currentProducts.length}</span> of <span className="font-semibold">{processedProducts.length}</span> products with issues
               {totalPages > 1 && (
@@ -796,8 +668,6 @@ const OverView = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-
-
           </div>
         </div>
 

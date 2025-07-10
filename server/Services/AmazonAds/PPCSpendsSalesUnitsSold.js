@@ -135,7 +135,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
                 const response = await axios.get(url, { headers });
                 const { status,location} = response.data;
 
-                console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'SUCCESS') {
@@ -216,9 +216,9 @@ async function downloadReportData(location, accessToken, profileId) {
   
       // 3) Parse JSON
       const reportJson = JSON.parse(payloadText);
-      console.log('Successfully downloaded and parsed report:', {
-        totalRows: reportJson.metadata?.totalRows ?? reportJson.length
-      });
+      // console.log('Successfully downloaded and parsed report:', {
+      //   totalRows: reportJson.metadata?.totalRows ?? reportJson.length
+      // });
   
       return reportJson;
   
@@ -235,7 +235,7 @@ async function downloadReportData(location, accessToken, profileId) {
   }
 
 async function getPPCSpendsSalesUnitsSold(accessToken, profileId, date, region) {
-    console.log(profileId)
+    // console.log(profileId)
     try {
         // Get the report ID first
         const reportData = await getReportId(accessToken, profileId, date, region);
@@ -244,13 +244,13 @@ async function getPPCSpendsSalesUnitsSold(accessToken, profileId, date, region) 
             throw new Error('Failed to get report ID');
         }
 
-        console.log(`Report ID generated: ${reportData.reportId}`);
+        // console.log(`Report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region);
 
         if (reportStatus.status === 'SUCCESS') {
-            console.log('Report generated successfully:', reportStatus.location);
+            // console.log('Report generated successfully:', reportStatus.location);
             
             // Download and parse the report data
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);

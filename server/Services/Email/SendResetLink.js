@@ -27,8 +27,8 @@ const checkEmailDomain = async (email) => {
 
 const sendEmailResetLink = async (email,firstName ,link) => {
 
-    console.log("Email file: ");
-    console.log(email,firstName,link);
+          // console.log("Email file: ");
+      // console.log(email,firstName,link);
     let template = VerificationEmailTemplate
     .replace('{{userName}}',firstName)
     .replace('{{resetLink}}', link);

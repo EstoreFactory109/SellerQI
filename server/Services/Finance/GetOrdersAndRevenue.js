@@ -369,7 +369,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         
         const totalAfterDiscounts = totalSales - totalItemPromotionDiscount - totalShippingPromotionDiscount;
 
-        console.log("totalAfterDiscounts: ", totalAfterDiscounts);
+        // console.log("totalAfterDiscounts: ", totalAfterDiscounts);
 
         const productWiseSales= transformedData.map(order=>{
             if(order.orderStatus === 'Shipped' || order.orderStatus === 'Unshipped' || order.orderStatus === 'PartiallyShipped'){

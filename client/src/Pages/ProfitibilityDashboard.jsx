@@ -6,6 +6,7 @@ import SuggestionList from '../Components/ProfitibilityDashboard/SuggestionList'
 import calenderIcon from '../assets/Icons/Calender.png'
 import { useSelector } from "react-redux";
 import { AnimatePresence, motion } from 'framer-motion';
+import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 
@@ -25,6 +26,7 @@ const mockChartData = [
 const ProfitabilityDashboard = () => {
   const [suggestionsData, setSuggestionsData] = useState([]);
   const [openCalender, setOpenCalender] = useState(false);
+  const [showCogsPopup, setShowCogsPopup] = useState(false);
   const CalenderRef = useRef(null);
 
   useEffect(() => {
@@ -38,6 +40,23 @@ const ProfitabilityDashboard = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Check if COGS popup should be shown (once per session)
+  useEffect(() => {
+    const hasShownCogsPopup = sessionStorage.getItem('profitability_cogs_popup_shown');
+    if (!hasShownCogsPopup) {
+      // Show popup after a short delay for better UX
+      const timer = setTimeout(() => {
+        setShowCogsPopup(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const handleCloseCogsPopup = () => {
+    setShowCogsPopup(false);
+    sessionStorage.setItem('profitability_cogs_popup_shown', 'true');
+  };
 
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   
@@ -77,12 +96,13 @@ const ProfitabilityDashboard = () => {
           const dateKey = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           const totalSales = parseFloat(sale.TotalAmount) || 0;
           
-          // Calculate total spend including all Amazon fees and ad spend
+          // Calculate gross profit: total sales - total spend (fees and ads)
           const totalSpend = avgFeesPerDay;
+          const grossProfit = totalSales - totalSpend;
           
           return {
             date: dateKey,
-            spend: parseFloat(totalSpend.toFixed(2)),
+            grossProfit: parseFloat(grossProfit.toFixed(2)),
             totalSales: parseFloat(totalSales.toFixed(2))
           };
         }
@@ -106,12 +126,13 @@ const ProfitabilityDashboard = () => {
           const dateKey = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           const totalSales = parseFloat(sale.TotalAmount) || 0;
           
-          // Calculate total spend including all Amazon fees
+          // Calculate gross profit: total sales - total spend (fees and ads)
           const totalSpend = avgFeesPerDay;
+          const grossProfit = totalSales - totalSpend;
           
           return {
             date: dateKey,
-            spend: parseFloat(totalSpend.toFixed(2)),
+            grossProfit: parseFloat(grossProfit.toFixed(2)),
             totalSales: parseFloat(totalSales.toFixed(2))
           };
         }
@@ -119,18 +140,18 @@ const ProfitabilityDashboard = () => {
       }).filter(item => item !== null);
     }
     
-    // Final fallback to mock data (updated for spend)
+    // Final fallback to mock data (updated for gross profit)
     return [
-      { date: 'Apr 1', spend: 250, totalSales: 1000 },
-      { date: 'Apr 5', spend: 280, totalSales: 1200 },
-      { date: 'Apr 8', spend: 300, totalSales: 1333 },
-      { date: 'Apr 12', spend: 275, totalSales: 1167 },
-      { date: 'Apr 15', spend: 290, totalSales: 1267 },
-      { date: 'Apr 18', spend: 265, totalSales: 1100 },
-      { date: 'Apr 22', spend: 285, totalSales: 1233 },
-      { date: 'Apr 25', spend: 270, totalSales: 1133 },
-      { date: 'Apr 28', spend: 295, totalSales: 1300 },
-      { date: 'Apr 30', spend: 260, totalSales: 1067 },
+      { date: 'Apr 1', grossProfit: 750, totalSales: 1000 },
+      { date: 'Apr 5', grossProfit: 920, totalSales: 1200 },
+      { date: 'Apr 8', grossProfit: 1033, totalSales: 1333 },
+      { date: 'Apr 12', grossProfit: 892, totalSales: 1167 },
+      { date: 'Apr 15', grossProfit: 977, totalSales: 1267 },
+      { date: 'Apr 18', grossProfit: 835, totalSales: 1100 },
+      { date: 'Apr 22', grossProfit: 948, totalSales: 1233 },
+      { date: 'Apr 25', grossProfit: 863, totalSales: 1133 },
+      { date: 'Apr 28', grossProfit: 1005, totalSales: 1300 },
+      { date: 'Apr 30', grossProfit: 807, totalSales: 1067 },
     ];
   }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance]);
 
@@ -138,27 +159,54 @@ const ProfitabilityDashboard = () => {
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
   
   const metrics = useMemo(() => {
-    // Use the exact same values as the main dashboard for consistency
-    const totalSales = Number(info?.TotalWeeklySale || 0);
-    const grossProfitRaw = Number(info?.accountFinance?.Gross_Profit) || 0;
+    // Calculate metrics from filtered data if available
+    const totalSalesData = info?.TotalSales;
+    const filteredAccountFinance = info?.accountFinance || accountFinance;
+    let filteredTotalSales = 0;
+    let totalOverallSpend = 0;
     
-    // Calculate other metrics
-    const adSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-    const amazonFees = (Number(info?.accountFinance?.FBA_Fees || 0) + 
-                       Number(info?.accountFinance?.Storage || 0) + 
-                       Number(info?.accountFinance?.Amazon_Charges || 0));
+    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      // Calculate totals from filtered date range
+      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+    }
     
-    // Calculate profit margin using the same gross profit as main dashboard
-    const profitMargin = totalSales > 0 ? ((grossProfitRaw / totalSales) * 100) : 0;
+    // Calculate total COGS from all products that have COGS entered
+    let totalCOGS = 0;
+    const profitibilityData = info?.profitibilityData || [];
+    
+    profitibilityData.forEach(product => {
+      const cogsPerUnit = cogsValues[product.asin] || 0;
+      const quantity = product.quantity || 0;
+      totalCOGS += cogsPerUnit * quantity;
+    });
+    
+    // Calculate total overall spend including all Amazon fees
+    totalOverallSpend = (Number(filteredAccountFinance?.FBA_Fees || 0) + 
+                        Number(filteredAccountFinance?.Storage || 0) + 
+                        Number(filteredAccountFinance?.Amazon_Charges || 0) +
+                        Number(filteredAccountFinance?.ProductAdsPayment || 0) +
+                        Number(filteredAccountFinance?.Refunds || 0));
+    
+    // Use filtered data if available, otherwise fall back to original data
+    const totalSales = filteredTotalSales > 0 ? filteredTotalSales : Number(info?.TotalWeeklySale || 0);
+    const originalGrossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
+    
+    // Adjust gross profit by subtracting total COGS (only for profitability page)
+    const adjustedGrossProfit = originalGrossProfit - totalCOGS;
+    
+    const adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
+    const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0) + Number(filteredAccountFinance?.Amazon_Charges || 0));
+    
+    // Calculate adjusted profit margin using COGS-adjusted gross profit
+    const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
     
     return [
       { label: 'Total Sales', value: `$${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `$${grossProfitRaw.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Avg Profit Margin', value: `${profitMargin.toFixed(2)}%`, icon: 'percent' },
+      { label: 'Gross Profit', value: `$${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Ad Spend', value: `$${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Amazon Fees', value: `$${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.TotalWeeklySale, info?.accountFinance]);
+  }, [info?.TotalSales, info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -248,9 +296,9 @@ const ProfitabilityDashboard = () => {
       csvData.push(['='.repeat(50)]);
       csvData.push([]);
     
-    // Add metrics summary (matching main dashboard)
+    // Add metrics summary (with COGS adjustments)
     console.log('Step 3: Processing metrics');
-    csvData.push(['Key Metrics (Matching Main Dashboard)']);
+    csvData.push(['Key Metrics (COGS-Adjusted)']);
     if (Array.isArray(metrics) && metrics.length > 0) {
       metrics.forEach((metric, index) => {
         if (metric && typeof metric === 'object' && metric.label && metric.value) {
@@ -420,7 +468,7 @@ const ProfitabilityDashboard = () => {
         
         csvData.push([
           product.asin,
-          productDetails.itemName || productDetails.title || `Product ${product.asin}`,
+          productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
           `$${(product.sales || 0).toFixed(2)}`,
           `$${revenuePerUnit.toFixed(2)}`,
@@ -458,7 +506,7 @@ const ProfitabilityDashboard = () => {
         const productDetails = productDetailsMap.get(product.asin) || {};
         csvData.push([
           product.asin,
-          productDetails.itemName || productDetails.title || `Product ${product.asin}`,
+          productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
           `$${(product.amount || 0).toFixed(2)}`
         ]);
@@ -475,7 +523,7 @@ const ProfitabilityDashboard = () => {
       totalProducts.forEach(product => {
         csvData.push([
           product.asin || 'N/A',
-          product.itemName || product.title || 'N/A',
+          product.title || 'N/A',
           product.brand || 'N/A',
           product.itemClassification || 'N/A',
           `$${(product.price || 0).toFixed(2)}`,
@@ -498,10 +546,11 @@ const ProfitabilityDashboard = () => {
       });
       const adjustedGrossProfitSummary = originalGrossProfit - totalCOGSSummary;
       
-      csvData.push(['Financial Summary (Matching Main Dashboard)']);
-      csvData.push(['Total Sales', `$${Number(info.TotalWeeklySale || 0).toFixed(2)}`]);
-      csvData.push(['Gross Profit', `$${Number(info.accountFinance.Gross_Profit || 0).toFixed(2)}`]);
+      csvData.push(['Financial Summary (COGS-Adjusted for Profitability Dashboard)']);
+      csvData.push(['Total Sales', `$${info.TotalWeeklySale || 0}`]);
+      csvData.push(['Original Gross Profit (from Amazon)', `$${originalGrossProfit}`]);
       csvData.push(['Total COGS Entered', `$${totalCOGSSummary.toFixed(2)}`]);
+      csvData.push(['Adjusted Gross Profit (Original - COGS)', `$${adjustedGrossProfitSummary.toFixed(2)}`]);
       csvData.push(['FBA Fees', `$${info.accountFinance.FBA_Fees || 0}`]);
       csvData.push(['Storage Fees', `$${info.accountFinance.Storage || 0}`]);
       csvData.push(['Amazon Charges', `$${info.accountFinance.Amazon_Charges || 0}`]);
@@ -665,7 +714,7 @@ const ProfitabilityDashboard = () => {
         
         csvData.push([
           asin,
-          productDetails.itemName || productDetails.title || `Product ${asin}`,
+          productDetails.title || `Product ${asin}`,
           impressions.toString(),
           clicks.toString(),
           `${ctr.toFixed(2)}%`,
@@ -761,121 +810,333 @@ const ProfitabilityDashboard = () => {
   };
 
   return (
-    <div className="bg-[#eeeeee] h-[90vh] overflow-y-auto">
-      <div className="p-6">
-        <div className="max-w-[1400px] mx-auto pb-6">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-sm text-gray-900">PROFITIBILITY</h1>
-            <div className="flex gap-4 flex-wrap">
-              <div className='fit-content relative' ref={CalenderRef}>
-                <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200  cursor-pointer' onClick={() => setOpenCalender(!openCalender)}>
-                  <p className='font-semi-bold text-xs'>Last 30 Days</p>
-                  <img src={calenderIcon} alt='' className='w-4 h-4' />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100">
+      {/* COGS Information Popup */}
+      <AnimatePresence>
+        {showCogsPopup && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            onClick={handleCloseCogsPopup}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.3 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
+                      <TrendingUp className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">Improve Profit Accuracy</h3>
+                      <p className="text-sm text-gray-600">Get precise profitability insights</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCloseCogsPopup}
+                    className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <AnimatePresence>
-                  {openCalender && (
-                    <motion.div
-                      initial={{ opacity: 0, scaleY: 0 }}
-                      animate={{ opacity: 1, scaleY: 1 }}
-                      exit={{ opacity: 0, scaleY: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="absolute top-full right-0 z-50 bg-white shadow-md rounded-md origin-top"
-                    >
-                      <Calender setOpenCalender={setOpenCalender} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                
+                <div className="mb-6">
+                  <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <h4 className="font-semibold text-amber-900 mb-1">Important Notice</h4>
+                      <p className="text-sm text-amber-800 leading-relaxed">
+                        To get accurate gross profit calculations, please add <strong>COGS (Cost of Goods Sold) values per unit</strong> for your products.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 text-sm font-bold">1</span>
+                      </div>
+                      <p className="text-sm text-gray-700">
+                        Navigate to the product table below
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 text-sm font-bold">2</span>
+                      </div>
+                      <p className="text-sm text-gray-700">
+                        Click the "Add COGS" button for each product
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 text-sm font-bold">3</span>
+                      </div>
+                      <p className="text-sm text-gray-700">
+                        Enter your actual cost per unit for accurate profit margins
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleCloseCogsPopup}
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                  >
+                    Got it, thanks!
+                  </button>
+                </div>
               </div>
-              <DownloadReport
-                prepareDataFunc={prepareProfitabilityData}
-                filename="Profitability_Dashboard_Report"
-                buttonText="Download Report"
-                buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
-                showIcon={true}
-              />
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            {metrics.map((m) => (
-              <MetricCard key={m.label} label={m.label} value={m.value} icon={m.icon} />
-            ))}
-          </div>
+      {/* Main Dashboard Container */}
+      <div className="h-[90vh] overflow-y-auto">
+        <div className="p-6 lg:p-8">
+          <div className="w-full">
+                      
+            {/* Modern Header Section */}
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="mb-8"
+            >
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                {/* Header Title and Description */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
+                      <TrendingUp className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
+                          Profitability Dashboard
+                        </h1>
+                        <div className="relative group">
+                          <HelpCircle className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help transition-colors" />
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
+                            <div className="bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ width: '256px' }}>
+                              Advanced profitability analysis dashboard that tracks gross and net profit margins by product. Add COGS (Cost of Goods Sold) values to get accurate net profit calculations and identify underperforming products that need optimization.
+                            </div>
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Monitor your profit margins and optimize your business performance
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-          {/* Area Chart for Spend vs Total Sales */}
-          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-            <h3 className="text-base font-semibold text-gray-900 mb-4">Spend vs Total Sales</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <AreaChart
-                data={chartData}
-                margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
-              >
-                <defs>
-                  <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#EF4444" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#EF4444" stopOpacity={0.05}/>
-                  </linearGradient>
-                  <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 12, fill: '#6B7280' }}
-                  stroke="#E5E7EB"
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: '#6B7280' }}
-                  stroke="#E5E7EB"
-                  tickLine={false}
-                  tickFormatter={(value) => `$${value}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    padding: '8px'
-                  }}
-                  formatter={(value) => `$${value}`}
-                />
-                <Legend 
-                  wrapperStyle={{
-                    paddingTop: '20px',
-                    fontSize: '12px'
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="spend"
-                  stroke="#EF4444"
-                  fill="url(#spendGradient)"
-                  name="Spend"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="totalSales"
-                  stroke="#3B82F6"
-                  fill="url(#salesGradient)"
-                  name="Total Sales"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+                {/* Controls Section */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Date Picker */}
+                  <div className='relative' ref={CalenderRef}>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className='flex items-center gap-3 px-4 py-2.5 bg-white border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all duration-200 min-w-[140px]'
+                      onClick={() => setOpenCalender(!openCalender)}
+                    >
+                      <Calendar className="w-4 h-4 text-gray-600" />
+                      <span className='text-sm font-medium text-gray-700'>Last 30 Days</span>
+                    </motion.button>
+                    <AnimatePresence>
+                      {openCalender && (
+                        <motion.div
+                          initial={{ opacity: 0, scaleY: 0 }}
+                          animate={{ opacity: 1, scaleY: 1 }}
+                          exit={{ opacity: 0, scaleY: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="absolute top-full right-0 z-50 mt-2 bg-white shadow-xl rounded-xl border border-gray-200 origin-top"
+                        >
+                          <Calender setOpenCalender={setOpenCalender} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
-          <div className="mb-6">
-            <ProfitTable setSuggestionsData={setSuggestionsData} />
-          </div>
+                  {/* Download Report Button */}
+                  <DownloadReport
+                    prepareDataFunc={prepareProfitabilityData}
+                    filename="Profitability_Dashboard_Report"
+                    buttonText="Download Report"
+                    buttonClass="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                    showIcon={true}
+                  />
+                </div>
+              </div>
+            </motion.div>
 
-          <SuggestionList suggestionsData={suggestionsData} />
-          <div className='w-full h-[3rem]'></div>
+                      {/* Enhanced Metrics Cards */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.1 }}
+              className="mb-8"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {metrics.map((metric, index) => (
+                  <motion.div
+                    key={metric.label}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.1 * index }}
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    className="group"
+                  >
+                    <MetricCard label={metric.label} value={metric.value} icon={metric.icon} />
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+
+                      {/* Enhanced Chart Section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="mb-8"
+            >
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="p-6 pb-0">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+                        <BarChart3 className="w-4 h-4 text-white" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-semibold text-gray-900">Gross Profit vs Total Sales Analysis</h3>
+                          <div className="relative group">
+                            <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help transition-colors" />
+                            <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
+                              <div className="bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ width: '256px' }}>
+                                Visual comparison of your gross profit (sales minus Amazon fees and ad spend) versus total sales over time. The green area shows your gross profit, while the blue area represents total sales revenue. Use this to identify profitability trends and seasonal patterns.
+                              </div>
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-600">Track your daily gross profit performance against total sales</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-gradient-to-r from-green-400 to-green-500 rounded-full"></div>
+                        <span className="text-gray-600">Gross Profit</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-blue-500 rounded-full"></div>
+                        <span className="text-gray-600">Total Sales</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-6 pb-6">
+                  <ResponsiveContainer width="100%" height={320}>
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+                    >
+                      <defs>
+                        <linearGradient id="grossProfitGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10B981" stopOpacity={0.6}/>
+                          <stop offset="95%" stopColor="#10B981" stopOpacity={0.1}/>
+                        </linearGradient>
+                        <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.02}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        stroke="#e2e8f0"
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        stroke="#e2e8f0"
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(value) => `$${value}`}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '12px',
+                          padding: '12px',
+                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+                          fontSize: '14px'
+                        }}
+                        formatter={(value, name) => [`$${value}`, name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
+                        labelFormatter={(label) => `Date: ${label}`}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="totalSales"
+                        stroke="#3B82F6"
+                        fill="url(#salesGradient)"
+                        name="totalSales"
+                        strokeWidth={3}
+                        dot={false}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="grossProfit"
+                        stroke="#10B981"
+                        fill="url(#grossProfitGradient)"
+                        name="grossProfit"
+                        strokeWidth={3}
+                        dot={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Enhanced Profit Table */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.3 }}
+              className="mb-8"
+            >
+              <ProfitTable setSuggestionsData={setSuggestionsData} />
+            </motion.div>
+
+            {/* Enhanced Suggestions Section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="mb-8"
+            >
+              <SuggestionList suggestionsData={suggestionsData} />
+            </motion.div>
+
+            {/* Bottom Spacer */}
+            <div className='w-full h-8'></div>
+          </div>
         </div>
       </div>
     </div>

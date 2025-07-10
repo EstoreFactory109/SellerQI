@@ -8,6 +8,7 @@ import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
+import { Building, Plus, ChevronRight, Bell, User } from 'lucide-react'
 import axios from 'axios'
 
 const TopNav = () => {
@@ -137,9 +138,46 @@ const TopNav = () => {
             <img src={hamburger} className='w-[1.5rem] lg:hidden' onClick={handleHamburger} />
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
-                    <div className="lg:px-4 lg:py-1 rounded-md outline-none text-xs lg:text-base flex justify-center items-center gap-2 min-w-[13rem] border-2 border-gray-300 cursor-pointer bg-gray-50" onClick={openDropDownfnc}>
-                        <p>{truncateBrandName(user?.brand)} | {marketplaces[Country]}</p>
-                        <img src={Arrow} alt="" className='w-3 h-2 ' />
+                    <div 
+                        className={`group lg:px-6 lg:py-3 px-4 py-2 rounded-xl outline-none text-xs lg:text-sm flex justify-center items-center gap-3 min-w-[13rem] border cursor-pointer transition-all duration-300 shadow-sm ${
+                            openDropDown 
+                                ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-400 shadow-lg ring-2 ring-blue-100' 
+                                : 'bg-white border-gray-200 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                        onClick={openDropDownfnc}
+                    >
+                        <div className="flex items-center gap-3 flex-1">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${
+                                openDropDown 
+                                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 shadow-md' 
+                                    : 'bg-gradient-to-br from-green-500 to-emerald-600 shadow-sm'
+                            }`}>
+                                <Building className="w-4 h-4 text-white" />
+                            </div>
+                            <div className="flex flex-col items-start">
+                                <p className={`font-semibold transition-colors duration-200 ${
+                                    openDropDown ? 'text-blue-700' : 'text-gray-800 group-hover:text-gray-900'
+                                }`}>
+                                    {truncateBrandName(user?.brand)}
+                                </p>
+                                <p className="text-xs text-gray-500 font-medium">
+                                    {marketplaces[Country]}
+                                </p>
+                            </div>
+                        </div>
+                        <div className={`p-1.5 rounded-lg transition-all duration-300 ${
+                            openDropDown 
+                                ? 'bg-blue-100 text-blue-600' 
+                                : 'bg-gray-100 text-gray-500 group-hover:bg-blue-100 group-hover:text-blue-600'
+                        }`}>
+                            <img 
+                                src={Arrow} 
+                                alt="" 
+                                className={`w-3.5 h-2.5 transition-transform duration-300 ${
+                                    openDropDown ? 'rotate-180' : 'rotate-0'
+                                }`}
+                            />
+                        </div>
                     </div>
                     <AnimatePresence>
                         {openDropDown && (
@@ -148,48 +186,89 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="w-full absolute top-10 flex flex-col shadow-sm shadow-black p-1 bg-white origin-top z-[99] "
+                                className="w-full absolute top-16 flex flex-col shadow-xl border border-gray-200/80 rounded-2xl p-3 bg-white/95 backdrop-blur-sm origin-top z-[99] min-w-[16rem]"
                             >
                                 {/* Show existing accounts if there are multiple accounts */}
                                 {sellerAccount.length > 1 && sellerAccount
                                     .filter(elm => !(elm.country === Country && (elm.brand || "Brand Name") === (user?.brand || "Brand Name")))
                                     .map((elm, key) =>
-                                    <div
+                                    <motion.div
                                         key={key}
-                                        className="min-w-[13rem] min-h-10 bg-white flex justify-start items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 "
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ duration: 0.2, delay: key * 0.05 }}
+                                        className="group min-w-[13rem] bg-white hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-transparent hover:border-blue-200 transition-all duration-200 hover:shadow-sm"
                                         onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                     >
-                                        {truncateBrandName(elm.brand)} | {marketplaces[elm.country]}
-                                    </div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-6 h-6 bg-gradient-to-br from-gray-400 to-gray-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                                                <Building className="w-3.5 h-3.5 text-white" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-semibold text-gray-800 group-hover:text-blue-700 transition-colors duration-200 truncate">
+                                                    {truncateBrandName(elm.brand)}
+                                                </p>
+                                                <p className="text-xs text-gray-500 font-medium">
+                                                    {marketplaces[elm.country]}
+                                                </p>
+                                            </div>
+                                            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-200" />
+                                        </div>
+                                    </motion.div>
                                 )}
                                 
                                 {/* Add New Account Option */}
-                                <div
-                                    className="min-w-[13rem] min-h-10 bg-white flex justify-start items-center hover:bg-[#333651] hover:text-white cursor-pointer rounded-md text-xs lg:text-base px-6 border-t border-gray-200"
+                                {sellerAccount.length > 1 && (
+                                    <div className="border-t border-gray-100 my-1"></div>
+                                )}
+                                <motion.div
+                                    initial={{ opacity: 0, x: -10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ duration: 0.2, delay: sellerAccount.length * 0.05 }}
+                                    className="group min-w-[13rem] bg-white hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-dashed border-gray-300 hover:border-green-300 transition-all duration-200 hover:shadow-sm"
                                     onClick={() => {
                                         setOpenDropDown(false);
                                         navigate('/seller-central-checker/settings?tab=account-integration');
                                     }}
                                 >
-                                    + Add New Account
-                                </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-6 h-6 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                                            <Plus className="w-3.5 h-3.5 text-white" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="font-semibold text-gray-700 group-hover:text-green-700 transition-colors duration-200">
+                                                Add New Account
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                Connect another marketplace
+                                            </p>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-green-500 opacity-0 group-hover:opacity-100 transition-all duration-200" />
+                                    </div>
+                                </motion.div>
                             </motion.div>
                         )}
                     </AnimatePresence>
 
                 </div>
-                <div className="w-6 h-6 lg:w-7 lg:h-8 relative flex justify-center items-center mr-2" ref={notificationRef}>
-                    <img 
-                        src={Notification} 
-                        alt="" 
-                        className='w-[70%] h-[70%] cursor-pointer' 
+                <div className="relative mr-3" ref={notificationRef}>
+                    <div 
+                        className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl flex items-center justify-center cursor-pointer transition-all duration-300 ${
+                            openNotifications 
+                                ? 'bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg ring-2 ring-blue-100' 
+                                : 'bg-gray-100 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50 hover:shadow-md'
+                        }`}
                         onClick={handleNotificationClick}
-                    />
-                    {unreadCount > 0 && (
-                        <p className='absolute text-white bg-[#b92533] text-[8px] lg:text-xs px-[3px] py-[0.5px] lg:px-[4px] rounded-full top-0 right-0'>
-                            {unreadCount > 99 ? '99+' : unreadCount}
-                        </p>
-                    )}
+                    >
+                        <Bell className={`w-5 h-5 transition-colors duration-300 ${
+                            openNotifications ? 'text-white' : 'text-gray-600 group-hover:text-blue-600'
+                        }`} />
+                        {unreadCount > 0 && (
+                            <div className='absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full shadow-sm min-w-[20px] text-center'>
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                            </div>
+                        )}
+                    </div>
 
                     {/* Notification Dropdown */}
                     <AnimatePresence>
@@ -199,17 +278,27 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="absolute top-8 right-0 w-80 max-h-96 bg-white border border-gray-200 rounded-lg shadow-lg origin-top z-[999] overflow-hidden"
+                                className="absolute top-14 right-0 w-96 max-h-[500px] bg-white/95 backdrop-blur-sm border border-gray-200/80 rounded-2xl shadow-xl origin-top z-[999] overflow-hidden"
                             >
                                 {/* Header */}
-                                <div className="p-4 border-b border-gray-100 flex justify-between items-center">
-                                    <h3 className="font-semibold text-gray-800">Notifications</h3>
+                                <div className="p-5 border-b border-gray-100/60 flex justify-between items-center bg-gradient-to-r from-gray-50/50 to-blue-50/30">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                                            <Bell className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-gray-900">Notifications</h3>
+                                            {unreadCount > 0 && (
+                                                <p className="text-xs text-gray-500">{unreadCount} unread</p>
+                                            )}
+                                        </div>
+                                    </div>
                                     {unreadCount > 0 && (
                                         <button
                                             onClick={handleMarkAllAsRead}
-                                            className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                                            className="text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all duration-200"
                                         >
-                                            Mark all as read
+                                            Mark all read
                                         </button>
                                     )}
                                 </div>
@@ -217,60 +306,79 @@ const TopNav = () => {
                                 {/* Notifications List */}
                                 <div className="max-h-80 overflow-y-auto">
                                     {notifications.length === 0 ? (
-                                        <div className="p-6 text-center text-gray-500">
-                                            <img src={Notification} alt="" className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                            <p>No notifications yet</p>
+                                        <div className="p-8 text-center">
+                                            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                                <Bell className="w-8 h-8 text-gray-400" />
+                                            </div>
+                                            <h4 className="font-semibold text-gray-700 mb-2">No notifications yet</h4>
+                                            <p className="text-sm text-gray-500">You're all caught up! New notifications will appear here.</p>
                                         </div>
                                     ) : (
-                                        notifications.slice(0, 10).map((notification) => (
-                                            <div
+                                        notifications.slice(0, 10).map((notification, index) => (
+                                            <motion.div
                                                 key={notification.id}
+                                                initial={{ opacity: 0, x: 20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ duration: 0.2, delay: index * 0.05 }}
                                                 onClick={() => handleNotificationItemClick(notification.id)}
-                                                className={`p-4 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${
-                                                    !notification.isRead ? 'bg-blue-50' : ''
+                                                className={`group p-4 mx-2 my-1 rounded-xl cursor-pointer transition-all duration-200 hover:shadow-sm ${
+                                                    !notification.isRead 
+                                                        ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 hover:border-blue-200' 
+                                                        : 'hover:bg-gray-50 border border-transparent hover:border-gray-100'
                                                 }`}
                                             >
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <h4 className={`text-sm font-medium ${
-                                                        !notification.isRead ? 'text-gray-900' : 'text-gray-700'
+                                                <div className="flex gap-3">
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                                        notification.type === 'analysis_complete' 
+                                                            ? 'bg-gradient-to-br from-green-500 to-emerald-600' 
+                                                            : 'bg-gradient-to-br from-orange-500 to-red-600'
                                                     }`}>
-                                                        {notification.title}
-                                                    </h4>
-                                                    <div className="flex items-center gap-2">
-                                                        {notification.type === 'issues_found' && notification.issueCount && (
-                                                            <span className="px-2 py-1 bg-red-100 text-red-600 text-xs rounded-full">
-                                                                {notification.issueCount}
+                                                        <Bell className="w-4 h-4 text-white" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <h4 className={`text-sm font-semibold leading-tight ${
+                                                                !notification.isRead ? 'text-gray-900' : 'text-gray-700'
+                                                            }`}>
+                                                                {notification.title}
+                                                            </h4>
+                                                            <div className="flex items-center gap-2 ml-2">
+                                                                {notification.type === 'issues_found' && notification.issueCount && (
+                                                                    <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                                                                        {notification.issueCount}
+                                                                    </span>
+                                                                )}
+                                                                {!notification.isRead && (
+                                                                    <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-sm"></div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-xs text-gray-600 mb-3 line-clamp-2 leading-relaxed">
+                                                            {notification.message}
+                                                        </p>
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-xs text-gray-400 font-medium">
+                                                                {formatTimestamp(notification.timestamp)}
                                                             </span>
-                                                        )}
-                                                        {!notification.isRead && (
-                                                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                                                        )}
+                                                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                                                                notification.type === 'analysis_complete' 
+                                                                    ? 'bg-green-100 text-green-700 border border-green-200' 
+                                                                    : 'bg-orange-100 text-orange-700 border border-orange-200'
+                                                            }`}>
+                                                                {notification.type === 'analysis_complete' ? 'Analysis' : 'Issues'}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                <p className="text-xs text-gray-600 mb-2 line-clamp-2">
-                                                    {notification.message}
-                                                </p>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-xs text-gray-400">
-                                                        {formatTimestamp(notification.timestamp)}
-                                                    </span>
-                                                    <span className={`text-xs px-2 py-1 rounded ${
-                                                        notification.type === 'analysis_complete' 
-                                                            ? 'bg-green-100 text-green-600' 
-                                                            : 'bg-orange-100 text-orange-600'
-                                                    }`}>
-                                                        {notification.type === 'analysis_complete' ? 'Analysis' : 'Issues'}
-                                                    </span>
-                                                </div>
-                                            </div>
+                                            </motion.div>
                                         ))
                                     )}
                                 </div>
 
                                 {/* Footer */}
                                 {notifications.length > 10 && (
-                                    <div className="p-3 border-t border-gray-100 text-center">
-                                        <p className="text-xs text-gray-500">
+                                    <div className="p-4 border-t border-gray-100/60 bg-gradient-to-r from-gray-50/30 to-blue-50/20 text-center">
+                                        <p className="text-xs font-medium text-gray-600">
                                             Showing latest 10 of {notifications.length} notifications
                                         </p>
                                     </div>
@@ -279,7 +387,22 @@ const TopNav = () => {
                         )}
                     </AnimatePresence>
                 </div>
-                <img src={profilepic || ProfileIcon} alt="" className="lg:w-8 lg:h-8 w-6 h-6 rounded-full border-2 border-gray-300 cursor-pointer" onClick={() => navigate('/seller-central-checker/settings')} />
+                <div 
+                    className="group w-10 h-10 lg:w-11 lg:h-11 rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-105 border-2 border-gray-200 hover:border-blue-300"
+                    onClick={() => navigate('/seller-central-checker/settings')}
+                >
+                    {profilepic ? (
+                        <img 
+                            src={profilepic} 
+                            alt="Profile" 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
+                        />
+                    ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 group-hover:from-blue-500 group-hover:to-indigo-600 flex items-center justify-center transition-all duration-300">
+                            <User className="w-5 h-5 text-white" />
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Loading Screen Overlay */}

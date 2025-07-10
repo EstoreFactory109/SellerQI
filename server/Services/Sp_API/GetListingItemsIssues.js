@@ -19,7 +19,7 @@ axiosRetry(axios, {
 });
 
 const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country, Region) => {
-  console.log("🎯 GetListingItem function called for SKU:", sku, "ASIN:", asin);
+      // console.log("🎯 GetListingItem function called for SKU:", sku, "ASIN:", asin);
   
   const host = baseuri;
 
@@ -29,13 +29,13 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     includedData: dataToReceive.includedData
   }).toString();
 
-  console.log("queryParams: ", queryParams);
-  console.log("sku: ", sku);
+      // console.log("queryParams: ", queryParams);
+    // console.log("sku: ", sku);
 
   const path = `/listings/2021-08-01/items/${dataToReceive.SellerId}/${sku}?${queryParams}`;
   const fullUrl = `https://${host}${path}`;
 
-  console.log("dataToReceive: ", dataToReceive);
+      // console.log("dataToReceive: ", dataToReceive);
 
   let request = {
     host: host,
@@ -48,7 +48,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     }
   };
 
-  console.log("request: ", request);
+      // console.log("request: ", request);
   // ✅ AWS signing
   aws4.sign(request, {
     accessKeyId: process.env.AWS_ACCESS_KEY,
@@ -59,24 +59,24 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
   });
 
   try {
-    console.log("🚀 Making API call to:", fullUrl);
+    // console.log("🚀 Making API call to:", fullUrl);
     
     const response = await axios.get(fullUrl, {
       headers: request.headers
     });
 
-    console.log("✅ API call successful!");
-    console.log("📄 Full response:", JSON.stringify(response.data, null, 2));
-    console.log("🔍 Response attributes:", response.data?.attributes);
-    console.log("🔍 Generic keyword path:", response.data?.attributes?.generic_keyword);
+          // console.log("✅ API call successful!");
+      // console.log("📄 Full response:", JSON.stringify(response.data, null, 2));
+      // console.log("🔍 Response attributes:", response.data?.attributes);
+      // console.log("🔍 Generic keyword path:", response.data?.attributes?.generic_keyword);
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
 
-    console.log("keywordData: ", keywordData);
-    console.log("🔍 Type of keywordData:", typeof keywordData);
+          // console.log("keywordData: ", keywordData);
+      // console.log("🔍 Type of keywordData:", typeof keywordData);
 
     if (!keywordData) {
-      console.log("❌ keywordData is falsy:", keywordData);
+              // console.log("❌ keywordData is falsy:", keywordData);
       logger.error(`❌ No generic_keyword found for SKU: ${sku}`);
       return false;
     }
@@ -90,13 +90,13 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     return generic_Keyword;
 
   } catch (error) {
-    console.log("❌❌❌ API CALL FAILED ❌❌❌");
-    console.log("🔍 Error type:", error.constructor.name);
-    console.log("🔍 Error message:", error.message);
-    console.log("🔍 Error status:", error.response?.status);
-    console.log("🔍 Error data:", JSON.stringify(error.response?.data, null, 2));
-    console.log("🔍 Request URL:", fullUrl);
-    console.log("🔍 Request headers:", JSON.stringify(request.headers, null, 2));
+          // console.log("❌❌❌ API CALL FAILED ❌❌❌");
+      // console.log("🔍 Error type:", error.constructor.name);
+      // console.log("🔍 Error message:", error.message);
+      // console.log("🔍 Error status:", error.response?.status);
+      // console.log("🔍 Error data:", JSON.stringify(error.response?.data, null, 2));
+      // console.log("🔍 Request URL:", fullUrl);
+      // console.log("🔍 Request headers:", JSON.stringify(request.headers, null, 2));
     
     console.error(`❌ Error fetching catalog for SKU: ${sku}:`, error.response?.data || error.message);
     return false;

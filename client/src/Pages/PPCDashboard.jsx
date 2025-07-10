@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import calenderIcon from '../assets/Icons/Calender.png'
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -83,6 +83,27 @@ const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, it
   );
 };
 
+// Optimization Tips Component
+const OptimizationTip = ({ tip, icon = "💡" }) => {
+  return (
+    <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+          <span className="text-blue-600 text-lg">{icon}</span>
+        </div>
+        <div className="flex-1">
+          <h4 className="text-sm font-semibold text-blue-900 mb-1">
+            Optimization Tip
+          </h4>
+          <p className="text-sm text-blue-800 leading-relaxed">
+            {tip}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PPCDashboard = () => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [prevTab, setPrevTab] = useState(0);
@@ -156,6 +177,10 @@ const PPCDashboard = () => {
     const totalSalesData = info?.TotalSales;
     
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      // Get actual PPC spend from finance data and distribute it across days
+      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
+      const dailySpend = actualPPCSpend / totalSalesData.length; // Distribute spend across days
+      
       // Transform date-filtered sales data for the chart
       return totalSalesData.map(item => {
         // Extract date from interval format: "2025-03-01T00:00:00Z--2025-03-01T23:59:59Z"
@@ -165,12 +190,11 @@ const PPCDashboard = () => {
         // For PPC data, we'll use a percentage of total sales as PPC sales (estimated)
         const totalSales = parseFloat(item.TotalAmount) || 0;
         const estimatedPPCSales = totalSales * 0.3; // Assume 30% of sales come from PPC
-        const estimatedSpend = estimatedPPCSales * 0.25; // Assume 25% ACOS
         
         return {
           date: formattedDate,
           ppcSales: estimatedPPCSales,
-          spend: estimatedSpend,
+          spend: dailySpend, // Use actual spend distributed daily
         };
       });
     }
@@ -185,15 +209,15 @@ const PPCDashboard = () => {
     }
     
     return mockChartData.slice();
-  }, [info?.TotalSales, productWiseSponsoredAdsGraphData]);
+  }, [info?.TotalSales, info?.accountFinance, productWiseSponsoredAdsGraphData]);
   
   // Tab configuration
   const tabs = [
     { id: 0, label: 'High ACOS Campaigns' },
     { id: 1, label: 'Wasted Spend Keywords' },
-    { id: 2, label: 'Negative Keywords' },
+    { id: 2, label: 'Negative Keywords not used' },
     { id: 3, label: 'Top Performing Keywords' },
-    { id: 4, label: 'Search Terms' },
+    { id: 4, label: 'Search Terms with Zero Sales' },
     { id: 5, label: 'Auto Campaign Insights' }
   ];
   
@@ -532,24 +556,25 @@ const PPCDashboard = () => {
   // Sort by sales descending
   autoCampaignInsights.sort((a, b) => b.sales - a.sales);
   
-  // Use Redux data for KPI values - prioritize filtered data from calendar selection
+  // Use Redux data for KPI values - prioritize actual finance data over estimates
   const kpiData = useMemo(() => {
     // Calculate totals from filtered TotalSales data if available
     const totalSalesData = info?.TotalSales;
     let filteredTotalSales = 0;
     let estimatedPPCSales = 0;
-    let estimatedSpend = 0;
     
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
       // Calculate totals from filtered date range
       filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
       estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC
-      estimatedSpend = estimatedPPCSales * 0.25; // Assume 25% ACOS
     }
+    
+    // Use actual PPC spend from finance data (ProductAdsPayment) - this is the official spend
+    const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
     
     // Use filtered data if available, otherwise fall back to original metrics
     const ppcSales = estimatedPPCSales > 0 ? estimatedPPCSales : (sponsoredAdsMetrics?.totalSalesIn30Days || 25432.96);
-    const spend = estimatedSpend > 0 ? estimatedSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
+    const spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
     const totalSales = filteredTotalSales > 0 ? filteredTotalSales : (Number(info?.TotalWeeklySale || 0) || 84776.44);
     
     return [
@@ -574,7 +599,7 @@ const PPCDashboard = () => {
         value: `${sponsoredAdsMetrics?.totalProductsPurchased || Math.round(ppcSales / 85)}`
       },
     ];
-  }, [info?.TotalSales, info?.TotalWeeklySale, sponsoredAdsMetrics]);
+  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, sponsoredAdsMetrics]);
 
   const formatYAxis = (value) => {
     if (value >= 1000) {
@@ -999,10 +1024,10 @@ const PPCDashboard = () => {
       csvData.push([]);
     }
     
-    // Add Chart Data
+    // Add Chart Data (now using official ProductAdsPayment spend data)
     if (chartData.length > 0) {
-      csvData.push(['Daily Performance Chart Data']);
-      csvData.push(['Date', 'PPC Sales', 'Spend']);
+      csvData.push(['Daily Performance Chart Data (Official Spend from ProductAdsPayment)']);
+      csvData.push(['Date', 'PPC Sales', 'Official Spend']);
       chartData.forEach(day => {
         csvData.push([
           day.date,
@@ -1125,10 +1150,20 @@ const PPCDashboard = () => {
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart 
+                <AreaChart 
                   data={chartData} 
                   margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
                 >
+                  <defs>
+                    <linearGradient id="ppcSalesGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.4}/>
+                      <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.05}/>
+                    </linearGradient>
+                    <linearGradient id="ppcSpendGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#F97316" stopOpacity={0.4}/>
+                      <stop offset="100%" stopColor="#F97316" stopOpacity={0.05}/>
+                    </linearGradient>
+                  </defs>
                   <XAxis 
                     dataKey="date" 
                     tick={{ fontSize: 12, fill: '#6B7280' }}
@@ -1151,9 +1186,9 @@ const PPCDashboard = () => {
                     }}
                     formatter={(value, name) => {
                       if (name === 'PPC Sales' || name === 'PPC Spend') {
-                        return [`$${value}`, name];
+                        return [`$${parseFloat(value).toFixed(2)}`, name];
                       }
-                      return [value, name];
+                      return [parseFloat(value).toFixed(2), name];
                     }}
                   />
                   <Legend 
@@ -1163,25 +1198,27 @@ const PPCDashboard = () => {
                     }}
                     iconType="line"
                   />
-                  <Line 
+                  <Area 
                     type="monotone" 
                     dataKey="ppcSales" 
                     name="PPC Sales"
                     stroke="#3B82F6" 
                     strokeWidth={2.5} 
+                    fill="url(#ppcSalesGradient)"
                     dot={false}
                     activeDot={{ r: 5 }}
                   />
-                  <Line 
+                  <Area 
                     type="monotone" 
                     dataKey="spend" 
                     name="PPC Spend"
                     stroke="#F97316" 
                     strokeWidth={2.5} 
+                    fill="url(#ppcSpendGradient)"
                     dot={false}
                     activeDot={{ r: 5 }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           </motion.div>
@@ -1284,6 +1321,10 @@ const PPCDashboard = () => {
                         totalItems={highAcosCampaigns.length}
                         itemsPerPage={itemsPerPage}
                       />
+                      <OptimizationTip 
+                        tip="Reduce bids or add negatives to lower ACoS."
+                        icon="📉"
+                      />
                     </>
                   )}
                   
@@ -1345,13 +1386,17 @@ const PPCDashboard = () => {
                         totalItems={wastedSpendKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
+                      <OptimizationTip 
+                        tip="Consider pausing or lowering bids for unprofitable keywords."
+                        icon="⚠️"
+                      />
                     </>
                   )}
                   
                   {/* Negative Keywords Tab */}
                   {selectedTab === 2 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords</h2>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords not used</h2>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -1408,6 +1453,10 @@ const PPCDashboard = () => {
                         onPageChange={setNegativePage}
                         totalItems={negativeKeywordsMetrics.length}
                         itemsPerPage={itemsPerPage}
+                      />
+                      <OptimizationTip 
+                        tip="You haven't blocked irrelevant items - consider analysing your search term report."
+                        icon="🔍"
                       />
                     </>
                   )}
@@ -1483,13 +1532,17 @@ const PPCDashboard = () => {
                         totalItems={topPerformingKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
+                      <OptimizationTip 
+                        tip="This keyword performs well — consider raising bid by 15–20%."
+                        icon="📈"
+                      />
                     </>
                   )}
                   
                   {/* Search Terms Tab */}
                   {selectedTab === 4 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms</h2>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms with Zero Sales</h2>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -1532,6 +1585,10 @@ const PPCDashboard = () => {
                         onPageChange={setSearchTermsPage}
                         totalItems={filteredSearchTerms.length}
                         itemsPerPage={itemsPerPage}
+                      />
+                      <OptimizationTip 
+                        tip="Consider adding a negative keyword or revising listing content."
+                        icon="📝"
                       />
                     </>
                   )}
@@ -1582,6 +1639,10 @@ const PPCDashboard = () => {
                         onPageChange={setAutoCampaignPage}
                         totalItems={autoCampaignInsights.length}
                         itemsPerPage={itemsPerPage}
+                      />
+                      <OptimizationTip 
+                        tip="Promote high performing search terms to manual campaigns for better control."
+                        icon="🎯"
                       />
                     </>
                   )}

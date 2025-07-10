@@ -34,12 +34,12 @@ const GET_STRANDED_INVENTORY_UI_DATA = require('../Services/Sp_API/GET_STRANDED_
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
 const getAmazonFees = require('../Services/Finance/AmazonFees.js');
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
-const GetWastedSpendKeywords = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
+const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
 
-    console.log("userId: ",userId)
+    // console.log("userId: ",userId)
   
     if (!userId) {
         return res.status(400).json(new ApiError(400, "User id is missing"));
@@ -48,7 +48,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     //Getting all the required credentials
 
     const getSellerData = await Seller.findOne({ User: userId, })
-    console.log(getSellerData);
+    // console.log(getSellerData);
 
     if (!getSellerData) {
         logger.error(new ApiError(500, "Internal server error in getting the seller data"));
@@ -122,40 +122,40 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Seller ID not found"));
     }
 
-    // Wrap GET_MERCHANT_LISTINGS_ALL_DATA with token refresh
-    const merchantListingsData = await tokenManager.wrapSpApiFunction(
-        GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
-    )(AccessToken, [Marketplace_Id], userId, Country, Region, Base_URI).catch(err => {
-        logger.error(`Merchant Listings Error: ${err.message}`);
-        return null;
-    });
+    // COMMENTED OUT FOR FINANCE TESTING: Merchant Listings Data
+    // const merchantListingsData = await tokenManager.wrapSpApiFunction(
+    //     GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
+    // )(AccessToken, [Marketplace_Id], userId, Country, Region, Base_URI).catch(err => {
+    //     logger.error(`Merchant Listings Error: ${err.message}`);
+    //     return null;
+    // });
 
-    if (!merchantListingsData) {
-        logger.error(new ApiError(500, "Internal server error in getting the merchant listing data"));
-        return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
-    }
+    // if (!merchantListingsData) {
+    //     logger.error(new ApiError(500, "Internal server error in getting the merchant listing data"));
+    //     return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
+    // }
 
-    // ASIN and SKU extraction
-    const asinArray = [];
-    const skuArray = [];
-    const ProductDetails = [];
+    // COMMENTED OUT FOR FINANCE TESTING: ASIN and SKU extraction
+    // const asinArray = [];
+    // const skuArray = [];
+    // const ProductDetails = [];
 
-    // Safer access to merchant listings data
-    const merchantSellerAccounts = Array.isArray(merchantListingsData.sellerAccount) ? merchantListingsData.sellerAccount : [];
-    const SellerAccount = merchantSellerAccounts.find(item => item && item.country === Country && item.region === Region);
+    // // Safer access to merchant listings data
+    // const merchantSellerAccounts = Array.isArray(merchantListingsData.sellerAccount) ? merchantListingsData.sellerAccount : [];
+    // const SellerAccount = merchantSellerAccounts.find(item => item && item.country === Country && item.region === Region);
 
-    if (!SellerAccount || !Array.isArray(SellerAccount.products)) {
-        logger.error(new ApiError(500, "Internal server error in getting the merchant listing data"));
-        return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
-    }
+    // if (!SellerAccount || !Array.isArray(SellerAccount.products)) {
+    //     logger.error(new ApiError(500, "Internal server error in getting the merchant listing data"));
+    //     return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the merchant listing data"));
+    // }
 
-    // Filter products and extract ASINs and SKUs safely
-    const activeProducts = SellerAccount.products.filter(e => e && e.status === "Active" && e.asin && e.sku);
-    if (activeProducts.length > 0) {
-        asinArray.push(...activeProducts.map(e => e.asin).filter(Boolean));
-        skuArray.push(...activeProducts.map(e => e.sku).filter(Boolean));
-        ProductDetails.push(...activeProducts.map(e=>{return {asin:e.asin,price:e.price}}));
-    }
+    // // Filter products and extract ASINs and SKUs safely
+    // const activeProducts = SellerAccount.products.filter(e => e && e.status === "Active" && e.asin && e.sku);
+    // if (activeProducts.length > 0) {
+    //     asinArray.push(...activeProducts.map(e => e.asin).filter(Boolean));
+    //     skuArray.push(...activeProducts.map(e => e.sku).filter(Boolean));
+    //     ProductDetails.push(...activeProducts.map(e=>{return {asin:e.asin,price:e.price}}));
+    // }
 
     // Calculate dynamic dates
     const now = new Date();
@@ -170,371 +170,370 @@ const getSpApiData = asyncHandler(async (req, res) => {
         AccessKey: credentials.AccessKey,
         SecretKey: credentials.SecretKey,
         SessionToken: credentials.SessionToken,
-        ASIN: asinArray,
+        // ASIN: asinArray, // COMMENTED OUT FOR FINANCE TESTING
         issueLocale: `en_${Country}`,
         includedData: "issues,attributes,summaries,offers,fulfillmentAvailability",
         SellerId: sellerId
     };
 
-    // First Promise.all block
-    const [v2data,
-        v1data,
-        ppcSpendsBySKU,
-        adsKeywordsPerformanceData
-    ] = await Promise.all([
-       tokenManager.wrapSpApiFunction(
-           GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
-           logger.error(`V2 Report Error: ${err.message}`);
-           return null;
-       }),
-       tokenManager.wrapSpApiFunction(
-           GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, Marketplace_Id, userId, Base_URI, Country, Region).catch(err => {
-           logger.error(`V1 Report Error: ${err.message}`);
-           return null;
-       }),
-       tokenManager.wrapAdsFunction(
-           getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken
-       )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
-           logger.error(`PPC Spends Error: ${err.message}`);
-           return { sponsoredAds: [] };
-       }),
-       tokenManager.wrapAdsFunction(
-           GetWastedSpendKeywords, userId, RefreshToken, AdsRefreshToken
-       )(AdsAccessToken, ProfileId,dataToSend.after, dataToSend.before , userId, Country, Region).catch(err => {
-           logger.error(`Ads Keywords Performance Data Error: ${err.message}`);
-           return null;
-       })
-    ]);
+    // COMMENTED OUT FOR FINANCE TESTING: First Promise.all block
+    // const [v2data,
+    //     v1data,
+    //     ppcSpendsBySKU,
+    //     adsKeywordsPerformanceData
+    // ] = await Promise.all([
+    //    tokenManager.wrapSpApiFunction(
+    //        GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+    //        logger.error(`V2 Report Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    tokenManager.wrapSpApiFunction(
+    //        GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, Marketplace_Id, userId, Base_URI, Country, Region).catch(err => {
+    //        logger.error(`V1 Report Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    tokenManager.wrapAdsFunction(
+    //        getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken
+    //    )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
+    //        logger.error(`PPC Spends Error: ${err.message}`);
+    //        return { sponsoredAds: [] };
+    //    }),
+    //    tokenManager.wrapAdsFunction(
+    //        getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken
+    //    )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
+    //        logger.error(`Ads Keywords Performance Data Error: ${err.message}`);
+    //        return null;
+    //    })
+    // ]);
 
-    // Validate ppcSpendsBySKU and extract sponsored ads data safely
-    const sponsoredAdsData = (ppcSpendsBySKU && Array.isArray(ppcSpendsBySKU.sponsoredAds)) ? ppcSpendsBySKU.sponsoredAds : [];
+    // COMMENTED OUT FOR FINANCE TESTING: Sponsored ads data and campaign/ad group ID extraction
+    // // Validate ppcSpendsBySKU and extract sponsored ads data safely
+    // const sponsoredAdsData = (ppcSpendsBySKU && Array.isArray(ppcSpendsBySKU.sponsoredAds)) ? ppcSpendsBySKU.sponsoredAds : [];
 
-    // SAFER APPROACH: Get campaign and ad group IDs from ProductWiseSponsoredAdsData model
-    console.log("=== FETCHING CAMPAIGN & AD GROUP IDs FROM DATABASE ===");
-    const storedSponsoredAdsData = await ProductWiseSponsoredAdsData.findOne({ 
-        userId: userId, 
-        region: Region, 
-        country: Country 
-    }).catch(err => {
-        logger.error(`Error fetching stored sponsored ads data: ${err.message}`);
-        return null;
-    });
+    // // SAFER APPROACH: Get campaign and ad group IDs from ProductWiseSponsoredAdsData model
+    // // console.log("=== FETCHING CAMPAIGN & AD GROUP IDs FROM DATABASE ===");
+    // const storedSponsoredAdsData = await ProductWiseSponsoredAdsData.findOne({ 
+    //     userId: userId, 
+    //     region: Region, 
+    //     country: Country 
+    // }).catch(err => {
+    //     logger.error(`Error fetching stored sponsored ads data: ${err.message}`);
+    //     return null;
+    // });
 
-    let campaignIdArray = [];
-    let adGroupIdArray = [];
+    // let campaignIdArray = [];
+    // let adGroupIdArray = [];
 
-    if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
-        // Extract unique campaign and ad group IDs from stored data
-        const campaignIds = new Set();
-        const adGroupIds = new Set();
+    // if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
+    //     // Extract unique campaign and ad group IDs from stored data
+    //     const campaignIds = new Set();
+    //     const adGroupIds = new Set();
         
-        storedSponsoredAdsData.sponsoredAds.forEach(ad => {
-            if (ad.campaignId) campaignIds.add(ad.campaignId);
-            if (ad.adGroupId) adGroupIds.add(ad.adGroupId);
-        });
+    //     storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+    //         if (ad.campaignId) campaignIds.add(ad.campaignId);
+    //         if (ad.adGroupId) adGroupIds.add(ad.adGroupId);
+    //     });
         
-        campaignIdArray = Array.from(campaignIds);
-        adGroupIdArray = Array.from(adGroupIds);
+    //     campaignIdArray = Array.from(campaignIds);
+    //     adGroupIdArray = Array.from(adGroupIds);
         
-        logger.info(`Successfully fetched from database: ${campaignIdArray.length} unique campaign IDs and ${adGroupIdArray.length} unique ad group IDs`);
-        console.log("Database data summary:");
-        console.log("- Total sponsored ads records:", storedSponsoredAdsData.sponsoredAds.length);
-        console.log("- Unique campaign IDs:", campaignIdArray.length);
-        console.log("- Unique ad group IDs:", adGroupIdArray.length);
-        console.log("- Campaign IDs:", campaignIdArray);
-        console.log("- Ad Group IDs:", adGroupIdArray);
-    } else {
-        // Fallback to live PPC data if no stored data found
-        logger.warn("No stored sponsored ads data found in database, falling back to live PPC data");
-        campaignIdArray = Array.isArray(sponsoredAdsData) 
-            ? sponsoredAdsData.map(item => item && item.campaignId).filter(Boolean)
-            : [];
-        adGroupIdArray = Array.isArray(sponsoredAdsData) 
-            ? sponsoredAdsData.map(item => item && item.adGroupId).filter(Boolean) 
-            : [];
+    //     logger.info(`Successfully fetched from database: ${campaignIdArray.length} unique campaign IDs and ${adGroupIdArray.length} unique ad group IDs`);
+    //         // console.log("Database data summary:");
+    // // console.log("- Total sponsored ads records:", storedSponsoredAdsData.sponsoredAds.length);
+    // // console.log("- Unique campaign IDs:", campaignIdArray.length);
+    // // console.log("- Unique ad group IDs:", adGroupIdArray.length);
+    // // console.log("- Campaign IDs:", campaignIdArray);
+    // // console.log("- Ad Group IDs:", adGroupIdArray);
+    // } else {
+    //     // Fallback to live PPC data if no stored data found
+    //     logger.warn("No stored sponsored ads data found in database, falling back to live PPC data");
+    //     campaignIdArray = Array.isArray(sponsoredAdsData) 
+    //         ? sponsoredAdsData.map(item => item && item.campaignId).filter(Boolean)
+    //         : [];
+    //     adGroupIdArray = Array.isArray(sponsoredAdsData) 
+    //         ? sponsoredAdsData.map(item => item && item.adGroupId).filter(Boolean) 
+    //         : [];
             
-        logger.info(`Fallback: Using ${campaignIdArray.length} campaign IDs and ${adGroupIdArray.length} ad group IDs from live PPC data`);
-    }
+    //     logger.info(`Fallback: Using ${campaignIdArray.length} campaign IDs and ${adGroupIdArray.length} ad group IDs from live PPC data`);
+    // }
     
-    console.log("=== FINAL IDs TO USE FOR getNegativeKeywords ===");
-    console.log("Campaign IDs count:", campaignIdArray.length);
-    console.log("Ad Group IDs count:", adGroupIdArray.length);
-    console.log("========================================================");
+    // // console.log("=== FINAL IDs TO USE FOR getNegativeKeywords ===");
+    // // console.log("Campaign IDs count:", campaignIdArray.length);
+    // // console.log("Ad Group IDs count:", adGroupIdArray.length);
+    // // console.log("========================================================");
 
-    // Competitive pricing logic
-    let competitivePriceData = [];
+    // COMMENTED OUT FOR FINANCE TESTING: Competitive pricing logic
+    // let competitivePriceData = [];
 
-    if (Array.isArray(asinArray) && asinArray.length > 0) {
-        let start = 0;
-        let end = 20;
+    // if (Array.isArray(asinArray) && asinArray.length > 0) {
+    //     let start = 0;
+    //     let end = 20;
     
-        while (start < asinArray.length) {
-            const asinArrayChunk = asinArray.slice(start, end);
+    //     while (start < asinArray.length) {
+    //         const asinArrayChunk = asinArray.slice(start, end);
     
-            try {
-                const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
-                    getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
-                )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
+    //         try {
+    //             const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
+    //                 getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
+    //             )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
         
-                if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
-                    competitivePriceData.push(...competitiveResponseData);
-                }
-            } catch (error) {
-                logger.error(`Competitive Pricing Error for chunk ${start}-${end}: ${error.message}`);
-            }
+    //             if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
+    //                 competitivePriceData.push(...competitiveResponseData);
+    //             }
+    //         } catch (error) {
+    //             logger.error(`Competitive Pricing Error for chunk ${start}-${end}: ${error.message}`);
+    //         }
     
-            start = end;
-            end = Math.min(end + 20, asinArray.length);
-            console.log(`Processed indices ${start} to ${end}`);
-        }
-    } else {
-        // Skip competitive pricing if no ASINs available
-        console.log("No ASINs available for competitive pricing");
-    }
+    //         start = end;
+    //         end = Math.min(end + 20, asinArray.length);
+    //         // console.log(`Processed indices ${start} to ${end}`);
+    //     }
+    // } else {
+    //     // Skip competitive pricing if no ASINs available
+    //     // console.log("No ASINs available for competitive pricing");
+    // }
     
-    let CreateCompetitivePricing;
-    try {
-        CreateCompetitivePricing = await CompetitivePricing.create({
-            User: userId,
-            region: Region,
-            country: Country,
-            Products: Array.isArray(competitivePriceData) ? competitivePriceData : []
-        });
-    } catch (error) {
-        logger.error(`Competitive Pricing DB Error: ${error.message}`);
-        CreateCompetitivePricing = null;
-    }
+    // let CreateCompetitivePricing;
+    // try {
+    //     CreateCompetitivePricing = await CompetitivePricing.create({
+    //         User: userId,
+    //         region: Region,
+    //         country: Country,
+    //         Products: Array.isArray(competitivePriceData) ? competitivePriceData : []
+    //     });
+    // } catch (error) {
+    //     logger.error(`Competitive Pricing DB Error: ${error.message}`);
+    //     CreateCompetitivePricing = null;
+    // }
 
-    // Second Promise.all block
-    const [
-        RestockinventoryData,
-        productReview,
-        adsKeywords,
-        campaignData,
-        fbaInventoryPlanningData,
-        strandedInventoryData,
-        inboundNonComplianceData
-    ] = await Promise.all([
-       tokenManager.wrapSpApiFunction(
-          GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
-          logger.error(`Restock Inventory Error: ${err.message}`);
-           return null;
-       }),
-       addReviewDataTODatabase(
-            Array.isArray(asinArray) ? asinArray : [], Country, userId, Region
-       ).catch(err => {
-            logger.error(`Product Review Error: ${err.message}`);
-            return null;
-       }),
-       tokenManager.wrapAdsFunction(
-            getKeywords, userId, RefreshToken, AdsRefreshToken
-       )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
-            logger.error(`Keywords Error: ${err.message}`);
-            return { campaignIdArray: [] };
-       }),
-       tokenManager.wrapAdsFunction(
-            getCampaign, userId, RefreshToken, AdsRefreshToken
-       )(AdsAccessToken, ProfileId, Region, userId, Country).catch(err => {
-            logger.error(`Campaign Error: ${err.message}`);
-            return null;
-       }),
-       tokenManager.wrapSpApiFunction(
-            GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
-            logger.error(`FBA Inventory Planning Error: ${err.message}`);
-            return null;
-       }),
-       tokenManager.wrapSpApiFunction(
-            GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
-            logger.error(`Stranded Inventory Error: ${err.message}`);
-            return null;
-       }),
-       tokenManager.wrapSpApiFunction(
-            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA, userId, RefreshToken, AdsRefreshToken
-       )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
-            logger.error(`Inbound Non-Compliance Error: ${err.message}`);
-            return null;
-       })
-    ])
+    // COMMENTED OUT FOR FINANCE TESTING: Second Promise.all block
+    // const [
+    //     RestockinventoryData,
+    //     productReview,
+    //     adsKeywords,
+    //     campaignData,
+    //     fbaInventoryPlanningData,
+    //     strandedInventoryData,
+    //     inboundNonComplianceData
+    // ] = await Promise.all([
+    //    tokenManager.wrapSpApiFunction(
+    //       GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+    //       logger.error(`Restock Inventory Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    addReviewDataTODatabase(
+    //         Array.isArray(asinArray) ? asinArray : [], Country, userId, Region
+    //    ).catch(err => {
+    //         logger.error(`Product Review Error: ${err.message}`);
+    //         return null;
+    //    }),
+    //    tokenManager.wrapAdsFunction(
+    //         getKeywords, userId, RefreshToken, AdsRefreshToken
+    //    )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
+    //         logger.error(`Keywords Error: ${err.message}`);
+    //         return { campaignIdArray: [] };
+    //    }),
+    //    tokenManager.wrapAdsFunction(
+    //         getCampaign, userId, RefreshToken, AdsRefreshToken
+    //    )(AdsAccessToken, ProfileId, Region, userId, Country).catch(err => {
+    //         logger.error(`Campaign Error: ${err.message}`);
+    //         return null;
+    //    }),
+    //    tokenManager.wrapSpApiFunction(
+    //         GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+    //         logger.error(`FBA Inventory Planning Error: ${err.message}`);
+    //         return null;
+    //    }),
+    //    tokenManager.wrapSpApiFunction(
+    //         GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+    //         logger.error(`Stranded Inventory Error: ${err.message}`);
+    //         return null;
+    //    }),
+    //    tokenManager.wrapSpApiFunction(
+    //         GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA, userId, RefreshToken, AdsRefreshToken
+    //    )(AccessToken, [Marketplace_Id], userId, Base_URI, Country, Region).catch(err => {
+    //         logger.error(`Inbound Non-Compliance Error: ${err.message}`);
+    //         return null;
+    //    })
+    // ])
 
-    // FINANCE FUNCTION
+    console.log("=== TESTING FINANCE FUNCTION ONLY ===");
+    console.log("Parameters being passed to finance function:");
+    console.log("- User ID:", userId);
+    console.log("- Base URI:", Base_URI);
+    console.log("- Country:", Country);
+    console.log("- Region:", Region);
+    console.log("- Data period: from", dataToSend.after, "to", dataToSend.before);
+    console.log("======================================");
+
     let financeData = await tokenManager.wrapDataToSendFunction(
         listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
     )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
         logger.error(`Finance Data Error: ${err.message}`);
+        console.log("ERROR DETAILS:", err);
         return [];
     });
 
-    // Third Promise.all block
-    let [
-       WeeklySales, 
-    shipment,
-       brandData,
-       feesResult
-       ] = await Promise.all([
-       tokenManager.wrapDataToSendFunction(
-           TotalSales, userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
-           logger.error(`Weekly Sales Error: ${err.message}`);
-           return null;
-       }),
-       tokenManager.wrapDataToSendFunction(
-           getshipment, userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
-           logger.error(`Shipment Error: ${err.message}`);
-           return null;
-       }),
-       tokenManager.wrapDataToSendFunction(
-           getBrand, userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI).catch(err => {
-           logger.error(`Brand Data Error: ${err.message}`);
-           return null;
-       }),
-       tokenManager.wrapDataToSendFunction(
-           getAmazonFees, userId, RefreshToken, AdsRefreshToken
-       )(dataToSend, userId, Base_URI, Country, Region, ProductDetails).catch(err => {
-           logger.error(`Fees Result Error: ${err.message}`);
-           return null;
-       })
-    ])
-
-    // Fourth Promise.all block
-    console.log("=== CALLING getNegativeKeywords ===");
-    console.log("Parameters being passed:");
-    console.log("- Profile ID:", ProfileId);
-    console.log("- User ID:", userId);
-    console.log("- Country:", Country);
-    console.log("- Region:", Region);
-    console.log("- Campaign IDs (from DB):", campaignIdArray);
-    console.log("- Ad Group IDs (from DB):", adGroupIdArray);
-    console.log("======================================");
-
-    const [
-        negativeKeywords,
-        searchKeywords
-    ] = await Promise.all([
-            tokenManager.wrapAdsFunction(
-                getNegativeKeywords, userId, RefreshToken, AdsRefreshToken
-            )(AdsAccessToken, ProfileId, userId, Country, Region, 
-                Array.isArray(campaignIdArray) ? campaignIdArray : [], 
-                Array.isArray(adGroupIdArray) ? adGroupIdArray : []
-            ).catch(err => {
-                logger.error(`Negative Keywords Error: ${err.message}`);
-                console.log("ERROR DETAILS:", err);
-                return null;
-            }),
-            tokenManager.wrapAdsFunction(
-                getSearchKeywords, userId, RefreshToken, AdsRefreshToken
-            )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
-                logger.error(`Search Keywords Error: ${err.message}`);
-                return null;
-            })
-       ]);
-
-    // LOG NEGATIVE KEYWORDS RESULT
-    console.log("=== getNegativeKeywords RESULT ===");
-    if (negativeKeywords) {
-        console.log("✅ SUCCESS - getNegativeKeywords returned data");
-        console.log("Type:", typeof negativeKeywords);
-        console.log("Is Array:", Array.isArray(negativeKeywords));
+    // LOG FINANCE RESULT
+    console.log("=== FINANCE FUNCTION RESULT ===");
+    if (financeData) {
+        console.log("✅ SUCCESS - Finance function returned data");
+        console.log("Type:", typeof financeData);
+        console.log("Is Array:", Array.isArray(financeData));
         
-        if (Array.isArray(negativeKeywords)) {
-            console.log("Total negative keywords found:", negativeKeywords.length);
-            if (negativeKeywords.length > 0) {
-                console.log("Sample negative keywords (first 3):");
-                negativeKeywords.slice(0, 3).forEach((keyword, index) => {
-                    console.log(`  ${index + 1}.`, JSON.stringify(keyword, null, 2));
+        if (Array.isArray(financeData)) {
+            console.log("Total finance events found:", financeData.length);
+            if (financeData.length > 0) {
+                console.log("Sample finance events (first 2):");
+                financeData.slice(0, 2).forEach((event, index) => {
+                    console.log(`  ${index + 1}.`, JSON.stringify(event, null, 2));
                 });
             }
-        } else if (typeof negativeKeywords === 'object') {
-            console.log("Object keys:", Object.keys(negativeKeywords));
-            console.log("Full result:", JSON.stringify(negativeKeywords, null, 2));
+        } else if (typeof financeData === 'object') {
+            console.log("Object keys:", Object.keys(financeData));
+            console.log("Full result:", JSON.stringify(financeData, null, 2));
         }
     } else {
-        console.log("❌ FAILED - getNegativeKeywords returned null/undefined");
+        console.log("❌ FAILED - Finance function returned null/undefined");
     }
-    console.log("==================================");
+    console.log("================================");
 
-    // Generic keyword processing
-    function delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    // COMMENTED OUT FOR FINANCE TESTING: Third Promise.all block
+    // let [
+    //    WeeklySales, 
+    // shipment,
+    //    brandData,
+    //    feesResult
+    //    ] = await Promise.all([
+    //    tokenManager.wrapDataToSendFunction(
+    //        TotalSales, userId, RefreshToken, AdsRefreshToken
+    //    )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
+    //        logger.error(`Weekly Sales Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    tokenManager.wrapDataToSendFunction(
+    //        getshipment, userId, RefreshToken, AdsRefreshToken
+    //    )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
+    //        logger.error(`Shipment Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    tokenManager.wrapDataToSendFunction(
+    //        getBrand, userId, RefreshToken, AdsRefreshToken
+    //    )(dataToSend, userId, Base_URI).catch(err => {
+    //        logger.error(`Brand Data Error: ${err.message}`);
+    //        return null;
+    //    }),
+    //    tokenManager.wrapDataToSendFunction(
+    //        getAmazonFees, userId, RefreshToken, AdsRefreshToken
+    //    )(dataToSend, userId, Base_URI, Country, Region, ProductDetails).catch(err => {
+    //        logger.error(`Fees Result Error: ${err.message}`);
+    //        return null;
+    //    })
+    // ])
 
-    let genericKeyWordArray = [];
+    // COMMENTED OUT FOR FINANCE TESTING: Fourth Promise.all block (Keywords)
+    // const [
+    //     negativeKeywords,
+    //     searchKeywords
+    // ] = await Promise.all([
+    //         tokenManager.wrapAdsFunction(
+    //             getNegativeKeywords, userId, RefreshToken, AdsRefreshToken
+    //         )(AdsAccessToken, ProfileId, userId, Country, Region, 
+    //             Array.isArray(campaignIdArray) ? campaignIdArray : [], 
+    //             Array.isArray(adGroupIdArray) ? adGroupIdArray : []
+    //         ).catch(err => {
+    //             logger.error(`Negative Keywords Error: ${err.message}`);
+    //             return null;
+    //         }),
+    //         tokenManager.wrapAdsFunction(
+    //             getSearchKeywords, userId, RefreshToken, AdsRefreshToken
+    //         )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
+    //             logger.error(`Search Keywords Error: ${err.message}`);
+    //             return null;
+    //         })
+    //    ]);
+
+    // COMMENTED OUT FOR FINANCE TESTING: Generic keyword processing
+    // function delay(ms) {
+    //     return new Promise(resolve => setTimeout(resolve, ms));
+    // }
+
+    // let genericKeyWordArray = [];
     
-    // Ensure both arrays exist and are actually arrays before processing
-    if (Array.isArray(skuArray) && Array.isArray(asinArray) && skuArray.length > 0) {
-        console.log("skuArray: ", skuArray);
-        const tasks = skuArray.map((sku, index) => {
-            return limit(async () => {
-                await delay(1000); // Delay each request a bit more than the previous (200ms gap)
+    // // Ensure both arrays exist and are actually arrays before processing
+    // if (Array.isArray(skuArray) && Array.isArray(asinArray) && skuArray.length > 0) {
+    //     // console.log("skuArray: ", skuArray);
+    //     const tasks = skuArray.map((sku, index) => {
+    //         return limit(async () => {
+    //             await delay(1000); // Delay each request a bit more than the previous (200ms gap)
 
-                // Ensure asinArray has corresponding ASIN for this SKU and check bounds
-                if (index >= asinArray.length) {
-                    logger.error(new ApiError(500, `❌ No corresponding ASIN found for SKU at index ${index}: ${sku}`));
-                    return;
-                }
+    //             // Ensure asinArray has corresponding ASIN for this SKU and check bounds
+    //             if (index >= asinArray.length) {
+    //                 logger.error(new ApiError(500, `❌ No corresponding ASIN found for SKU at index ${index}: ${sku}`));
+    //                 return;
+    //             }
                 
-                const asin = asinArray[index];
-                if (!asin) {
-                    logger.error(new ApiError(500, `❌ No ASIN found for SKU: ${sku}`));
-                    return;
-                }
+    //             const asin = asinArray[index];
+    //             if (!asin) {
+    //                 logger.error(new ApiError(500, `❌ No ASIN found for SKU: ${sku}`));
+    //                 return;
+    //             }
 
-                const ListingItem = await tokenManager.wrapDataToSendFunction(
-                    GetListingItem, userId, RefreshToken, AdsRefreshToken
-                )(dataToSend, sku, asin, userId, Base_URI, Country, Region).catch(err => {
-                    logger.error(new ApiError(500, `❌ Error for SKU: ${sku} - ${err.message}`));
-                    return null;
-                });
+    //             const ListingItem = await tokenManager.wrapDataToSendFunction(
+    //                 GetListingItem, userId, RefreshToken, AdsRefreshToken
+    //             )(dataToSend, sku, asin, userId, Base_URI, Country, Region).catch(err => {
+    //                 logger.error(new ApiError(500, `❌ Error for SKU: ${sku} - ${err.message}`));
+    //                 return null;
+    //             });
 
-                console.log("ListingItem: ", ListingItem);
+    //             // console.log("ListingItem: ", ListingItem);
 
-                if (!ListingItem) {
-                    logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
-                } else {
-                    genericKeyWordArray.push(ListingItem)
-                }
-            });
-        });
-        await Promise.all(tasks);
-    } else {
-        console.log("No SKUs or ASINs available for processing listing items");
-    }
+    //             if (!ListingItem) {
+    //                 logger.error(new ApiError(500, `❌ No data for SKU: ${sku}`));
+    //             } else {
+    //                 genericKeyWordArray.push(ListingItem)
+    //             }
+    //         });
+    //     });
+    //     await Promise.all(tasks);
+    // } else {
+    //     // console.log("No SKUs or ASINs available for processing listing items");
+    // }
 
-    console.log("genericKeyWordArray: ", genericKeyWordArray);
+    // // console.log("genericKeyWordArray: ", genericKeyWordArray);
 
-    // Save generic keywords if any were found
-    if (Array.isArray(genericKeyWordArray) && genericKeyWordArray.length > 0) {
-        try {
-            const saveGenericKeyword = await ListingItemsModel.create({
-                User: userId,
-                region: Region,
-                country: Country,
-                GenericKeyword: genericKeyWordArray
-            });
+    // // Save generic keywords if any were found
+    // if (Array.isArray(genericKeyWordArray) && genericKeyWordArray.length > 0) {
+    //     try {
+    //         const saveGenericKeyword = await ListingItemsModel.create({
+    //             User: userId,
+    //             region: Region,
+    //             country: Country,
+    //             GenericKeyword: genericKeyWordArray
+    //         });
 
-            console.log("Data saved in db", saveGenericKeyword);
-            if (!saveGenericKeyword) {
-                logger.error("Failed to save generic keyword - continuing without saving");
-            }
-        } catch (error) {
-            logger.error(`Error saving generic keywords: ${error.message} - continuing without saving`);
-        }
-    }
+    //         // console.log("Data saved in db", saveGenericKeyword);
+    //         if (!saveGenericKeyword) {
+    //             logger.error("Failed to save generic keyword - continuing without saving");
+    //         }
+    //     } catch (error) {
+    //         logger.error(`Error saving generic keywords: ${error.message} - continuing without saving`);
+    //     }
+    // }
 
-    // Critical data validation
-    if (!v2data) {
-        logger.error("Failed to fetch V2 seller performance report - continuing with null data");
-    }
+    // COMMENTED OUT FOR FINANCE TESTING: Other data validations
+    // if (!v2data) {
+    //     logger.error("Failed to fetch V2 seller performance report - continuing with null data");
+    // }
 
-    if (!v1data) {
-        logger.error("Failed to fetch V1 seller performance report - continuing with null data");
-    }
+    // if (!v1data) {
+    //     logger.error("Failed to fetch V1 seller performance report - continuing with null data");
+    // }
 
     // Finance data validation - ensure it's an array
     if (!Array.isArray(financeData)) {
@@ -562,68 +561,69 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
     }
 
-    // Optional data validation
-    if (!CreateCompetitivePricing) {
-        logger.warn("Competitive pricing data not available - continuing without it");
-    }
+    // COMMENTED OUT FOR FINANCE TESTING: Additional data validations  
+    // if (!CreateCompetitivePricing) {
+    //     logger.warn("Competitive pricing data not available - continuing without it");
+    // }
 
-    if (!WeeklySales) {
-        logger.warn("Weekly sales data not available - continuing without it");
-    }
+    // if (!WeeklySales) {
+    //     logger.warn("Weekly sales data not available - continuing without it");
+    // }
 
-    if (!RestockinventoryData) {
-        logger.warn("Restock inventory data not available - continuing without it");
-    }
+    // if (!RestockinventoryData) {
+    //     logger.warn("Restock inventory data not available - continuing without it");
+    // }
 
-    if (!productReview) {
-        console.log("productReview", productReview);
-        logger.warn("Product review data not available - continuing without it");
-    }
+    // if (!productReview) {
+    //     // console.log("productReview", productReview);
+    //     logger.warn("Product review data not available - continuing without it");
+    // }
 
-    if (!shipment) {
-        logger.warn("Shipment data not available - continuing without it");
-    }
+    // if (!shipment) {
+    //     logger.warn("Shipment data not available - continuing without it");
+    // }
 
-    if (!brandData) {
-        logger.warn("Brand data not available - continuing without it");
-    }
+    // if (!brandData) {
+    //     logger.warn("Brand data not available - continuing without it");
+    // }
 
-    if (!negativeKeywords) {
-        logger.warn("Negative keywords data not available - continuing without it");
-    }
+    // if (!negativeKeywords) {
+    //     logger.warn("Negative keywords data not available - continuing without it");
+    // }
 
-    if (!searchKeywords) {
-        logger.warn("Search keywords data not available - continuing without it");
-    }
+    // if (!searchKeywords) {
+    //     logger.warn("Search keywords data not available - continuing without it");
+    // }
 
-    if (!fbaInventoryPlanningData) {
-        logger.warn("FBA Inventory Planning data not available - continuing without it");
-    }
+    // if (!fbaInventoryPlanningData) {
+    //     logger.warn("FBA Inventory Planning data not available - continuing without it");
+    // }
 
-    if (!strandedInventoryData) {
-        logger.warn("Stranded Inventory data not available - continuing without it");
-    }
+    // if (!strandedInventoryData) {
+    //     logger.warn("Stranded Inventory data not available - continuing without it");
+    // }
 
-    if (!inboundNonComplianceData) {
-        logger.warn("Inbound Non-Compliance data not available - continuing without it");
-    }
+    // if (!inboundNonComplianceData) {
+    //     logger.warn("Inbound Non-Compliance data not available - continuing without it");
+    // }
 
+    // FINANCE TESTING: Result object with only finance data
     const result = {
-        MerchantlistingData: merchantListingsData,
-        v2data: v2data,
-        v1data: v1data,
+        // MerchantlistingData: merchantListingsData,
+        // v2data: v2data,
+        // v1data: v1data,
         financeData: financeData,
-        competitivePriceData: Array.isArray(competitivePriceData) ? competitivePriceData : [],
-        RestockinventoryData: RestockinventoryData,
-        productReview: productReview,
-        WeeklySales: WeeklySales,
-        shipment: shipment,
-        brandData: brandData,
-        negativeKeywords: negativeKeywords,
-        searchKeywords: searchKeywords,
-        fbaInventoryPlanningData: fbaInventoryPlanningData,
-        strandedInventoryData: strandedInventoryData,
-        inboundNonComplianceData: inboundNonComplianceData
+        // competitivePriceData: Array.isArray(competitivePriceData) ? competitivePriceData : [],
+        // RestockinventoryData: RestockinventoryData,
+        // productReview: productReview,
+        // WeeklySales: WeeklySales,
+        // shipment: shipment,
+        // brandData: brandData,
+        // negativeKeywords: negativeKeywords,
+        // searchKeywords: searchKeywords,
+        // fbaInventoryPlanningData: fbaInventoryPlanningData,
+        // strandedInventoryData: strandedInventoryData,
+        // inboundNonComplianceData: inboundNonComplianceData
     }
 
     // Final validation - log warnings for missing data but continue
@@ -631,7 +631,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("No financial data found - continuing with empty finance data");
     }
 
-    return res.status(200).json(new ApiResponse(200,result, "All SP-API data has been fetched successfully"));
+    return res.status(200).json(new ApiResponse(200, result, "Finance data has been fetched successfully"));
 
 })
 

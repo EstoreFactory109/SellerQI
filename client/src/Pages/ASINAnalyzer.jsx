@@ -4,6 +4,24 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AnalyseProduct } from '../operations/AnalyseProduct';
 
+// Add shimmer animation styles
+const shimmerStyles = `
+  @keyframes shimmer {
+    0% { transform: translateX(-100%) skewX(-12deg); }
+    100% { transform: translateX(200%) skewX(-12deg); }
+  }
+  .animate-shimmer {
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+`;
+
+// Inject styles
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = shimmerStyles;
+  document.head.appendChild(styleSheet);
+}
+
 const ASINAnalyzer = () => {
   // State management
   const [asin, setAsin] = useState('');
@@ -12,6 +30,7 @@ const ASINAnalyzer = () => {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState(null);
   const [showMarketDropdown, setShowMarketDropdown] = useState(false);
+  const [hasAnimated, setHasAnimated] = useState(false);
   const marketDropdownRef = useRef(null);
 
   // Market options
@@ -50,6 +69,14 @@ const ASINAnalyzer = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
+  }, []);
+
+  // Set hasAnimated to true after ALL animations complete to prevent re-animations
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setHasAnimated(true);
+    }, 2000); // Wait for all animations to complete (longest delay is 0.8s + 0.6s duration = 1.4s)
+    return () => clearTimeout(timer);
   }, []);
 
   // Handle analysis
@@ -509,130 +536,353 @@ const ASINAnalyzer = () => {
 
   // Search Component
   const SearchComponent = () => (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex flex-col overflow-y-auto">
-      <div className="flex-1 flex items-center justify-center py-20 px-4 max-w-full">
-        <div className="w-full max-w-4xl text-center">
-          <div className="mb-12">
-            <h1 className="text-5xl font-bold mb-6 leading-tight text-[#222b45]">
-              Analyze Any Amazon Product
-            </h1>
-            <p className="text-xl text-[#6b7280] mb-2">
-              Get a <span className="text-red-500 font-semibold">Comprehensive Health Check</span> of Any Amazon Product
-            </p>
-            <p className="text-[#6b7280]">
-              Enter an ASIN to get detailed analysis, optimization recommendations, and actionable insights
-            </p>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-cyan-50 w-full lg:mt-0 mt-[12vh] relative overflow-hidden">
+      {/* Animated Background Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full opacity-10 animate-pulse"></div>
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-blue-400 to-cyan-400 rounded-full opacity-10 animate-pulse" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br from-green-400 to-emerald-400 rounded-full opacity-5 animate-pulse" style={{ animationDelay: '2s' }}></div>
+      </div>
 
-          <div className="max-w-2xl mx-auto mb-6">
-            <div className="relative flex gap-0 shadow-lg">
-              <div className="relative flex-1">
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  value={asin}
-                  onChange={(e) => setAsin(e.target.value)}
-                  placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW"
-                  className="w-full pl-12 pr-4 py-4 border border-gray-300 rounded-l-lg focus:outline-none focus:border-[#3B4A6B] focus:ring-2 focus:ring-[#3B4A6B]/20 text-lg"
-                  onKeyPress={(e) => e.key === 'Enter' && handleAnalyze()}
-                />
+      {/* Header Section */}
+      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-40 shadow-sm">
+        <div className="px-4 lg:px-6 py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                  ASIN Analyzer
+                </h1>
+                <p className="text-sm text-gray-600 mt-1">Analyze any Amazon product for comprehensive insights</p>
               </div>
-              <div className="relative" ref={marketDropdownRef}>
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 rounded-full text-xs font-medium border border-green-200 shadow-sm">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                Ready to analyze
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="overflow-y-auto" style={{ height: 'calc(100vh - 120px)' }}>
+        <div className="px-4 lg:px-6 py-6 pb-20">
+          {/* Search Section */}
+          <motion.div
+            initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/20 shadow-xl p-8 mb-8 relative overflow-hidden"
+          >
+            {/* Card Background Gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white via-purple-50/30 to-blue-50/30 opacity-50"></div>
+            
+            <div className="max-w-4xl mx-auto relative z-10">
+              <div className="text-center mb-8">
+                <motion.div 
+                  initial={hasAnimated ? false : { scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.8, delay: hasAnimated ? 0 : 0.3, ease: "backOut" }}
+                  className="relative inline-block mb-6"
+                >
+                  <div className="w-20 h-20 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-3xl flex items-center justify-center mx-auto shadow-2xl transform rotate-3 hover:rotate-6 transition-transform duration-300">
+                    <Search className="w-10 h-10 text-white" />
+                  </div>
+                  <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-br from-yellow-400 to-orange-400 rounded-full animate-bounce"></div>
+                  <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-gradient-to-br from-pink-400 to-red-400 rounded-full animate-pulse"></div>
+                </motion.div>
+                
+                <motion.h2 
+                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.4, ease: "easeOut" }}
+                  className="text-4xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent mb-4"
+                >
+                  Get Comprehensive Product Analysis
+                </motion.h2>
+                
+                <motion.p 
+                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
+                  className="text-lg text-gray-700 mb-2"
+                >
+                  Enter an ASIN to get detailed analysis, optimization recommendations, and actionable insights
+                </motion.p>
+                
+                <motion.div 
+                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.6, ease: "easeOut" }}
+                  className="flex flex-wrap justify-center gap-4 text-sm"
+                >
+                  <span className="px-3 py-1 bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 rounded-full border border-purple-300">✨ Instant analysis</span>
+                  <span className="px-3 py-1 bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 rounded-full border border-blue-300">🎯 Detailed insights</span>
+                  <span className="px-3 py-1 bg-gradient-to-r from-green-100 to-green-200 text-green-700 rounded-full border border-green-300">📊 Professional reports</span>
+                </motion.div>
+              </div>
+
+              <motion.div 
+                initial={hasAnimated ? false : { opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.7, ease: "easeOut" }}
+                className="max-w-2xl mx-auto mb-6"
+              >
+                <form 
+                  onSubmit={(e) => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    handleAnalyze(); 
+                  }} 
+                  className="relative flex gap-0 shadow-2xl rounded-xl"
+                >
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-purple-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      value={asin}
+                      onChange={(e) => setAsin(e.target.value)}
+                      onPaste={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAnalyze();
+                        }
+                      }}
+                      placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW"
+                      className="w-full pl-12 pr-4 py-4 border-2 border-purple-200 rounded-l-xl focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/20 text-lg bg-white/90 backdrop-blur-sm transition-all duration-300"
+                    />
+                  </div>
+                  <div className="relative" ref={marketDropdownRef}>
+                    <button
+                      type="button"
+                      className={`
+                        relative flex items-center justify-between gap-2 px-6 py-4 border-2 border-l-0 border-purple-200 rounded-r-xl 
+                        font-medium text-center min-w-[180px] text-lg h-[60px] transition-all duration-300 group overflow-hidden
+                        ${showMarketDropdown 
+                          ? 'bg-gradient-to-r from-purple-100 to-blue-100 border-purple-300 shadow-lg' 
+                          : 'bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 hover:border-purple-300'
+                        }
+                        focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400
+                      `}
+                      onClick={(e) => { 
+                        e.preventDefault(); 
+                        e.stopPropagation(); 
+                        setShowMarketDropdown(!showMarketDropdown); 
+                      }}
+                    >
+                      {/* Background shimmer effect */}
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-500"></div>
+                      
+                      {/* Selected market display */}
+                      <div className="relative flex items-center gap-3 flex-1">
+                        {/* Market flag circle */}
+                        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-400 to-blue-400 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                          {market}
+                        </div>
+                        
+                        {/* Market name */}
+                        <span className="text-gray-700 group-hover:text-gray-800 transition-colors duration-200 truncate">
+                          {marketOptions.find(option => option.value === market)?.label || 'Select Market'}
+                        </span>
+                      </div>
+                      
+                      {/* Dropdown arrow with animation */}
+                      <ChevronDown className={`
+                        w-4 h-4 text-purple-500 transition-all duration-300 
+                        ${showMarketDropdown ? 'rotate-180 text-purple-600' : 'group-hover:text-purple-600'}
+                      `} />
+                      
+                      {/* Active indicator */}
+                      {showMarketDropdown && (
+                        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gradient-to-r from-purple-500 to-blue-500 rounded-t-full"></div>
+                      )}
+                    </button>
+                    
+                    <AnimatePresence>
+                      {showMarketDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2, ease: "easeInOut" }}
+                          className="absolute top-full left-0 right-0 bg-gradient-to-b from-white via-purple-50/30 to-blue-50/50 backdrop-blur-xl border-2 border-purple-200 border-t-0 rounded-b-xl shadow-2xl z-[9999] max-h-60 overflow-y-auto overflow-hidden"
+                        >
+                        {/* Dropdown Header */}
+                        <div className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white px-4 py-2 text-xs font-semibold tracking-wide">
+                          SELECT MARKETPLACE
+                        </div>
+                        
+                        {/* Options List */}
+                        <ul className="py-2">
+                          {marketOptions.map((option, index) => (
+                            <li
+                              key={option.value}
+                              className={`
+                                relative px-4 py-3 cursor-pointer transition-all duration-300 group
+                                ${market === option.value 
+                                  ? 'bg-gradient-to-r from-purple-100 via-blue-100 to-cyan-100 text-purple-800 border-l-4 border-purple-500 font-semibold' 
+                                  : 'hover:bg-gradient-to-r hover:from-purple-50 hover:via-blue-50 hover:to-cyan-50 hover:text-purple-700 border-l-4 border-transparent hover:border-purple-400'
+                                }
+                                transform hover:translate-x-1 hover:scale-[1.02]
+                              `}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setMarket(option.value);
+                                setShowMarketDropdown(false);
+                              }}
+                            >
+                              {/* Subtle background gradient on hover */}
+                              <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-blue-500/5 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-r-lg"></div>
+                              
+                              {/* Flag and Country Info */}
+                              <div className="relative flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  {/* Country Flag Circle */}
+                                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-blue-400 flex items-center justify-center text-white text-xs font-bold shadow-md">
+                                    {option.value}
+                                  </div>
+                                  
+                                  {/* Country Name */}
+                                  <span className="text-sm font-medium group-hover:font-semibold transition-all duration-200">
+                                    {option.label}
+                                  </span>
+                                </div>
+                                
+                                {/* Selected Indicator */}
+                                {market === option.value && (
+                                  <div className="w-2 h-2 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full shadow-lg animate-pulse"></div>
+                                )}
+                                
+                                {/* Hover Arrow */}
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                  <ChevronRight className="w-4 h-4 text-purple-500" />
+                                </div>
+                              </div>
+                              
+                              {/* Bottom border on hover */}
+                              <div className="absolute bottom-0 left-4 right-4 h-px bg-gradient-to-r from-purple-300 via-blue-300 to-cyan-300 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                            </li>
+                          ))}
+                        </ul>
+                        
+                        {/* Dropdown Footer */}
+                        <div className="bg-gradient-to-r from-gray-50 to-purple-50 px-4 py-2 border-t border-purple-200/50">
+                          <div className="text-xs text-gray-500 text-center">
+                            {marketOptions.length} marketplaces available
+                          </div>
+                                                 </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </form>
+              </motion.div>
+
+              {error && (
+                <motion.div 
+                  initial={hasAnimated ? false : { opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                  className="max-w-2xl mx-auto mb-6"
+                >
+                  <div className="bg-gradient-to-r from-red-50 to-pink-50 border-2 border-red-200 rounded-xl p-4 text-red-700 shadow-lg">
+                    {error}
+                  </div>
+                </motion.div>
+              )}
+
+              <motion.div 
+                initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.8, ease: "easeOut" }}
+                className="text-center mb-8"
+              >
                 <button
                   type="button"
-                  className="flex items-center justify-between gap-2 px-6 py-4 border border-l-0 border-gray-300 rounded-r-lg bg-white hover:bg-gray-50 focus:outline-none font-medium text-center min-w-[180px] text-lg h-[60px]"
-                  onClick={() => setShowMarketDropdown(!showMarketDropdown)}
+                  className="relative bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 hover:from-purple-700 hover:via-blue-700 hover:to-cyan-700 text-white px-10 py-4 rounded-xl flex items-center gap-3 mx-auto transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-lg font-bold shadow-2xl group overflow-hidden"
+                  onClick={(e) => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    handleAnalyze(); 
+                  }}
+                  disabled={loading}
                 >
-                  <span>{marketOptions.find(option => option.value === market)?.label || 'Select Market'}</span>
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
-                </button>
-                
-                <AnimatePresence>
-                  {showMarketDropdown && (
-                    <motion.div
-                      className="absolute top-full -mt-px w-full bg-white border border-gray-300 border-t-white rounded-b-md shadow-lg z-50 overflow-hidden max-h-60 overflow-y-auto"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                    >
-                      <ul className="py-1 text-sm text-gray-700">
-                        {marketOptions.map((option) => (
-                          <li
-                            key={option.value}
-                            className="px-4 py-2 hover:bg-[#333651] hover:text-white cursor-pointer transition-colors"
-                            onClick={() => {
-                              setMarket(option.value);
-                              setShowMarketDropdown(false);
-                            }}
-                          >
-                            {option.label}
-                          </li>
-                        ))}
-                      </ul>
-                    </motion.div>
+                  {/* Button Shimmer Effect */}
+                  <div className="absolute inset-0 -skew-x-12 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-500"></div>
+                  
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span className="bg-gradient-to-r from-white to-cyan-100 bg-clip-text text-transparent">Analyzing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="bg-gradient-to-r from-white to-cyan-100 bg-clip-text text-transparent">Analyze Product</span>
+                      <ChevronRight className="w-6 h-6 group-hover:translate-x-1 transition-transform duration-300" />
+                    </>
                   )}
-                </AnimatePresence>
-              </div>
+                </button>
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
 
-          {error && (
-            <div className="max-w-2xl mx-auto mb-6">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-                {error}
-              </div>
-            </div>
-          )}
-
-          <div className="max-w-2xl mx-auto mb-8">
-            <p className="text-gray-600 mb-6 text-sm">
-              Instant analysis • Detailed insights • Professional recommendations • Comprehensive reports
-            </p>
-
-            <button
-              type="button"
-              className="bg-[#3B4A6B] text-white px-8 py-4 rounded-lg flex items-center gap-2 mx-auto hover:bg-[#2d3a52] transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-lg font-semibold shadow-lg"
-              onClick={handleAnalyze}
-              disabled={loading}
+          {/* Features Section */}
+          <motion.div
+            initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.2, ease: "easeOut" }}
+            className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto"
+          >
+            <motion.div 
+              initial={hasAnimated ? false : { opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.4, ease: "easeOut" }}
+              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  Analyze Product <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
-          </div>
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <Search className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-purple-700 transition-colors duration-300">Comprehensive Analysis</h3>
+                <p className="text-sm text-gray-600 leading-relaxed">Analyze 13+ data points including rankings, conversion, fulfillment, and more with AI-powered insights</p>
+              </div>
+            </motion.div>
 
-          {/* Features */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-12 h-12 bg-[#3B4A6B]/10 rounded-lg flex items-center justify-center mb-4 mx-auto">
-                <Search className="w-6 h-6 text-[#3B4A6B]" />
+            <motion.div 
+              initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
+              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <Info className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-green-700 transition-colors duration-300">Actionable Insights</h3>
+                <p className="text-sm text-gray-600 leading-relaxed">Get specific recommendations on how to fix issues and optimize performance with step-by-step guidance</p>
               </div>
-              <h3 className="font-semibold text-[#222b45] mb-2">Comprehensive Analysis</h3>
-              <p className="text-sm text-[#6b7280]">Analyze 13+ data points including rankings, conversion, fulfillment, and more</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-12 h-12 bg-[#3B4A6B]/10 rounded-lg flex items-center justify-center mb-4 mx-auto">
-                <Info className="w-6 h-6 text-[#3B4A6B]" />
+            </motion.div>
+
+            <motion.div 
+              initial={hasAnimated ? false : { opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.6, ease: "easeOut" }}
+              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-red-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <Download className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-orange-700 transition-colors duration-300">Detailed Reports</h3>
+                <p className="text-sm text-gray-600 leading-relaxed">Download comprehensive PDF reports with all findings and recommendations for easy sharing</p>
               </div>
-              <h3 className="font-semibold text-[#222b45] mb-2">Actionable Insights</h3>
-              <p className="text-sm text-[#6b7280]">Get specific recommendations on how to fix issues and optimize performance</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-12 h-12 bg-[#3B4A6B]/10 rounded-lg flex items-center justify-center mb-4 mx-auto">
-                <Download className="w-6 h-6 text-[#3B4A6B]" />
-              </div>
-              <h3 className="font-semibold text-[#222b45] mb-2">Detailed Reports</h3>
-              <p className="text-sm text-[#6b7280]">Download comprehensive PDF reports with all findings and recommendations</p>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         </div>
       </div>
     </div>
@@ -658,7 +908,11 @@ const ASINAnalyzer = () => {
           </div>
           <button
             type="button"
-            onClick={handleNewSearch}
+            onClick={(e) => { 
+              e.preventDefault(); 
+              e.stopPropagation(); 
+              handleNewSearch(); 
+            }}
             className="flex items-center gap-2 bg-[#3B4A6B] hover:bg-[#2d3a52] text-white px-6 py-2 rounded-lg font-semibold shadow transition-all"
           >
             <Search size={18} />
@@ -698,7 +952,15 @@ const ASINAnalyzer = () => {
                   </div>
                 </div>
                 {/* Download Button */}
-                <button type="button" className="flex items-center gap-2 bg-[#2a2d42] hover:bg-[#23253a] text-white px-6 py-2 rounded-md font-semibold shadow transition-all mt-2 md:mt-0">
+                <button 
+                  type="button" 
+                  onClick={(e) => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    /* Add download logic here */ 
+                  }}
+                  className="flex items-center gap-2 bg-[#2a2d42] hover:bg-[#23253a] text-white px-6 py-2 rounded-md font-semibold shadow transition-all mt-2 md:mt-0"
+                >
                   Download PDF <Download size={18} />
                 </button>
               </div>

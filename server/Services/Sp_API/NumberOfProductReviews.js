@@ -84,7 +84,7 @@ const CalculateNumberOfElementsPerRequest=(totalElements)=>{
 }
 
 const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
-  console.log("asinArray: ", asinArray);
+          // console.log("asinArray: ", asinArray);
   
   if (!asinArray || !country || !userId) {
     logger.warn("❗ Missing required parameters: asin, country, or userId");
@@ -171,7 +171,7 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
     await getUser.save();
     logger.info("✅ Data saved successfully");
 
-    console.log("addReview: ", addReview);
+                // console.log("addReview: ", addReview);
 
     return addReview;
   } catch (error) {

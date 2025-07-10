@@ -104,7 +104,12 @@ async function getSearchTermReportId(accessToken, profileId, region) {
                 data: error.response.data,
                 headers: error.response.headers
             });
-            throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Preserve the original error structure for TokenManager to detect 401s
+            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            throw enhancedError;
         } else if (error.request) {
             console.error('No response received:', error.request);
             throw new Error('No response received from Amazon Ads API');
@@ -145,19 +150,9 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                if (attempts === 58 || attempts === 118 || attempts === 178) {
-                    const user = await userModel.findById(userId).select('spiRefreshToken');
-                    if (!user || !user.spiRefreshToken) {
-                        return {
-                            status: 'FAILURE',
-                            reportId: reportId,
-                            error: 'Report generation failed - unable to refresh token'
-                        }
-                    }
-                    accessToken = await generateAccessToken(user.spiRefreshToken);
-                }
+                // Token refresh is now handled automatically by TokenManager
 
-                console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
@@ -206,7 +201,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 data: error.response.data,
                 headers: error.response.headers
             });
-            throw new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Preserve the original error structure for TokenManager to detect 401s
+            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            throw enhancedError;
         } else if (error.request) {
             console.error('No response received:', error.request);
             throw new Error('No response received from Amazon Ads API');
@@ -285,7 +285,7 @@ async function downloadSearchTermReportData(location, accessToken, profileId) {
 }
 
 async function getAutoSearchTermsWithSales(accessToken, profileId, userId, country, region) {
-    console.log(`Getting search terms for auto campaigns in region: ${region}`);
+            // console.log(`Getting search terms for auto campaigns in region: ${region}`);
 
     try {
         // Add a small delay to prevent rapid successive requests
@@ -298,7 +298,7 @@ async function getAutoSearchTermsWithSales(accessToken, profileId, userId, count
             throw new Error('Failed to get report ID');
         }
 
-        console.log(`Report ID generated: ${reportData.reportId}`);
+        // console.log(`Report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);

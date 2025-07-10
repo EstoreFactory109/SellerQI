@@ -2,11 +2,13 @@ import React, { useState } from "react";
 import { AlertCircle, DollarSign, TrendingUp, PieChart } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft'
 
 const TotalSales = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const navigate = useNavigate();
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
 
@@ -30,12 +32,24 @@ const TotalSales = () => {
     Number(info?.accountFinance?.Refunds || 0),
   ];
 
+  // Handle navigation to profitability dashboard
+  const handleNavigateToProfitability = (itemName) => {
+    console.log(`Navigating to profitability dashboard from: ${itemName}`);
+    navigate('/seller-central-checker/profitibility-dashboard');
+  };
+
   const chartData = {
     series: saleValues,
     options: {
       chart: { 
         type: "pie",
-        fontFamily: "'Inter', sans-serif"
+        fontFamily: "'Inter', sans-serif",
+        events: {
+          dataPointSelection: function(event, chartContext, config) {
+            const selectedLabel = labelData[config.dataPointIndex];
+            handleNavigateToProfitability(selectedLabel);
+          }
+        }
       },
       labels: labelData,
       colors: [
@@ -155,20 +169,22 @@ const TotalSales = () => {
             return (
               <div
                 key={index}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                onClick={() => handleNavigateToProfitability(label)}
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-blue-50 hover:border-blue-200 border border-transparent transition-all cursor-pointer group"
+                title={`Click to view ${label} details in Profitability Dashboard`}
               >
                 <div className="flex items-center gap-3">
                   <div
                     className="w-3 h-3 rounded-full flex-shrink-0"
                     style={{ backgroundColor: chartData.options.colors[index] }}
                   ></div>
-                  <p className="text-sm font-medium text-gray-700">{label}</p>
+                  <p className="text-sm font-medium text-gray-700 group-hover:text-blue-700 transition-colors">{label}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <p className="text-sm font-semibold text-gray-900">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-900 transition-colors">
                     ${(index === 0 ? grossProfitRaw : value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
-                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs font-medium min-w-[2.5rem] text-center">
+                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs font-medium min-w-[2.5rem] text-center group-hover:bg-blue-100 transition-colors">
                     {percentage}%
                   </span>
                 </div>

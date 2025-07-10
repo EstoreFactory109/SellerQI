@@ -94,15 +94,34 @@ const AnalysingAccount = () => {
                         const expireDate = new Date();
                         expireDate.setDate(currentDate.getDate() + 7);
                         
+                        // Calculate total issues using EXACT SAME formula as Dashboard Total Issues box
+                        // Source: Dashboard.jsx lines 143-149 - const totalIssues = (dashboardInfo?.totalProfitabilityErrors || 0) + ...
+                        const profitabilityErrors = dashboardData.totalProfitabilityErrors || 0;
+                        const sponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
+                        const inventoryErrors = dashboardData.totalInventoryErrors || 0;
+                        const rankingErrors = dashboardData.TotalRankingerrors || 0;
+                        const conversionErrors = dashboardData.totalErrorInConversion || 0;
+                        const accountErrors = dashboardData.totalErrorInAccount || 0;
+                        
+                        // IDENTICAL calculation to Dashboard's totalIssues
+                        const totalCalculatedIssues = profitabilityErrors + sponsoredAdsErrors + inventoryErrors + 
+                                                    rankingErrors + conversionErrors + accountErrors;
+
+                        console.log("🔍 ACCOUNT HISTORY TOTAL ISSUES BREAKDOWN (DASHBOARD ORDER):");
+                        console.log("  • Profitability Errors:", profitabilityErrors);
+                        console.log("  • Sponsored Ads Errors:", sponsoredAdsErrors);
+                        console.log("  • Inventory Errors:", inventoryErrors);
+                        console.log("  • Ranking Errors:", rankingErrors);
+                        console.log("  • Conversion Errors:", conversionErrors);
+                        console.log("  • Account Errors:", accountErrors);
+                        console.log("  • TOTAL ISSUES (MATCHES DASHBOARD):", totalCalculatedIssues);
+                        
                         const HistoryData = {
                             Date: currentDate,
                             HealthScore: dashboardData.accountHealthPercentage?.Percentage || 0,
                             TotalProducts: dashboardData.TotalProduct?.length || 0,
                             ProductsWithIssues: dashboardData.productWiseError?.length || 0,
-                            TotalNumberOfIssues: 
-                                (dashboardData.TotalRankingerrors || 0) + 
-                                (dashboardData.totalErrorInConversion || 0) + 
-                                (dashboardData.totalErrorInAccount || 0),
+                            TotalNumberOfIssues: totalCalculatedIssues,
                             expireDate: expireDate
                         };
 
@@ -112,7 +131,11 @@ const AnalysingAccount = () => {
                             { withCredentials: true }
                         );
 
-                        console.log(CreateAccountHistory);
+                        console.log("🔍 ACCOUNT HISTORY CREATION IN ANALYSINGACCOUNT:");
+                        console.log("History Data Being Sent:", HistoryData);
+                        console.log("Account History Creation Response:", CreateAccountHistory);
+                        console.log("Account History Created Data:", CreateAccountHistory?.data?.data);
+                        
                         if (CreateAccountHistory && CreateAccountHistory.status === 201) {
                             dispatch(setHistoryInfo(CreateAccountHistory.data.data));
                         }

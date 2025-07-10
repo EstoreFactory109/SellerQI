@@ -106,7 +106,7 @@ export default function AccountHealthDashboard() {
     // Calculate health overview
     const totalIssues = accountMetrics.filter(metric => metric.data?.status === "Error").length;
     const totalMetrics = accountMetrics.length;
-    const healthPercentage = Math.round(((totalMetrics - totalIssues) / totalMetrics) * 100);
+    const healthPercentage = info.accountHealthPercentage.Percentage;
 
     // Filter metrics based on search and filter
     const filteredMetrics = accountMetrics.filter(metric => {
@@ -252,9 +252,9 @@ export default function AccountHealthDashboard() {
                                     {healthPercentage}%
                                 </div>
                                 <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Account Health</div>
-                                                                 <div className="text-xs text-gray-400 mt-1">
-                                     {totalIssues > 0 ? `${totalIssues} issues detected` : 'All systems healthy'}
-                                 </div>
+                                <div className="text-xs text-gray-400 mt-1">
+                                    {totalIssues > 0 ? `${totalIssues} issues detected` : 'All systems healthy'}
+                                </div>
                             </div>
                             <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
                                 <Shield className="w-8 h-8 text-white" />
@@ -262,45 +262,6 @@ export default function AccountHealthDashboard() {
                         </div>
                     </div>
                 </div>
-            </div>
-
-                         {/* Quick Stats */}
-             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                 {[
-                     { label: 'Total Metrics', value: totalMetrics, icon: BarChart3, color: 'blue' },
-                     { label: 'Issues Found', value: totalIssues, icon: AlertTriangle, color: 'red' },
-                     { label: 'Healthy Metrics', value: totalMetrics - totalIssues, icon: CheckCircle, color: 'green' },
-                     { label: 'Health Score', value: `${healthPercentage}%`, icon: Shield, color: 'purple' }
-                 ].map((stat, index) => {
-                    const Icon = stat.icon;
-                                         const colorMap = {
-                         blue: 'from-blue-500 to-blue-600',
-                         red: 'from-red-500 to-red-600',
-                         orange: 'from-orange-500 to-orange-600',
-                         green: 'from-green-500 to-green-600',
-                         purple: 'from-purple-500 to-purple-600'
-                     };
-                    
-                    return (
-                        <motion.div
-                            key={stat.label}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.5, delay: index * 0.1 }}
-                            className="bg-white rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg"
-                        >
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-gray-600 mb-1">{stat.label}</p>
-                                    <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                                </div>
-                                <div className={`w-12 h-12 bg-gradient-to-br ${colorMap[stat.color]} rounded-lg flex items-center justify-center shadow-lg`}>
-                                    <Icon className="w-6 h-6 text-white" />
-                                </div>
-                            </div>
-                        </motion.div>
-                    );
-                })}
             </div>
 
             {/* Top Section - Health & Sales Chart */}
