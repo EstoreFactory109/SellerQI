@@ -40,6 +40,7 @@ import PromotionsPage from './Pages/PromotionsPage.jsx';
 import Advertisement from './Pages/advertisement.jsx';
 import Features from './Pages/features.jsx';
 import InventoryManagement from './Pages/inventoryManagement.jsx';
+import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
 
 const App = () => {
 
@@ -77,6 +78,7 @@ const App = () => {
         <Route path='/advertisement' element={<Advertisement />} />
         <Route path='/features' element={<Features />} />
         <Route path='/inventory-management' element={<InventoryManagement />} />
+        <Route path='/auth/info' element={<GoogleInfoPage />} />
         <Route
           element={
             <ProtectedRouteWrapper>
