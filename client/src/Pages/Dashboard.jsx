@@ -53,7 +53,12 @@ const Dashboard = () => {
 
   // Calculate PPC sales using the exact same logic as sponsored ads page
   const calculatePPCSales = () => {
-    // Calculate totals from filtered TotalSales data if available
+    // Prioritize actual PPC sales from sponsored ads data
+    if (sponsoredAdsMetrics?.totalSalesIn30Days && sponsoredAdsMetrics.totalSalesIn30Days > 0) {
+      return sponsoredAdsMetrics.totalSalesIn30Days;
+    }
+    
+    // Calculate totals from filtered TotalSales data as fallback
     const totalSalesData = dashboardInfo?.TotalSales;
     let filteredTotalSales = 0;
     let estimatedPPCSales = 0;
@@ -61,12 +66,10 @@ const Dashboard = () => {
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
       // Calculate totals from filtered date range
       filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC
+      estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
     }
     
-    // Use filtered data if available, otherwise fall back to original metrics
-    const ppcSales = estimatedPPCSales > 0 ? estimatedPPCSales : (sponsoredAdsMetrics?.totalSalesIn30Days || 0);
-    return ppcSales;
+    return estimatedPPCSales;
   };
 
   // Calculate PPC Spend using actual ProductAdsPayment data from finance

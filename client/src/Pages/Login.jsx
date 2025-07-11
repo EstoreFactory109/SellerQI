@@ -9,6 +9,7 @@ import BeatLoader from "react-spinners/BeatLoader";
 import {useDispatch} from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice.js';
 import stripeService from '../services/stripeService';
+import googleAuthService from '../services/googleAuthService.js';
 
 
 const Login = () => {
@@ -17,6 +18,7 @@ const Login = () => {
     const [password, setPassword] = useState("");
     const [errors, setErrors] = useState({ email: false, password: false });
     const [loading, setLoading] = useState(false);
+    const [googleLoading, setGoogleLoading] = useState(false);
     const navigate = useNavigate();
     const dispatch = useDispatch();
 
@@ -100,6 +102,40 @@ const Login = () => {
         }
     };
 
+    const handleGoogleSignIn = async () => {
+        setGoogleLoading(true);
+        try {
+            const response = await googleAuthService.handleGoogleSignIn();
+            
+            if (response.status === 200) {
+                dispatch(loginSuccess(response.data));
+                localStorage.setItem("isAuth", true);
+                
+                // Check subscription status before redirecting
+                try {
+                    const subscriptionStatus = await stripeService.getSubscriptionStatus();
+                    
+                    if (subscriptionStatus.hasSubscription) {
+                        // User has a subscription, redirect to dashboard
+                        window.location.href = "/seller-central-checker/dashboard";
+                    } else {
+                        // No subscription, redirect to pricing page
+                        navigate("/pricing");
+                    }
+                } catch (error) {
+                    console.error('Error checking subscription status:', error);
+                    // If subscription check fails, default to pricing page
+                    navigate("/pricing");
+                }
+            }
+        } catch (error) {
+            console.error('Google sign-in failed:', error);
+            setError(error.response?.data?.message || 'Google sign-in failed. Please try again.');
+        } finally {
+            setGoogleLoading(false);
+        }
+    };
+
 
 
     return (
@@ -180,7 +216,13 @@ const Login = () => {
                     <div className="mb-4 space-y-2">
                         <button 
                             type="button"
-                            className="w-full flex items-center justify-center gap-2 p-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                            onClick={handleGoogleSignIn}
+                            disabled={googleLoading}
+                            className={`w-full flex items-center justify-center gap-2 p-2 border border-gray-300 rounded transition-colors ${
+                                googleLoading 
+                                    ? 'bg-gray-100 cursor-not-allowed opacity-50' 
+                                    : 'hover:bg-gray-50'
+                            }`}
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24">
                                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -188,7 +230,9 @@ const Login = () => {
                                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                             </svg>
-                            <span className="text-gray-700 text-sm font-medium">Continue with Google</span>
+                            <span className="text-gray-700 text-sm font-medium">
+                                {googleLoading ? <BeatLoader color="#666" size={4} /> : 'Continue with Google'}
+                            </span>
                         </button>
                         
                         <button 

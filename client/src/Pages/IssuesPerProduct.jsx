@@ -5,7 +5,8 @@ import DropDown from '../assets/Icons/drop-down.png';
 import noImage from '../assets/Icons/no-image.png';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from "framer-motion";
-import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
+import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
@@ -448,33 +449,52 @@ const Dashboard = () => {
     };
 
     // Download as Excel
-    const downloadExcel = () => {
+    const downloadExcel = async () => {
         const data = prepareExportData();
-        const ws = XLSX.utils.json_to_sheet(data);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Product Issues');
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Product Issues');
         
-        // Auto-size columns
-        const maxWidth = 50;
-        const wscols = [
-            { wch: 20 }, // Category
-            { wch: 20 }, // Type
-            { wch: 20 }, // Issue
-            { wch: maxWidth }, // Message
-            { wch: maxWidth }  // Solution
-        ];
-        ws['!cols'] = wscols;
+        // Add header row
+        if (data.length > 0) {
+            const headers = Object.keys(data[0]);
+            worksheet.addRow(headers);
+            
+            // Add data rows
+            data.forEach(row => {
+                worksheet.addRow(Object.values(row));
+            });
+            
+            // Auto-size columns
+            worksheet.columns = [
+                { width: 20 }, // Category
+                { width: 20 }, // Type
+                { width: 20 }, // Issue
+                { width: 50 }, // Message
+                { width: 50 }  // Solution
+            ];
+            
+            // Style header row
+            worksheet.getRow(1).font = { bold: true };
+            worksheet.getRow(1).fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFE0E0E0' }
+            };
+        }
         
         // Generate filename with ASIN and date
         const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.xlsx`;
-        XLSX.writeFile(wb, fileName);
+        
+        // Write and download file
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        saveAs(blob, fileName);
     };
 
     // Download as CSV
     const downloadCSV = () => {
         const data = prepareExportData();
-        const ws = XLSX.utils.json_to_sheet(data);
-        const csv = XLSX.utils.sheet_to_csv(ws);
+        const csv = Papa.unparse(data);
         
         // Generate filename with ASIN and date
         const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.csv`;

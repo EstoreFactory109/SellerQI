@@ -5,6 +5,7 @@
  */
 const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
     // Initialize totals
+    console.log("productWiseSponsoredAds: ", productWiseSponsoredAds);
     let totalCost = 0;
     let totalSalesIn30Days = 0;
     let totalProductsPurchased = 0;
@@ -36,13 +37,18 @@ const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
             totalProductsPurchased += parseFloat(item.purchasedIn30Days) || 0;
         }
     });
-
-    // Return the calculated totals
-    return {
+    console.log("totalSalesIn30Days: ", totalSalesIn30Days);
+    
+    const finalMetrics = {
         totalCost: parseFloat(totalCost.toFixed(2)),
         totalSalesIn30Days: parseFloat(totalSalesIn30Days.toFixed(2)),
         totalProductsPurchased: parseFloat(totalProductsPurchased.toFixed(2))
     };
+    
+    console.log("Final sponsored ads metrics for ACOS calculation:", finalMetrics);
+    
+    // Return the calculated totals
+    return finalMetrics;
 };
 
 /**

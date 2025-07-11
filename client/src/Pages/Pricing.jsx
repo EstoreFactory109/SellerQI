@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, X, Loader2 } from 'lucide-react';
+import { Check, X, Loader2, Star, Shield, Zap, BarChart3, Users, Crown, Plus, Minus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -138,8 +138,8 @@ export default function PricingPage() {
     }
     
     if (currentPlan && currentPlan !== planType && subscriptionStatus?.hasSubscription) {
-      const currentPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
-      const targetPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
+      const currentPlanPrices = { LITE: 0, AGENCY: 49, PRO: 49 };
+      const targetPlanPrices = { LITE: 0, AGENCY: 49, PRO: 49 };
       
       if (targetPlanPrices[planType] > currentPlanPrices[currentPlan]) {
         return 'Upgrade';
@@ -148,7 +148,7 @@ export default function PricingPage() {
       }
     }
     
-    return 'Subscribe';
+    return planType === 'LITE' ? 'Get Started Free' : 'Start 14-Day Trial';
   };
 
   const isButtonDisabled = (planType) => {
@@ -157,24 +157,28 @@ export default function PricingPage() {
   
   const faqs = [
     {
-      q: "What's the difference between Lite and Pro?",
-      a: 'Lite gives you basic product audit summary for free. Pro includes everything - detailed reports, fix recommendations, expert consultation, and tracking for multiple products.',
+      q: "What's the difference between Free and Pro?",
+      a: 'Free gives you basic product analysis with limited features. Pro includes everything - unlimited analyses, detailed reports, fix recommendations, priority support, and tracking for multiple products.',
     },
     {
       q: 'Will I lose data if I downgrade?',
-      a: 'No, your historical data will be preserved. However, you will lose access to premium features like downloading reports and expert consultation.',
+      a: 'No, your historical data will be preserved. However, you will lose access to premium features like downloading reports and priority support.',
     },
     {
       q: 'Can I cancel anytime?',
-      a: 'Yes, you can cancel the subscription anytime you want. You will continue to have access until the end of your billing period.',
+      a: 'Yes, you can cancel your subscription anytime. You will continue to have access until the end of your billing period, and you can always return to the free plan.',
     },
     {
       q: 'How often is my product data updated?',
-      a: 'Product data is updated daily for Pro and Agency plans. Lite plan users can refresh their data once per week.',
+      a: 'Product data is updated in real-time for Pro plans. Free plan users get basic analysis with standard refresh rates.',
     },
     {
       q: 'Do you offer refunds?',
-      a: 'Yes, we offer a 7-day money-back guarantee. If you\'re not satisfied, contact our support team for a full refund.',
+      a: 'Yes, we offer a 30-day money-back guarantee. If you\'re not satisfied, contact our support team for a full refund.',
+    },
+    {
+      q: 'What is the Agency plan for?',
+      a: 'The Agency plan is designed for agencies and consultants managing multiple client accounts. It includes everything in Pro plus agency-specific features like client management and white-label reporting.',
     },
   ];
 
@@ -182,177 +186,451 @@ export default function PricingPage() {
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
       <Navbar />
+      
       <main className="flex-1 w-full">
-        <section className="py-20 px-4">
-          <div className="container mx-auto max-w-3xl text-center mb-16">
-            <h1 className="text-5xl font-extrabold mb-6 leading-tight">
-              Choose the <span className="text-red-500">Plan</span> That Grows<br />With You
-            </h1>
-            <p className="text-gray-600 text-lg max-w-2xl mx-auto">
-              Start with a free audit. Upgrade when you're ready for full insights, reports & expert-backed solutions.
-            </p>
-            
-            {/* Show manage subscription button if user has active subscription */}
-            {subscriptionStatus?.hasSubscription && (
-              <button
-                onClick={handleManageSubscription}
-                className="mt-6 text-blue-600 hover:text-blue-700 underline font-medium"
-              >
-                Manage Your Subscription
-              </button>
-            )}
-          </div>
+        {/* Hero Section */}
+        <section className="relative bg-gradient-to-b from-gray-50 via-white to-white pt-16 pb-24 px-4 lg:px-6 overflow-hidden">
+          {/* Background Elements */}
+          <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:bg-grid-slate-700/25 dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))]"></div>
+          <div className="absolute top-10 right-10 w-72 h-72 bg-gray-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+          <div className="absolute top-40 left-10 w-72 h-72 bg-emerald-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
           
-          <div className="container mx-auto flex flex-col md:flex-row gap-8 justify-center items-end mb-24">
-            {/* LITE */}
-            <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-[0_2px_16px_0_rgba(0,0,0,0.06)] p-8 flex flex-col items-center max-w-xs mx-auto min-h-[520px] relative z-0">
-              <div className="text-lg font-bold mb-2">LITE</div>
-              <div className="text-3xl font-extrabold mb-2">$0<span className="text-base font-normal">/mo</span></div>
-              <div className="text-gray-500 mb-6 text-center">Perfect for new Amazon sellers who want a quick health check.</div>
-              <ul className="mb-8 space-y-3 text-left w-full">
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Product Audit Summary</li>
-                <li className="flex items-center gap-2 text-red-500"><X className="w-5 h-5" />Download Reports</li>
-                <li className="flex items-center gap-2 text-red-500"><X className="w-5 h-5" />Fix Recommendations</li>
-                <li className="flex items-center gap-2 text-red-500"><X className="w-5 h-5" />Expert Consultation</li>
-                <li className="flex items-center gap-2 text-red-500"><X className="w-5 h-5" />Track Multiple Products</li>
-                <li className="flex items-center gap-2 text-red-500"><X className="w-5 h-5" />Issue Breakdown</li>
-              </ul>
-              <button 
-                onClick={() => handleSubscribe('LITE')}
-                disabled={isButtonDisabled('LITE')}
-                className={`px-6 py-2 rounded w-full font-semibold shadow-md transition-all ${
-                  isButtonDisabled('LITE')
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                    : 'bg-[#23253A] text-white hover:bg-gray-800'
-                }`}
+          <div className="relative container mx-auto max-w-4xl text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+            >
+              {/* Announcement Bar */}
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium mb-8">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                30-day money-back guarantee • Cancel anytime
+              </div>
+              
+              <h1 className="text-5xl lg:text-6xl font-bold leading-tight text-gray-900 mb-6">
+                Choose the <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B4A6B] to-emerald-600">Perfect Plan</span> for Your Business
+              </h1>
+              <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-12">
+                Start with our powerful free plan. Upgrade when you're ready for unlimited insights, advanced features, and priority support.
+              </p>
+
+              {/* Trust Indicators */}
+              <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-500 mb-8">
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> No setup fees</span>
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Cancel anytime</span>
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 30-day guarantee</span>
+                <span className="flex items-center gap-2"><Shield className="w-4 h-4 text-[#3B4A6B]" /> SOC 2 Compliant</span>
+              </div>
+              
+              {/* Show manage subscription button if user has active subscription */}
+              {subscriptionStatus?.hasSubscription && (
+                <motion.button
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  onClick={handleManageSubscription}
+                  className="mb-8 bg-[#3B4A6B] text-white px-6 py-3 rounded-lg hover:bg-[#2d3a52] transition-all duration-300 font-semibold shadow-lg"
+                >
+                  Manage Your Subscription
+                </motion.button>
+              )}
+            </motion.div>
+          </div>
+        </section>
+
+        {/* Pricing Cards */}
+        <section className="py-24 px-4 lg:px-6 bg-white">
+          <div className="container mx-auto max-w-7xl">
+            <div className="grid lg:grid-cols-3 gap-8 items-end">
+              
+              {/* Free Plan */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.1 }}
+                className="bg-white rounded-2xl border-2 border-gray-200 p-8 shadow-lg hover:shadow-xl transition-all duration-300"
               >
-                {getButtonText('LITE')}
-              </button>
-            </div>
-            
-            {/* PRO */}
-            <div className="flex-1 bg-[#23253A] rounded-2xl border-4 border-yellow-400 shadow-[0_8px_32px_0_rgba(0,0,0,0.18)] p-10 flex flex-col items-center max-w-xs mx-auto min-h-[560px] scale-105 relative z-10">
-              <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs font-bold px-6 py-2 rounded-full shadow-lg z-20">RECOMMENDED</div>
-              <div className="text-lg font-bold mb-2 text-white">PRO</div>
-              <div className="text-4xl font-extrabold mb-2 text-white">$99<span className="text-base font-normal text-gray-300">/mo</span></div>
-              <div className="text-white mb-6 text-center font-medium">Recommended for serious sellers who want full visibility, fixes, and growth.</div>
-              <ul className="mb-8 space-y-3 text-left w-full">
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Product Audit Summary</li>
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Download Reports</li>
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Fix Recommendations</li>
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Expert Consultation</li>
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Track Multiple Products</li>
-                <li className="flex items-center gap-2 text-green-400 font-semibold"><Check className="w-5 h-5" />Issue Breakdown</li>
-              </ul>
-              <button 
-                onClick={() => handleSubscribe('PRO')}
-                disabled={isButtonDisabled('PRO')}
-                className={`px-6 py-3 rounded w-full font-extrabold shadow-lg text-lg tracking-wide transition-all ${
-                  isButtonDisabled('PRO')
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                    : 'bg-yellow-400 text-black hover:bg-yellow-500'
-                }`}
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <BarChart3 className="w-8 h-8 text-gray-600" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Free Plan</h3>
+                  <div className="text-4xl font-bold text-gray-900 mb-2">$0<span className="text-lg text-gray-500 font-normal">/month</span></div>
+                  <p className="text-gray-600">Perfect for new sellers getting started</p>
+                </div>
+                
+                <ul className="space-y-4 mb-8">
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">Basic product analysis</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <X className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <span className="text-gray-500">Download reports</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <X className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <span className="text-gray-500">Fix recommendations</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <X className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <span className="text-gray-500">Track multiple products</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <X className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <span className="text-gray-500">Priority support</span>
+                  </li>
+                </ul>
+                
+                <button 
+                  onClick={() => handleSubscribe('LITE')}
+                  disabled={isButtonDisabled('LITE')}
+                  className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 ${
+                    isButtonDisabled('LITE')
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'border-2 border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50'
+                  }`}
+                >
+                  {getButtonText('LITE')}
+                </button>
+              </motion.div>
+
+              {/* Pro Plan - Featured */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.2 }}
+                className="bg-gradient-to-br from-[#3B4A6B] to-[#333651] text-white rounded-2xl p-8 shadow-2xl relative transform lg:scale-105"
               >
-                {getButtonText('PRO')}
-              </button>
-            </div>
-            
-            {/* AGENCY */}
-            <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-[0_2px_16px_0_rgba(0,0,0,0.06)] p-8 flex flex-col items-center max-w-xs mx-auto min-h-[520px] relative z-0">
-              <div className="text-lg font-bold mb-2">AGENCY</div>
-              <div className="text-3xl font-extrabold mb-2">$49<span className="text-base font-normal">/mo</span></div>
-              <div className="text-gray-500 mb-6 text-center">Great for first time audits or early stage sellers.</div>
-              <ul className="mb-8 space-y-3 text-left w-full">
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Product Audit Summary</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Download Reports</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Fix Recommendations</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Expert Consultation</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Track Multiple Products</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Issue Breakdown</li>
-                <li className="flex items-center gap-2 text-green-600"><Check className="w-5 h-5" />Minimum 5 Accounts</li>
-              </ul>
-              <button 
-                onClick={() => handleSubscribe('AGENCY')}
-                disabled={isButtonDisabled('AGENCY')}
-                className={`px-6 py-2 rounded w-full font-semibold shadow-md transition-all ${
-                  isButtonDisabled('AGENCY')
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                    : 'bg-[#23253A] text-white hover:bg-gray-800'
-                }`}
+                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-emerald-500 text-white px-6 py-2 rounded-full text-sm font-semibold shadow-lg">
+                  Most Popular
+                </div>
+                
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Crown className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-2xl font-bold mb-2">Pro Plan</h3>
+                  <div className="text-4xl font-bold mb-2">$49<span className="text-lg opacity-75 font-normal">/month</span></div>
+                  <p className="opacity-90">Everything you need to scale</p>
+                </div>
+                
+                <ul className="space-y-4 mb-8">
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>Unlimited product analyses</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>Download detailed reports</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>AI-powered fix recommendations</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>Track unlimited products</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>Priority support</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+                    <span>Advanced analytics</span>
+                  </li>
+                </ul>
+                
+                <button 
+                  onClick={() => handleSubscribe('PRO')}
+                  disabled={isButtonDisabled('PRO')}
+                  className={`w-full py-4 px-6 rounded-lg font-bold transition-all duration-300 text-lg ${
+                    isButtonDisabled('PRO')
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg hover:shadow-xl'
+                  }`}
+                >
+                  {getButtonText('PRO')}
+                </button>
+              </motion.div>
+
+              {/* Agency Plan */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+                className="bg-white rounded-2xl border-2 border-gray-200 p-8 shadow-lg hover:shadow-xl transition-all duration-300"
               >
-                {getButtonText('AGENCY')}
-              </button>
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 bg-purple-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-8 h-8 text-purple-600" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Agency Plan</h3>
+                  <div className="text-4xl font-bold text-gray-900 mb-2">$49<span className="text-lg text-gray-500 font-normal">/month</span></div>
+                  <p className="text-gray-600">For agencies & consultants</p>
+                </div>
+                
+                <ul className="space-y-4 mb-8">
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">Everything in Pro</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">Client management</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">White-label reports</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">Bulk operations</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                    <span className="text-gray-700">Dedicated support</span>
+                  </li>
+                </ul>
+                
+                <button 
+                  onClick={() => handleSubscribe('AGENCY')}
+                  disabled={isButtonDisabled('AGENCY')}
+                  className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 ${
+                    isButtonDisabled('AGENCY')
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-[#3B4A6B] text-white hover:bg-[#2d3a52] shadow-lg hover:shadow-xl'
+                  }`}
+                >
+                  {getButtonText('AGENCY')}
+                </button>
+              </motion.div>
             </div>
+          </div>
+        </section>
+
+        {/* Features Comparison */}
+        <section className="py-24 px-4 lg:px-6 bg-gray-50">
+          <div className="container mx-auto max-w-6xl">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="text-center mb-16"
+            >
+              <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
+                Why Choose SellerQI Pro?
+              </h2>
+              <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+                Join thousands of successful Amazon sellers who've transformed their business with our comprehensive platform.
+              </p>
+            </motion.div>
+
+            <div className="grid md:grid-cols-3 gap-8">
+              {[
+                {
+                  icon: Zap,
+                  title: "Lightning Fast Analysis",
+                  description: "Get comprehensive product insights in under 60 seconds with our AI-powered analysis engine.",
+                  color: "yellow"
+                },
+                {
+                  icon: BarChart3,
+                  title: "Actionable Insights",
+                  description: "Don't just see data - get specific recommendations on what to fix and how to fix it.",
+                  color: "blue"
+                },
+                {
+                  icon: Shield,
+                  title: "Enterprise Security",
+                  description: "Bank-level encryption and SOC 2 compliance ensure your data is always protected.",
+                  color: "green"
+                }
+              ].map((feature, index) => {
+                const Icon = feature.icon;
+                const colorClasses = {
+                  yellow: "bg-yellow-100 text-yellow-600 border-yellow-200",
+                  blue: "bg-blue-50 text-[#3B4A6B] border-blue-200",
+                  green: "bg-emerald-50 text-emerald-600 border-emerald-200"
+                };
+                return (
+                  <motion.div
+                    key={feature.title}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.1 * index }}
+                    className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
+                  >
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 ${colorClasses[feature.color]}`}>
+                      <Icon className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">{feature.title}</h3>
+                    <p className="text-gray-600 leading-relaxed">{feature.description}</p>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* Social Proof */}
+        <section className="py-24 px-4 lg:px-6 bg-white">
+          <div className="container mx-auto max-w-6xl text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+            >
+              <h2 className="text-4xl font-bold text-gray-900 mb-12">
+                Trusted by 10,000+ Amazon Sellers
+              </h2>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-16">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-[#3B4A6B] mb-2">10K+</div>
+                  <div className="text-gray-600">Active Users</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-[#3B4A6B] mb-2">$50M+</div>
+                  <div className="text-gray-600">Sales Optimized</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-[#3B4A6B] mb-2">2.5M+</div>
+                  <div className="text-gray-600">Products Analyzed</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-[#3B4A6B] mb-2">32%</div>
+                  <div className="text-gray-600">Avg Revenue Increase</div>
+                </div>
+              </div>
+
+              {/* Testimonial */}
+              <div className="bg-gray-50 rounded-2xl p-8 max-w-4xl mx-auto">
+                <div className="flex items-center justify-center mb-4">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="w-5 h-5 text-yellow-400 fill-current" />
+                  ))}
+                </div>
+                <blockquote className="text-xl text-gray-700 mb-6 italic">
+                  "SellerQI helped us identify issues we never knew existed. Our main product went from page 3 to #1 in just 6 weeks. Sales increased 127%!"
+                </blockquote>
+                <div className="flex items-center justify-center gap-4">
+                  <div className="w-12 h-12 bg-gradient-to-r from-[#3B4A6B] to-[#333651] rounded-full flex items-center justify-center text-white font-bold">
+                    SC
+                  </div>
+                  <div className="text-left">
+                    <div className="font-semibold text-gray-900">Sarah Chen</div>
+                    <div className="text-gray-600">TechGadgets Pro • $2.3M ARR</div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
           </div>
         </section>
         
         {/* FAQ Section */}
-        <section className="bg-gray-100 py-20 px-4">
-          <div className="container mx-auto max-w-3xl">
-            <div className="text-center mb-12">
-              <div className="text-xs font-bold text-red-400 mb-2 tracking-widest">FAQS</div>
-              <h2 className="text-3xl font-extrabold mb-2">Frequently Asked Questions</h2>
-            </div>
+        <section className="py-24 px-4 lg:px-6 bg-gray-50">
+          <div className="container mx-auto max-w-4xl">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="text-center mb-16"
+            >
+              <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
+                Frequently Asked Questions
+              </h2>
+              <p className="text-xl text-gray-600">
+                Everything you need to know about SellerQI pricing and features.
+              </p>
+            </motion.div>
+
             <div className="space-y-4">
-              {faqs.map((faq, i) => (
-                <div 
-                  key={i} 
-                  className={`bg-white rounded-lg overflow-hidden transition-all duration-300 border ${
-                    openFaq === i ? 'border-blue-200 shadow-md' : 'border-transparent'
-                  }`}
+              {faqs.map((faq, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.1 * index }}
+                  className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden"
                 >
                   <button
-                    className="w-full text-left px-6 py-4 font-semibold flex justify-between items-center focus:outline-none text-lg"
-                    onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                    className="w-full p-6 text-left flex items-center justify-between hover:bg-gray-50 transition-colors duration-200"
+                    onClick={() => setOpenFaq(openFaq === index ? null : index)}
                   >
-                    <span>{faq.q}</span>
-                    <motion.span 
-                      className={`ml-4 text-2xl font-bold`}
-                      animate={{ 
-                        rotate: openFaq === i ? 45 : 0,
-                        color: openFaq === i ? '#3b82f6' : '#9ca3af'
-                      }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                    >
-                      +
-                    </motion.span>
-                  </button>
-                  <motion.div
-                    initial={false}
-                    animate={{
-                      height: openFaq === i ? 'auto' : 0,
-                      opacity: openFaq === i ? 1 : 0
-                    }}
-                    transition={{ 
-                      duration: 0.25, 
-                      ease: "easeOut",
-                      opacity: { duration: 0.2 }
-                    }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-6 pb-4 text-gray-600 text-base bg-blue-50">
-                      {faq.a}
+                    <h3 className="text-lg font-semibold text-gray-900 pr-4">{faq.q}</h3>
+                    <div className="flex-shrink-0">
+                      {openFaq === index ? (
+                        <Minus className="w-5 h-5 text-[#3B4A6B]" />
+                      ) : (
+                        <Plus className="w-5 h-5 text-[#3B4A6B]" />
+                      )}
                     </div>
-                  </motion.div>
-                </div>
+                  </button>
+                  <AnimatePresence>
+                    {openFaq === index && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-6 pb-6 pt-0">
+                          <div className="h-px bg-gray-200 mb-4"></div>
+                          <p className="text-gray-600 leading-relaxed">{faq.a}</p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
               ))}
             </div>
           </div>
         </section>
-        
-        {/* Contact CTA */}
-        <section className="py-20 bg-white text-center">
-          <div className="mb-8">
-            <div className="w-24 h-24 mx-auto bg-black rounded-full flex items-center justify-center mb-5">
-              <img src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1200/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" alt="Seller QI Logo" loading="eager" />
-            </div>
-            <h2 className="text-2xl font-bold mb-2">Still have questions? We're here for you!</h2>
-            <Link to="/contact-us" className="inline-block mt-4 bg-[#23253A] text-white px-6 py-2 rounded font-semibold shadow hover:bg-gray-800 transition-colors">
-              Contact Us <span className="ml-2">&gt;</span>
-            </Link>
+
+        {/* Final CTA */}
+        <section className="py-24 px-4 lg:px-6 bg-gradient-to-r from-[#3B4A6B] via-[#333651] to-[#3B4A6B] text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-black opacity-10"></div>
+          <div className="relative container mx-auto max-w-4xl text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+            >
+              <h2 className="text-4xl lg:text-5xl font-bold mb-6">
+                Ready to Transform Your Amazon Business?
+              </h2>
+              <p className="text-xl mb-12 opacity-90">
+                Join thousands of successful sellers who've chosen SellerQI to scale their business.
+              </p>
+              
+              <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
+                <button 
+                  onClick={() => handleSubscribe('PRO')}
+                  disabled={isButtonDisabled('PRO')}
+                  className="bg-white text-[#3B4A6B] px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all duration-300 shadow-lg"
+                >
+                  Start 14-Day Free Trial
+                </button>
+                <Link 
+                  to="/contact-us"
+                  className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-white hover:text-[#3B4A6B] transition-all duration-300"
+                >
+                  Contact Sales
+                </Link>
+              </div>
+              
+              <div className="flex justify-center gap-8 text-sm opacity-75">
+                <span>✓ 30-day money-back guarantee</span>
+                <span>✓ Cancel anytime</span>
+                <span>✓ No setup fees</span>
+              </div>
+            </motion.div>
           </div>
         </section>
       </main>
+      
       {/* Footer */}
       <Footer />
     </div>

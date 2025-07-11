@@ -558,23 +558,34 @@ const PPCDashboard = () => {
   
   // Use Redux data for KPI values - prioritize actual finance data over estimates
   const kpiData = useMemo(() => {
-    // Calculate totals from filtered TotalSales data if available
-    const totalSalesData = info?.TotalSales;
-    let filteredTotalSales = 0;
-    let estimatedPPCSales = 0;
+    // Prioritize actual PPC sales from sponsored ads data
+    let ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
     
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      // Calculate totals from filtered date range
-      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC
+    // If no sponsored ads data, calculate from filtered TotalSales data as fallback
+    if (!ppcSales || ppcSales === 0) {
+      const totalSalesData = info?.TotalSales;
+      let filteredTotalSales = 0;
+      let estimatedPPCSales = 0;
+      
+      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+        // Calculate totals from filtered date range
+        filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+        estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
+      }
+      
+      ppcSales = estimatedPPCSales > 0 ? estimatedPPCSales : 25432.96; // Final fallback
     }
     
     // Use actual PPC spend from finance data (ProductAdsPayment) - this is the official spend
     const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-    
-    // Use filtered data if available, otherwise fall back to original metrics
-    const ppcSales = estimatedPPCSales > 0 ? estimatedPPCSales : (sponsoredAdsMetrics?.totalSalesIn30Days || 25432.96);
     const spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
+    
+    // Calculate total sales for TACoS calculation
+    const totalSalesData = info?.TotalSales;
+    let filteredTotalSales = 0;
+    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+    }
     const totalSales = filteredTotalSales > 0 ? filteredTotalSales : (Number(info?.TotalWeeklySale || 0) || 84776.44);
     
     return [

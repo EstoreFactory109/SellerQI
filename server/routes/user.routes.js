@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking}=require('../controllers/UserController.js')
+const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking,googleLoginUser,googleRegisterUser}=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -11,6 +11,8 @@ const {verifyResetPasswordCode}=require('../controllers/UserController.js')
 
 router.post('/register',registerUser);
 router.post('/login',validateLogin,loginUser);
+router.post('/google-login',googleLoginUser);
+router.post('/google-register',googleRegisterUser);
 router.post('/verify-user',verifyUser);
 router.get('/profile',auth,profileUser);
 router.get('/logout',auth,logoutUser);

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from "framer-motion";
-import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
+import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import Download from '../../assets/Icons/Download.png';
 
@@ -36,7 +37,7 @@ const DownloadReport = ({
     };
 
     // Download as Excel
-    const downloadExcel = () => {
+    const downloadExcel = async () => {
         try {
             const exportData = prepareExportData();
             console.log('Export data for Excel:', exportData);
@@ -46,34 +47,57 @@ const DownloadReport = ({
                 return;
             }
             
-            let ws;
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Report');
             
             // Check if data is 2D array (like CSV format) or JSON objects
             if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
                 // Handle 2D array format
-                ws = XLSX.utils.aoa_to_sheet(exportData);
+                exportData.forEach((row, index) => {
+                    worksheet.addRow(row);
+                    // Style first row as header if it's likely to be headers
+                    if (index === 0) {
+                        worksheet.getRow(1).font = { bold: true };
+                        worksheet.getRow(1).fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: 'FFE0E0E0' }
+                        };
+                    }
+                });
+                
+                // Set column widths for 2D array
+                const columnCount = exportData[0] ? exportData[0].length : 0;
+                worksheet.columns = Array(columnCount).fill().map(() => ({ width: 30 }));
             } else {
                 // Handle JSON object format
-                ws = XLSX.utils.json_to_sheet(exportData);
-            }
-            
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Report');
-            
-            // Auto-size columns
-            const maxWidth = 30; // Reduced width for better viewing
-            if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
-                // For 2D array, set column width based on first row length
-                const cols = exportData[0] ? exportData[0].map(() => ({ wch: maxWidth })) : [];
-                ws['!cols'] = cols;
-            } else if (exportData.length > 0) {
-                // For JSON objects
-                const cols = Object.keys(exportData[0] || {}).map(() => ({ wch: maxWidth }));
-                ws['!cols'] = cols;
+                if (exportData.length > 0) {
+                    const headers = Object.keys(exportData[0]);
+                    worksheet.addRow(headers);
+                    
+                    exportData.forEach(row => {
+                        worksheet.addRow(Object.values(row));
+                    });
+                    
+                    // Set column widths for JSON objects
+                    worksheet.columns = headers.map(() => ({ width: 30 }));
+                    
+                    // Style header row
+                    worksheet.getRow(1).font = { bold: true };
+                    worksheet.getRow(1).fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFE0E0E0' }
+                    };
+                }
             }
             
             const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`;
-            XLSX.writeFile(wb, fileName);
+            
+            // Write and download file
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            saveAs(blob, fileName);
             console.log('Excel download completed:', fileName);
         } catch (error) {
             console.error('Error downloading Excel:', error);
@@ -92,18 +116,16 @@ const DownloadReport = ({
                 return;
             }
             
-            let ws;
+            let csv;
             
             // Check if data is 2D array (like CSV format) or JSON objects
             if (Array.isArray(exportData) && Array.isArray(exportData[0])) {
-                // Handle 2D array format
-                ws = XLSX.utils.aoa_to_sheet(exportData);
+                // Handle 2D array format - convert to CSV directly
+                csv = Papa.unparse(exportData, { header: false });
             } else {
                 // Handle JSON object format
-                ws = XLSX.utils.json_to_sheet(exportData);
+                csv = Papa.unparse(exportData, { header: true });
             }
-            
-            const csv = XLSX.utils.sheet_to_csv(ws);
             
             if (!csv || csv.trim() === '') {
                 alert('No data could be converted to CSV format');
