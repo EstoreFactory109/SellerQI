@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
 import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight} from 'lucide-react'
-import LogoutIcon from '../../assets/Icons/logout.png';
+import LogoutIcon from '../../assets/Icons/Logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';

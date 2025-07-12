@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight} from 'lucide-react'
-import LogoutIcon from '../../assets/Icons/logout.png';
+import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
