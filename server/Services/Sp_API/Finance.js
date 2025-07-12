@@ -67,7 +67,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         return [];
     }
 
-   // const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
+    const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
     const weeklyFinanceData = await processWeeklyFinanceData(dataToReceive, userId, baseuri, country, region);
 
     
@@ -197,7 +197,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         }
 
         // Calculate fees
-        const dataObj = calculateAmazonFees(allTransactions,reportResult.totalAfterDiscounts,reportResult.productWiseSales);
+        const dataObj = calculateAmazonFees(allTransactions,reportResult?.grossRevenue,reportResult?.productWiseSales);
 
         
       
@@ -210,7 +210,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         });
 
         // Save to database
-        let addToDb
+        let addToDb, addToSalesDb;
         
         try {
             addToDb = await listFinancialEvents.create({

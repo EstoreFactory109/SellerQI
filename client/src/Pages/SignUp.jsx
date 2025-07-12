@@ -2,10 +2,14 @@ import React, { useState,useEffect } from 'react';
 import BeatLoader from "react-spinners/BeatLoader";
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
+import { loginSuccess } from '../redux/slices/authSlice';
 import Mail from '../assets/Icons/mail.png';
 import Hidden from '../assets/Icons/hidden.png';
 import Show from '../assets/Icons/show.png';
 import Right from '../Components/Forms/Right';
+import googleAuthService from '../services/googleAuthService.js';
+import stripeService from '../services/stripeService.js';
 
 
 const SignUp = () => {
@@ -20,8 +24,10 @@ const SignUp = () => {
   const [errors, setErrors] = useState({});
   const [passwordStatus, setPasswordStatus] = useState("password");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const navigate = useNavigate();
+  const dispatch = useDispatch();
 
   const changePasswordStatus = () => {
     setPasswordStatus(passwordStatus === "password" ? "text" : "password");
@@ -98,30 +104,51 @@ const SignUp = () => {
     navigate('/log-in');
   };
 
-  useEffect(() => {
-    // Dynamically load Google's API script
-    const script = document.createElement('script');
-    script.src = 'https://apis.google.com/js/platform.js';
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+  const handleGoogleSignUp = async () => {
+    if (!termsAccepted) {
+        setErrors({ ...errors, terms: 'You must agree to the Terms of Use and Privacy Policy' });
+        return;
+    }
 
-    // Initialize Google API once the script is loaded
-    script.onload = () => {
-      window.gapi.load('auth2', () => {
-        window.gapi.auth2.init({
-          client_id: '113167162939-ucumckjf0vlngbb790md23vd8puck4ll.apps.googleusercontent.com',  // Replace with your actual Google Client ID
-        });
-      });
-    };
-  }, []);
+    setGoogleLoading(true);
+    try {
+        const response = await googleAuthService.handleGoogleSignUp();
+        
+        if (response.status === 200) {
+            dispatch(loginSuccess(response.data));
+            localStorage.setItem("isAuth", true);
+            
+            // Check subscription status before redirecting
+            try {
+                const subscriptionStatus = await stripeService.getSubscriptionStatus();
+                
+                if (subscriptionStatus.hasSubscription) {
+                    // User has a subscription, redirect to dashboard
+                    window.location.href = "/seller-central-checker/dashboard";
+                } else {
+                    // No subscription, redirect to pricing page
+                    navigate("/pricing");
+                }
+            } catch (error) {
+                console.error('Error checking subscription status:', error);
+                // If subscription check fails, default to pricing page
+                navigate("/pricing");
+            }
+        } else if (response.status === 201) {
+            // New user registered, redirect to connect Amazon
+            dispatch(loginSuccess(response.data));
+            localStorage.setItem("isAuth", true);
+            navigate("/connect-to-amazon");
+        }
+    } catch (error) {
+        console.error('Google sign-up failed:', error);
+        setErrorMessage(error.response?.data?.message || 'Google sign-up failed. Please try again.');
+    } finally {
+        setGoogleLoading(false);
+    }
+};
 
-  const handleGoogleSignUp = () => {
-    const auth2 = window.gapi.auth2.getAuthInstance();
-
-    // Trigger Google Sign-In
-    auth2.signIn()
-  };
+  
 
 
   return (
@@ -263,6 +290,8 @@ const SignUp = () => {
           <div className="mb-4 space-y-2">
             <button 
               type="button"
+              onClick={handleGoogleSignUp}
+              disabled={googleLoading || !termsAccepted}
               className="w-full flex items-center justify-center gap-2 p-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">

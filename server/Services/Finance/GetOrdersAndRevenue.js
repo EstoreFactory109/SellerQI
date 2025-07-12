@@ -1,7 +1,7 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const OrderAndRevenue=require('../../models/OrderAndRevenueModel.js');
+const OrderAndRevenue = require('../../models/OrderAndRevenueModel.js');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI, startTime, endTime) => {
     try {
@@ -169,8 +169,8 @@ const saveOrderDataToDB = async (userId, region, country, revenueData) => {
             const existingOrderIds = new Set(
                 existingDocument.RevenueData.map(order => order.amazonOrderId)
             );
-            
-            const newOrders = revenueData.filter(order => 
+
+            const newOrders = revenueData.filter(order =>
                 !existingOrderIds.has(order.amazonOrderId)
             );
 
@@ -182,7 +182,7 @@ const saveOrderDataToDB = async (userId, region, country, revenueData) => {
             } else {
                 logger.info("ℹ️ No new orders to add - all orders already exist");
             }
-            
+
             return existingDocument;
         } else {
             // Create new document
@@ -207,7 +207,7 @@ const getReportForPeriod = async (accessToken, marketplaceIds, baseURI, startTim
     try {
         logger.info(`📄 Generating Report for ${periodLabel}...`);
         const reportId = await generateReport(accessToken, marketplaceIds, baseURI, startTime, endTime);
-        
+
         if (!reportId) {
             logger.error(`❌ Failed to generate report for ${periodLabel}`);
             return [];
@@ -270,7 +270,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
     try {
         const now = new Date();
         const endTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        
+
         // Define time periods
         const periods = [
             {
@@ -280,14 +280,14 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 endOffset: 23    // 23 days ago
             },
             {
-                label: "Period 2 (7 days)", 
+                label: "Period 2 (7 days)",
                 days: 7,
                 startOffset: 23, // 23 days ago
                 endOffset: 16    // 16 days ago
             },
             {
                 label: "Period 3 (7 days)",
-                days: 7, 
+                days: 7,
                 startOffset: 16, // 16 days ago
                 endOffset: 9     // 9 days ago
             },
@@ -304,28 +304,28 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         // Process each period
         for (const period of periods) {
             logger.info(`🚀 Starting ${period.label}...`);
-            
+
             const periodStartTime = new Date(endTime.getTime() - period.startOffset * 24 * 60 * 60 * 1000);
             const periodEndTime = period.endOffset === 0 ? endTime : new Date(endTime.getTime() - period.endOffset * 24 * 60 * 60 * 1000);
-            
+
             logger.info(`📅 ${period.label}: ${periodStartTime.toISOString()} to ${periodEndTime.toISOString()}`);
-            
+
             const periodData = await getReportForPeriod(
-                accessToken, 
-                marketplaceIds, 
-                baseURI, 
-                periodStartTime, 
-                periodEndTime, 
+                accessToken,
+                marketplaceIds,
+                baseURI,
+                periodStartTime,
+                periodEndTime,
                 period.label
             );
-            
+
             if (periodData.length > 0) {
                 allResults.push(...periodData);
                 logger.info(`✅ Added ${periodData.length} records from ${period.label}`);
             } else {
                 logger.warn(`⚠️ No data found for ${period.label}`);
             }
-            
+
             // Add a small delay between requests to avoid rate limiting
             if (period !== periods[periods.length - 1]) {
                 logger.info("⏳ Waiting 30 seconds before next period...");
@@ -334,7 +334,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
         logger.info(`🎉 All periods completed! Total records: ${allResults.length}`);
-        
+
         if (allResults.length === 0) {
             logger.warn("⚠️ No data found across all periods");
             return [];
@@ -343,16 +343,17 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         // Transform data for database storage
         logger.info("🔄 Transforming data for database storage...");
         const transformedData = transformOrderDataForDB(allResults);
-        
+
         if (transformedData.length === 0) {
             logger.warn("⚠️ No valid data after transformation");
             return allResults;
         }
 
         // Calculate total sales and discounts (only for shipped, Unshipped, or PartiallyShipped orders)
-        const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
+        /*
+        const validStatuses = ['Shipped', 'Unshipped', 'Pending'];
         const validOrders = transformedData.filter(order => 
-            validStatuses.includes(order.orderStatus)
+            validStatuses.includes(order.orderStatus) && !validOrders.has(order.amazonOrderId)
         );
         
         const totalSales = validOrders.reduce((total, order) => {
@@ -387,9 +388,38 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         logger.info("💾 Saving order data to database...");
         await saveOrderDataToDB(userId, region, country, transformedData);
         
-        logger.info(`✅ Successfully processed and saved ${transformedData.length} orders to database`);
-        
-        return {totalAfterDiscounts,productWiseSales,transformedData};
+        logger.info(`✅ Successfully processed and saved ${transformedData.length} orders to database`);*/
+
+        const validStatuses = ['Shipped', 'Unshipped', 'Pending'];
+        const productWiseSales = [];
+        let grossRevenue = 0;
+        const processedOrderIds = new Set(); // Track processed order IDs to avoid duplicates
+
+        transformedData.forEach(order => {
+            if (processedOrderIds.has(order.amazonOrderId)) return;
+            if (!validStatuses.includes(order.orderStatus)) return;
+
+            // Mark this order as processed
+            processedOrderIds.add(order.amazonOrderId);
+
+            productWiseSales.push({
+                asin: order.asin,
+                quantity: order.quantity,
+                amount: order.itemPrice 
+            });
+
+            const unitPrice = order.itemPrice / order.quantity;
+
+            if (order.quantity > 1 && unitPrice < 100) {
+                // Bulk order - itemPrice is total
+                grossRevenue += order.itemPrice;
+              } else {
+                // Regular order - itemPrice is unit price
+                grossRevenue += order.itemPrice * order.quantity;
+              }
+        })
+
+        return { grossRevenue, productWiseSales, transformedData };
 
     } catch (error) {
         logger.error("❌ Error in getReport:", error.message);

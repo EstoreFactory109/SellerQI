@@ -429,7 +429,7 @@ const listWeeklyFinancialEventsMethod = async (dataToReceive, userId, baseuri, c
         });
 
         // Save to database
-        let addToDb
+        let addToDb, addToSalesDb;
         
         try {
             addToDb = await listFinancialEvents.create({

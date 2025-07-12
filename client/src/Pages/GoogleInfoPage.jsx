@@ -7,6 +7,7 @@ const GoogleInfoPage = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [userInfo, setUserInfo] = useState(null);
 
+
   useEffect(() => {
     // Parse the URL for the query parameters
     const urlParams = new URLSearchParams(window.location.search);
@@ -104,6 +105,122 @@ const GoogleInfoPage = () => {
     if (index < currentStep) return "emerald";
     if (index === currentStep) return authSteps[index].color;
     return "gray";
+  };
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('Processing Google authentication...');
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    handleGoogleCallback();
+  }, []);
+
+  const handleGoogleCallback = async () => {
+    try {
+      // Check for various Google OAuth parameters
+      const code = searchParams.get('code');
+      const state = searchParams.get('state');
+      const error = searchParams.get('error');
+      const errorDescription = searchParams.get('error_description');
+
+      if (error) {
+        setError(`Google OAuth Error: ${error} - ${errorDescription || 'Unknown error'}`);
+        setLoading(false);
+        return;
+      }
+
+      if (code) {
+        setStatus('Exchanging authorization code...');
+        // Handle authorization code flow if implemented
+        await handleAuthorizationCode(code, state);
+      } else {
+        // If no code, try the ID token flow fallback
+        setStatus('Initializing Google sign-in...');
+        await handleIdTokenFlow();
+      }
+
+    } catch (err) {
+      console.error('Google auth callback error:', err);
+      setError(err.message || 'Google authentication failed');
+      setLoading(false);
+    }
+  };
+
+  const handleAuthorizationCode = async (code, state) => {
+    try {
+      // This would be used if you implement server-side authorization code flow
+      // For now, we'll redirect to the ID token flow
+      setStatus('Code received, proceeding with authentication...');
+      
+      // You can implement server-side code exchange here if needed
+      // For now, fall back to the existing ID token flow
+      await handleIdTokenFlow();
+      
+    } catch (error) {
+      throw new Error(`Failed to process authorization code: ${error.message}`);
+    }
+  };
+
+  const handleIdTokenFlow = async () => {
+    try {
+      setStatus('Completing authentication...');
+      
+      // Determine if this is a signup or login flow
+      const isSignUp = searchParams.get('signup') === 'true' || 
+                       sessionStorage.getItem('googleAuthFlow') === 'signup';
+      
+      const response = isSignUp 
+        ? await googleAuthService.handleGoogleSignUp()
+        : await googleAuthService.handleGoogleSignIn();
+      
+      if (response.status === 200) {
+        // Existing user login
+        dispatch(loginSuccess(response.data));
+        localStorage.setItem("isAuth", true);
+        
+        setStatus('Checking subscription status...');
+        
+        try {
+          const subscriptionStatus = await stripeService.getSubscriptionStatus();
+          
+          if (subscriptionStatus.hasSubscription) {
+            setStatus('Redirecting to dashboard...');
+            setTimeout(() => {
+              window.location.href = "/seller-central-checker/dashboard";
+            }, 1000);
+          } else {
+            setStatus('Redirecting to pricing...');
+            setTimeout(() => {
+              navigate("/pricing");
+            }, 1000);
+          }
+        } catch (error) {
+          console.error('Error checking subscription status:', error);
+          setStatus('Redirecting to pricing...');
+          setTimeout(() => {
+            navigate("/pricing");
+          }, 1000);
+        }
+        
+      } else if (response.status === 201) {
+        // New user registration
+        dispatch(loginSuccess(response.data));
+        localStorage.setItem("isAuth", true);
+        
+        setStatus('Registration successful! Redirecting...');
+        setTimeout(() => {
+          navigate("/connect-to-amazon");
+        }, 1000);
+      }
+      
+      setLoading(false);
+      
+    } catch (error) {
+      throw new Error(`Authentication failed: ${error.message}`);
+    }
   };
 
   return (

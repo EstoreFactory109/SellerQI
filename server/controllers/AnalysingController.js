@@ -140,6 +140,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const ThirtyDaysAgo = new Date(createdDate);
     ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
 
+    console.log("SellerAccount: ", SellerAccount);
+
     const [
         v2Data,
         v1Data,
@@ -203,7 +205,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     // console.log("inventoryPlanningData: ", inventoryPlanningData);
     // console.log("inventoryStrandedData: ", inventoryStrandedData);
     // console.log("inboundNonComplianceData: ", inboundNonComplianceData);
-
+ 
     // Create default values for missing data instead of returning error
     const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
     const safeV1Data = v1Data || { V1Reports: [] };
@@ -396,8 +398,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
         adsKeywordsPerformanceData: safeAdsKeywordsPerformanceData.keywordsData,
         GetOrderData: safeGetOrderData.RevenueData
     };
-
-    console.log("result: ", safeGetOrderData);
 
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));
     const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(safeCompetitiveData.Products).presentAsin);
@@ -748,10 +748,6 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
     // Handle 7-day calculation with OrderAndRevenue data
     if (isSevenDayRequest) {
         try {
-            console.log("=== NEW 7-DAY CALCULATION STARTED ===");
-            console.log("Date range:", { start: start.toISOString(), end: end.toISOString() });
-            console.log("Days difference:", daysDifference);
-            console.log("Period type:", periodType);
 
             // Get order data from OrderAndRevenue model
             const orderData = await GetOrderDataModel.findOne({ 
@@ -760,12 +756,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                 region 
             }).sort({ createdAt: -1 });
 
-            console.log("=== ORDER DATA RETRIEVAL ===");
-            console.log("Order data found:", !!orderData);
-            console.log("Total revenue data entries:", orderData?.RevenueData?.length || 0);
-
             if (!orderData || !orderData.RevenueData) {
-                console.log("❌ No order data found for 7-day calculation");
                 logger.warn("No order data found for 7-day calculation");
                 return {
                     status: 200,
@@ -792,39 +783,14 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
 
             // Filter orders with NEW status criteria: Shipped, Unshipped, Pending
             const validOrderStatuses = ["Shipped", "Unshipped"];
-            console.log("=== ORDER FILTERING (NEW LOGIC) ===");
-            console.log("Valid order statuses:", validOrderStatuses);
             
             const filteredOrders = orderData.RevenueData.filter(order => {
                 const orderDate = new Date(order.orderDate);
                 const hasValidStatus = validOrderStatuses.includes(order.orderStatus);
                 const isInDateRange = orderDate >= start && orderDate <= end;
                 
-                console.log("Order:", {
-                    amazonOrderId: order.amazonOrderId,
-                    orderDate: orderDate.toISOString(),
-                    orderStatus: order.orderStatus,
-                    hasValidStatus,
-                    isInDateRange,
-                    included: hasValidStatus && isInDateRange
-                });
-                
                 return hasValidStatus && isInDateRange;
             });
-
-            console.log("=== FILTERING RESULTS ===");
-            console.log("Total orders before filtering:", orderData.RevenueData.length);
-            console.log("Total orders after filtering:", filteredOrders.length);
-            console.log("Filtered orders details:", filteredOrders.map(order => ({
-                amazonOrderId: order.amazonOrderId,
-                orderDate: order.orderDate,
-                orderStatus: order.orderStatus,
-                asin: order.asin,
-                itemPrice: order.itemPrice,
-                quantity: order.quantity,
-                itemPromotionDiscount: order.itemPromotionDiscount,
-                shippingPromotionDiscount: order.shippingPromotionDiscount
-            })));
 
             // Calculate total sales (quantity × price) for all products
             let totalSales = 0;
@@ -832,23 +798,11 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
             let itemPromotionDiscountsTotal = 0;
             let shippingPromotionDiscountsTotal = 0;
 
-            console.log("=== SALES CALCULATION ===");
             filteredOrders.forEach((order, index) => {
                 const orderTotal = (order.itemPrice || 0) * (order.quantity || 0);
                 const itemPromotionDiscount = order.itemPromotionDiscount || 0;
                 const shippingPromotionDiscount = order.shippingPromotionDiscount || 0;
                 const orderDiscounts = itemPromotionDiscount + shippingPromotionDiscount;
-                
-                console.log(`Order ${index + 1}:`, {
-                    amazonOrderId: order.amazonOrderId,
-                    asin: order.asin,
-                    itemPrice: order.itemPrice,
-                    quantity: order.quantity,
-                    orderTotal: orderTotal,
-                    itemPromotionDiscount: itemPromotionDiscount,
-                    shippingPromotionDiscount: shippingPromotionDiscount,
-                    orderDiscounts: orderDiscounts
-                });
                 
                 // Track discount totals
                 itemPromotionDiscountsTotal += itemPromotionDiscount;
@@ -858,39 +812,16 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                 totalDiscounts += orderDiscounts;
             });
 
-            console.log("=== DISCOUNT BREAKDOWN ===");
-            console.log("Item promotion discounts total:", itemPromotionDiscountsTotal);
-            console.log("Shipping promotion discounts total:", shippingPromotionDiscountsTotal);
-            console.log("Combined total discounts:", totalDiscounts);
-            console.log("Discount verification (item + shipping):", itemPromotionDiscountsTotal + shippingPromotionDiscountsTotal);
-            console.log("Discounts match check:", totalDiscounts === (itemPromotionDiscountsTotal + shippingPromotionDiscountsTotal));
-
-            console.log("=== SALES TOTALS BEFORE DISCOUNT SUBTRACTION ===");
-            console.log("Total sales (price × quantity):", totalSales);
-            console.log("Total discounts to subtract:", totalDiscounts);
-
             // NEW LOGIC: Subtract discounts from total sales
             const salesBeforeDiscountSubtraction = totalSales;
             totalSales -= totalDiscounts;
 
-            console.log("=== DISCOUNT SUBTRACTION (NEW LOGIC) ===");
-            console.log("Sales before subtracting discounts:", salesBeforeDiscountSubtraction);
-            console.log("Discounts being subtracted:", totalDiscounts);
-            console.log("Sales after subtracting discounts:", totalSales);
-            console.log("Calculation verification:", salesBeforeDiscountSubtraction - totalDiscounts === totalSales);
-
-            console.log("=== SALES TOTALS AFTER DISCOUNT SUBTRACTION ===");
-            console.log("Total sales (after discount subtraction):", totalSales);
-
             // Get financial events data from WeeklyFinanceModel
-            console.log("=== WEEKLY FINANCE DATA RETRIEVAL ===");
             const weeklyFinanceData = await WeeklyFinanceModel.findOne({ 
                 User: userId, 
                 country, 
                 region 
             }).sort({ createdAt: -1 });
-
-            console.log("Weekly finance data found:", !!weeklyFinanceData);
             
             let financialEvents = {
                 ProductAdsPayment: 0,
@@ -901,8 +832,6 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
             };
 
             if (weeklyFinanceData && weeklyFinanceData.weeklyFinanceData) {
-                console.log("=== CHECKING 4 SECTIONS FOR DATE RANGE MATCH ===");
-                
                 const sections = [
                     { name: 'FirstSevenDays', data: weeklyFinanceData.weeklyFinanceData.FirstSevenDays },
                     { name: 'SecondSevenDays', data: weeklyFinanceData.weeklyFinanceData.SecondSevenDays },
@@ -922,31 +851,11 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                         const endDateInRange = sectionEndDate >= start && sectionEndDate <= end;
                         const includeSection = startDateInRange || endDateInRange;
                         
-                        console.log(`${section.name} (Section ${index + 1}):`, {
-                            sectionStartDate: sectionStartDate.toISOString(),
-                            sectionEndDate: sectionEndDate.toISOString(),
-                            providedStart: start.toISOString(),
-                            providedEnd: end.toISOString(),
-                            startDateInRange: startDateInRange,
-                            endDateInRange: endDateInRange,
-                            includeSection: includeSection,
-                            sectionData: section.data
-                        });
-                        
                         if (includeSection) {
                             matchingSections.push(section);
-                            console.log(`✅ ${section.name} INCLUDED in calculation`);
-                        } else {
-                            console.log(`❌ ${section.name} EXCLUDED from calculation`);
                         }
-                    } else {
-                        console.log(`❌ ${section.name} has invalid date data:`, section.data);
                     }
                 });
-                
-                console.log("=== MATCHING SECTIONS SUMMARY ===");
-                console.log("Number of matching sections:", matchingSections.length);
-                console.log("Matching section names:", matchingSections.map(s => s.name));
                 
                 // Sum values from matching sections
                 if (matchingSections.length > 0) {
@@ -958,28 +867,13 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                         const refunds = Number(sectionData.Refunds || 0);
                         const storage = Number(sectionData.Storage || 0);
                         
-                        console.log(`Adding ${section.name} values:`, {
-                            ProductAdsPayment: productAdsPayment,
-                            FBA_Fees: fbaFees,
-                            Amazon_Charges: amazonCharges,
-                            Refunds: refunds,
-                            Storage: storage
-                        });
-                        
                         financialEvents.ProductAdsPayment += productAdsPayment;
                         financialEvents.FBA_Fees += fbaFees;
                         financialEvents.Amazon_Charges += amazonCharges;
                         financialEvents.Refunds += refunds;
                         financialEvents.Storage += storage;
                     });
-                    
-                    console.log("=== SUMMED FINANCIAL EVENTS ===");
-                    console.log("Combined financial events from matching sections:", financialEvents);
-                } else {
-                    console.log("❌ No matching sections found, using zero values");
                 }
-            } else {
-                console.log("❌ No weekly finance data found, using zero values");
             }
 
             // NEW LOGIC: Subtract refunds from total sales to get final total sales
@@ -993,20 +887,6 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                 financialEvents.Storage
             );
 
-            console.log("=== FINAL CALCULATIONS (NEW LOGIC) ===");
-            console.log("Total sales (after discount subtraction):", totalSales);
-            console.log("Refunds to subtract:", financialEvents.Refunds);
-            console.log("Final total sales (after refunds):", finalTotalSales);
-            console.log("Other expenses breakdown:", {
-                ProductAdsPayment: financialEvents.ProductAdsPayment,
-                FBA_Fees: financialEvents.FBA_Fees,
-                Amazon_Charges: financialEvents.Amazon_Charges,
-                Storage: financialEvents.Storage,
-                totalOtherExpenses: financialEvents.ProductAdsPayment + financialEvents.FBA_Fees + financialEvents.Amazon_Charges + financialEvents.Storage
-            });
-            console.log("Gross profit calculation: Final Total Sales - Other Expenses");
-            console.log("Gross profit:", finalTotalSales + " - " + (financialEvents.ProductAdsPayment + financialEvents.FBA_Fees + financialEvents.Amazon_Charges + financialEvents.Storage) + " = " + grossProfit);
-
             function formatDate(date) {
                 const dte = new Date(date);
                 const Day = String(dte.getDate()).padStart(2, '0');
@@ -1015,7 +895,6 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
             }
 
             // Create date-wise sales array for the 7-day period
-            console.log("=== DATE-WISE SALES CALCULATION ===");
             const dateWiseSales = [];
             let totalDailyDiscounts = 0;
             let dailyDiscountBreakdown = [];
@@ -1044,16 +923,6 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                     dayDiscounts += orderTotalDiscounts;
                     dayItemPromotionDiscounts += orderItemDiscount;
                     dayShippingPromotionDiscounts += orderShippingDiscount;
-                    
-                    console.log(`  Order in day ${i + 1} (${formatDate(currentDate)}):`, {
-                        amazonOrderId: order.amazonOrderId,
-                        itemPrice: order.itemPrice,
-                        quantity: order.quantity,
-                        orderDayTotal: orderDayTotal,
-                        itemPromotionDiscount: orderItemDiscount,
-                        shippingPromotionDiscount: orderShippingDiscount,
-                        orderTotalDiscounts: orderTotalDiscounts
-                    });
                 });
 
                 // Apply discount subtraction for daily totals too
@@ -1072,27 +941,8 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                     TotalAmount: dayTotalAfterDiscounts // Use amount after discount subtraction
                 };
 
-                console.log(`Day ${i + 1} (${formatDate(currentDate)}):`, {
-                    ordersCount: dayOrders.length,
-                    dayTotal: dayTotal,
-                    dayDiscounts: dayDiscounts,
-                    dayTotalAfterDiscounts: dayTotalAfterDiscounts,
-                    dayItemPromotionDiscounts: dayItemPromotionDiscounts,
-                    dayShippingPromotionDiscounts: dayShippingPromotionDiscounts,
-                    dayEntry: dayEntry
-                });
-
                 dateWiseSales.push(dayEntry);
             }
-
-            console.log("=== DAILY DISCOUNT SUMMARY ===");
-            console.log("Daily discount breakdown:", dailyDiscountBreakdown);
-            console.log("Total daily discounts sum:", totalDailyDiscounts);
-            console.log("Daily vs overall discount verification:", totalDailyDiscounts === totalDiscounts);
-            console.log("Note: Discounts SUBTRACTED from daily sales totals");
-
-            console.log("=== COMPLETE DATE-WISE SALES ===");
-            console.log("Date-wise sales array:", dateWiseSales);
 
             const result = {
                 startDate: formatDate(end),
@@ -1109,31 +959,12 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                 }
             };
 
-            console.log("=== COMPREHENSIVE CALCULATION SUMMARY ===");
-            console.log("📊 NEW 7-DAY CALCULATION COMPLETE:");
-            console.log("  • Order Status Filter: Shipped, Unshipped, Pending");
-            console.log("  • Total Item Promotion Discounts:", itemPromotionDiscountsTotal);
-            console.log("  • Total Shipping Promotion Discounts:", shippingPromotionDiscountsTotal);
-            console.log("  • Combined Total Discounts SUBTRACTED:", totalDiscounts);
-            console.log("  • Sales after discount subtraction:", totalSales);
-            console.log("  • Refunds subtracted from sales:", financialEvents.Refunds);
-            console.log("  • Final Total Sales:", finalTotalSales);
-            console.log("  • Gross Profit:", grossProfit);
-            console.log("  • Using WeeklyFinanceModel with 4 sections");
-            console.log("=== END NEW CALCULATION SUMMARY ===");
-
-            console.log("=== FINAL RESULT ===");
-            console.log("Complete result object:", JSON.stringify(result, null, 2));
-            console.log("=== NEW 7-DAY CALCULATION COMPLETED ===");
-
             return {
                 status: 200,
                 message: result
             };
 
         } catch (error) {
-            console.log("❌ ERROR IN NEW 7-DAY CALCULATION:", error);
-            console.log("Error stack:", error.stack);
             logger.error(`Error in new 7-day calculation: ${error.message}`);
             // Fall back to original logic if error occurs
         }

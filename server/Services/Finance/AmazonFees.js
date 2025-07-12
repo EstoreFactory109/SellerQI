@@ -157,7 +157,6 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
 
         // Return results with summary
 
-
         const saveFees = await FBAFeesModel.create({
             userId: UserId,
             country: country,
@@ -172,6 +171,13 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
                 error: "Failed to save fees to database"
             }
         }
+
+        // Define summary object with processing statistics
+        const summary = {
+            total: totalProducts,
+            successful: feesResults.length,
+            failed: failedASINs.length
+        };
 
         return {
             success: true,
