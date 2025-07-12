@@ -4,7 +4,12 @@ const logger=require('../utils/Logger.js');
 
 const dbConnect=async()=>{
     try {
-        const connect=await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`)
+        const connect=await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`,{
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            connectTimeoutMS: 60000,  // Connection timeout (in milliseconds)
+            socketTimeoutMS: 120000,   // Socket timeout (in milliseconds)
+        })
         if(connect){
             logger.info('Connected to DB');
         }
