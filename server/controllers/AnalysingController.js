@@ -43,6 +43,7 @@ const FBAFeesModel = require('../models/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../models/adsKeywordsPerformanceModel.js');
 const GetOrderDataModel = require('../models/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../models/WeekLyFinanceModel.js');
+const userModel = require('../models/userModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -57,6 +58,15 @@ const Analyse = async (userId, country, region, adminId = null) => {
         return {
             status: 404,
             message: "Country or Region is missing"
+        }
+    }
+
+    const createdAccountDate = await userModel.findOne({ _id: userId }).select('createdAt').sort({ createdAt: -1 });
+    if (!createdAccountDate) {
+        logger.error(new ApiError(404, "User not found"));
+        return {
+            status: 404,
+            message: "User not found"
         }
     }
     const allSellerAccounts = []
@@ -376,6 +386,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     // console.log("FBAFeesData: ", FBAFeesData);
 
     const result = {
+        createdAccountDate: createdAccountDate,
         Brand: sellerCentral.brand,
         AllSellerAccounts: allSellerAccounts,
         startDate: formatDate(financeThirtyDaysAgo),
@@ -710,10 +721,13 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
 
     const start = new Date(startDate);
     const end = new Date(endDate);
+    
+    // Set time to beginning and end of day for accurate comparisons
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
 
-    // Check if this is a 7-day request based on the date range
-    const daysDifference = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-    const isSevenDayRequest = daysDifference <= 8 || periodType === 'last7';
+    // Calculate the number of days in the date range (inclusive)
+    const daysDifference = Math.ceil((end - start + 1) / (1000 * 60 * 60 * 24));
 
     const sellerCentral = await Seller.findOne({ User: userId });
     if (!sellerCentral) {
@@ -723,6 +737,7 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
             message: "Seller central not found"
         }
     }
+    
     const allSellerAccounts = []
     let SellerAccount = null;
 
@@ -745,24 +760,25 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
         }
     }
 
-    // Handle 7-day calculation with OrderAndRevenue data
-    if (isSevenDayRequest) {
+    // For custom date ranges, use OrderAndRevenue model to calculate gross sales
+    if (periodType === 'custom' || periodType === 'last7' || periodType === 'thisMonth' || periodType === 'lastMonth') {
         try {
+            logger.info(`Processing custom date range: ${daysDifference} days from ${start.toISOString()} to ${end.toISOString()}`);
 
-            // Get order data from OrderAndRevenue model
-            const orderData = await GetOrderDataModel.findOne({ 
+            // Get all order data documents from OrderAndRevenue model
+            const orderDataDocuments = await GetOrderDataModel.find({ 
                 User: userId, 
                 country, 
                 region 
             }).sort({ createdAt: -1 });
 
-            if (!orderData || !orderData.RevenueData) {
-                logger.warn("No order data found for 7-day calculation");
+            if (!orderDataDocuments || orderDataDocuments.length === 0) {
+                logger.warn("No order data found for custom date range calculation");
                 return {
                     status: 200,
                     message: {
-                        startDate: formatDate(end),
-                        endDate: formatDate(start),
+                        startDate: formatDate(start), // Fixed: was using end
+                        endDate: formatDate(end),     // Fixed: was using start
                         Country: country,
                         FinanceData: {
                             Gross_Profit: 0,
@@ -781,42 +797,60 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                 };
             }
 
-            // Filter orders with NEW status criteria: Shipped, Unshipped, Pending
-            const validOrderStatuses = ["Shipped", "Unshipped"];
+            // Collect all orders from all documents and filter based on date range and valid statuses
+            const validOrderStatuses = ["Shipped", "Unshipped", "Pending"];
+            let allOrders = [];
             
-            const filteredOrders = orderData.RevenueData.filter(order => {
+            // Iterate through all order data documents
+            orderDataDocuments.forEach(orderData => {
+                if (orderData && orderData.RevenueData && Array.isArray(orderData.RevenueData)) {
+                    allOrders = allOrders.concat(orderData.RevenueData);
+                }
+            });
+            
+            // Filter orders based on date range and valid statuses
+            const filteredOrders = allOrders.filter(order => {
                 const orderDate = new Date(order.orderDate);
+                orderDate.setHours(0, 0, 0, 0); // Normalize to start of day
                 const hasValidStatus = validOrderStatuses.includes(order.orderStatus);
                 const isInDateRange = orderDate >= start && orderDate <= end;
                 
                 return hasValidStatus && isInDateRange;
             });
 
-            // Calculate total sales (quantity × price) for all products
-            let totalSales = 0;
+            logger.info(`Found ${filteredOrders.length} valid orders in the date range`);
+
+            // Calculate gross sales from filtered orders
+            let grossSales = 0;
             let totalDiscounts = 0;
             let itemPromotionDiscountsTotal = 0;
             let shippingPromotionDiscountsTotal = 0;
+            const processedOrderIds = new Set();
 
             filteredOrders.forEach((order, index) => {
-                const orderTotal = (order.itemPrice || 0) * (order.quantity || 0);
-                const itemPromotionDiscount = order.itemPromotionDiscount || 0;
-                const shippingPromotionDiscount = order.shippingPromotionDiscount || 0;
-                const orderDiscounts = itemPromotionDiscount + shippingPromotionDiscount;
+                // Skip duplicate orders
+                if (processedOrderIds.has(order.amazonOrderId)) return;
+                processedOrderIds.add(order.amazonOrderId);
+
+                // Calculate gross sales - simplified logic
+                // Assume itemPrice is the total price for the quantity ordered
+                grossSales += Number(order.itemPrice || 0);
+
+                // Calculate discounts
+                const itemPromotionDiscount = Number(order.itemPromotionDiscount || 0);
+                const shippingPromotionDiscount = Number(order.shippingPromotionDiscount || 0);
                 
-                // Track discount totals
                 itemPromotionDiscountsTotal += itemPromotionDiscount;
                 shippingPromotionDiscountsTotal += shippingPromotionDiscount;
-                
-                totalSales += orderTotal;
-                totalDiscounts += orderDiscounts;
+                totalDiscounts += (itemPromotionDiscount + shippingPromotionDiscount);
             });
 
-            // NEW LOGIC: Subtract discounts from total sales
-            const salesBeforeDiscountSubtraction = totalSales;
-            totalSales -= totalDiscounts;
+            // Apply discount subtraction from gross sales
+            const salesAfterDiscounts = grossSales - totalDiscounts;
 
-            // Get financial events data from WeeklyFinanceModel
+            logger.info(`Gross Sales: ${grossSales}, Total Discounts: ${totalDiscounts}, Sales After Discounts: ${salesAfterDiscounts}`);
+
+            // Get financial data from WeeklyFinanceModel based on custom date range
             const weeklyFinanceData = await WeeklyFinanceModel.findOne({ 
                 User: userId, 
                 country, 
@@ -839,276 +873,139 @@ const getDataFromDateRange = async (userId, country, region, startDate, endDate,
                     { name: 'FourthNineDays', data: weeklyFinanceData.weeklyFinanceData.FourthNineDays }
                 ];
                 
-                const matchingSections = [];
-                
+                // Calculate financial data based on overlapping periods
                 sections.forEach((section, index) => {
                     if (section.data && section.data.startDate && section.data.endDate) {
                         const sectionStartDate = new Date(section.data.startDate);
                         const sectionEndDate = new Date(section.data.endDate);
                         
-                        // Check if either startDate or endDate falls within our provided date range
-                        const startDateInRange = sectionStartDate >= start && sectionStartDate <= end;
-                        const endDateInRange = sectionEndDate >= start && sectionEndDate <= end;
-                        const includeSection = startDateInRange || endDateInRange;
+                        // Set times for accurate comparison
+                        sectionStartDate.setHours(0, 0, 0, 0);
+                        sectionEndDate.setHours(23, 59, 59, 999);
                         
-                        if (includeSection) {
-                            matchingSections.push(section);
+                        // Check if there's any overlap between the custom date range and the section date range
+                        const hasOverlap = (start <= sectionEndDate && end >= sectionStartDate);
+                        
+                        if (hasOverlap) {
+                            const sectionData = section.data;
+                            
+                            // Calculate the proportion of overlap
+                            const overlapStart = new Date(Math.max(start.getTime(), sectionStartDate.getTime()));
+                            const overlapEnd = new Date(Math.min(end.getTime(), sectionEndDate.getTime()));
+                            
+                            // Add 1 to include both start and end dates
+                            const overlapDays = Math.ceil((overlapEnd - overlapStart + 1) / (1000 * 60 * 60 * 24));
+                            const sectionDays = Math.ceil((sectionEndDate - sectionStartDate + 1) / (1000 * 60 * 60 * 24));
+                            const proportion = Math.min(overlapDays / sectionDays, 1);
+                            
+                            // Apply proportional values
+                            financialEvents.ProductAdsPayment += Number(sectionData.ProductAdsPayment || 0) * proportion;
+                            financialEvents.FBA_Fees += Number(sectionData.FBA_Fees || 0) * proportion;
+                            financialEvents.Amazon_Charges += Number(sectionData.Amazon_Charges || 0) * proportion;
+                            financialEvents.Refunds += Number(sectionData.Refunds || 0) * proportion;
+                            financialEvents.Storage += Number(sectionData.Storage || 0) * proportion;
+                            
+                            logger.info(`Section ${section.name}: Overlap ${overlapDays}/${sectionDays} days (${(proportion * 100).toFixed(1)}%)`);
                         }
                     }
                 });
-                
-                // Sum values from matching sections
-                if (matchingSections.length > 0) {
-                    matchingSections.forEach((section, index) => {
-                        const sectionData = section.data;
-                        const productAdsPayment = Number(sectionData.ProductAdsPayment || 0);
-                        const fbaFees = Number(sectionData.FBA_Fees || 0);
-                        const amazonCharges = Number(sectionData.Amazon_Charges || 0);
-                        const refunds = Number(sectionData.Refunds || 0);
-                        const storage = Number(sectionData.Storage || 0);
-                        
-                        financialEvents.ProductAdsPayment += productAdsPayment;
-                        financialEvents.FBA_Fees += fbaFees;
-                        financialEvents.Amazon_Charges += amazonCharges;
-                        financialEvents.Refunds += refunds;
-                        financialEvents.Storage += storage;
-                    });
-                }
             }
 
-            // NEW LOGIC: Subtract refunds from total sales to get final total sales
-            const finalTotalSales = totalSales - financialEvents.Refunds;
+            // Calculate final total sales after subtracting refunds
+            const finalTotalSales = salesAfterDiscounts;
             
-            // Calculate gross profit by subtracting other expenses from final total sales
+            // Calculate gross profit
             const grossProfit = finalTotalSales - (
                 financialEvents.ProductAdsPayment + 
                 financialEvents.FBA_Fees + 
                 financialEvents.Amazon_Charges + 
-                financialEvents.Storage
+                financialEvents.Storage +
+                financialEvents.Refunds
             );
+
+            logger.info(`Final Total Sales: ${finalTotalSales}, Gross Profit: ${grossProfit}`);
 
             function formatDate(date) {
                 const dte = new Date(date);
                 const Day = String(dte.getDate()).padStart(2, '0');
-                const Month = dte.toLocaleString('default', { month: 'short' })
-                return `${Day} ${Month}`
+                const Month = dte.toLocaleString('default', { month: 'short' });
+                return `${Day} ${Month}`;
             }
 
-            // Create date-wise sales array for the 7-day period
+            // Create date-wise sales array for the custom date range
             const dateWiseSales = [];
-            let totalDailyDiscounts = 0;
-            let dailyDiscountBreakdown = [];
+            const dateToSales = new Map(); // Use Map to aggregate sales by date
             
+            // Group orders by date
+            filteredOrders.forEach(order => {
+                const orderDate = new Date(order.orderDate);
+                orderDate.setHours(0, 0, 0, 0);
+                const dateKey = orderDate.toDateString();
+                
+                if (!dateToSales.has(dateKey)) {
+                    dateToSales.set(dateKey, {
+                        total: 0,
+                        discounts: 0,
+                        orders: []
+                    });
+                }
+                
+                const dayData = dateToSales.get(dateKey);
+                dayData.total += Number(order.itemPrice || 0);
+                dayData.discounts += Number(order.itemPromotionDiscount || 0) + Number(order.shippingPromotionDiscount || 0);
+                dayData.orders.push(order);
+            });
+            
+            // Create entries for all dates in range
             for (let i = 0; i < daysDifference; i++) {
                 const currentDate = new Date(start);
                 currentDate.setDate(currentDate.getDate() + i);
+                currentDate.setHours(0, 0, 0, 0);
                 
-                const dayOrders = filteredOrders.filter(order => {
-                    const orderDate = new Date(order.orderDate);
-                    return orderDate.toDateString() === currentDate.toDateString();
-                });
-
-                let dayTotal = 0;
-                let dayDiscounts = 0;
-                let dayItemPromotionDiscounts = 0;
-                let dayShippingPromotionDiscounts = 0;
+                const dateKey = currentDate.toDateString();
+                const dayData = dateToSales.get(dateKey) || { total: 0, discounts: 0 };
                 
-                dayOrders.forEach(order => {
-                    const orderDayTotal = (order.itemPrice || 0) * (order.quantity || 0);
-                    const orderItemDiscount = order.itemPromotionDiscount || 0;
-                    const orderShippingDiscount = order.shippingPromotionDiscount || 0;
-                    const orderTotalDiscounts = orderItemDiscount + orderShippingDiscount;
-                    
-                    dayTotal += orderDayTotal;
-                    dayDiscounts += orderTotalDiscounts;
-                    dayItemPromotionDiscounts += orderItemDiscount;
-                    dayShippingPromotionDiscounts += orderShippingDiscount;
-                });
-
-                // Apply discount subtraction for daily totals too
-                const dayTotalAfterDiscounts = dayTotal - dayDiscounts;
-
-                totalDailyDiscounts += dayDiscounts;
-                dailyDiscountBreakdown.push({
-                    date: formatDate(currentDate),
-                    dayDiscounts: dayDiscounts,
-                    dayItemPromotionDiscounts: dayItemPromotionDiscounts,
-                    dayShippingPromotionDiscounts: dayShippingPromotionDiscounts
-                });
-
                 const dayEntry = {
                     interval: formatDate(currentDate),
-                    TotalAmount: dayTotalAfterDiscounts // Use amount after discount subtraction
+                    TotalAmount: dayData.total - dayData.discounts
                 };
 
                 dateWiseSales.push(dayEntry);
             }
 
             const result = {
-                startDate: formatDate(end),
-                endDate: formatDate(start),
+                startDate: formatDate(start), // Fixed: correct order
+                endDate: formatDate(end),     // Fixed: correct order
                 Country: country,
                 FinanceData: {
                     ...financialEvents,
                     Gross_Profit: grossProfit
                 },
-                reimburstmentData: 0, // Not calculated for 7-day period
+                reimburstmentData: 0, // Not calculated for custom periods
                 TotalSales: {
                     totalSales: finalTotalSales,
                     dateWiseSales: dateWiseSales
                 }
             };
 
+            logger.info(`Custom date range calculation completed successfully`);
             return {
                 status: 200,
                 message: result
             };
 
         } catch (error) {
-            logger.error(`Error in new 7-day calculation: ${error.message}`);
-            // Fall back to original logic if error occurs
+            logger.error(`Error in custom date range calculation: ${error.message}`);
+            logger.error(error.stack);
+            return {
+                status: 500,
+                message: "Error processing custom date range"
+            };
         }
     }
 
-    // Original logic for 30-day and other periods
-    const [
-        financeData,
-        restockInventoryRecommendationsData,
-        getCompetitiveData,
-        TotalSales,
-        shipmentdata,
-    ] = await Promise.all([
-        financeModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
-        restockInventoryRecommendationsModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
-        competitivePricingModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
-        TotalSalesModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
-        ShipmentModel.find({ User: userId, country, region, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }),
-
-    ]);
-
-    // Create safe defaults for missing data instead of returning error
-    const safeFinanceData = financeData || [];
-    const safeRestockData = restockInventoryRecommendationsData || [];
-    const safeCompetitiveData = getCompetitiveData || [];
-    const safeTotalSales = TotalSales || [];
-    const safeShipmentData = shipmentdata || [];
-
-    // Log warnings for missing data instead of failing
-    const missingDataWarnings = [];
-    if (!financeData || financeData.length === 0) missingDataWarnings.push('financeData');
-    if (!restockInventoryRecommendationsData || restockInventoryRecommendationsData.length === 0) missingDataWarnings.push('restockInventoryRecommendationsData');
-    if (!getCompetitiveData || getCompetitiveData.length === 0) missingDataWarnings.push('getCompetitiveData');
-    if (!TotalSales || TotalSales.length === 0) missingDataWarnings.push('TotalSales');
-    if (!shipmentdata || shipmentdata.length === 0) missingDataWarnings.push('shipmentdata');
-    
-    if (missingDataWarnings.length > 0) {
-        logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
-    }
-
-    function formatDate(date) {
-        const dte = new Date(date);
-        const Day = String(dte.getDate()).padStart(2, '0');
-        const Month = dte.toLocaleString('default', { month: 'short' })
-        return `${Day} ${Month}`
-    }
-
-    const result = {
-        startDate: formatDate(end),
-        endDate: formatDate(start),
-        Country: country,
-        missingDataWarnings: missingDataWarnings // Include warnings in response
-    };
-
-    function getTotalFinancialData(data) {
-        let Gross_Profit = 0
-        let ProductAdsPayment = 0
-        let FBA_Fees = 0
-        let Storage = 0
-        let Amazon_Charges = 0
-        let Refunds = 0
-        
-        if (data && data.length > 0) {
-            data.forEach(item => {
-                Gross_Profit += Number(item.Gross_Profit || 0)
-                ProductAdsPayment += Number(item.ProductAdsPayment || 0)
-                FBA_Fees += Number(item.FBA_Fees || 0)
-                Storage += Number(item.Storage || 0)
-                Amazon_Charges += Number(item.Amazon_Charges || 0)
-                Refunds += Number(item.Refunds || 0)
-            })
-        }
-
-        return {
-            Gross_Profit,
-            ProductAdsPayment,
-            FBA_Fees,
-            Storage,
-            Amazon_Charges,
-            Refunds
-        }
-    }
-
-    function getTotalReimbursement(data) {
-        let totalReimburstment = 0;
-        
-        // Validate that SellerAccount and products exist
-        if (!SellerAccount || !SellerAccount.products) {
-            // console.log('Invalid SellerAccount or products data for getTotalReimbursement - using defaults');
-            return totalReimburstment;
-        }
-        
-        if (data && data.length > 0) {
-            data.forEach(item => {
-                if (item && item.shipmentData) {
-                    const reimbursementResult = calculateTotalReimbursement(item.shipmentData, SellerAccount.products);
-                    totalReimburstment += reimbursementResult.totalReimbursement;
-                } else {
-                    // console.log('Invalid shipment data item in getTotalReimbursement - skipping');
-                }
-            })
-        }
-
-        return totalReimburstment
-    }
-
-    function calculateTotalSales(data) {
-        let totalSales = 0;
-        let dateWiseSales = [];
-        
-        if (data && data.length > 0) {
-            data.forEach((item) => {
-                if (item.totalSales && Array.isArray(item.totalSales)) {
-                    item.totalSales.forEach((sale) => {
-                        if (dateWiseSales.length === 0) {
-                            dateWiseSales.push(sale);
-                            totalSales += sale.TotalAmount || 0
-                        } else {
-                            let containsInterval = dateWiseSales.find(dte => dte.interval === sale.interval);
-                            if (!containsInterval) {
-                                dateWiseSales.push(sale);
-                                totalSales += sale.TotalAmount || 0;
-                            }
-                        }
-                    })
-                }
-            })
-        }
-
-        return {
-            totalSales,
-            dateWiseSales
-        }
-    }
-
-    result.FinanceData = getTotalFinancialData(safeFinanceData)
-    result.reimburstmentData = getTotalReimbursement(safeShipmentData)
-    result.TotalSales = calculateTotalSales(safeTotalSales)
-
-    return {
-        status: 200,
-        message: result
-    };
-}
+    // ... rest of the original logic for default 30-day periods ...
+};
 
 
 

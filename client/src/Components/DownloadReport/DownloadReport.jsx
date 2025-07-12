@@ -3,13 +3,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import * as ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
-import Download from '../../assets/Icons/Download.png';
+import { Download, ChevronDown, FileText, FileSpreadsheet } from 'lucide-react';
 
 const DownloadReport = ({ 
     data, 
     filename = 'report', 
-    buttonText = 'Download Report',
-    buttonClass = 'flex items-center text-xs bg-[#333651] text-white gap-2 px-3 py-1 rounded-md',
+    buttonText = 'Export',
+    buttonClass = '',
     showIcon = true,
     prepareDataFunc = null
 }) => {
@@ -103,6 +103,7 @@ const DownloadReport = ({
             console.error('Error downloading Excel:', error);
             alert('Error downloading Excel file. Please check console for details.');
         }
+        setShowDownloadOptions(false);
     };
 
     // Download as CSV
@@ -140,48 +141,49 @@ const DownloadReport = ({
             console.error('Error downloading CSV:', error);
             alert('Error downloading CSV file. Please check console for details.');
         }
+        setShowDownloadOptions(false);
     };
 
-
+    // Use dashboard styling if no custom buttonClass provided
+    const defaultButtonClass = 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium';
+    const finalButtonClass = buttonClass || defaultButtonClass;
 
     return (
         <>
             <div className="relative" ref={downloadRef} data-download-button>
                 <button 
-                    className={buttonClass}
+                    className={finalButtonClass}
                     onClick={() => setShowDownloadOptions(!showDownloadOptions)}
                 >
+                    {showIcon && <Download className='w-4 h-4' />}
                     {buttonText}
-                    {showIcon && <img src={Download} className='w-4 h-4' alt="Download" />}
+                    <ChevronDown className="w-4 h-4" />
                 </button>
                 <AnimatePresence>
                     {showDownloadOptions && (
                         <motion.div
-                            initial={{ opacity: 0, scaleY: 0 }}
-                            animate={{ opacity: 1, scaleY: 1 }}
-                            exit={{ opacity: 0, scaleY: 0 }}
-                            transition={{ duration: 0.2, ease: "easeInOut" }}
-                            style={{ transformOrigin: "top" }}
-                            className="absolute right-0 top-10 bg-white border border-gray-300 rounded-md shadow-lg z-50 overflow-hidden min-w-[200px]"
+                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                            transition={{ duration: 0.2 }}
+                            className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
                         >
-                            <button
-                                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors"
-                                onClick={() => {
-                                    downloadExcel();
-                                    setShowDownloadOptions(false);
-                                }}
-                            >
-                                Download as Excel (.xlsx)
-                            </button>
-                            <button
-                                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors border-t border-gray-200"
-                                onClick={() => {
-                                    downloadCSV();
-                                    setShowDownloadOptions(false);
-                                }}
-                            >
-                                Download as CSV (.csv)
-                            </button>
+                            <div className="py-1">
+                                <button
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                    onClick={downloadCSV}
+                                >
+                                    <FileText className="w-4 h-4 text-green-600" />
+                                    <span className="text-sm font-medium">Download as CSV</span>
+                                </button>
+                                <button
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                    onClick={downloadExcel}
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                                    <span className="text-sm font-medium">Download as Excel</span>
+                                </button>
+                            </div>
                         </motion.div>
                     )}
                 </AnimatePresence>

@@ -489,6 +489,7 @@ const analyseData = (data) => {
 
     const dashboardData = {
         Country: data.Country || "US",
+        createdAccountDate: data.createdAccountDate || null,
         accountHealthPercentage,
         accountFinance,
         totalErrorInAccount,

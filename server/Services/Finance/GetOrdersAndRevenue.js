@@ -158,7 +158,7 @@ const transformOrderDataForDB = (rawOrderData) => {
 const saveOrderDataToDB = async (userId, region, country, revenueData) => {
     try {
         // Check if document already exists for this user, region, and country
-        let existingDocument = await OrderAndRevenue.findOne({
+       /* let existingDocument = await OrderAndRevenue.findOne({
             User: userId,
             region: region,
             country: country
@@ -184,7 +184,7 @@ const saveOrderDataToDB = async (userId, region, country, revenueData) => {
             }
 
             return existingDocument;
-        } else {
+        } else {*/
             // Create new document
             const newOrderAndRevenue = new OrderAndRevenue({
                 User: userId,
@@ -196,7 +196,7 @@ const saveOrderDataToDB = async (userId, region, country, revenueData) => {
             const savedDocument = await newOrderAndRevenue.save();
             logger.info(`✅ Created new document with ${revenueData.length} orders`);
             return savedDocument;
-        }
+       // }
     } catch (error) {
         logger.error("❌ Error saving order data to database:", error.message);
         throw error;
@@ -382,13 +382,13 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             }
         })
         
-
+*/
 
         // Save to database
         logger.info("💾 Saving order data to database...");
         await saveOrderDataToDB(userId, region, country, transformedData);
         
-        logger.info(`✅ Successfully processed and saved ${transformedData.length} orders to database`);*/
+        logger.info(`✅ Successfully processed and saved ${transformedData.length} orders to database`);
 
         const validStatuses = ['Shipped', 'Unshipped', 'Pending'];
         const productWiseSales = [];

@@ -209,9 +209,7 @@ const Reports = () => {
           <DownloadReport
             prepareDataFunc={prepareReportsData}
             filename="Dashboard_Report"
-            
-            buttonText="Download Report"
-            buttonClass="text-sm text-white bg-[#333651] rounded px-3 py-1 flex items-center gap-2"
+            buttonText="Export"
             showIcon={true}
           />
         </div>

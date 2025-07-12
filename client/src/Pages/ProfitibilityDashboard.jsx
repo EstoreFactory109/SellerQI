@@ -159,16 +159,9 @@ const ProfitabilityDashboard = () => {
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
   
   const metrics = useMemo(() => {
-    // Calculate metrics from filtered data if available
-    const totalSalesData = info?.TotalSales;
+    // Use the same Total Sales value as the Dashboard Total Sales component
     const filteredAccountFinance = info?.accountFinance || accountFinance;
-    let filteredTotalSales = 0;
     let totalOverallSpend = 0;
-    
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      // Calculate totals from filtered date range
-      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-    }
     
     // Calculate total COGS from all products that have COGS entered
     let totalCOGS = 0;
@@ -187,8 +180,8 @@ const ProfitabilityDashboard = () => {
                         Number(filteredAccountFinance?.ProductAdsPayment || 0) +
                         Number(filteredAccountFinance?.Refunds || 0));
     
-    // Use filtered data if available, otherwise fall back to original data
-    const totalSales = filteredTotalSales > 0 ? filteredTotalSales : Number(info?.TotalWeeklySale || 0);
+    // Always use the same value as Dashboard Total Sales component (TotalWeeklySale)
+    const totalSales = Number(info?.TotalWeeklySale || 0);
     const originalGrossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
     
     // Adjust gross profit by subtracting total COGS (only for profitability page)
@@ -206,7 +199,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Total Ad Spend', value: `$${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Amazon Fees', value: `$${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.TotalSales, info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -974,8 +967,7 @@ const ProfitabilityDashboard = () => {
                   <DownloadReport
                     prepareDataFunc={prepareProfitabilityData}
                     filename="Profitability_Dashboard_Report"
-                    buttonText="Download Report"
-                    buttonClass="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                    buttonText="Export"
                     showIcon={true}
                   />
                 </div>

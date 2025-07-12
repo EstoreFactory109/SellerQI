@@ -1106,7 +1106,6 @@ const PPCDashboard = () => {
                 prepareDataFunc={preparePPCData}
                 filename="PPC_Dashboard_Report"
                 buttonText="Export"
-                buttonClass="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium"
                 showIcon={true}
               />
             </div>

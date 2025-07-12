@@ -10,7 +10,7 @@ import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
-import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle } from 'lucide-react';
+import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle, FileText, FileSpreadsheet } from 'lucide-react';
 import './IssuesPerProduct.css';
 
 // Reusable component for conversion issues
@@ -612,12 +612,12 @@ const Dashboard = () => {
                             {/* Download Report Button */}
                             <div className="relative" ref={downloadRef}>
                                 <button 
-                                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg text-sm font-medium"
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium"
                                     onClick={() => setShowDownloadOptions(!showDownloadOptions)}
                                 >
                                     <Download className="w-4 h-4" />
-                                    Download Report
-                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showDownloadOptions ? 'rotate-180' : ''}`} />
+                                    Export
+                                    <ChevronDown className="w-4 h-4" />
                                 </button>
                                 <AnimatePresence>
                                     {showDownloadOptions && (
@@ -626,26 +626,30 @@ const Dashboard = () => {
                                             animate={{ opacity: 1, y: 0, scale: 1 }}
                                             exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                             transition={{ duration: 0.2 }}
-                                            className="absolute top-full right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
+                                            className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
                                         >
-                                            <button
-                                                className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 transition-colors duration-200 flex items-center gap-2 text-gray-700"
-                                                onClick={() => {
-                                                    downloadExcel();
-                                                    setShowDownloadOptions(false);
-                                                }}
-                                            >
-                                                Download as Excel (.xlsx)
-                                            </button>
-                                            <button
-                                                className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 transition-colors duration-200 border-t border-gray-200 flex items-center gap-2 text-gray-700"
-                                                onClick={() => {
-                                                    downloadCSV();
-                                                    setShowDownloadOptions(false);
-                                                }}
-                                            >
-                                                Download as CSV (.csv)
-                                            </button>
+                                            <div className="py-1">
+                                                <button
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                                    onClick={() => {
+                                                        downloadCSV();
+                                                        setShowDownloadOptions(false);
+                                                    }}
+                                                >
+                                                    <FileText className="w-4 h-4 text-green-600" />
+                                                    <span className="text-sm font-medium">Download as CSV</span>
+                                                </button>
+                                                <button
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                                    onClick={() => {
+                                                        downloadExcel();
+                                                        setShowDownloadOptions(false);
+                                                    }}
+                                                >
+                                                    <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                                                    <span className="text-sm font-medium">Download as Excel</span>
+                                                </button>
+                                            </div>
                                         </motion.div>
                                     )}
                                 </AnimatePresence>

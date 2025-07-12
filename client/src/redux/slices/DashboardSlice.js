@@ -19,6 +19,10 @@ const DashboardDataSlice = createSlice({
         state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales;
         state.DashBoardInfo.TotalSales=action.payload.TotalSales;
         state.DashBoardInfo.GetOrderData=action.payload.GetOrderData;
+        // Preserve createdAccountDate when updating dashboard info
+        if (action.payload.createdAccountDate) {
+          state.DashBoardInfo.createdAccountDate = action.payload.createdAccountDate;
+        }
       }
     },
   });

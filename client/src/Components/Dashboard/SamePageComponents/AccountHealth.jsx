@@ -66,7 +66,7 @@ const navigatie = useNavigate()
 
   const viewFullReport=(e)=>{
     e.preventDefault();
-    navigatie('/seller-central-checker/reports')
+    navigatie('/seller-central-checker/issues?tab=account')
   }
 
   return (
