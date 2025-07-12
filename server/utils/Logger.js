@@ -1,12 +1,9 @@
-const pino = require('pino');
-
-// Use pretty-print for better readability in dev
-const logger = pino({
-  level: 'debug',
-  transport: {
-    target: 'pino-pretty', // Pretty formatting
-    options: { colorize: true }
-  }
-});
+// Simple console-based logger to replace pino
+const logger = {
+  info: (...args) => console.log('[INFO]', ...args),
+  error: (...args) => console.error('[ERROR]', ...args),
+  warn: (...args) => console.warn('[WARN]', ...args),
+  debug: (...args) => console.log('[DEBUG]', ...args)
+};
 
 module.exports = logger;
