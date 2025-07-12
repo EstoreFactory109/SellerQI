@@ -11,6 +11,8 @@
             "src": "/(.*)",
             "dest": "api/index.js"
         }
-    ]
+    ],
+    "installCommand": "npm ci",
+    "buildCommand": "echo 'Build complete - pino removed'"
   }
   
