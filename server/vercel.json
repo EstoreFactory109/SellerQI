@@ -1,10 +1,18 @@
 {
     "version": 2,
+    "functions": {
+        "api/**": {
+            "regions": [
+                "sfo1",
+                "iad1"
+            ]
+        }
+    },
     "builds": [
-      {
-        "src": "api/index.js",
-        "use": "@vercel/node"
-      }
+        {
+            "src": "api/index.js",
+            "use": "@vercel/node"
+        }
     ],
     "routes": [
         {
@@ -14,5 +22,4 @@
     ],
     "installCommand": "npm ci",
     "buildCommand": "echo 'Build complete - pino removed'"
-  }
-  
+}
