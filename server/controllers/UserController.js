@@ -278,10 +278,19 @@ const logoutUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in updating refresh token"));
     }
 
-    res.clearCookie("AdminToken");
-    res.clearCookie("IBEXAccessToken");
-    res.clearCookie("IBEXRefreshToken");
-    res.clearCookie("IBEXLocationToken");
+    // Define the SAME options used when setting cookies
+    const option = {
+        httpOnly: true,
+        secure: true,
+        sameSite: "None"
+    }
+
+    // Clear cookies with the same options
+    res.clearCookie("AdminToken", option);
+    res.clearCookie("IBEXAccessToken", option);
+    res.clearCookie("IBEXRefreshToken", option);
+    res.clearCookie("IBEXLocationToken", option);
+    
     res.status(200).json(new ApiResponse(200, "", "User logged out successfully"));
 })
 
