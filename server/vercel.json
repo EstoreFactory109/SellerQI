@@ -1,13 +1,5 @@
 {
     "version": 2,
-    "functions": {
-        "api/**": {
-            "regions": [
-                "sfo1",
-                "iad1"
-            ]
-        }
-    },
     "builds": [
         {
             "src": "api/index.js",
