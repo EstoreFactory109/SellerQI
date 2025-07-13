@@ -25,8 +25,50 @@ export default function ProductTable() {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
 
   const allProducts = info.productWiseError || [];
+  
+  // Get GetOrderData array for calculating quantities
+  const getOrderData = Array.isArray(info?.GetOrderData) ? info.GetOrderData : [];
+  
+  // Function to calculate total quantities ASIN-wise from GetOrderData
+  const calculateAsinQuantities = (orderData) => {
+    const asinQuantities = {};
+    
+    // Only consider shipped, unshipped, and partially shipped orders
+    const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
+    
+    orderData.forEach(order => {
+      if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
+        return;
+      }
+      
+      const asin = order.asin;
+      const quantity = Number(order.quantity) || 0;
+      
+      if (asinQuantities[asin]) {
+        asinQuantities[asin] += quantity;
+      } else {
+        asinQuantities[asin] = quantity;
+      }
+    });
+    
+    return asinQuantities;
+  };
+  
+  // Calculate quantities from GetOrderData
+  const asinQuantities = calculateAsinQuantities(getOrderData);
+  
+  // Debug logging
+  console.log('ProductTable - GetOrderData length:', getOrderData.length);
+  console.log('ProductTable - Calculated ASIN quantities:', asinQuantities);
+  
+  // Update products with calculated quantities
+  const allProductsWithUpdatedQuantities = allProducts.map(product => ({
+    ...product,
+    quantity: asinQuantities[product.asin] || 0
+  }));
 
-  console.log(allProducts)
+  console.log('ProductTable - Updated products with quantities:', allProductsWithUpdatedQuantities.map(p => ({ asin: p.asin, oldQuantity: allProducts.find(op => op.asin === p.asin)?.quantity, newQuantity: p.quantity })));
+
   const itemsPerPage = 10;
   const [currentPage, setCurrentPage] = useState(1);
   const [query, setQuery] = useState('')
@@ -64,7 +106,7 @@ export default function ProductTable() {
     }
   };
 
-  const sortedAllProducts = getSortedProducts(allProducts, sortBy);
+  const sortedAllProducts = getSortedProducts(allProductsWithUpdatedQuantities, sortBy);
 
   const totalProducts = sortedAllProducts.length;
   const highThreshold = Math.ceil(totalProducts * 0.3); // Top 30% are High priority
