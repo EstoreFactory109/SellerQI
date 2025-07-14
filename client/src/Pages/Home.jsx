@@ -243,7 +243,7 @@ export default function SellerQIHomepage() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="relative"
           >
-            <div className="bg-gradient-to-t from-gray-100 to-white rounded-3xl shadow-2xl border border-gray-200">
+            <div className="bg-[#3c4a6b] rounded-3xl shadow-2xl border p-2 border-gray-200">
               <img
                 src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1600/v1752527599/accountSummery_l7rk09.png"
 
