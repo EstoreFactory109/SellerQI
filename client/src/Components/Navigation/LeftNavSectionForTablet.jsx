@@ -82,7 +82,7 @@ const LeftNavSection = () => {
 
 
     return (
-        <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm flex flex-col" style={{ left: position }}>
+        <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm " style={{ left: position }}>
             {/* Logo Section */}
             <div className="w-full px-4 py-4 border-b border-gray-200/50 flex-shrink-0">
                 <div className="flex items-center justify-between">

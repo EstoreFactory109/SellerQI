@@ -353,7 +353,10 @@ const GoogleInfoPage = () => {
 
             {/* Center Google Icon Area */}
             <motion.div
-              className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center border-2 border-gray-100"
+              className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center border-2 border-gray-100"  style={{
+                background: 'linear-gradient(to right, #3b82f6, #f87171, #facc15, #10b981)',
+                WebkitBackgroundClip: 'text'
+              }}
               animate={{
                 scale: [1, 1.1, 1],
               }}
@@ -363,7 +366,7 @@ const GoogleInfoPage = () => {
                 ease: "easeInOut",
               }}
             >
-              <div className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-red-500 via-yellow-500 to-green-500">
+              <div className="text-lg font-bold text-transparent bg-clip-text">
                 G
               </div>
             </motion.div>
