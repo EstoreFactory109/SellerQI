@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Your SellerQI Account is Ready!</title>
+  <style>
+    /* Base resets */
+    body, html { margin: 0; padding: 0; }
+    a { color: #3182ce; text-decoration: none; }
+    /* Container styles */
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 2.5rem 0;
+    }
+    .email-container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 0.5rem;
+      padding: 3rem;
+      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    }
+    .text-center { text-align: center; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .text-gray-800 { color: #2d3748; }
+    .text-gray-700 { color: #4a5568; }
+    .text-gray-600 { color: #718096; }
+    .text-gray-500 { color: #a0aec0; }
+    .text-blue-700 { color: #2b6cb0; }
+    .bg-blue-50 { background-color: #ebf8ff; }
+    .padding-6 { padding: 1.5rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    h3 { margin: 0; font-size: 1.125rem; font-weight: 600; }
+    p { margin: 0; line-height: 1.6; }
+    .celebrate {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    .headline {
+      color: #2d3748;
+      font-size: 2.25rem;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #38a169;
+      font-size: 1.25rem;
+      text-align: center;
+      font-weight: 600;
+      margin-bottom: 2rem;
+    }
+    .greeting {
+      color: #4a5568;
+      font-size: 1.125rem;
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    .whats-next {
+      background: #f7fafc;
+      border-radius: 0.75rem;
+      padding: 2rem;
+      margin-bottom: 2.5rem;
+      border: 1px solid #e2e8f0;
+    }
+    .whats-next-title {
+      color: #2d3748;
+      font-size: 1.25rem;
+      font-weight: bold;
+      margin-bottom: 1.5rem;
+    }
+    .next-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .next-item {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 1.25rem;
+    }
+    .next-item:last-child {
+      margin-bottom: 0;
+    }
+    .next-icon {
+      font-size: 1.5rem;
+      margin-right: 0.75rem;
+      margin-top: 0.1rem;
+    }
+    .next-content {
+      color: #4a5568;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+    .cta {
+      display: block;
+      width: max-content;
+      margin: 2.5rem auto;
+      background: #3182ce;
+      color: #fff;
+      font-weight: bold;
+      font-size: 1.125rem;
+      padding: 0.875rem 2.5rem;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(49,130,206,0.15);
+      transition: background 0.2s;
+    }
+    .cta:hover {
+      background: #2563eb;
+    }
+    .social-links {
+      margin-top: 1.5rem;
+    }
+    .social-links a {
+      display: inline-block;
+      margin: 0 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header with Logo -->
+    <div class="text-center mb-6">
+      <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI Logo" width="180" class="mb-6" loading="eager"/>
+    </div>
+
+    <div class="celebrate">🎉</div>
+    <div class="headline">Your Account is Ready!</div>
+    <div class="subtitle">Account fetching is complete & your data is organized</div>
+    <div class="greeting">Hi <strong>{{userName}}</strong>,<br>Welcome to your new SellerQI dashboard!</div>
+
+    <div class="whats-next">
+      <div class="whats-next-title">Here's what you can do now:</div>
+      <ul class="next-list">
+        <li class="next-item">
+          <span class="next-icon">📊</span>
+          <span class="next-content"><strong>Review your sales & profit analytics</strong> for actionable insights</span>
+        </li>
+        <li class="next-item">
+          <span class="next-icon">📦</span>
+          <span class="next-content"><strong>Check inventory & restock suggestions</strong> to stay ahead</span>
+        </li>
+        <li class="next-item">
+          <span class="next-icon">🎯</span>
+          <span class="next-content"><strong>Explore PPC & keyword performance</strong> to optimize your ads</span>
+        </li>
+        <li class="next-item">
+          <span class="next-icon">🏆</span>
+          <span class="next-content"><strong>Track competitors & product rankings</strong> to stay on top</span>
+        </li>
+      </ul>
+    </div>
+
+    <a href="{{dashboardUrl}}" class="cta">Go to My Dashboard</a>
+
+    <!-- Support Section -->
+    <div class="bg-blue-50 padding-6 rounded-lg text-center" style="margin-top: 3rem; margin-bottom: 2rem;">
+      <h3 class="text-gray-800 mb-2">Need Help?</h3>
+      <p class="text-gray-600 mb-4">Our support team is here to ensure your success.</p>
+      <p class="text-gray-600">
+        📧 Email: <a href="mailto:support@sellerqi.com" class="text-blue-700 font-semibold">support@sellerqi.com</a><br>
+        Phone: <a href="tel:+18183505203" class="text-blue-700 font-semibold">+1 818 350 5203</a><br>
+        💬 Live Chat: Available Mon-Fri, 9 AM - 6 PM EST
+      </p>
+    </div>
+
+    <hr />
+
+    <!-- Footer -->
+    <div class="text-center">
+      <p class="text-gray-600 mb-4">
+        Stay connected with us for updates, tips, and exclusive offers:
+      </p>
+      
+      <!-- Social Links -->
+      <div class="social-links mb-6">
+        <a href="{{facebookUrl}}" style="color: #4267B2;">Facebook</a>
+        <a href="{{twitterUrl}}" style="color: #1DA1F2;">Twitter</a>
+        <a href="{{linkedinUrl}}" style="color: #0077B5;">LinkedIn</a>
+        <a href="{{youtubeUrl}}" style="color: #FF0000;">YouTube</a>
+      </div>
+
+      <p class="text-gray-500" style="font-size: 0.875rem;">
+        © 2025 SellerQI. All rights reserved.<br>
+        <a href="{{privacyUrl}}" class="text-gray-500">Privacy Policy</a> | 
+        <a href="{{termsUrl}}" class="text-gray-500">Terms of Service</a> | 
+        <a href="{{unsubscribeUrl}}" class="text-gray-500">Unsubscribe</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

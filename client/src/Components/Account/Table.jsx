@@ -115,9 +115,6 @@ const AccountSnapshotTable = () => {
                   Health Score
                 </th>
                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                  Total Products
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                   Products with Issues
                 </th>
                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -175,12 +172,6 @@ const AccountSnapshotTable = () => {
                             </span>
                           </div>
                         </div>
-                      </td>
-                      
-                      <td className="px-6 py-4 text-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 text-sm font-medium rounded-lg">
-                          {item.TotalProducts !== undefined && item.TotalProducts !== null ? item.TotalProducts : 0}
-                        </span>
                       </td>
                       
                       <td className="px-6 py-4 text-center">

@@ -138,8 +138,8 @@ export default function PricingPage() {
     }
     
     if (currentPlan && currentPlan !== planType && subscriptionStatus?.hasSubscription) {
-      const currentPlanPrices = { LITE: 0, AGENCY: 49, PRO: 49 };
-      const targetPlanPrices = { LITE: 0, AGENCY: 49, PRO: 49 };
+      const currentPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
+      const targetPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
       
       if (targetPlanPrices[planType] > currentPlanPrices[currentPlan]) {
         return 'Upgrade';
@@ -310,7 +310,7 @@ export default function PricingPage() {
                     <Crown className="w-8 h-8 text-white" />
                   </div>
                   <h3 className="text-2xl font-bold mb-2">Pro Plan</h3>
-                  <div className="text-4xl font-bold mb-2">$49<span className="text-lg opacity-75 font-normal">/month</span></div>
+                  <div className="text-4xl font-bold mb-2">$99<span className="text-lg opacity-75 font-normal">/month</span></div>
                   <p className="opacity-90">Everything you need to scale</p>
                 </div>
                 
@@ -366,7 +366,10 @@ export default function PricingPage() {
                     <Users className="w-8 h-8 text-purple-600" />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Agency Plan</h3>
-                  <div className="text-4xl font-bold text-gray-900 mb-2">$49<span className="text-lg text-gray-500 font-normal">/month</span></div>
+                  <div className="mb-2">
+                    <div className="text-4xl font-bold text-gray-900">$49<span className="text-lg text-gray-500 font-normal">/month</span></div>
+                    <div className="text-sm font-normal text-gray-600">(Minimum 5 Accounts)</div>
+                  </div>
                   <p className="text-gray-600">For agencies & consultants</p>
                 </div>
                 

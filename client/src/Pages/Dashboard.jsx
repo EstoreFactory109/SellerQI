@@ -26,6 +26,39 @@ const Dashboard = () => {
   // Get sponsored ads metrics from Redux (same as sponsored ads page)
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
   
+  // Update selectedPeriod based on Redux state
+  useEffect(() => {
+    const calendarMode = dashboardInfo?.calendarMode || 'default';
+    
+    console.log('=== Dashboard: Calendar Mode Update ===');
+    console.log('Calendar mode:', calendarMode);
+    console.log('Start date:', dashboardInfo?.startDate);
+    console.log('End date:', dashboardInfo?.endDate);
+    
+    if (calendarMode === 'custom' && dashboardInfo?.startDate && dashboardInfo?.endDate) {
+      // Show custom date range
+      const formatDate = (dateStr) => {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+      };
+      const customPeriod = `${formatDate(dashboardInfo.startDate)} - ${formatDate(dashboardInfo.endDate)}`;
+      setSelectedPeriod(customPeriod);
+      console.log('Dashboard showing custom range:', customPeriod);
+    } else if (calendarMode === 'last7') {
+      // Show "Last 7 Days"
+      setSelectedPeriod('Last 7 Days');
+      console.log('Dashboard showing Last 7 Days');
+    } else {
+      // Show default "Last 30 Days"
+      setSelectedPeriod('Last 30 Days');
+      console.log('Dashboard showing Last 30 Days');
+    }
+  }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
+  
   // Check data availability
   const { hasAnyData, hasAllData, missingItems, availableItems } = useDataAvailability({
     accountHealth: dashboardInfo?.accountHealthPercentage,
@@ -181,7 +214,7 @@ const Dashboard = () => {
   };
 
   const quickStats = [
-    { icon: BarChart3, label: 'Sales', value: formatCurrency(totalSales), change: '+12.5%', trend: 'up', color: 'emerald' },
+    { icon: BarChart3, label: 'Sales', value: `$${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: '+12.5%', trend: 'up', color: 'emerald' },
     { icon: Zap, label: 'PPC Sales', value: `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: '+8.3%', trend: 'up', color: 'blue' },
     { icon: Target, label: 'ACOS', value: `${acos}%`, change: '-2.1%', trend: 'down', color: 'purple' },
     { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: '+15.3%', trend: 'up', color: 'orange' }

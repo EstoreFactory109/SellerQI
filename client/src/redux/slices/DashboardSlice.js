@@ -19,13 +19,20 @@ const DashboardDataSlice = createSlice({
         state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales;
         state.DashBoardInfo.TotalSales=action.payload.TotalSales;
         state.DashBoardInfo.GetOrderData=action.payload.GetOrderData;
+        // Set calendar mode flag for custom range
+        state.DashBoardInfo.calendarMode = action.payload.calendarMode || 'custom';
         // Preserve createdAccountDate when updating dashboard info
         if (action.payload.createdAccountDate) {
           state.DashBoardInfo.createdAccountDate = action.payload.createdAccountDate;
+        }
+      },
+      setCalendarMode: (state, action) => {
+        if (state.DashBoardInfo) {
+          state.DashBoardInfo.calendarMode = action.payload;
         }
       }
     },
   });
 
-  export const { setDashboardInfo,UpdateDashboardInfo } = DashboardDataSlice.actions;
+  export const { setDashboardInfo,UpdateDashboardInfo,setCalendarMode } = DashboardDataSlice.actions;
   export default DashboardDataSlice.reducer;

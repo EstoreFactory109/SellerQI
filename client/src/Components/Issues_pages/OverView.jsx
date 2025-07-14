@@ -168,21 +168,55 @@ const OverView = () => {
     
     return asinQuantities;
   };
+
+  // Function to calculate total revenue ASIN-wise from GetOrderData
+  const calculateAsinRevenue = (orderData) => {
+    const asinRevenue = {};
+    
+    // Only consider shipped, unshipped, and partially shipped orders
+    const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
+    
+    orderData.forEach(order => {
+      if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
+        return;
+      }
+      
+      const asin = order.asin;
+      const itemPrice = Number(order.itemPrice) || 0;
+      
+      if (asinRevenue[asin]) {
+        asinRevenue[asin] += itemPrice;
+      } else {
+        asinRevenue[asin] = itemPrice;
+      }
+    });
+    
+    return asinRevenue;
+  };
   
-  // Calculate quantities from GetOrderData
+  // Calculate quantities and revenue from GetOrderData
   const asinQuantities = calculateAsinQuantities(getOrderData);
+  const asinRevenue = calculateAsinRevenue(getOrderData);
   
   // Debug logging
   console.log('Overview - GetOrderData length:', getOrderData.length);
   console.log('Overview - Calculated ASIN quantities:', asinQuantities);
+  console.log('Overview - Calculated ASIN revenue:', asinRevenue);
   
-  // Update products with calculated quantities
+  // Update products with calculated quantities and revenue from GetOrderData
   const allProductsWithUpdatedQuantities = allProducts.map(product => ({
     ...product,
-    quantity: asinQuantities[product.asin] || 0
+    quantity: asinQuantities[product.asin] || 0,
+    sales: asinRevenue[product.asin] || 0
   }));
   
-  console.log('Overview - Updated products with quantities:', allProductsWithUpdatedQuantities.map(p => ({ asin: p.asin, oldQuantity: allProducts.find(op => op.asin === p.asin)?.quantity, newQuantity: p.quantity })));
+  console.log('Overview - Updated products with quantities and revenue:', allProductsWithUpdatedQuantities.map(p => ({ 
+    asin: p.asin, 
+    oldQuantity: allProducts.find(op => op.asin === p.asin)?.quantity, 
+    newQuantity: p.quantity,
+    oldSales: allProducts.find(op => op.asin === p.asin)?.sales,
+    newSales: p.sales 
+  })));
 
   // Sort all products based on selected criteria
   const getSortedProducts = (products, criteria) => {
@@ -723,7 +757,7 @@ const OverView = () => {
                   <th className="text-left py-4 px-2 text-xs font-semibold text-gray-700 w-20 hidden sm:table-cell">ASIN</th>
                   <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-16">Issues</th>
                   <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20 hidden md:table-cell">Revenue</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-16 hidden lg:table-cell">Units</th>
+                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-16 hidden lg:table-cell">Units sold</th>
                   <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20">Priority</th>
                   <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20">Action</th>
                 </tr>
@@ -760,7 +794,7 @@ const OverView = () => {
                             </p>
                             <div className="flex items-center gap-2 text-xs text-gray-500">
                               <span className="sm:hidden">{product.asin}</span>
-                              <span className="md:hidden">${(product.sales || 0) > 999 ? `${((product.sales || 0) / 1000).toFixed(1)}k` : (product.sales || 0).toLocaleString()}</span>
+                              <span className="md:hidden">${(product.sales || 0).toFixed(2)}</span>
                               <span className="lg:hidden">{(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()} units</span>
                             </div>
                           </div>
@@ -775,7 +809,7 @@ const OverView = () => {
                         </span>
                       </td>
                       <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden md:table-cell">
-                        ${(product.sales || 0) > 999 ? `${((product.sales || 0) / 1000).toFixed(1)}k` : (product.sales || 0).toLocaleString()}
+                        ${(product.sales || 0).toFixed(2)}
                       </td>
                       <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden lg:table-cell">
                         {(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()}

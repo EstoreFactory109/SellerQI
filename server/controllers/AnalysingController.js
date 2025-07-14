@@ -44,6 +44,8 @@ const adsKeywordsPerformanceModel = require('../models/adsKeywordsPerformanceMod
 const GetOrderDataModel = require('../models/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../models/WeekLyFinanceModel.js');
 const userModel = require('../models/userModel.js');
+const GetDateWisePPCspendModel = require('../models/GetDateWisePPCspendModel.js');
+const AdsGroup = require('../models/adsgroupModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     if (!userId) {
@@ -174,7 +176,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         inboundNonComplianceData,
         FBAFeesData,
         adsKeywordsPerformanceData,
-        GetOrderData
+        GetOrderData,
+        GetDateWisePPCspendData,
+        AdsGroupData
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -208,7 +212,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         FBAFeesModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-        GetOrderDataModel.findOne({ User:userId, country, region }).sort({ createdAt: -1 })
+        GetOrderDataModel.findOne({ User:userId, country, region }).sort({ createdAt: -1 }),
+        GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 })
     ]);
 
     // console.log("userId: ", userId);
@@ -244,6 +250,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const safeAdsKeywordsPerformanceData = adsKeywordsPerformanceData || { keywordsData: [] };
     const safeFBAFeesData = FBAFeesData || { FbaData: [] };
     const safeGetOrderData = GetOrderData || { orderData: [] };
+    const safeGetDateWisePPCspendData = GetDateWisePPCspendData || { dateWisePPCSpends: [] };
+    const safeAdsGroupData = AdsGroupData || { adsGroupData: [] };
     // Log warnings for missing data instead of failing
     const missingDataWarnings = [];
     if (!v2Data) missingDataWarnings.push('v2Data');
@@ -267,6 +275,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (!FBAFeesData) missingDataWarnings.push('FBAFeesData');
     if (!adsKeywordsPerformanceData) missingDataWarnings.push('adsKeywordsPerformanceData');
     if (!GetOrderData) missingDataWarnings.push('GetOrderData');
+    if (!GetDateWisePPCspendData) missingDataWarnings.push('GetDateWisePPCspendData');
+    if (!AdsGroupData) missingDataWarnings.push('AdsGroupData');
     // Log missing data warnings
     if (missingDataWarnings.length > 0) {
         logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
@@ -407,7 +417,9 @@ const Analyse = async (userId, country, region, adminId = null) => {
         campaignData: safeCampaignData.campaignData,
         FBAFeesData: safeFBAFeesData.FbaData,
         adsKeywordsPerformanceData: safeAdsKeywordsPerformanceData.keywordsData,
-        GetOrderData: safeGetOrderData.RevenueData
+        GetOrderData: safeGetOrderData.RevenueData,
+        GetDateWisePPCspendData: safeGetDateWisePPCspendData.dateWisePPCSpends,
+        AdsGroupData: safeAdsGroupData.adsGroupData 
     };
 
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));

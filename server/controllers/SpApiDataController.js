@@ -9,32 +9,34 @@ const Seller = require('../models/sellerCentralModel.js')
 const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js')
 const tokenManager = require('../utils/TokenManager.js');
 
-// const ListingItemsModel = require('../models/GetListingItemsModel.js');
+const ListingItemsModel = require('../models/GetListingItemsModel.js');
 
 const GET_MERCHANT_LISTINGS_ALL_DATA = require('../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
-// const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/V2_Seller_Performance_Report.js');
-// const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
+const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/V2_Seller_Performance_Report.js');
+const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
 const { listFinancialEventsMethod } = require('../Services/Sp_API/Finance.js');
-// const { getCompetitivePricing } = require('../Services/Sp_API/CompetitivePrices.js');
-// const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
-// const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
-// const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
-// const TotalSales = require('../Services/Sp_API/WeeklySales.js');
-// const getshipment = require('../Services/Sp_API/shipment.js');
-// const CompetitivePricing= require('../models/CompetitivePricingModel.js');
+const { getCompetitivePricing } = require('../Services/Sp_API/CompetitivePrices.js');
+const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
+const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
+const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
+const TotalSales = require('../Services/Sp_API/WeeklySales.js');
+const getshipment = require('../Services/Sp_API/shipment.js');
+const CompetitivePricing= require('../models/CompetitivePricingModel.js');
 const {generateAdsAccessToken} = require('../Services/AmazonAds/GenerateToken.js');
-// const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
-// const {getKeywords} = require('../Services/AmazonAds/Keywords.js');
-// const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
-// const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
-// const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
-// const {getBrand} = require('../Services/Sp_API/GetBrand.js');
-// const GET_FBA_INVENTORY_PLANNING_DATA = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
-// const GET_STRANDED_INVENTORY_UI_DATA = require('../Services/Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js');
-// const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
-// const getAmazonFees = require('../Services/Finance/AmazonFees.js');
-// const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
-// const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
+const {getPPCSpendsBySKU} = require('../Services/AmazonAds/GetPPCProductWise.js');
+const {getKeywords} = require('../Services/AmazonAds/Keywords.js');
+const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
+const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
+const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
+const {getBrand} = require('../Services/Sp_API/GetBrand.js');
+const GET_FBA_INVENTORY_PLANNING_DATA = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
+const GET_STRANDED_INVENTORY_UI_DATA = require('../Services/Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js');
+const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA = require('../Services/Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
+const getAmazonFees = require('../Services/Finance/AmazonFees.js');
+const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
+const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
+const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
+const {getAdGroups}= require('../Services/AmazonAds/AdGroups.js');
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -174,12 +176,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
         SellerId: sellerId
     };
 
-    // COMMENTED OUT: All other API calls except finance
-    /*
     const [v2data,
         v1data,
         ppcSpendsBySKU,
-        adsKeywordsPerformanceData
+        adsKeywordsPerformanceData,
+        ppcSpendsDateWise
     ] = await Promise.all([
        tokenManager.wrapSpApiFunction(
            GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
@@ -204,12 +205,15 @@ const getSpApiData = asyncHandler(async (req, res) => {
        )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
            logger.error(`Ads Keywords Performance Data Error: ${err.message}`);
            return null;
+       }),
+       tokenManager.wrapAdsFunction(
+           getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken
+       )(AdsAccessToken, ProfileId, userId, Country, Region).catch(err => {
+           logger.error(`PPC Spends Date Wise Error: ${err.message}`);
+           return null;
        })
     ]);
-    */
 
-    // COMMENTED OUT: Sponsored ads data processing
-    /*
     // Validate ppcSpendsBySKU and extract sponsored ads data safely
     const sponsoredAdsData = (ppcSpendsBySKU && Array.isArray(ppcSpendsBySKU.sponsoredAds)) ? ppcSpendsBySKU.sponsoredAds : [];
 
@@ -264,10 +268,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // console.log("Campaign IDs count:", campaignIdArray.length);
     // console.log("Ad Group IDs count:", adGroupIdArray.length);
     // console.log("========================================================");
-    */
 
-    // COMMENTED OUT: Competitive pricing
-    /*
     let competitivePriceData = [];
 
     if (Array.isArray(asinArray) && asinArray.length > 0) {
@@ -310,10 +311,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.error(`Competitive Pricing DB Error: ${error.message}`);
         CreateCompetitivePricing = null;
     }
-    */
 
-    // COMMENTED OUT: All other API calls
-    /*
     const [
         RestockinventoryData,
         productReview,
@@ -366,16 +364,19 @@ const getSpApiData = asyncHandler(async (req, res) => {
             return null;
        })
     ])
-    */
 
-    // COMMENTED OUT: Other API calls
-    /*
+    const campaignDbData = campaignData?.campaignData;
+    const campaignids= campaignDbData.map(item=>item.campaignId);
+
+
+
     let [
        WeeklySales, 
     shipment,
        brandData,
        feesResult,
-       financeData
+       financeDataFromAPI,
+       adGroupsData
        ] = await Promise.all([
        tokenManager.wrapDataToSendFunction(
            TotalSales, userId, RefreshToken, AdsRefreshToken
@@ -406,20 +407,28 @@ const getSpApiData = asyncHandler(async (req, res) => {
        )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
            logger.error(`Finance Data Error: ${err.message}`);
            return [];
+       }),
+       tokenManager.wrapAdsFunction(
+           getAdGroups, userId, RefreshToken, AdsRefreshToken
+       )(AdsAccessToken, ProfileId, Region, userId, Country, campaignids).catch(err => {
+           logger.error(`Ad Groups Data Error: ${err.message}`);
+           return null;
        })
     ])
-    */
 
-    // ONLY FINANCE FUNCTION - Testing individually
-    const financeData = await tokenManager.wrapDataToSendFunction(
-        listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
-    )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
-        logger.error(`Finance Data Error: ${err.message}`);
-        return [];
-    });
+    // Combine finance data from both sources
+    let financeData = financeDataFromAPI || [];
+    
+    // If the Promise.all didn't work, try the individual call
+    if (!financeData || (Array.isArray(financeData) && financeData.length === 0)) {
+        financeData = await tokenManager.wrapDataToSendFunction(
+            listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
+        )(dataToSend, userId, Base_URI, Country, Region).catch(err => {
+            logger.error(`Finance Data Error: ${err.message}`);
+            return [];
+        });
+    }
 
-    // COMMENTED OUT: Negative keywords and search keywords
-    /*
     const [
         negativeKeywords,
         searchKeywords
@@ -440,10 +449,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 return null;
             })
        ]);
-    */
 
-    // COMMENTED OUT: Listing items processing
-    /*
     function delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -510,10 +516,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
             logger.error(`Error saving generic keywords: ${error.message} - continuing without saving`);
         }
     }
-    */
 
     // COMMENTED OUT: Data validation for other functions
-    /*
     if (!v2data) {
         logger.error("Failed to fetch V2 seller performance report - continuing with null data");
     }
@@ -521,7 +525,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (!v1data) {
         logger.error("Failed to fetch V1 seller performance report - continuing with null data");
     }
-    */
 
     // Finance data validation - ensure it's an array
     if (!Array.isArray(financeData)) {
@@ -550,7 +553,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
     // COMMENTED OUT: Other data validation
-    /*
     if (!CreateCompetitivePricing) {
         logger.warn("Competitive pricing data not available - continuing without it");
     }
@@ -595,14 +597,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (!inboundNonComplianceData) {
         logger.warn("Inbound Non-Compliance data not available - continuing without it");
     }
-    */
 
-    // MODIFIED: Only return finance data and merchant listings (needed for setup)
+    // Return all data from all functions
     const result = {
         MerchantlistingData: merchantListingsData,
         financeData: financeData,
-        // COMMENTED OUT: All other data
-        /*
         v2data: v2data,
         v1data: v1data,
         competitivePriceData: Array.isArray(competitivePriceData) ? competitivePriceData : [],
@@ -615,8 +614,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
         searchKeywords: searchKeywords,
         fbaInventoryPlanningData: fbaInventoryPlanningData,
         strandedInventoryData: strandedInventoryData,
-        inboundNonComplianceData: inboundNonComplianceData
-        */
+        inboundNonComplianceData: inboundNonComplianceData,
+        adGroupsData: adGroupsData
     }
 
     // Final validation - log warnings for missing data but continue
@@ -624,7 +623,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.warn("No financial data found - continuing with empty finance data");
     }
 
-    return res.status(200).json(new ApiResponse(200, result, "Finance data has been fetched successfully"));
+    return res.status(200).json(new ApiResponse(200, result, "All SP-API and Amazon Ads data has been fetched successfully"));
 
 })
 

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DateRange } from 'react-date-range';
 import 'react-date-range/dist/styles.css';
 import 'react-date-range/dist/theme/default.css';
 import './Calendar.css';
 import axios from 'axios'
 import {useDispatch, useSelector} from 'react-redux'
-import {UpdateDashboardInfo, setDashboardInfo} from '../../redux/slices/DashboardSlice.js'
+import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode} from '../../redux/slices/DashboardSlice.js'
 import PulseLoader from "react-spinners/PulseLoader";
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,27 +37,138 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
   
   const minimumDate = getMinimumDate();
   
-  const [selectedRange, setSelectedRange] = useState({
-    startDate: subDays(new Date(), 30),
-    endDate: subDays(new Date(), 1),
-    key: 'selection',
-  });
+  // Initialize state based on current Redux calendar mode
+  const initializeCalendarState = () => {
+    const calendarMode = dashboardInfo?.calendarMode || 'default';
+    
+    if (calendarMode === 'custom') {
+      // Custom range is selected - initialize with those dates
+      return {
+        selectedRange: {
+          startDate: new Date(dashboardInfo.startDate),
+          endDate: new Date(dashboardInfo.endDate),
+          key: 'selection',
+        },
+        thirtyDaysActive: false,
+        sevenDaysActive: false,
+        customActive: true
+      };
+    } else if (calendarMode === 'last7') {
+      // Last 7 days is selected
+      return {
+        selectedRange: {
+          startDate: subDays(new Date(), 8),
+          endDate: subDays(new Date(), 1),
+          key: 'selection',
+        },
+        thirtyDaysActive: false,
+        sevenDaysActive: true,
+        customActive: false
+      };
+    } else {
+      // Default "Last 30 days" or no dates - default to last 30 days
+      return {
+        selectedRange: {
+          startDate: subDays(new Date(), 30),
+          endDate: subDays(new Date(), 1),
+          key: 'selection',
+        },
+        thirtyDaysActive: true,
+        sevenDaysActive: false,
+        customActive: false
+      };
+    }
+  };
+  
+  const initialState = initializeCalendarState();
+  
+  const [selectedRange, setSelectedRange] = useState(initialState.selectedRange);
+  const [thirtyDaysActive,setThirtyDaysActive]=useState(initialState.thirtyDaysActive);
+  const [sevenDaysActive,setSevenDaysActive]=useState(initialState.sevenDaysActive);
+  const [customActive,setCustomActive]=useState(initialState.customActive);
 
-  const [thirtyDaysActive,setThirtyDaysActive]=useState(true);
-  const [customActive,setCustomActive]=useState(false);
+  // Debug: Log initial calendar state
+  console.log('=== Calendar Component Initialization ===');
+  console.log('Dashboard startDate:', dashboardInfo?.startDate);
+  console.log('Dashboard endDate:', dashboardInfo?.endDate);
+  console.log('Calendar mode from Redux:', dashboardInfo?.calendarMode);
+  console.log('Is custom range:', dashboardInfo?.calendarMode === 'custom');
+  console.log('Is last 7 days:', dashboardInfo?.calendarMode === 'last7');
+  console.log('Initial thirtyDaysActive:', initialState.thirtyDaysActive);
+  console.log('Initial sevenDaysActive:', initialState.sevenDaysActive);
+  console.log('Initial customActive:', initialState.customActive);
+  console.log('Initial selectedRange:', initialState.selectedRange);
+
+  // Update calendar state when Redux state changes
+  useEffect(() => {
+    const calendarMode = dashboardInfo?.calendarMode || 'default';
+    
+    console.log('=== Calendar useEffect: Redux state changed ===');
+    console.log('Calendar mode:', calendarMode);
+    console.log('Redux startDate:', dashboardInfo?.startDate);
+    console.log('Redux endDate:', dashboardInfo?.endDate);
+    
+    if (calendarMode === 'custom') {
+      // Custom range is selected - update to show custom selection
+      setThirtyDaysActive(false);
+      setSevenDaysActive(false);
+      setCustomActive(true);
+      if (dashboardInfo?.startDate && dashboardInfo?.endDate) {
+        setSelectedRange({
+          startDate: new Date(dashboardInfo.startDate),
+          endDate: new Date(dashboardInfo.endDate),
+          key: 'selection',
+        });
+      }
+      console.log('Calendar updated to custom range:', {
+        startDate: dashboardInfo?.startDate,
+        endDate: dashboardInfo?.endDate
+      });
+    } else if (calendarMode === 'last7') {
+      // Last 7 days is selected
+      setThirtyDaysActive(false);
+      setSevenDaysActive(true);
+      setCustomActive(false);
+      setSelectedRange({
+        startDate: subDays(new Date(), 8),
+        endDate: subDays(new Date(), 1),
+        key: 'selection',
+      });
+      console.log('Calendar updated to last 7 days');
+    } else {
+      // Default "Last 30 days" - reset to last 30 days
+      setThirtyDaysActive(true);
+      setSevenDaysActive(false);
+      setCustomActive(false);
+      setSelectedRange({
+        startDate: subDays(new Date(), 30),
+        endDate: subDays(new Date(), 1),
+        key: 'selection',
+      });
+      console.log('Calendar reset to last 30 days (mode:', calendarMode, ')');
+    }
+  }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
 
   const handleActive=(btnValue)=>{
     switch(btnValue){
       case 'last30':
         setThirtyDaysActive(true);
+        setSevenDaysActive(false);
+        setCustomActive(false);
+        break;
+      case 'last7':
+        setThirtyDaysActive(false);
+        setSevenDaysActive(true);
         setCustomActive(false);
         break;
       case 'custom':
         setThirtyDaysActive(false);
+        setSevenDaysActive(false);
         setCustomActive(true);
         break;
       default:
         setThirtyDaysActive(false);
+        setSevenDaysActive(false);
         setCustomActive(false);
         break;
     }
@@ -94,8 +205,28 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         setSelectedRange(defaultRange);
         if (setSelectedPeriod) setSelectedPeriod('Last 30 Days');
         
+        // Set calendar mode to default
+        dispatch(setCalendarMode('default'));
+        
         // Make API call to get the default dashboard data
         await applyDefaultDateRange();
+        break;
+      case 'last7':
+        handleActive('last7');
+        // Set the range to show last 7 days (8 days ago to 1 day ago)
+        const last7Range = {
+          startDate: subDays(today, 8),
+          endDate: subDays(today, 1),
+          key: 'selection',
+        };
+        setSelectedRange(last7Range);
+        if (setSelectedPeriod) setSelectedPeriod('Last 7 Days');
+        
+        // Set calendar mode to last7
+        dispatch(setCalendarMode('last7'));
+        
+        // Make API call with last 7 days range
+        await applyDateRange(last7Range, 'last7');
         break;
       case 'custom':
         handleActive('custom');
@@ -141,6 +272,9 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     const startDate = range.startDate;
     const endDate = range.endDate;
 
+    console.log('startDate', startDate);
+    console.log('endDate', endDate);
+    
     try {
       // Add periodType as query parameter
       const url = `${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${startDate}&endDate=${endDate}${periodType ? `&periodType=${periodType}` : ''}`;
@@ -150,14 +284,27 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         navigate(`/error/${dateResponse.status}`);
       }
 
+      // Determine calendar mode based on periodType
+      let calendarMode = 'custom'; // default
+      if (periodType === 'last7') {
+        calendarMode = 'last7';
+      } else if (periodType === 'custom') {
+        calendarMode = 'custom';
+      }
+      
+      console.log('=== applyDateRange: Setting calendar mode ===');
+      console.log('periodType:', periodType);
+      console.log('calendarMode:', calendarMode);
+
       dispatch(UpdateDashboardInfo({
-        startDate: dateResponse.data.data.endDate,
-        endDate: dateResponse.data.data.startDate,
+        startDate: startDate.toString(),
+        endDate: endDate.toString(),
         financeData: dateResponse.data.data.FinanceData,
         reimburstmentData: dateResponse.data.data.reimburstmentData,
         WeeklySales: dateResponse.data.data.TotalSales.totalSales,
         TotalSales: dateResponse.data.data.TotalSales.dateWiseSales,
         GetOrderData: dateResponse.data.data.GetOrderData,
+        calendarMode: calendarMode, // Use determined calendar mode
         createdAccountDate: createdAccountDate
       }));
 
@@ -268,6 +415,46 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                           <div className="flex items-center gap-1 mt-2">
                             <Sparkles className="w-3 h-3 text-yellow-300" />
                             <span className="text-xs text-yellow-100">Recommended</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </motion.button>
+
+                {/* Last 7 Days Option */}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handlePreset('last7')}
+                  disabled={Loader}
+                  className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
+                    sevenDaysActive
+                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 hover:shadow-md'
+                  } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {sevenDaysActive && (
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-purple-500/20"></div>
+                  )}
+                  <div className="relative z-10">
+                    {Loader && sevenDaysActive ? (
+                      <div className="flex items-center justify-center">
+                        <PulseLoader color="#ffffff" size={6} />
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-2 h-2 rounded-full ${sevenDaysActive ? 'bg-white' : 'bg-blue-500'}`}></div>
+                          <div className="font-semibold">Last 7 Days</div>
+                        </div>
+                        <div className={`text-sm ${sevenDaysActive ? 'text-blue-100' : 'text-gray-500'}`}>
+                          {sevenDaysActive ? 'Currently active period' : 'Most recent 7 days of data'}
+                        </div>
+                        {sevenDaysActive && (
+                          <div className="flex items-center gap-1 mt-2">
+                            <Sparkles className="w-3 h-3 text-yellow-300" />
+                            <span className="text-xs text-yellow-100">Quick view</span>
                           </div>
                         )}
                       </div>

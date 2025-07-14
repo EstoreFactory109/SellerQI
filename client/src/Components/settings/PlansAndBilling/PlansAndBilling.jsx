@@ -57,8 +57,7 @@ const PlansAndBilling = () => {
         'Fix Recommendations',
         'Expert Consultation',
         'Track Multiple Products',
-        'Issue Breakdown',
-        'Minimum 5 Accounts'
+        'Issue Breakdown'
       ]
     }
   };
@@ -528,8 +527,11 @@ const PlansAndBilling = () => {
                     </div>
                     <h4 className="text-2xl font-bold text-gray-900 mb-2">{config.name}</h4>
                     <div className="mb-3">
-                      <span className="text-4xl font-bold text-gray-900">{config.displayPrice}</span>
-                      {planType !== 'LITE' && <span className="text-gray-600 text-lg">/month</span>}
+                      <div>
+                        <span className="text-4xl font-bold text-gray-900">{config.displayPrice}</span>
+                        {planType !== 'LITE' && <span className="text-gray-600 text-lg">/month</span>}
+                      </div>
+                      {planType === 'AGENCY' && <div className="text-sm font-normal text-gray-600">(Minimum 5 Accounts)</div>}
                     </div>
                     <p className="text-gray-600 text-sm">{config.description}</p>
                   </div>

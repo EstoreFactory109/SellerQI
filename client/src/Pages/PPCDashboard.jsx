@@ -117,11 +117,12 @@ const PPCDashboard = () => {
   const [highAcosPage, setHighAcosPage] = useState(1);
   const [wastedSpendPage, setWastedSpendPage] = useState(1);
   const [negativePage, setNegativePage] = useState(1);
+  const [campaignsWithoutNegativePage, setCampaignsWithoutNegativePage] = useState(1);
   const [topPerformingPage, setTopPerformingPage] = useState(1);
   const [searchTermsPage, setSearchTermsPage] = useState(1);
   const [autoCampaignPage, setAutoCampaignPage] = useState(1);
   
-  const itemsPerPage = 5;
+  const itemsPerPage = 10;
   
   const dispatch = useDispatch();
 
@@ -161,22 +162,239 @@ const PPCDashboard = () => {
   // Get adsKeywordsPerformanceData from Redux store
   const adsKeywordsPerformanceData = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
   
+  // Get dateWiseTotalCosts from Redux store - actual PPC spend data by date
+  const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
+  
+  // Filter dateWiseTotalCosts based on selected date range from calendar
+  const filteredDateWiseTotalCosts = useMemo(() => {
+    if (!dateWiseTotalCosts.length) return [];
+    
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+
+    //console.log('startDate', new Date(startDate));
+    //console.log('endDate', new Date(endDate));
+    //console.log('dateWiseTotalCosts', new Date(dateWiseTotalCosts[0].date));
+    
+    // If no date range is selected, return all data
+    if (!startDate || !endDate) {
+      console.log('No date range selected, showing all dateWiseTotalCosts:', dateWiseTotalCosts);
+      return dateWiseTotalCosts;
+    }
+    
+    // Filter data based on selected date range
+    const filtered = dateWiseTotalCosts.filter(item => {
+      if (!item.date) return false;
+      
+      const itemDate = new Date(item.date);
+      //console.log('itemDate', itemDate);
+      const start = new Date(startDate);
+      //console.log('start', start);
+      const end = new Date(endDate);
+      //console.log('end', end);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+
+  
+    
+    console.log('=== Filtered DateWise Total Costs ===');
+    console.log('Selected Date Range:', { startDate, endDate });
+    console.log('Original dateWiseTotalCosts length:', dateWiseTotalCosts.length);
+    console.log('Filtered dateWiseTotalCosts length:', filtered.length);
+    console.log('Filtered dateWiseTotalCosts data:', filtered);
+    console.log('Total filtered cost:', filtered.reduce((sum, item) => sum + (item.totalCost || 0), 0));
+    
+    return filtered;
+  }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
+  
+  // Get negetiveKeywords and AdsGroupData from Redux store
+  const negetiveKeywords = useSelector((state) => state.Dashboard.DashBoardInfo?.negetiveKeywords) || [];
+  const AdsGroupData = useSelector((state) => state.Dashboard.DashBoardInfo?.AdsGroupData) || [];
+  
+  // Logic to find campaigns without negative keywords
+  const campaignsWithoutNegativeKeywords = useMemo(() => {
+    if (!campaignData.length || !AdsGroupData.length) return [];
+    
+    // Create a set of campaign IDs that have negative keywords
+    const campaignIdsWithNegativeKeywords = new Set();
+    negetiveKeywords.forEach(negKeyword => {
+      if (negKeyword.campaignId) {
+        campaignIdsWithNegativeKeywords.add(negKeyword.campaignId);
+      }
+    });
+    
+    // Find campaigns that don't have negative keywords
+    const campaignsWithoutNegatives = campaignData.filter(campaign => 
+      !campaignIdsWithNegativeKeywords.has(campaign.campaignId)
+    );
+    
+    // Get ad groups for these campaigns and create the table data
+    const result = [];
+    campaignsWithoutNegatives.forEach(campaign => {
+      // Find all ad groups for this campaign
+      const adGroups = AdsGroupData.filter(adGroup => 
+        adGroup.campaignId === campaign.campaignId
+      );
+      
+      if (adGroups.length > 0) {
+        adGroups.forEach(adGroup => {
+          result.push({
+            campaignId: campaign.campaignId,
+            campaignName: campaign.name,
+            adGroupId: adGroup.adGroupId,
+            adGroupName: adGroup.name,
+            negatives: 'No negative keywords'
+          });
+        });
+      } else {
+        // If no ad groups found, still show the campaign
+        result.push({
+          campaignId: campaign.campaignId,
+          campaignName: campaign.name,
+          adGroupId: 'N/A',
+          adGroupName: 'No ad groups found',
+          negatives: 'No negative keywords'
+        });
+      }
+    });
+    
+    return result;
+  }, [campaignData, negetiveKeywords, AdsGroupData]);
+  
   // Debug: Log the data to console for troubleshooting
-  console.log('=== PPC Dashboard Debug - Raw Data ===');
-  console.log('adsKeywordsPerformanceData Length:', adsKeywordsPerformanceData.length);
-  console.log('adsKeywordsPerformanceData Full Array:', adsKeywordsPerformanceData);
-  console.log('Sample Keywords (first 3):', adsKeywordsPerformanceData.slice(0, 3));
-  console.log('All Dashboard Keys:', Object.keys(useSelector((state) => state.Dashboard.DashBoardInfo) || {}));
+  // console.log('=== PPC Dashboard Debug - Raw Data ===');
+  // console.log('adsKeywordsPerformanceData Length:', adsKeywordsPerformanceData.length);
+  // console.log('adsKeywordsPerformanceData Full Array:', adsKeywordsPerformanceData);
+  // console.log('Sample Keywords (first 3):', adsKeywordsPerformanceData.slice(0, 3));
+  // console.log('dateWiseTotalCosts Length:', dateWiseTotalCosts.length);
+  // console.log('dateWiseTotalCosts Sample (first 5):', dateWiseTotalCosts.slice(0, 5));
+  // console.log('All Dashboard Keys:', Object.keys(useSelector((state) => state.Dashboard.DashBoardInfo) || {}));
+  // console.log('=== Campaigns Without Negative Keywords Debug ===');
+  // console.log('campaignData Length:', campaignData.length);
+  // console.log('negetiveKeywords Length:', negetiveKeywords.length);
+  // console.log('AdsGroupData Length:', AdsGroupData.length);
+  // console.log('campaignsWithoutNegativeKeywords:', campaignsWithoutNegativeKeywords);
   
   // Filter search terms where clicks >= 10 and sales = 0
   const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
-  // Transform the data for the chart - use filtered TotalSales from Redux
+  // Transform the data for the chart - prioritize actual dateWiseTotalCosts (filtered by date range)
   const chartData = useMemo(() => {
-    // Use date-filtered TotalSales data from Redux if available
-    const totalSalesData = info?.TotalSales;
+    // Use filtered dateWiseTotalCosts if available, otherwise fall back to original
+    const costsDataToUse = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
     
+    // Console log to verify chart is using filtered data
+    if (info?.startDate && info?.endDate) {
+      console.log('=== Chart Data Update ===');
+      console.log('Date range selected:', info.startDate, 'to', info.endDate);
+      console.log('Chart using filtered data points:', costsDataToUse.length);
+      console.log('Chart data source:', costsDataToUse === filteredDateWiseTotalCosts ? 'Filtered Data' : 'Original Data');
+      console.log('costsDataToUse sample:', costsDataToUse.slice(0, 3));
+      console.log('TotalSales data available:', info?.TotalSales?.length || 0);
+    }
+    
+    // First priority: Use actual dateWiseTotalCosts for spend and TotalSales for PPC sales
+    if (costsDataToUse && Array.isArray(costsDataToUse) && costsDataToUse.length > 0) {
+      // console.log('=== Using dateWiseTotalCosts for chart data ===');
+      // console.log('dateWiseTotalCosts:', costsDataToUse);
+      
+      // Create a map for spend data by date - Convert dates to "Jun 18" format to match chart
+      const spendByDate = new Map();
+      costsDataToUse.forEach(item => {
+        if (item && item.date && typeof item.totalCost === 'number') {
+          // Convert from "2025-06-18" format to "Jun 18" format
+          const dateObj = new Date(item.date);
+          const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          spendByDate.set(formattedDate, item.totalCost);
+        }
+      });
+      
+      // Debug: Log spend data map
+      if (info?.startDate && info?.endDate) {
+        console.log('=== Spend By Date Map (converted to chart format) ===');
+        console.log('spendByDate map size:', spendByDate.size);
+        console.log('spendByDate entries:', Array.from(spendByDate.entries()).slice(0, 5));
+      }
+      
+      // If we have TotalSales data, combine it with actual spend data
+      const totalSalesData = info?.TotalSales;
+      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+        // console.log('Combining dateWiseTotalCosts with TotalSales data');
+        
+        return totalSalesData.map((item, index) => {
+          // Extract date from interval format: "2025-03-01T00:00:00Z--2025-03-01T23:59:59Z"
+          const startDate = new Date(item.interval.split('--')[0]);
+          const dateStr = startDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD format
+          const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          
+          // For PPC sales, estimate as percentage of total sales
+          const totalSales = parseFloat(item.TotalAmount) || 0;
+          const estimatedPPCSales = totalSales * 0.3; // Assume 30% of sales come from PPC
+          
+          // Get actual spend for this date using the formatted date (Jun 18 format)
+          const actualSpend = spendByDate.get(formattedDate) || 0;
+          
+          // Debug: Log date matching for first few items
+          if ((info?.startDate && info?.endDate) && index < 5) {
+            console.log(`=== Chart Data Item ${index + 1} ===`);
+            console.log('TotalSales interval:', item.interval);
+            console.log('Extracted dateStr (YYYY-MM-DD):', dateStr);
+            console.log('formattedDate (Jun 18):', formattedDate);
+            console.log('totalSales:', totalSales);
+            console.log('estimatedPPCSales:', estimatedPPCSales);
+            console.log('actualSpend from map:', actualSpend);
+            console.log('spendByDate has this formattedDate?', spendByDate.has(formattedDate));
+            console.log('All available dates in spendByDate:', Array.from(spendByDate.keys()));
+          }
+          
+          return {
+            date: formattedDate,
+            ppcSales: estimatedPPCSales,
+            spend: actualSpend, // Use actual daily spend from dateWiseTotalCosts
+          };
+        });
+      }
+      
+      // If no TotalSales data, use dateWiseTotalCosts alone with estimated sales
+      // console.log('Using dateWiseTotalCosts only (no TotalSales data)');
+      const fallbackData = costsDataToUse.map((item, index) => {
+        const date = new Date(item.date);
+        const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        // Estimate PPC sales based on spend (assume 2:1 sales to spend ratio)
+        const estimatedPPCSales = item.totalCost * 2;
+        
+        // Debug: Log fallback data for first few items
+        if ((info?.startDate && info?.endDate) && index < 3) {
+          console.log(`=== Fallback Chart Data Item ${index + 1} ===`);
+          console.log('item.date:', item.date);
+          console.log('formattedDate:', formattedDate);
+          console.log('item.totalCost:', item.totalCost);
+          console.log('estimatedPPCSales:', estimatedPPCSales);
+        }
+        
+        return {
+          date: formattedDate,
+          ppcSales: estimatedPPCSales,
+          spend: item.totalCost,
+        };
+      });
+      
+      if (info?.startDate && info?.endDate) {
+        console.log('=== Using Fallback Data (costsDataToUse only) ===');
+        console.log('fallbackData length:', fallbackData.length);
+        console.log('fallbackData sample:', fallbackData.slice(0, 3));
+      }
+      
+      return fallbackData;
+    }
+    
+    // Second priority: Use date-filtered TotalSales data from Redux with estimated spend
+    const totalSalesData = info?.TotalSales;
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      // console.log('Using TotalSales data with estimated spend distribution');
+      
       // Get actual PPC spend from finance data and distribute it across days
       const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
       const dailySpend = actualPPCSpend / totalSalesData.length; // Distribute spend across days
@@ -199,8 +417,9 @@ const PPCDashboard = () => {
       });
     }
     
-    // Fallback to original productWiseSponsoredAdsGraphData if no filtered data
+    // Third priority: Fallback to original productWiseSponsoredAdsGraphData
     if (productWiseSponsoredAdsGraphData.length > 0) {
+      // console.log('Using productWiseSponsoredAdsGraphData fallback');
       return productWiseSponsoredAdsGraphData.map(item => ({
         date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         ppcSales: item.totalSalesIn30Days || 0,
@@ -208,14 +427,32 @@ const PPCDashboard = () => {
       }));
     }
     
-    return mockChartData.slice();
-  }, [info?.TotalSales, info?.accountFinance, productWiseSponsoredAdsGraphData]);
+    // Final fallback: Use mock data
+    // console.log('Using mock chart data as final fallback');
+    const finalMockData = mockChartData.slice();
+    
+    if (info?.startDate && info?.endDate) {
+      console.log('=== Using Final Mock Data Fallback ===');
+      console.log('mockData length:', finalMockData.length);
+      console.log('mockData sample:', finalMockData.slice(0, 3));
+    }
+    
+    return finalMockData;
+  }, [filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.TotalSales, info?.accountFinance, productWiseSponsoredAdsGraphData]);
+  
+  // Final debug: Log the actual chart data being used
+  if (info?.startDate && info?.endDate) {
+    console.log('=== FINAL CHART DATA ===');
+    console.log('chartData length:', chartData.length);
+    console.log('chartData first 3 items:', chartData.slice(0, 3));
+    console.log('chartData last 3 items:', chartData.slice(-3));
+  }
   
   // Tab configuration
   const tabs = [
     { id: 0, label: 'High ACOS Campaigns' },
     { id: 1, label: 'Wasted Spend Keywords' },
-    { id: 2, label: 'Negative Keywords not used' },
+    { id: 2, label: 'Campaigns Without Negative Keywords' },
     { id: 3, label: 'Top Performing Keywords' },
     { id: 4, label: 'Search Terms with Zero Sales' },
     { id: 5, label: 'Auto Campaign Insights' }
@@ -308,8 +545,8 @@ const PPCDashboard = () => {
   
   // Wasted Spend Keywords - cost > 5 && attributedSales30d < 1
   // Use the new adsKeywordsPerformanceData structure directly
-  console.log('=== Starting Wasted Keywords Processing ===');
-  console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
+  // console.log('=== Starting Wasted Keywords Processing ===');
+  // console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
 
   const wastedSpendKeywords = adsKeywordsPerformanceData
     .filter((keyword, index) => {
@@ -320,18 +557,18 @@ const PPCDashboard = () => {
       
       // Debug: Log every keyword for first 10, then log only matches
       if (index < 10 || matchesCriteria) {
-        console.log(`Keyword ${index + 1}:`, {
-          keyword: keyword.keyword,
-          rawCost: keyword.cost,
-          parsedCost: cost,
-          rawAttributedSales30d: keyword.attributedSales30d,
-          parsedAttributedSales30d: attributedSales,
-          costOver5: cost > 5,
-          attributedSales30dUnder1: attributedSales < 1,
-          matchesCriteria: matchesCriteria,
-          campaignName: keyword.campaignName,
-          matchType: keyword.matchType
-        });
+        // console.log(`Keyword ${index + 1}:`, {
+        //   keyword: keyword.keyword,
+        //   rawCost: keyword.cost,
+        //   parsedCost: cost,
+        //   rawAttributedSales30d: keyword.attributedSales30d,
+        //   parsedAttributedSales30d: attributedSales,
+        //   costOver5: cost > 5,
+        //   attributedSales30dUnder1: attributedSales < 1,
+        //   matchesCriteria: matchesCriteria,
+        //   campaignName: keyword.campaignName,
+        //   matchType: keyword.matchType
+        // });
       }
       
       return matchesCriteria;
@@ -349,29 +586,29 @@ const PPCDashboard = () => {
         spend: cost
       };
       
-      console.log(`Processed Wasted Keyword ${index + 1}:`, processedKeyword);
+      // console.log(`Processed Wasted Keyword ${index + 1}:`, processedKeyword);
       return processedKeyword;
     })
     .sort((a, b) => b.spend - a.spend);
 
   // Debug: Final results
-  console.log('=== Final Wasted Keywords Results ===');
-  console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
-  console.log('Filtered Wasted Keywords:', wastedSpendKeywords.length);
-  console.log('Wasted Keywords Data:', wastedSpendKeywords);
+  // console.log('=== Final Wasted Keywords Results ===');
+  // console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
+  // console.log('Filtered Wasted Keywords:', wastedSpendKeywords.length);
+  // console.log('Wasted Keywords Data:', wastedSpendKeywords);
   
   if (adsKeywordsPerformanceData.length > 0) {
-    console.log('=== Data Analysis ===');
-    console.log('Cost Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
-    console.log('AttributedSales30d Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
+    // console.log('=== Data Analysis ===');
+    // console.log('Cost Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
+    // console.log('AttributedSales30d Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
     
     const highCostKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.cost) > 5);
     const lowAttributedSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) < 1);
     
-    console.log(`Keywords with cost > 5: ${highCostKeywords.length}`);
-    console.log(`Keywords with attributedSales30d < 1: ${lowAttributedSalesKeywords.length}`);
-    console.log('High cost keywords sample:', highCostKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
-    console.log('Low attributedSales30d keywords sample:', lowAttributedSalesKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
+    // console.log(`Keywords with cost > 5: ${highCostKeywords.length}`);
+    // console.log(`Keywords with attributedSales30d < 1: ${lowAttributedSalesKeywords.length}`);
+    // console.log('High cost keywords sample:', highCostKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
+    // console.log('Low attributedSales30d keywords sample:', lowAttributedSalesKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
   }
   
   // First, create a map of campaignId to campaign data for easier lookup (still needed for top performing keywords)
@@ -388,8 +625,8 @@ const PPCDashboard = () => {
   
   // Top Performing Keywords - Use adsKeywordsPerformanceData directly
   // Filter: ACOS < 20%, sales > 100, impressions > 1000
-  console.log('=== Starting Top Performing Keywords Processing ===');
-  console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for top performance analysis');
+  // console.log('=== Starting Top Performing Keywords Processing ===');
+  // console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for top performance analysis');
 
   const topPerformingKeywords = adsKeywordsPerformanceData
     .filter((keyword, index) => {
@@ -404,22 +641,22 @@ const PPCDashboard = () => {
       
       // Debug: Log every keyword for first 10, then log only matches
       if (index < 10 || matchesCriteria) {
-        console.log(`Top Performance Keyword ${index + 1}:`, {
-          keyword: keyword.keyword,
-          rawCost: keyword.cost,
-          parsedCost: cost,
-          rawAttributedSales30d: keyword.attributedSales30d,
-          parsedAttributedSales30d: attributedSales30d,
-          rawImpressions: keyword.impressions,
-          parsedImpressions: impressions,
-          calculatedAcos: acos,
-          acosUnder20: acos < 20,
-          salesOver100: attributedSales30d > 100,
-          impressionsOver1000: impressions > 1000,
-          matchesCriteria: matchesCriteria,
-          campaignName: keyword.campaignName,
-          matchType: keyword.matchType
-        });
+        // console.log(`Top Performance Keyword ${index + 1}:`, {
+        //   keyword: keyword.keyword,
+        //   rawCost: keyword.cost,
+        //   parsedCost: cost,
+        //   rawAttributedSales30d: keyword.attributedSales30d,
+        //   parsedAttributedSales30d: attributedSales30d,
+        //   rawImpressions: keyword.impressions,
+        //   parsedImpressions: impressions,
+        //   calculatedAcos: acos,
+        //   acosUnder20: acos < 20,
+        //   salesOver100: attributedSales30d > 100,
+        //   impressionsOver1000: impressions > 1000,
+        //   matchesCriteria: matchesCriteria,
+        //   campaignName: keyword.campaignName,
+        //   matchType: keyword.matchType
+        // });
       }
       
       return matchesCriteria;
@@ -447,19 +684,19 @@ const PPCDashboard = () => {
         keywordId: keyword.keywordId
       };
       
-      console.log(`Processed Top Performing Keyword ${index + 1}:`, processedKeyword);
+      // console.log(`Processed Top Performing Keyword ${index + 1}:`, processedKeyword);
       return processedKeyword;
     })
     .sort((a, b) => b.sales - a.sales);
 
   // Debug: Final results for top performing keywords
-  console.log('=== Final Top Performing Keywords Results ===');
-  console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
-  console.log('Filtered Top Performing Keywords:', topPerformingKeywords.length);
-  console.log('Top Performing Keywords Data:', topPerformingKeywords);
+  // console.log('=== Final Top Performing Keywords Results ===');
+  // console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
+  // console.log('Filtered Top Performing Keywords:', topPerformingKeywords.length);
+  // console.log('Top Performing Keywords Data:', topPerformingKeywords);
   
   if (adsKeywordsPerformanceData.length > 0) {
-    console.log('=== Top Performance Analysis ===');
+    // console.log('=== Top Performance Analysis ===');
     const highPerformanceKeywords = adsKeywordsPerformanceData.filter(k => {
       const cost = parseFloat(k.cost) || 0;
       const sales = parseFloat(k.attributedSales30d) || 0;
@@ -470,16 +707,16 @@ const PPCDashboard = () => {
     const highSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) > 100);
     const highImpressionsKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.impressions) > 1000);
     
-    console.log(`Keywords with ACOS < 20%: ${highPerformanceKeywords.length}`);
-    console.log(`Keywords with sales > $100: ${highSalesKeywords.length}`);
-    console.log(`Keywords with impressions > 1000: ${highImpressionsKeywords.length}`);
-    console.log('High performance keywords sample:', highPerformanceKeywords.slice(0, 5).map(k => ({ 
-      keyword: k.keyword, 
-      cost: k.cost, 
-      attributedSales30d: k.attributedSales30d,
-      impressions: k.impressions,
-      acos: parseFloat(k.attributedSales30d) > 0 ? (parseFloat(k.cost) / parseFloat(k.attributedSales30d)) * 100 : 0
-    })));
+    // console.log(`Keywords with ACOS < 20%: ${highPerformanceKeywords.length}`);
+    // console.log(`Keywords with sales > $100: ${highSalesKeywords.length}`);
+    // console.log(`Keywords with impressions > 1000: ${highImpressionsKeywords.length}`);
+    // console.log('High performance keywords sample:', highPerformanceKeywords.slice(0, 5).map(k => ({ 
+    //   keyword: k.keyword, 
+    //   cost: k.cost, 
+    //   attributedSales30d: k.attributedSales30d,
+    //   impressions: k.impressions,
+    //   acos: parseFloat(k.attributedSales30d) > 0 ? (parseFloat(k.cost) / parseFloat(k.attributedSales30d)) * 100 : 0
+    // })));
   }
   
   // Auto Campaign Insights Processing
@@ -556,37 +793,88 @@ const PPCDashboard = () => {
   // Sort by sales descending
   autoCampaignInsights.sort((a, b) => b.sales - a.sales);
   
-  // Use Redux data for KPI values - prioritize actual finance data over estimates
+  // Use Redux data for KPI values - prioritize actual finance data over estimates, with date filtering
   const kpiData = useMemo(() => {
-    // Prioritize actual PPC sales from sponsored ads data
-    let ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
+    // Check if date range is selected to determine which data to use
+    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
     
-    // If no sponsored ads data, calculate from filtered TotalSales data as fallback
-    if (!ppcSales || ppcSales === 0) {
+    // Calculate spend based on date range selection
+    let spend = 0;
+    if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
+      // Use filtered spend data when date range is selected
+      spend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+      console.log('=== KPI Calculation (Filtered) ===');
+      console.log('Using filtered spend data:', spend);
+      console.log('Filtered data points:', filteredDateWiseTotalCosts.length);
+    } else {
+      // Use default spend calculation when no date range selected
+      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
+      spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
+      console.log('=== KPI Calculation (Default) ===');
+      console.log('Using default spend data:', spend);
+    }
+    
+    // Calculate PPC sales based on date range selection
+    let ppcSales = 0;
+    if (isDateRangeSelected) {
+      // For date range selection, calculate from filtered TotalSales data
       const totalSalesData = info?.TotalSales;
-      let filteredTotalSales = 0;
-      let estimatedPPCSales = 0;
-      
       if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        // Calculate totals from filtered date range
-        filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-        estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
+        const filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+        ppcSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC
+        console.log('Filtered total sales:', filteredTotalSales);
+        console.log('Estimated PPC sales (30%):', ppcSales);
+      }
+    } else {
+      // Use default PPC sales calculation
+      ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
+      
+      // If no sponsored ads data, calculate from TotalSales data as fallback
+      if (!ppcSales || ppcSales === 0) {
+        const totalSalesData = info?.TotalSales;
+        if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+          const filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+          ppcSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
+        }
       }
       
-      ppcSales = estimatedPPCSales > 0 ? estimatedPPCSales : 25432.96; // Final fallback
+      // Final fallback
+      if (!ppcSales || ppcSales === 0) {
+        ppcSales = 25432.96;
+      }
     }
-    
-    // Use actual PPC spend from finance data (ProductAdsPayment) - this is the official spend
-    const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-    const spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
     
     // Calculate total sales for TACoS calculation
-    const totalSalesData = info?.TotalSales;
-    let filteredTotalSales = 0;
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+    let totalSales = 0;
+    if (isDateRangeSelected) {
+      // Use filtered sales data for TACoS when date range is selected
+      const totalSalesData = info?.TotalSales;
+      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+        totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+      }
+    } else {
+      // Use default total sales calculation
+      const totalSalesData = info?.TotalSales;
+      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+        totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
+      } else {
+        totalSales = Number(info?.TotalWeeklySale || 0) || 84776.44;
+      }
     }
-    const totalSales = filteredTotalSales > 0 ? filteredTotalSales : (Number(info?.TotalWeeklySale || 0) || 84776.44);
+    
+    // Calculate units sold - always use default data (don't filter by date range)
+    const unitsSold = sponsoredAdsMetrics?.totalProductsPurchased || Math.round((sponsoredAdsMetrics?.totalSalesIn30Days || 25432.96) / 85);
+    
+    // Log final calculations
+    if (isDateRangeSelected) {
+      console.log('=== Final KPI Values (Filtered) ===');
+      console.log('PPC Sales:', ppcSales);
+      console.log('Spend:', spend);
+      console.log('Total Sales:', totalSales);
+      console.log('ACOS:', ppcSales > 0 ? ((spend / ppcSales) * 100).toFixed(2) + '%' : 'N/A');
+      console.log('TACoS:', totalSales > 0 ? ((spend / totalSales) * 100).toFixed(2) + '%' : 'N/A');
+      console.log('Units Sold (unchanged):', unitsSold);
+    }
     
     return [
       { 
@@ -607,10 +895,10 @@ const PPCDashboard = () => {
       },
       { 
         label: 'Units Sold', 
-        value: `${sponsoredAdsMetrics?.totalProductsPurchased || Math.round(ppcSales / 85)}`
+        value: `${unitsSold}`
       },
     ];
-  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, sponsoredAdsMetrics]);
+  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, sponsoredAdsMetrics, filteredDateWiseTotalCosts]);
 
   const formatYAxis = (value) => {
     if (value >= 1000) {
@@ -1035,15 +1323,35 @@ const PPCDashboard = () => {
       csvData.push([]);
     }
     
-    // Add Chart Data (now using official ProductAdsPayment spend data)
+    // Add Chart Data (prioritizing actual dateWiseTotalCosts spend data)
     if (chartData.length > 0) {
-      csvData.push(['Daily Performance Chart Data (Official Spend from ProductAdsPayment)']);
-      csvData.push(['Date', 'PPC Sales', 'Official Spend']);
+      const dataSource = dateWiseTotalCosts.length > 0 ? 
+        'Official Daily Spend from dateWiseTotalCosts' : 
+        'Estimated Spend Distribution';
+      csvData.push([`Daily Performance Chart Data (${dataSource})`]);
+      csvData.push(['Date', 'PPC Sales', 'Spend']);
       chartData.forEach(day => {
         csvData.push([
           day.date,
           `$${day.ppcSales.toFixed(2)}`,
           `$${day.spend.toFixed(2)}`
+        ]);
+      });
+      csvData.push([]);
+    }
+    
+    // Add Raw DateWise Total Costs if available (filtered by selected date range)
+    const costsForExport = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
+    if (costsForExport.length > 0) {
+      const dateRangeInfo = filteredDateWiseTotalCosts.length > 0 ? 
+        ` (Filtered: ${info?.startDate || 'N/A'} to ${info?.endDate || 'N/A'})` : 
+        ' (All Data)';
+      csvData.push([`Raw DateWise Total Costs (Source Data)${dateRangeInfo}`]);
+      csvData.push(['Date', 'Total Cost']);
+      costsForExport.forEach(item => {
+        csvData.push([
+          item.date,
+          `$${item.totalCost.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -1084,7 +1392,14 @@ const PPCDashboard = () => {
                   className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
                 >
                   <img src={calenderIcon} alt='' className='w-4 h-4' />
-                  <span className='text-sm font-medium text-gray-700'>Last 30 Days</span>
+                  <span className='text-sm font-medium text-gray-700'>
+                    {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
+                      ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : info?.calendarMode === 'last7'
+                      ? 'Last 7 Days'
+                      : 'Last 30 Days'
+                    }
+                  </span>
                 </button>
                 
                 <AnimatePresence>
@@ -1137,6 +1452,9 @@ const PPCDashboard = () => {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-600">{kpi.label}</p>
+                      {kpi.label === 'Units Sold' && (
+                        <p className="text-xs text-gray-500 mt-0.5">For last 30 days</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1290,6 +1608,9 @@ const PPCDashboard = () => {
                   {selectedTab === 0 && (
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">High ACOS Campaigns</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Campaigns with high advertising cost of sales for last 30 days
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -1342,6 +1663,9 @@ const PPCDashboard = () => {
                   {selectedTab === 1 && (
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">Wasted Spend Keywords</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Keywords with high spend but low returns for last 30 days
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -1403,70 +1727,57 @@ const PPCDashboard = () => {
                     </>
                   )}
                   
-                  {/* Negative Keywords Tab */}
+                  {/* Campaigns Without Negative Keywords Tab */}
                   {selectedTab === 2 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Negative Keywords not used</h2>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Campaigns Without Negative Keywords</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">AdGroup</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">Negatives</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {negativeKeywordsMetrics.length === 0 ? (
+                          {campaignsWithoutNegativeKeywords.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="text-center py-12 text-gray-400">
-                                No data available
+                              <td colSpan={3} className="text-center py-12 text-gray-400">
+                                All campaigns have negative keywords configured ✅
                               </td>
                             </tr>
                           ) : (
                             (() => {
-                              const startIndex = (negativePage - 1) * itemsPerPage;
+                              const startIndex = (campaignsWithoutNegativePage - 1) * itemsPerPage;
                               const endIndex = startIndex + itemsPerPage;
-                              return negativeKeywordsMetrics.slice(startIndex, endIndex).map((row, idx) => {
-                                // Find keyword details
-                                const keywordDetail = keywords.find(k => 
-                                  k.keywordText === row.keyword && 
-                                  productWiseSponsoredAds.some(p => 
-                                    p.campaignName === row.campaignName && 
-                                    p.campaignId === k.campaignId
-                                  )
-                                );
-                                
-                                return (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="py-4 text-sm text-gray-900">{row.keyword}</td>
-                                    <td className="py-4 text-sm text-gray-600">{row.campaignName}</td>
-                                    <td className="py-4 text-sm text-center">${row.sales.toFixed(2)}</td>
-                                    <td className="py-4 text-sm text-center">${row.spend.toFixed(2)}</td>
-                                    <td className={`py-4 text-sm text-center font-medium ${
-                                      row.acos === 0 ? 'text-gray-400' : 
-                                      row.acos > 100 ? 'text-red-600' : 'text-gray-900'
-                                    }`}>
-                                      {row.acos === 0 ? '-' : `${row.acos.toFixed(2)}%`}
-                                    </td>
-                                  </tr>
-                                );
-                              });
+                              return campaignsWithoutNegativeKeywords.slice(startIndex, endIndex).map((row, idx) => (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="py-4 text-sm text-gray-900">{row.campaignName}</td>
+                                  <td className="py-4 text-sm text-gray-600">{row.adGroupName}</td>
+                                  <td className="py-4 text-sm text-center">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                      {row.negatives}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ));
                             })()
                           )}
                         </tbody>
                       </table>
                       <TablePagination
-                        currentPage={negativePage}
-                        totalPages={Math.ceil(negativeKeywordsMetrics.length / itemsPerPage)}
-                        onPageChange={setNegativePage}
-                        totalItems={negativeKeywordsMetrics.length}
+                        currentPage={campaignsWithoutNegativePage}
+                        totalPages={Math.ceil(campaignsWithoutNegativeKeywords.length / itemsPerPage)}
+                        onPageChange={setCampaignsWithoutNegativePage}
+                        totalItems={campaignsWithoutNegativeKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
                       <OptimizationTip 
-                        tip="You haven't blocked irrelevant items - consider analysing your search term report."
-                        icon="🔍"
+                        tip="Add negative keywords to these campaigns to prevent irrelevant traffic and improve ad performance."
+                        icon="⚠️"
                       />
                     </>
                   )}
@@ -1476,7 +1787,7 @@ const PPCDashboard = () => {
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
                       <div className="mb-4 text-sm text-gray-600">
-                        Criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
+                        For Last 30 days
                       </div>
                       <table className="w-full">
                         <thead>
@@ -1553,6 +1864,9 @@ const PPCDashboard = () => {
                   {selectedTab === 4 && (
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms with Zero Sales</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Search terms that generated clicks but no conversions for last 30 days
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -1607,6 +1921,9 @@ const PPCDashboard = () => {
                   {selectedTab === 5 && (
                     <>
                       <h2 className="text-xl font-semibold text-gray-900 mb-6">Auto Campaign Insights</h2>
+                      <div className="mb-4 text-sm text-gray-600">
+                        Performance insights from automatic targeting campaigns for last 30 days
+                      </div>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">

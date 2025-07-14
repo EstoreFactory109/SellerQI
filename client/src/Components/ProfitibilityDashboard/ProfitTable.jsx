@@ -14,6 +14,9 @@ const ProfitTable = ({ setSuggestionsData }) => {
     const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
     const totalProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
     
+    // Calculate total active products
+    const totalActiveProducts = totalProducts.filter(product => product.status === "Active").length;
+    
     // Get COGs values from Redux store
     const cogsValues = useSelector((state) => state.cogs.cogsValues);
     
@@ -225,9 +228,10 @@ const ProfitTable = ({ setSuggestionsData }) => {
         totalGrossProfit,
         profitableProducts,
         criticalProducts,
-        totalProducts: products.length
+        totalProducts: products.length,
+        totalActiveProducts: totalActiveProducts
       };
-    }, [products]);
+    }, [products, totalActiveProducts]);
   
     return (
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -243,9 +247,16 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 <p className="text-sm text-gray-600">Detailed profit breakdown with COGS integration</p>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-600">Total Products</div>
-              <div className="text-2xl font-bold text-gray-900">{totalProducts.length}</div>
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <div className="text-sm text-gray-600">Active Products</div>
+                <div className="text-2xl font-bold text-emerald-600">{totalActiveProducts}</div>
+              </div>
+              <div className="w-px h-12 bg-gray-300"></div>
+              <div className="text-center">
+                <div className="text-sm text-gray-600">Total Products</div>
+                <div className="text-2xl font-bold text-gray-900">{totalProducts.length}</div>
+              </div>
             </div>
           </div>
 
@@ -298,10 +309,10 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1 py-1 rounded truncate block">{product.asin}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">{product.units > 999 ? `${(product.units/1000).toFixed(1)}k` : product.units}</span>
+                         <span className="text-sm font-semibold text-gray-900">{product.units.toLocaleString()}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.sales > 999 ? `${(product.sales/1000).toFixed(1)}k` : product.sales.toFixed(0)}</span>
+                         <span className="text-sm font-semibold text-gray-900">${product.sales.toFixed(2)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
                          <div className="flex items-center justify-center">
@@ -319,14 +330,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          </div>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.adSpend > 999 ? `${(product.adSpend/1000).toFixed(1)}k` : product.adSpend.toFixed(0)}</span>
+                         <span className="text-sm font-semibold text-gray-900">${product.adSpend.toFixed(2)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.fees > 999 ? `${(product.fees/1000).toFixed(1)}k` : product.fees.toFixed(0)}</span>
+                         <span className="text-sm font-semibold text-gray-900">${product.fees.toFixed(2)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
                          <span className={`text-sm font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                           ${product.grossProfit < 0 ? `-${Math.abs(product.grossProfit) > 999 ? `${(Math.abs(product.grossProfit)/1000).toFixed(1)}k` : Math.abs(product.grossProfit).toFixed(0)}` : product.grossProfit > 999 ? `${(product.grossProfit/1000).toFixed(1)}k` : product.grossProfit.toFixed(0)}
+                           ${product.grossProfit.toFixed(2)}
                          </span>
                        </td>
                        <td className="px-2 py-4 text-center relative">
@@ -340,7 +351,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                ? 'text-gray-400' 
                                : product.netProfit < 0 ? 'text-red-600' : 'text-emerald-600'
                            }`}>
-                             ${product.netProfit < 0 ? `-${Math.abs(product.netProfit) > 999 ? `${(Math.abs(product.netProfit)/1000).toFixed(1)}k` : Math.abs(product.netProfit).toFixed(0)}` : product.netProfit > 999 ? `${(product.netProfit/1000).toFixed(1)}k` : product.netProfit.toFixed(0)}
+                             ${product.netProfit.toFixed(2)}
                            </span>
                          </div>
                          {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
@@ -386,7 +397,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 Showing {products.length > 0 ? indexOfFirstProduct + 1 : 0} to {Math.min(indexOfLastProduct, products.length)} of {products.length} products
               </span>
               <span className="text-xs text-gray-500">
-                ({summaryStats.profitableProducts} profitable, {summaryStats.criticalProducts} critical)
+                ({summaryStats.totalActiveProducts} active, {summaryStats.profitableProducts} profitable, {summaryStats.criticalProducts} critical)
               </span>
             </div>
             

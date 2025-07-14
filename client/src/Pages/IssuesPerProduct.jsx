@@ -59,11 +59,82 @@ const Dashboard = () => {
     const { asin } = useParams();
     const product = info.productWiseError.find(item => item.asin === asin);
     
+    // Get GetOrderData array for calculating quantities and revenue
+    const getOrderData = Array.isArray(info?.GetOrderData) ? info.GetOrderData : [];
+    
+    // Function to calculate total quantities ASIN-wise from GetOrderData
+    const calculateAsinQuantities = (orderData) => {
+        const asinQuantities = {};
+        
+        // Only consider shipped, unshipped, and partially shipped orders
+        const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
+        
+        orderData.forEach(order => {
+            if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
+                return;
+            }
+            
+            const asinName = order.asin;
+            const quantity = Number(order.quantity) || 0;
+            
+            if (asinQuantities[asinName]) {
+                asinQuantities[asinName] += quantity;
+            } else {
+                asinQuantities[asinName] = quantity;
+            }
+        });
+        
+        return asinQuantities;
+    };
+
+    // Function to calculate total revenue ASIN-wise from GetOrderData
+    const calculateAsinRevenue = (orderData) => {
+        const asinRevenue = {};
+        
+        // Only consider shipped, unshipped, and partially shipped orders
+        const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
+        
+        orderData.forEach(order => {
+            if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
+                return;
+            }
+            
+            const asinName = order.asin;
+            const itemPrice = Number(order.itemPrice) || 0;
+            
+            if (asinRevenue[asinName]) {
+                asinRevenue[asinName] += itemPrice;
+            } else {
+                asinRevenue[asinName] = itemPrice;
+            }
+        });
+        
+        return asinRevenue;
+    };
+    
+    // Calculate quantities and revenue from GetOrderData
+    const asinQuantities = calculateAsinQuantities(getOrderData);
+    const asinRevenue = calculateAsinRevenue(getOrderData);
+    
+    // Debug: Log calculations
+    console.log('IssuesPerProduct - GetOrderData length:', getOrderData.length);
+    console.log('IssuesPerProduct - Calculated ASIN quantities:', asinQuantities);
+    console.log('IssuesPerProduct - Calculated ASIN revenue:', asinRevenue);
+    
+    // Update product with calculated quantities and revenue from GetOrderData
+    const updatedProduct = product ? {
+        ...product,
+        quantity: asinQuantities[product.asin] || 0,
+        sales: asinRevenue[product.asin] || 0
+    } : null;
+    
     // Debug: Log when component renders with new ASIN
     useEffect(() => {
         console.log('Component rendered with ASIN:', asin);
         console.log('Product found:', !!product);
-    }, [asin, product]);
+        console.log('Updated product units:', updatedProduct?.quantity);
+        console.log('Updated product revenue:', updatedProduct?.sales);
+    }, [asin, product, updatedProduct]);
 
     // Reset states when ASIN changes
     useEffect(() => {
@@ -93,24 +164,24 @@ const Dashboard = () => {
         window.scrollTo(0, 0);
     }, [asin]);
 
-    if (!product) {
+    if (!updatedProduct) {
         return <div className="p-6">No product data found for ASIN: {asin}</div>;
     }
 
     const hasAnyConversionError = [
-        product.conversionErrors.imageResultErrorData?.status,
-        product.conversionErrors.videoResultErrorData?.status,
-        product.conversionErrors.productReviewResultErrorData?.status,
-        product.conversionErrors.productStarRatingResultErrorData?.status,
-        product.conversionErrors.productsWithOutBuyboxErrorData?.status,
-        product.conversionErrors.aplusErrorData?.status
+        updatedProduct.conversionErrors.imageResultErrorData?.status,
+        updatedProduct.conversionErrors.videoResultErrorData?.status,
+        updatedProduct.conversionErrors.productReviewResultErrorData?.status,
+        updatedProduct.conversionErrors.productStarRatingResultErrorData?.status,
+        updatedProduct.conversionErrors.productsWithOutBuyboxErrorData?.status,
+        updatedProduct.conversionErrors.aplusErrorData?.status
     ].includes("Error");
 
-    const hasAnyInventoryError = product.inventoryErrors && (
-        product.inventoryErrors.inventoryPlanningErrorData ||
-        product.inventoryErrors.strandedInventoryErrorData ||
-        product.inventoryErrors.inboundNonComplianceErrorData ||
-        product.inventoryErrors.replenishmentErrorData
+    const hasAnyInventoryError = updatedProduct.inventoryErrors && (
+        updatedProduct.inventoryErrors.inventoryPlanningErrorData ||
+        updatedProduct.inventoryErrors.strandedInventoryErrorData ||
+        updatedProduct.inventoryErrors.inboundNonComplianceErrorData ||
+        updatedProduct.inventoryErrors.replenishmentErrorData
     );
 
     // Ranking issue states
@@ -195,42 +266,42 @@ const Dashboard = () => {
             Category: 'Product Information',
             Type: 'ASIN',
             Issue: '',
-            Message: product.asin,
+            Message: updatedProduct.asin,
             Solution: ''
         });
         exportData.push({
             Category: 'Product Information',
             Type: 'SKU',
             Issue: '',
-            Message: product.sku,
+            Message: updatedProduct.sku,
             Solution: ''
         });
         exportData.push({
             Category: 'Product Information',
             Type: 'Product Name',
             Issue: '',
-            Message: product.name,
+            Message: updatedProduct.name,
             Solution: ''
         });
         exportData.push({
             Category: 'Product Information',
             Type: 'List Price',
             Issue: '',
-            Message: `$${product.price || 0}`,
+            Message: `$${updatedProduct.price || 0}`,
             Solution: ''
         });
         exportData.push({
             Category: 'Product Information',
             Type: 'Units Sold',
             Issue: '',
-            Message: String(product.quantity || 0),
+            Message: String(updatedProduct.quantity || 0),
             Solution: ''
         });
         exportData.push({
             Category: 'Product Information',
             Type: 'Sales',
             Issue: '',
-            Message: `$${product.sales || 0}`,
+            Message: `$${(updatedProduct.sales || 0).toFixed(2)}`,
             Solution: ''
         });
         exportData.push({
@@ -242,31 +313,31 @@ const Dashboard = () => {
         });
 
         // Ranking Issues - Title
-        if (product.rankingErrors.data.TitleResult.charLim?.status === "Error") {
+        if (updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Character Limit',
-                Message: product.rankingErrors.data.TitleResult.charLim.Message,
-                Solution: product.rankingErrors.data.TitleResult.charLim.HowTOSolve
+                Message: updatedProduct.rankingErrors.data.TitleResult.charLim.Message,
+                Solution: updatedProduct.rankingErrors.data.TitleResult.charLim.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.TitleResult.RestictedWords?.status === "Error") {
+        if (updatedProduct.rankingErrors.data.TitleResult.RestictedWords?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Restricted Words',
-                Message: product.rankingErrors.data.TitleResult.RestictedWords.Message,
-                Solution: product.rankingErrors.data.TitleResult.RestictedWords.HowTOSolve
+                Message: updatedProduct.rankingErrors.data.TitleResult.RestictedWords.Message,
+                Solution: updatedProduct.rankingErrors.data.TitleResult.RestictedWords.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.TitleResult.checkSpecialCharacters?.status === "Error") {
+        if (updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Special Characters',
-                Message: product.rankingErrors.data.TitleResult.checkSpecialCharacters.Message,
-                Solution: product.rankingErrors.data.TitleResult.checkSpecialCharacters.HowTOSolve
+                Message: updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.Message,
+                Solution: updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.HowTOSolve
             });
         }
 
@@ -483,7 +554,7 @@ const Dashboard = () => {
         }
         
         // Generate filename with ASIN and date
-        const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const fileName = `Product_Issues_${updatedProduct.asin}_${new Date().toISOString().split('T')[0]}.xlsx`;
         
         // Write and download file
         const buffer = await workbook.xlsx.writeBuffer();
@@ -497,7 +568,7 @@ const Dashboard = () => {
         const csv = Papa.unparse(data);
         
         // Generate filename with ASIN and date
-        const fileName = `Product_Issues_${product.asin}_${new Date().toISOString().split('T')[0]}.csv`;
+        const fileName = `Product_Issues_${updatedProduct.asin}_${new Date().toISOString().split('T')[0]}.csv`;
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         saveAs(blob, fileName);
     };
@@ -555,7 +626,7 @@ const Dashboard = () => {
                             <div className="flex items-center gap-6 text-white">
                                 <div className="text-center lg:text-right">
                                     <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent mb-1">
-                                        {product.asin}
+                                        {updatedProduct.asin}
                                     </div>
                                     <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Product ASIN</div>
                                     <div className="text-xs text-orange-300 mt-1">Requires optimization</div>
@@ -578,34 +649,34 @@ const Dashboard = () => {
                 >
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                         <div className="flex items-center space-x-6">
-                            <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl overflow-hidden shadow-md">
-                                <LazyLoadImage
-                                    src={product.MainImage || noImage}
-                                    alt="Product"
-                                    className="w-full h-full object-cover"
-                                    effect="blur"
-                                    placeholderSrc={noImage}
-                                    threshold={100}
-                                    wrapperClassName="w-full h-full"
-                                />
-                            </div>
-                            <div className="space-y-3">
-                                <h2 className="text-xl font-bold text-gray-900 leading-tight">{product.name}</h2>
-                                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-gray-500 font-medium">ASIN:</span>
-                                        <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{product.asin}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-gray-500 font-medium">SKU:</span>
-                                        <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{product.sku}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-gray-500 font-medium">Price:</span>
-                                        <span className="font-semibold text-green-600">${product.price}</span>
-                                    </div>
+                                                    <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl overflow-hidden shadow-md">
+                            <LazyLoadImage
+                                src={updatedProduct.MainImage || noImage}
+                                alt="Product"
+                                className="w-full h-full object-cover"
+                                effect="blur"
+                                placeholderSrc={noImage}
+                                threshold={100}
+                                wrapperClassName="w-full h-full"
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <h2 className="text-xl font-bold text-gray-900 leading-tight">{updatedProduct.name}</h2>
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-500 font-medium">ASIN:</span>
+                                    <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{updatedProduct.asin}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-500 font-medium">SKU:</span>
+                                    <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{updatedProduct.sku}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-500 font-medium">Price:</span>
+                                    <span className="font-semibold text-green-600">${updatedProduct.price}</span>
                                 </div>
                             </div>
+                        </div>
                         </div>
 
                         <div className='flex items-center gap-3 relative'>
@@ -707,8 +778,8 @@ const Dashboard = () => {
                 {/* Key Metrics */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     {[
-                        { label: 'Units Sold', value: product.quantity, icon: BarChart3, color: 'blue' },
-                        { label: 'Revenue', value: `$${product.sales}`, icon: TrendingUp, color: 'green' },
+                        { label: 'Units Sold', value: updatedProduct.quantity, icon: BarChart3, color: 'blue' },
+                        { label: 'Revenue', value: `$${(updatedProduct.sales || 0).toFixed(2)}`, icon: TrendingUp, color: 'green' },
                         { label: 'Analysis Period', value: `${info?.startDate} - ${info?.endDate}`, icon: Calendar, color: 'purple' },
                     ].map((metric, idx) => {
                         const Icon = metric.icon;
@@ -760,14 +831,14 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div className="p-6 space-y-6">
-                        {(product.rankingErrors.data.TitleResult.charLim?.status === "Error" || product.rankingErrors.data.TitleResult.RestictedWords.status === "Error" || product.rankingErrors.data.TitleResult.checkSpecialCharacters.status === "Error") && (<div>
+                        {(updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error" || updatedProduct.rankingErrors.data.TitleResult.RestictedWords.status === "Error" || updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.status === "Error") && (<div>
                             <p className="font-semibold">Titles</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
                                 {
-                                    product.rankingErrors.data.TitleResult.charLim?.status === "Error" && (
+                                    updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{product.rankingErrors.data.TitleResult.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors.data.TitleResult.charLim?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -776,7 +847,7 @@ const Dashboard = () => {
                                             <div className=' bg-gray-200 mt-2 flex justify-center items-center' style={TitleSolution === "charLim"
                                                 ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                                 : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
-                                            }>{product.rankingErrors.data.TitleResult.charLim?.HowTOSolve}</div>
+                                            }>{updatedProduct.rankingErrors.data.TitleResult.charLim?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }

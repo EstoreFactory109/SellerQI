@@ -254,8 +254,8 @@ export default function AboutUs() {
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Call Us</h3>
                 <p className="text-gray-600 mb-3">Mon-Fri, 9am-6pm EST</p>
-                <a href="tel:+1-555-123-4567" className="text-blue-500 hover:text-blue-600 font-medium">
-                  +1 (555) 123-4567
+                <a href="tel:+1-818-350-5203" className="text-blue-500 hover:text-blue-600 font-medium">
+                  +1 818 350 5203
                 </a>
               </div>
               <div className="text-center p-6 rounded-xl bg-gray-50">

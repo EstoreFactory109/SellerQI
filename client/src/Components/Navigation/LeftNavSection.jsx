@@ -84,7 +84,7 @@ const LeftNavSection = () => {
             <div className="w-full h-[10%] px-6 py-6 border-b border-gray-200/50 flex-shrink-0">
                 <div className="flex items-center justify-center">
                     <img 
-                        src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png"
+                        src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png"
                         alt="Seller QI Logo"
                         loading="lazy"
                         className="h-8 w-auto object-contain transition-transform duration-300 hover:scale-105"

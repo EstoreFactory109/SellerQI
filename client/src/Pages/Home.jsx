@@ -243,9 +243,10 @@ export default function SellerQIHomepage() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="relative"
           >
-            <div className="bg-gradient-to-t from-gray-100 to-white rounded-3xl p-4 shadow-2xl border border-gray-200">
+            <div className="bg-gradient-to-t from-gray-100 to-white rounded-3xl shadow-2xl border border-gray-200">
               <img
-                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1600/v1749221237/Dashboard_ziqkui.png"
+                src="https://res.cloudinary.com/ddoa960le/image/upload/q_auto:good,f_auto,w_1600/v1752527599/accountSummery_l7rk09.png"
+
                 alt="SellerQI Dashboard Preview"
                 className="rounded-2xl w-full shadow-lg"
               />
@@ -721,7 +722,7 @@ export default function SellerQIHomepage() {
                   Most Popular
                 </div>
                 <h3 className="text-2xl font-bold mb-4">Pro Plan</h3>
-                <div className="text-4xl font-bold mb-6">$49<span className="text-lg opacity-75">/month</span></div>
+                <div className="text-4xl font-bold mb-6">$99<span className="text-lg opacity-75">/month</span></div>
                 <ul className="space-y-3 mb-8">
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Product Audit Summary</li>
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Download Reports</li>

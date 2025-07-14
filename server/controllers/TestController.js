@@ -8,11 +8,12 @@ const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js')
 const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 
-const {getAdGroups} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
+const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
 const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
+const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
 
 const testReport = async (req, res) => {
     const { accessToken, marketplaceIds } = req.body;
@@ -150,7 +151,7 @@ const testAmazonAds = async (req, res) => {
 
 const testPPCSpendsSalesUnitsSold = async (req, res) => {
     const { accessToken } = req.body;
-    const result = await getKeywordPerformanceReport(accessToken, "4009758203350767", "2025-04-02", "2025-04-30", "681b7e41525925e8abb7d3c6", "US", "NA");
+    const result = await getPPCSpendsDateWise(accessToken, "738756868093004", "684dc0c4a18a59a57ba9164a", "US", "NA");
     return res.status(200).json({
         data: result
     })
@@ -170,7 +171,7 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 
   const testGetAdGroups = async (req, res) => {
     const { accessToken, region,profileId,campaignIds } = req.body;
-    const result = await getAdGroups(accessToken,profileId,region,campaignIds);
+    const result = await getAdGroups(accessToken,profileId,"NA","681b7e41525925e8abb7d3c6","US",["384401447418864","296211985111834","501765201108807"]);
     return res.status(200).json({
         data: result
     })

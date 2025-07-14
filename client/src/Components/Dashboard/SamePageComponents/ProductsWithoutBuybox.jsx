@@ -1,11 +1,8 @@
-import React, { useState } from 'react'
-import issue from '../../../assets/Icons/error.png'
+import React from 'react'
 import { useSelector } from 'react-redux';
-import TooltipBox from '../../ToolTipBox/ToolTipBoxRight.jsx'
 
 const ProductsWithoutBuybox = () => {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
-    const [opentToottip, setOpenToolTip] = useState(false)
     
     return (
         <div className='w-full lg:w-[20vw] bg-white p-6 border-2 border-gray-200 rounded-md h-full'>
@@ -15,11 +12,7 @@ const ProductsWithoutBuybox = () => {
                         <path fillRule='evenodd' d='M10 2L3 7v11a2 2 0 002 2h10a2 2 0 002-2V7l-7-5zM10 18a8 8 0 100-16 8 8 0 000 16z' clipRule='evenodd' />
                     </svg>
                 </div>
-                <h3 className='text-lg font-semibold text-gray-900'>No Buy Box</h3>
-                <div className='relative fit-content'>
-                    <img src={issue} alt='' className='w-4 h-4 cursor-pointer' onMouseEnter={() => setOpenToolTip(true)} onMouseLeave={() => setOpenToolTip(false)} />
-                    {opentToottip && <TooltipBox Information='Products without BuyBox which are not eligible for Sponsored ads.' />}
-                </div>
+                <h3 className='text-lg font-semibold text-gray-900'>Products with no buy box</h3>
             </div>
             
             <div className='space-y-4'>

@@ -40,7 +40,7 @@ export default function ReturnsRefundsPolicy() {
               If you have any questions about our Returns and Refunds Policy, please contact us:
             </p>
             <p className="mb-4">
-              <strong>Phone Number : +1 (818) 350-5302</strong><br />
+                              <strong>Phone Number : +1 818 350 5203</strong><br />
               <strong>(Mon-Sat India Time, 9:30 AM – 7:30 PM)</strong>
             </p>
           </section>

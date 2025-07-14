@@ -187,7 +187,14 @@ const Reports = () => {
         <div className='flex gap-4 flex-wrap'>
         <div className='fit-content relative ' ref={CalenderRef}>
           <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200 cursor-pointer calendar-selector' onClick={() => setOpenCalender(!openCalender)}>
-            <p className='font-semi-bold text-xs'>Last 30 Days</p>
+            <p className='font-semi-bold text-xs'>
+              {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
+                ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                : info?.calendarMode === 'last7'
+                ? 'Last 7 Days'
+                : 'Last 30 Days'
+              }
+            </p>
             <img src={calenderIcon} alt='' className='w-4 h-4' />
           </div>
           <AnimatePresence>

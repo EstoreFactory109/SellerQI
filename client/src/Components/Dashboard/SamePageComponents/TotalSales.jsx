@@ -6,6 +6,26 @@ import { useNavigate } from "react-router-dom";
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft'
 
+// Function to format date with ordinal suffix (1st, 2nd, 3rd, etc.)
+const formatDateWithOrdinal = (dateString) => {
+  const date = new Date(dateString);
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-US', { month: 'long' });
+  
+  // Get ordinal suffix
+  const getOrdinalSuffix = (day) => {
+    if (day > 3 && day < 21) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+  
+  return `${day}${getOrdinalSuffix(day)} ${month}`;
+};
+
 const TotalSales = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const navigate = useNavigate();
@@ -127,13 +147,9 @@ const TotalSales = () => {
             <h2 className="text-3xl font-bold text-gray-900">
               ${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </h2>
-            <div className="flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 rounded-full">
-              <TrendingUp className="w-3 h-3" />
-              <span className="text-xs font-medium">12.5%</span>
-            </div>
           </div>
           <p className="text-sm text-gray-500">
-            {info?.startDate || '23 May'} - {info?.endDate || '22 Jun'}
+            {info?.startDate ? formatDateWithOrdinal(info.startDate) : '23rd May'} - {info?.endDate ? formatDateWithOrdinal(info.endDate) : '22nd June'}
           </p>
         </div>
         

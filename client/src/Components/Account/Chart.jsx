@@ -35,7 +35,11 @@ const IssuesLineChart = () => {
     );
   }
 
-  const chartData = info.slice(0, 10);
+  // Get the most recent 10 records (same logic as table)
+  const reversedInfo = [...info].reverse();
+  const recentData = reversedInfo.slice(0, 10);
+  // Reverse again to show chronological order in chart (oldest to newest)
+  const chartData = [...recentData].reverse();
 
   const categories = chartData.map(item => 
     new Date(item.Date).toLocaleDateString('en-GB', { 
@@ -227,7 +231,7 @@ const IssuesLineChart = () => {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-6">Issues Week by Week</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-6">Recent Issues Trend</h2>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

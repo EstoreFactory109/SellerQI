@@ -67,8 +67,8 @@ export default function ContactPage() {
       icon: Phone,
       title: "Phone Support",
       description: "Speak with our experts",
-      contact: "+1 (555) 123-4567",
-      action: "tel:+15551234567",
+      contact: "+1 818 350 5203",
+      action: "tel:+18183505203",
       color: "purple"
     }
   ];

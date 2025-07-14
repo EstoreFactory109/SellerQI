@@ -75,6 +75,41 @@ const ProfitabilityDashboard = () => {
   // Get sales by products for more accurate daily sales
   const salesByProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.SalesByProducts) || [];
   
+  // Get dateWiseTotalCosts from Redux store - same as PPC Dashboard
+  const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
+  
+  // Filter dateWiseTotalCosts based on selected date range - same logic as PPC Dashboard
+  const filteredDateWiseTotalCosts = useMemo(() => {
+    if (!dateWiseTotalCosts.length) return [];
+    
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+    
+    // If no date range is selected, return empty array (use default calculation)
+    if (!startDate || !endDate) {
+      return [];
+    }
+    
+    // Filter data based on selected date range
+    const filtered = dateWiseTotalCosts.filter(item => {
+      if (!item.date) return false;
+      
+      const itemDate = new Date(item.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+    
+    console.log('=== Profitability Dashboard: Filtered DateWise Total Costs ===');
+    console.log('Selected Date Range:', { startDate, endDate });
+    console.log('Original dateWiseTotalCosts length:', dateWiseTotalCosts.length);
+    console.log('Filtered dateWiseTotalCosts length:', filtered.length);
+    console.log('Total filtered cost:', filtered.reduce((sum, item) => sum + (item.totalCost || 0), 0));
+    
+    return filtered;
+  }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
+  
   // Transform the data for the chart using filtered TotalSales data
   const chartData = useMemo(() => {
     // Prioritize filtered TotalSales data from Redux (calendar selection)
@@ -173,11 +208,27 @@ const ProfitabilityDashboard = () => {
       totalCOGS += cogsPerUnit * quantity;
     });
     
-    // Calculate total overall spend including all Amazon fees
+    // Calculate ad spend using same logic as PPC Dashboard
+    let adSpend = 0;
+    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+    
+    if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
+      // Use filtered spend data when date range is selected (same as PPC Dashboard)
+      adSpend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+      console.log('=== Profitability Dashboard: Using filtered spend data ===');
+      console.log('Filtered ad spend:', adSpend);
+    } else {
+      // Use default spend calculation when no date range selected (same as PPC Dashboard)
+      adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
+      console.log('=== Profitability Dashboard: Using default spend data ===');
+      console.log('Default ad spend:', adSpend);
+    }
+    
+    // Calculate total overall spend including all Amazon fees (using calculated adSpend)
     totalOverallSpend = (Number(filteredAccountFinance?.FBA_Fees || 0) + 
                         Number(filteredAccountFinance?.Storage || 0) + 
                         Number(filteredAccountFinance?.Amazon_Charges || 0) +
-                        Number(filteredAccountFinance?.ProductAdsPayment || 0) +
+                        adSpend +
                         Number(filteredAccountFinance?.Refunds || 0));
     
     // Always use the same value as Dashboard Total Sales component (TotalWeeklySale)
@@ -186,8 +237,6 @@ const ProfitabilityDashboard = () => {
     
     // Adjust gross profit by subtracting total COGS (only for profitability page)
     const adjustedGrossProfit = originalGrossProfit - totalCOGS;
-    
-    const adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
     const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0) + Number(filteredAccountFinance?.Amazon_Charges || 0));
     
     // Calculate adjusted profit margin using COGS-adjusted gross profit
@@ -946,7 +995,14 @@ const ProfitabilityDashboard = () => {
                       onClick={() => setOpenCalender(!openCalender)}
                     >
                       <Calendar className="w-4 h-4 text-gray-600" />
-                      <span className='text-sm font-medium text-gray-700'>Last 30 Days</span>
+                      <span className='text-sm font-medium text-gray-700'>
+                        {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
+                          ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                          : info?.calendarMode === 'last7'
+                          ? 'Last 7 Days'
+                          : 'Last 30 Days'
+                        }
+                      </span>
                     </motion.button>
                     <AnimatePresence>
                       {openCalender && (

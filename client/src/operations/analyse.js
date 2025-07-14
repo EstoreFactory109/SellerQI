@@ -2,6 +2,33 @@ import Profitiblity from "./Profitiblity";
 import calculateSponsoredAdsMetrics from "./sponserdAds";
 import {calculateNegativeKeywordsMetrics} from "./sponserdAds";
 
+// Function to calculate date-wise total costs from PPC spend data
+const calculateDateWiseTotalCosts = (dateWisePPCData) => {
+    if (!Array.isArray(dateWisePPCData)) {
+        return [];
+    }
+    
+    const dateWiseCosts = {};
+    
+    dateWisePPCData.forEach(item => {
+        if (item && item.date && typeof item.cost === 'number') {
+            const dateStr = item.date.split('T')[0]; // Extract just the date part (YYYY-MM-DD)
+            
+            if (!dateWiseCosts[dateStr]) {
+                dateWiseCosts[dateStr] = 0;
+            }
+            
+            dateWiseCosts[dateStr] += item.cost;
+        }
+    });
+    
+    // Convert to array format and sort by date
+    return Object.entries(dateWiseCosts).map(([date, totalCost]) => ({
+        date,
+        totalCost: Math.round(totalCost * 100) / 100 // Round to 2 decimal places
+    })).sort((a, b) => new Date(a.date) - new Date(b.date));
+};
+
 // Function to calculate profitability errors
 const calculateProfitabilityErrors = (profitibilityData) => {
     let totalErrors = 0;
@@ -101,7 +128,11 @@ const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMe
 
 const analyseData = (data) => {
 
-    console.log("data: ",data)
+    console.log("data: ",data.GetDateWisePPCspendData)
+    
+    // Calculate and log date-wise total costs
+    const dateWiseTotalCosts = calculateDateWiseTotalCosts(data.GetDateWisePPCspendData);
+    console.log("dateWiseTotalCosts: ", dateWiseTotalCosts);
     // Safely extract data with fallbacks
     const TotalProducts = data.TotalProducts || [];
     const accountHealthPercentage = data.AccountData?.getAccountHealthPercentge || { Percentage: 0, status: 'UNKNOWN' };
@@ -487,6 +518,8 @@ const analyseData = (data) => {
         console.error("❌ Error calculating sponsored ads errors:", error);
     }
 
+    
+
     const dashboardData = {
         Country: data.Country || "US",
         createdAccountDate: data.createdAccountDate || null,
@@ -528,7 +561,10 @@ const analyseData = (data) => {
         searchTerms: data.searchTerms || [],
         campaignData: data.campaignData || [],
         adsKeywordsPerformanceData: data.adsKeywordsPerformanceData || [],
-        GetOrderData: data.GetOrderData || []
+        GetOrderData: data.GetOrderData || [],
+        dateWiseTotalCosts: dateWiseTotalCosts,
+        negetiveKeywords: data.negetiveKeywords || [],
+        AdsGroupData: data.AdsGroupData || []
     };
 
     return { dashboardData };
