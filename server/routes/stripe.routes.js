@@ -8,14 +8,28 @@ const StripeWebhookController = require('../controllers/StripeWebhookController.
 // Import middleware
 const auth = require('../middlewares/Auth/auth.js');
 
+// Debug endpoint for testing webhook connectivity (no auth required)
+router.get('/webhook-debug', (req, res) => {
+    res.json({
+        message: 'Webhook endpoint is accessible',
+        timestamp: new Date().toISOString(),
+        environment: {
+            hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
+            hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
+            nodeEnv: process.env.NODE_ENV
+        }
+    });
+});
+
 // Webhook endpoint (must be before express.json middleware and auth)
+// This needs to use raw body parsing for Stripe signature verification
 router.post('/webhook', express.raw({ type: 'application/json' }), StripeWebhookController.handleWebhook);
 
-// Public endpoints (no auth required)
+// Get publishable key (no auth required for frontend setup)
 router.get('/publishable-key', StripeController.getPublishableKey);
 
 // Protected routes (require authentication)
-router.use(auth); // Apply auth middleware to all routes below
+router.use(auth);
 
 // Subscription management
 router.post('/create-checkout-session', StripeController.createCheckoutSession);

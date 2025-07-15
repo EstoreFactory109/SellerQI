@@ -5,7 +5,8 @@ const checkSpecialCharacters = (str) => {
   };
   
   const containsRestrictedWords = (str) => {
-    const restrictedWords = [ "anti-microbial", "Airborne microbial", "anti-bacterial", "bacterial", "pesticides",
+    const restrictedWords = [
+        "anti-microbial", "Airborne microbial", "anti-bacterial", "bacterial", "pesticides",
         "anti-fungal", "fungal", "kill", "antimicrobial", "virus", "antifungal", "antibacterial",
         "heal", "sexy", "insect", "insecticide", "pesticide", "pest", "safe", "non-poisonous",
         "non-injurious", "harmless", "infection", "risk", "disease", "non-toxic", "natural",
@@ -37,7 +38,8 @@ const checkSpecialCharacters = (str) => {
         "Psilocybe Cubensis", "Psilocybin", "Salvia Divinorum", "Sonoran Song", "Mimosa Hostilis",
         "Syrian Rue", "Wild Dagga", "Yopo Seeds", "Gonorrhea", "Syphilis", "Pubic", "Alzheimer’s",
         "Alzheimer", "Concussion", "Gout", "Crohn’s", "Celiac", "Epilepsy", "Seizures",
-        "Seizure", "Obesity", "Autism", "macula", "macular"];
+        "Seizure", "Obesity", "Autism", "macula", "macular"
+      ];
   
     const matchedWords = restrictedWords.filter(word => {
       const regex = new RegExp(`\\b${word}\\b`, 'i');

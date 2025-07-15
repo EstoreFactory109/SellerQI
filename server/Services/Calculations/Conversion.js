@@ -22,7 +22,7 @@ const checkIfVideoExists = (video) => {
         return {
             status: "Error",
             Message: "Your product listing does not include a video. Missing a video may reduce the opportunity to fully engage potential buyers and demonstrate the product's features effectively, potentially impacting conversion rates.",
-            HowToSolve: "Increase the number of images to the recommended total of 7 or more, ensuring that these cover all angles and important features of your product. Include high-quality images that showcase the product in use, any important details, variations, and packaging. This visual enhancement will help improve customer engagement and confidence in making a purchase."
+            HowToSolve: "Add a high-quality video to your product listing that demonstrates the product in use and highlights its key features and benefits. Ensure the video is informative, professionally made, and concise, providing clear value to viewers. This addition can significantly enhance user engagement and help boost your product's appeal."
         }
     } else {
         return {
