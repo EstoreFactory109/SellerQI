@@ -79,7 +79,7 @@ const ConnectAccounts = () => {
       const redirectUri = `${window.location.origin}/auth/callback`;
       const state = crypto.randomUUID(); // More secure random state string
   
-      const amazonAuthUrl = new URL('https://sellercentral.amazon.com/apps/authorize/consent');
+      const amazonAuthUrl = new URL('https://apac.account.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93&scope=advertising::campaign_management&response_type=code&redirect_uri=https://www.sellerqi.com/auth/callback');
       amazonAuthUrl.searchParams.append('application_id', applicationId);
       amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAuthUrl.searchParams.append('state', state);

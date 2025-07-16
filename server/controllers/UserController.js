@@ -162,9 +162,10 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
     }
 
+    console.log(email,password);
     const checkUserIfExists = await getUserByEmail(email);
 
-
+    console.log(checkUserIfExists);
 
     if (!checkUserIfExists) {
         logger.error(new ApiError(404, "User not found"));
@@ -172,7 +173,7 @@ const loginUser = asyncHandler(async (req, res) => {
     }
 
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
-
+    console.log(checkPassword);
 
     if (!checkPassword) {
         logger.error(new ApiError(401, "Password not matched"))
@@ -229,6 +230,9 @@ const loginUser = asyncHandler(async (req, res) => {
         secure: true,
         sameSite: "None"
     }
+
+    console.log(AccessToken,RefreshToken,LocationToken);
+    
 
     // Prepare response data
     const responseData = {
