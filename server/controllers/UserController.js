@@ -752,46 +752,24 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         const checkUserIfExists = await getUserByEmail(email);
 
         if (checkUserIfExists) {
-            // User exists, perform login instead
-            logger.info("User already exists, redirecting to login flow");
+            // User exists, but this is signup flow - just generate basic tokens without seller central lookup
+            logger.info("User already exists, generating basic authentication for signup flow");
             
-            let getSellerCentral;
-            let allSellerAccounts = null;
-            let AccessToken, RefreshToken, LocationToken, adminToken = "";
+            // Create basic authentication tokens without requiring seller central
+            const AccessToken = await createAccessToken(checkUserIfExists._id);
+            const RefreshToken = await createRefreshToken(checkUserIfExists._id);
 
-            // Check if user is superAdmin
-            if (checkUserIfExists.accessType === 'superAdmin') {
-                // Get all seller central accounts from the database
-                const allSellerCentrals = await SellerCentralModel.find({});
-
-                if (!allSellerCentrals || allSellerCentrals.length === 0) {
-                    logger.error(new ApiError(404, "No seller central accounts found"));
-                    return res.status(404).json(new ApiResponse(404, "", "No seller central accounts found"));
-                }
-
-                // Use the first seller central account for tokens
-                getSellerCentral = allSellerCentrals[0];
-
-                adminToken = await createAccessToken(checkUserIfExists._id);
-                AccessToken = await createAccessToken(getSellerCentral.User);
-                RefreshToken = await createRefreshToken(getSellerCentral.User);
-                LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
-            } else {
-                getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
-                if (!getSellerCentral) {
-                    logger.error(new ApiError(404, "Seller central not found"));
-                    return res.status(404).json(new ApiResponse(404, "", "Seller central not found"));
-                }
-                // For regular users and enterpriseAdmin, get their own seller central
-                AccessToken = await createAccessToken(checkUserIfExists._id);
-                RefreshToken = await createRefreshToken(checkUserIfExists._id);
-                LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
-            }
-
-            if (!AccessToken || !RefreshToken || !LocationToken) {
+            if (!AccessToken || !RefreshToken) {
                 logger.error(new ApiError(500, "Internal server error in creating tokens"));
                 return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
             }
+
+            // Update user with refresh token
+            await UserModel.findOneAndUpdate(
+                { _id: checkUserIfExists._id },
+                { $set: { appRefreshToken: RefreshToken } },
+                { new: true }
+            );
 
             const option = {
                 httpOnly: true,
@@ -809,22 +787,10 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
                 accessType: checkUserIfExists.accessType
             };
 
-            // Add all seller accounts data if user is superAdmin
-            if (checkUserIfExists.accessType === 'superAdmin' && allSellerAccounts) {
-                responseData.allSellerAccounts = allSellerAccounts;
-                responseData.activeAccount = {
-                    sellingPartnerId: getSellerCentral.selling_partner_id,
-                    country: getSellerCentral.sellerAccount[0].country,
-                    region: getSellerCentral.sellerAccount[0].region
-                };
-            }
-
             return res.status(200)
-                .cookie("AdminToken", adminToken, option)
                 .cookie("IBEXAccessToken", AccessToken, option)
                 .cookie("IBEXRefreshToken", RefreshToken, option)
-                .cookie("IBEXLocationToken", LocationToken, option)
-                .json(new ApiResponse(200, responseData, "Existing user logged in via Google"));
+                .json(new ApiResponse(200, responseData, "Existing user authenticated for signup flow - redirect to connect Amazon"));
         }
 
         // Create new user

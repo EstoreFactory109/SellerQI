@@ -112,25 +112,10 @@ const SignUp = () => {
         const response = await googleAuthService.handleGoogleSignUp();
         
         if (response.status === 200) {
+            // Existing user logging in through signup page - redirect to connect Amazon
             dispatch(loginSuccess(response.data));
             localStorage.setItem("isAuth", true);
-            
-            // Check subscription status before redirecting
-            try {
-                const subscriptionStatus = await stripeService.getSubscriptionStatus();
-                
-                if (subscriptionStatus.hasSubscription) {
-                    // User has a subscription, redirect to dashboard
-                    window.location.href = "/seller-central-checker/dashboard";
-                } else {
-                    // No subscription, redirect to pricing page
-                    navigate("/pricing");
-                }
-            } catch (error) {
-                console.error('Error checking subscription status:', error);
-                // If subscription check fails, default to pricing page
-                navigate("/pricing");
-            }
+            navigate("/connect-to-amazon");
         } else if (response.status === 201) {
             // New user registered, redirect to connect Amazon
             dispatch(loginSuccess(response.data));
@@ -143,6 +128,20 @@ const SignUp = () => {
     } finally {
         setGoogleLoading(false);
     }
+  };
+
+  const handleAmazonSignUp = () => {
+    if (!termsAccepted) {
+        setErrors({ ...errors, terms: 'You must agree to the Terms of Use and Privacy Policy' });
+        return;
+    }
+    
+    // TODO: Implement Amazon signup functionality
+    // When implemented, ensure it redirects to connect-to-amazon after successful signup:
+    // navigate("/connect-to-amazon");
+    
+    // For now, show a message that this feature is coming soon
+    setErrorMessage('Amazon signup is coming soon. Please use email signup or Google signup for now.');
   };
 
   return (
@@ -352,7 +351,12 @@ const SignUp = () => {
                     type="checkbox"
                     id="termsCheckbox"
                     checked={termsAccepted}
-                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    onChange={(e) => {
+                      setTermsAccepted(e.target.checked);
+                      if (e.target.checked) {
+                        setErrors({ ...errors, terms: '' });
+                      }
+                    }}
                     className="mt-1 w-4 h-4 text-[#3B4A6B] bg-gray-100 border-gray-300 rounded focus:ring-[#3B4A6B] focus:ring-2"
                   />
                   <label htmlFor="termsCheckbox" className="text-sm text-gray-700 leading-relaxed">
@@ -409,8 +413,12 @@ const SignUp = () => {
                  <button
                    type="button"
                    onClick={handleGoogleSignUp}
-                   disabled={googleLoading || !termsAccepted}
-                   className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-300 font-medium text-sm"
+                   disabled={googleLoading}
+                   className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg transition-all duration-300 font-medium text-sm ${
+                     googleLoading 
+                       ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                       : 'hover:bg-gray-50 hover:border-gray-400'
+                   }`}
                  >
                    {googleLoading ? (
                      <Loader2 className="w-4 h-4 animate-spin" />
@@ -429,6 +437,7 @@ const SignUp = () => {
 
                  <button
                    type="button"
+                   onClick={handleAmazonSignUp}
                    className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-300 font-medium text-sm"
                  >
                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#FF9900">

@@ -181,28 +181,37 @@ const GoogleInfoPage = () => {
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         
-        setStatus('Checking subscription status...');
-        
-        try {
-          const subscriptionStatus = await stripeService.getSubscriptionStatus();
+        if (isSignUp) {
+          // If this was triggered from signup page, redirect to connect Amazon
+          setStatus('Redirecting to connect Amazon...');
+          setTimeout(() => {
+            navigate("/connect-to-amazon");
+          }, 1000);
+        } else {
+          // Regular login flow - check subscription status
+          setStatus('Checking subscription status...');
           
-          if (subscriptionStatus.hasSubscription) {
-            setStatus('Redirecting to dashboard...');
-            setTimeout(() => {
-              window.location.href = "/seller-central-checker/dashboard";
-            }, 1000);
-          } else {
+          try {
+            const subscriptionStatus = await stripeService.getSubscriptionStatus();
+            
+            if (subscriptionStatus.hasSubscription) {
+              setStatus('Redirecting to dashboard...');
+              setTimeout(() => {
+                window.location.href = "/seller-central-checker/dashboard";
+              }, 1000);
+            } else {
+              setStatus('Redirecting to pricing...');
+              setTimeout(() => {
+                navigate("/pricing");
+              }, 1000);
+            }
+          } catch (error) {
+            console.error('Error checking subscription status:', error);
             setStatus('Redirecting to pricing...');
             setTimeout(() => {
               navigate("/pricing");
             }, 1000);
           }
-        } catch (error) {
-          console.error('Error checking subscription status:', error);
-          setStatus('Redirecting to pricing...');
-          setTimeout(() => {
-            navigate("/pricing");
-          }, 1000);
         }
         
       } else if (response.status === 201) {
