@@ -5,6 +5,8 @@ const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
 
 const generateRefreshToken=async(authCode,redirectUri)=>{
+    console.log(authCode)
+    console.log(redirectUri)
     if (!authCode) {
         logger.error("Authorization code is missing");
         throw new ApiError(400, "Authorization code is required");
@@ -23,6 +25,7 @@ const generateRefreshToken=async(authCode,redirectUri)=>{
 
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
+
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
@@ -47,7 +50,7 @@ const generateRefreshToken=async(authCode,redirectUri)=>{
                 timeout: 30000 // 30 second timeout
             }
         );
-
+        console.log(response.data)
         // Validate response
         if (!response.data || !response.data.refresh_token) {
             logger.error("Invalid token response from Amazon", response.data);
