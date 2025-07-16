@@ -9,6 +9,7 @@ import { setHistoryInfo } from '../redux/slices/HistorySlice.js';
 import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js';
 import analyseData from '../operations/analyse.js';
+import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js';
 import axiosInstance from '../config/axios.config.js';
 import Loader from '../Components/Loader/Loader.jsx';
 
@@ -94,22 +95,35 @@ const ProtectedRouteWrapper = ({ children }) => {
         // Check if component is still mounted
         if (!isMountedRef.current) return;
 
+        console.log("=== ProtectedRouteWrapper: Data fetch response ===");
+        console.log("Response status:", response?.status);
+        console.log("Response data:", response?.data);
+
         // Handle different response scenarios gracefully
-        if (response?.status === 200 && response.data?.data) {
-          hasAnyData = true;
-          
-          // Set available data even if some parts are missing
-          if (response.data.data.AllSellerAccounts) {
+        if (response?.status === 200) {
+          // Set available account and brand data if present
+          if (response.data?.data?.AllSellerAccounts) {
             dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
           }
           
-          if (response.data.data.Brand) {
+          if (response.data?.data?.Brand) {
             dispatch(addBrand(response.data.data.Brand));
           }
           
-          // Process dashboard data even if incomplete
+          // Process dashboard data - analyseData will now handle empty data gracefully
           try {
-            dashboardData = analyseData(response.data.data).dashboardData;
+            dashboardData = analyseData(response.data?.data || {}).dashboardData;
+            
+            // Check if we got empty data or actual data
+            if (isEmptyDashboardData(dashboardData)) {
+              console.log("⚠️ Account has no data available - showing zero data instead of error");
+              hasAnyData = false; // This will be used for loader logic but not redirect
+            } else {
+              console.log("✅ Account has data available");
+              hasAnyData = true;
+            }
+            
+            // Always dispatch the dashboard data (either real data or empty structure)
             dispatch(setDashboardInfo(dashboardData));
             
             // Dispatch error details if available
@@ -127,15 +141,33 @@ const ProtectedRouteWrapper = ({ children }) => {
             }
           } catch (analyseError) {
             console.error("❌ Error processing dashboard data:", analyseError);
-            // Still continue with partial data
+            // Create default data structure if analysis fails
+            console.log("⚠️ Analysis failed - providing default empty data structure");
+            dashboardData = createDefaultDashboardData();
+            dispatch(setDashboardInfo(dashboardData));
+            hasAnyData = false;
           }
         } else if (response?.status && response.status !== 200) {
           console.warn(`⚠️ Non-200 response: ${response.status}`);
-          // Only redirect to error page if it's a critical error and no data is available
-          if (response.status >= 500 && !hasAnyData) {
+          // For accounts with no data, don't redirect to error page
+          // Instead, provide empty data structure
+          if (response.status === 404 || response.status === 204) {
+            console.log("⚠️ Account not found or no content - providing empty data structure");
+            dashboardData = createDefaultDashboardData();
+            dispatch(setDashboardInfo(dashboardData));
+            hasAnyData = false;
+          } else if (response.status >= 500) {
+            // Only redirect for server errors (not data availability issues)
+            console.error("❌ Server error detected, redirecting to error page");
             navigate(`/error/${response.status}`);
             return;
           }
+        } else {
+          // No response or invalid response - provide empty data
+          console.log("⚠️ No valid response - providing empty data structure");
+          dashboardData = createDefaultDashboardData();
+          dispatch(setDashboardInfo(dashboardData));
+          hasAnyData = false;
         }
 
         // Try to fetch history data independently
@@ -230,18 +262,31 @@ const ProtectedRouteWrapper = ({ children }) => {
           // Continue without history data
         }
 
-        // Only redirect to error page if absolutely no data is available
-        if (!hasAnyData && !dashboardData) {
-          console.error("❌ No data available, redirecting to error page");
-          navigate("/error/500");
+        // Don't redirect to error page for accounts with no data
+        // The dashboard components will handle displaying zero data gracefully
+        if (!dashboardData) {
+          console.log("⚠️ No dashboard data structure available - creating default empty structure");
+          dashboardData = createDefaultDashboardData();
+          dispatch(setDashboardInfo(dashboardData));
         }
 
       } catch (error) {
         console.error("❌ Data fetch failed:", error);
         
-        // Only redirect to error page if we have no data at all
-        if (!hasAnyData && isMountedRef.current) {
-          navigate("/error/500");
+        // Check if component is still mounted
+        if (!isMountedRef.current) return;
+        
+        // Create default data structure instead of redirecting to error page
+        // This ensures accounts with no data can still access the dashboard
+        console.log("⚠️ Data fetch error - providing default empty data structure instead of error page");
+        dashboardData = createDefaultDashboardData();
+        dispatch(setDashboardInfo(dashboardData));
+        hasAnyData = false;
+        
+        // Only redirect for critical authentication errors (not data availability)
+        if (error.response?.status === 401) {
+          console.error("❌ Authentication error, redirecting to login");
+          navigate("/");
         }
       }
     };
@@ -249,9 +294,9 @@ const ProtectedRouteWrapper = ({ children }) => {
     checkAuthAndFetchData();
   }, []); // Empty dependency array to run only once on mount
 
-  // Hide loader and show children immediately
+  // Hide loader when authentication is complete and we have dashboard data (even if empty)
   useEffect(() => {
-    if (authChecked && info && Object.keys(info).length > 0) {
+    if (authChecked && info) {
       const timer = setTimeout(() => {
         if (isMountedRef.current) {
           setShowLoader(false);

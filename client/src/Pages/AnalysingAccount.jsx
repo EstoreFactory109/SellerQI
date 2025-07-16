@@ -8,6 +8,7 @@ import { setDashboardInfo } from '../redux/slices/DashboardSlice.js'
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js'
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js'
 import analyseData from "../operations/analyse.js"
+import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js'
 
 
 const AnalysingAccount = () => {
@@ -53,14 +54,26 @@ const AnalysingAccount = () => {
                         `${import.meta.env.VITE_BASE_URI}/app/analyse/getData`, { withCredentials: true }
                     );
                     
-                    if (response && response.status === 200 && response.data?.data) {
-                        console.log("✅ Raw API Response:", response.data.data);
-                        hasAnyData = true;
-
-                        // Process dashboard data with error handling
+                    console.log("=== AnalysingAccount: Data fetch response ===");
+                    console.log("Response status:", response?.status);
+                    console.log("Response data:", response?.data);
+                    
+                    if (response && response.status === 200) {
+                        // Process dashboard data - analyseData will handle empty data gracefully
                         try {
-                            dashboardData = analyseData(response.data.data).dashboardData;
-                            console.log(dashboardData);
+                            dashboardData = analyseData(response.data?.data || {}).dashboardData;
+                            console.log("Dashboard data processed:", dashboardData);
+                            
+                            // Check if we got empty data or actual data
+                            if (isEmptyDashboardData(dashboardData)) {
+                                console.log("⚠️ Account has no data available - will show zero data instead of error");
+                                hasAnyData = false;
+                            } else {
+                                console.log("✅ Account has data available");
+                                hasAnyData = true;
+                            }
+                            
+                            // Always dispatch the dashboard data (either real data or empty structure)
                             dispatch(setDashboardInfo(dashboardData));
                             
                             // Dispatch error details if available
@@ -78,13 +91,30 @@ const AnalysingAccount = () => {
                             }
                         } catch (analyseError) {
                             console.error("❌ Error processing dashboard data:", analyseError);
-                            // Continue with partial data
+                            // Create default data structure if analysis fails
+                            console.log("⚠️ Analysis failed - providing default empty data structure");
+                            dashboardData = createDefaultDashboardData();
+                            dispatch(setDashboardInfo(dashboardData));
+                            hasAnyData = false;
                         }
+                    } else if (response?.status === 404 || response?.status === 204) {
+                        console.log("⚠️ Account not found or no content - providing empty data structure");
+                        dashboardData = createDefaultDashboardData();
+                        dispatch(setDashboardInfo(dashboardData));
+                        hasAnyData = false;
                     } else {
                         console.warn("⚠️ Analysis data not available or invalid response");
+                        dashboardData = createDefaultDashboardData();
+                        dispatch(setDashboardInfo(dashboardData));
+                        hasAnyData = false;
                     }
                 } catch (analysisError) {
                     console.error("❌ Analysis data fetch failed:", analysisError);
+                    // Create default data structure instead of failing
+                    console.log("⚠️ Data fetch error - providing default empty data structure");
+                    dashboardData = createDefaultDashboardData();
+                    dispatch(setDashboardInfo(dashboardData));
+                    hasAnyData = false;
                 }
 
                 // Try to create account history only if we have dashboard data
@@ -145,19 +175,28 @@ const AnalysingAccount = () => {
                     }
                 }
 
-                // Navigate to dashboard even if some data is missing
-                if (hasAnyData) {
-                    navigate("/seller-central-checker/dashboard");
-                } else {
-                    console.error("❌ No data available, redirecting to error page");
-                    navigate("/error/500");
-                }
+                // Always navigate to dashboard - it will handle displaying zero data gracefully
+                console.log("✅ Navigating to dashboard...");
+                navigate("/seller-central-checker/dashboard");
 
             } catch (error) {
                 console.error("❌ Critical error while fetching data:", error);
-                // Only redirect to error page if we have no data at all
-                if (!hasAnyData) {
-                    navigate("/error/500");
+                
+                // Create default data structure and navigate to dashboard even on error
+                // This ensures accounts with no data can still access the dashboard
+                if (!dashboardData) {
+                    console.log("⚠️ Critical error - providing default empty data structure");
+                    dashboardData = createDefaultDashboardData();
+                    dispatch(setDashboardInfo(dashboardData));
+                }
+                
+                // Only redirect for authentication errors (not data availability)
+                if (error.response?.status === 401) {
+                    console.error("❌ Authentication error, redirecting to login");
+                    navigate("/");
+                } else {
+                    console.log("✅ Navigating to dashboard with empty data after error");
+                    navigate("/seller-central-checker/dashboard");
                 }
             }
         })();

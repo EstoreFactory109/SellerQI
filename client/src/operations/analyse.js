@@ -1,6 +1,7 @@
 import Profitiblity from "./Profitiblity";
 import calculateSponsoredAdsMetrics from "./sponserdAds";
 import {calculateNegativeKeywordsMetrics} from "./sponserdAds";
+import { createDefaultDashboardData, mergeWithDefaults } from "../utils/defaultDataStructure";
 
 // Function to calculate date-wise total costs from PPC spend data
 const calculateDateWiseTotalCosts = (dateWisePPCData) => {
@@ -127,7 +128,38 @@ const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMe
 };
 
 const analyseData = (data) => {
+    console.log("=== analyseData: Processing data ===");
+    console.log("Input data:", data);
 
+    // Check if we have any meaningful data
+    const hasValidData = data && (
+        (Array.isArray(data.TotalProducts) && data.TotalProducts.length > 0) ||
+        (data.SalesByProducts && Array.isArray(data.SalesByProducts) && data.SalesByProducts.length > 0) ||
+        (data.ProductWiseSponsoredAds && Array.isArray(data.ProductWiseSponsoredAds) && data.ProductWiseSponsoredAds.length > 0) ||
+        (data.FinanceData && Object.keys(data.FinanceData).length > 0)
+    );
+
+    console.log("=== Data availability check ===");
+    console.log("Has valid data:", hasValidData);
+    console.log("TotalProducts length:", data?.TotalProducts?.length || 0);
+    console.log("SalesByProducts length:", data?.SalesByProducts?.length || 0);
+    console.log("ProductWiseSponsoredAds length:", data?.ProductWiseSponsoredAds?.length || 0);
+    console.log("FinanceData keys:", data?.FinanceData ? Object.keys(data.FinanceData).length : 0);
+
+    // If no meaningful data is available, return default empty data structure
+    if (!hasValidData) {
+        console.log("⚠️ No valid data found, returning default empty data structure");
+        const defaultData = createDefaultDashboardData();
+        // Preserve any available country or date information
+        if (data?.Country) defaultData.Country = data.Country;
+        if (data?.createdAccountDate) defaultData.createdAccountDate = data.createdAccountDate;
+        if (data?.startDate) defaultData.startDate = data.startDate;
+        if (data?.endDate) defaultData.endDate = data.endDate;
+        
+        return { dashboardData: defaultData };
+    }
+
+    console.log("✅ Valid data found, proceeding with analysis");
     console.log("data: ",data.GetDateWisePPCspendData)
     
     // Calculate and log date-wise total costs
@@ -564,9 +596,13 @@ const analyseData = (data) => {
         GetOrderData: data.GetOrderData || [],
         dateWiseTotalCosts: dateWiseTotalCosts,
         negetiveKeywords: data.negetiveKeywords || [],
-        AdsGroupData: data.AdsGroupData || []
+        AdsGroupData: data.AdsGroupData || [],
+        // Data availability flags
+        isEmptyData: false,
+        dataAvailabilityStatus: 'DATA_AVAILABLE'
     };
 
+    console.log("✅ Dashboard data processed successfully with", activeProducts.length, "active products");
     return { dashboardData };
 };
 
