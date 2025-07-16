@@ -12,7 +12,7 @@ const FetchingTokens = () => {
   const hasProcessed = useRef(false); // Prevent double processing
 
   // Extract 'code' and 'state' from URL
-  const authCode = searchParams.get("code");
+  const authCode = searchParams.get("spapi_oauth_code");
   const state = searchParams.get("state");
   const sellingPartnerId = searchParams.get("selling_partner_id"); // SP-API also returns this
 
