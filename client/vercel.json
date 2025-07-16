@@ -1,9 +1,15 @@
-
 {
-    "rewrites": [
-      {
-        "source": "/(.*)",
-        "destination": "/index.html"
-      }
-    ]
-  }
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "https://sellerqi.com",
+      "destination": "https://www.sellerqi.com",
+      "permanent": true
+    }
+  ]
+}
