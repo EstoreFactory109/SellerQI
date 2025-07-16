@@ -124,100 +124,48 @@ const addNewSellerCentralAccount=asyncHandler(async(req,res)=>{
 })
 
 
-const generateSPAPITokens = asyncHandler(async(req, res) => {
-    const { authCode, redirectUri } = req.body;
-    const userId = req.userId;
-    const region = req.region;
-    const country = req.country;
-    
-    // Validation
-    if (!region || !country) {
-        return res.status(400).json(
-            new ApiResponse(400, null, "Region and country are required")
-        );
+const generateSPAPITokens=asyncHandler(async(req,res)=>{
+    const {authCode,sellingPartnerId}=req.body;
+    const userId=req.userId;
+    const region=req.region;
+    const country=req.country;
+    if(!region || !country){
+        return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
+    }
+    if(!authCode){
+        return res.status(400).json({message:"Authorization code is missing"});
     }
     
-    if (!authCode) {
-        return res.status(400).json(
-            new ApiResponse(400, null, "Authorization code is required")
-        );
+    const {refreshToken}=await generateRefreshToken(authCode);
+    if(!refreshToken){
+        return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
     
-    if (!redirectUri) {
-        return res.status(400).json(
-            new ApiResponse(400, null, "Redirect URI is required")
-        );
+
+    const sellerCentral=await Seller.findOne({User:userId});
+    if(!sellerCentral){
+        return res.status(404).json(new ApiError(404,"SellerCentral not found"));
     }
+
+    sellerCentral.selling_partner_id=sellingPartnerId;
+
+    // Find the seller account that matches the current region and country
+    const sellerAccount = sellerCentral.sellerAccount.find(account => 
+        account.country === country && account.region === region
+    );
     
-    try {
-        // Generate tokens with both required parameters
-        const tokenData = await generateRefreshToken(authCode, redirectUri);
-        
-        if (!tokenData || !tokenData.refreshToken) {
-            return res.status(500).json(
-                new ApiResponse(500, null, "Failed to generate refresh token")
-            );
-        }
-        
-        // Find seller
-        const sellerCentral = await Seller.findOne({ User: userId });
-        
-        if (!sellerCentral) {
-            return res.status(404).json(
-                new ApiResponse(404, null, "Seller account not found")
-            );
-        }
-        
-        // Find the seller account for the region/country
-        const sellerAccountIndex = sellerCentral.sellerAccount.findIndex(
-            account => account.country === country && account.region === region
-        );
-        
-        if (sellerAccountIndex === -1) {
-            return res.status(404).json(
-                new ApiResponse(404, null, "Seller account not found for the specified region and country")
-            );
-        }
-        
-        // Update the seller account with tokens
-        sellerCentral.sellerAccount[sellerAccountIndex].spiRefreshToken = tokenData.refreshToken;
-        
-        // Optionally store access token and expiry
-        sellerCentral.sellerAccount[sellerAccountIndex].spiAccessToken = tokenData.accessToken;
-        sellerCentral.sellerAccount[sellerAccountIndex].tokenExpiresAt = new Date(
-            Date.now() + (tokenData.expiresIn * 1000)
-        );
-        
-        // Update sellerId at the account level (not global level)
-        if (tokenData.sellerId) {
-            sellerCentral.sellerAccount[sellerAccountIndex].sellerId = tokenData.sellerId;
-        }
-        
-        // Save changes
-        await sellerCentral.save();
-        
-        return res.status(200).json(
-            new ApiResponse(200, {
-                message: "Tokens generated and stored successfully",
-                sellerId: tokenData.sellerId,
-                region: region,
-                country: country
-            })
-        );
-        
-    } catch (error) {
-        logger.error(`Error in generateSPAPITokens: ${error.message}`);
-        
-        // Pass through ApiError if it's already formatted
-        if (error instanceof ApiError) {
-            return res.status(error.statusCode).json(error);
-        }
-        
-        return res.status(500).json(
-            new ApiResponse(500, null, "Failed to generate and store tokens")
-        );
+    if(!sellerAccount){
+        return res.status(404).json(new ApiError(404,"Seller account not found for the specified region and country"));
     }
-});
+
+    // Store the refresh token in the seller account
+    sellerAccount.spiRefreshToken = refreshToken;
+    
+    
+    
+    await sellerCentral.save();
+    return res.status(200).json(new ApiResponse(200,"","Tokens generated successfully"));
+})
 
 
 module.exports={generateSPAPITokens,SaveAllDetails,addNewSellerCentralAccount,saveDetailsOfOtherAccounts}

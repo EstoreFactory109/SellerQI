@@ -4,9 +4,8 @@ const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
 
-const generateRefreshToken=async(authCode,redirectUri)=>{
-    console.log(authCode)
-    console.log(redirectUri)
+const generateRefreshToken=async(authCode)=>{
+
     if (!authCode) {
         logger.error("Authorization code is missing");
         throw new ApiError(400, "Authorization code is required");
@@ -36,7 +35,7 @@ const generateRefreshToken=async(authCode,redirectUri)=>{
             code: authCode,
             client_id: clientId,
             client_secret: clientSecret,
-            redirect_uri: redirectUri  // CRITICAL: This was missing!
+            redirect_uri: "https://www.sellerqi.com/auth/callback"  // CRITICAL: This was missing!
         };
 
         const response = await axios.post(
@@ -59,12 +58,7 @@ const generateRefreshToken=async(authCode,redirectUri)=>{
 
         // Extract all tokens and metadata
         const tokenData = {
-            refreshToken: response.data.refresh_token,
-            accessToken: response.data.access_token,
-            tokenType: response.data.token_type || "Bearer",
-            expiresIn: response.data.expires_in || 3600, // Usually 1 hour
-            scope: response.data.scope,
-            sellerId: response.data.seller_id // May not always be present
+            refreshToken: response.data.refresh_token
         };
 
         logger.info(`Successfully obtained tokens for seller: ${tokenData.sellerId || 'unknown'}`);
