@@ -38,7 +38,7 @@ const AmazonConnect = () => {
       setLoading(false);
       throw new Error(error)
     }
-  }
+  }     //handleSubmit
 
   return (
     <div className="w-screen h-screen flex font-roboto">
