@@ -7,7 +7,7 @@
   ],
   "redirects": [
       {
-          "source": "/",
+          "source": "https://sellerqi.com",
           "destination": "https://www.sellerqi.com",
           "permanent": true
       }
