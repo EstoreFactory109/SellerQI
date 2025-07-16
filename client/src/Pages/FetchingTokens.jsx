@@ -34,11 +34,11 @@ const FetchingTokens = () => {
         console.error("Missing required parameters: authCode or state");
         setError("Invalid authorization response from Amazon");
         // Give user time to see the error before redirecting
-        setTimeout(() => {
+        /*setTimeout(() => {
           navigate('/seller-central-checker/auth-error', { 
             state: { error: 'Missing authorization parameters' } 
           });
-        }, 2000);
+        }, 2000);*/
         return;
       }
 
@@ -78,13 +78,7 @@ const FetchingTokens = () => {
           }
           
           // Navigate to dashboard with success message
-          navigate('/connect-accounts', {
-            state: { 
-              success: true, 
-              message: 'Successfully connected to Amazon Seller Central',
-              sellerId: response.data.sellerId
-            }
-          });
+         console.log(response.data)
         }
       } catch (error) {
         console.error("Error generating tokens:", error);
@@ -120,7 +114,7 @@ const FetchingTokens = () => {
         }
         
         setError(errorMessage);
-        
+      /*  
         // Navigate to error page with context
         setTimeout(() => {
           navigate('/seller-central-checker/auth-error', {
@@ -131,6 +125,7 @@ const FetchingTokens = () => {
             }
           });
         }, 2000);
+        */
       }
     };
 
