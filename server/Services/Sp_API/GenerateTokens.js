@@ -19,7 +19,7 @@ const axios=require('axios');
 
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
-    const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
+    const redirectUri = "https://www.sellerqi.com/auth/result"; // Define redirect URI
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
