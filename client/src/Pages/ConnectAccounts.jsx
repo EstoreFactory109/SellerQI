@@ -66,18 +66,36 @@ const ConnectAccounts = () => {
     setErrorMessage('');
     setSuccessMessage('');
     
+    
     try {
-      // TODO: Implement Amazon Ads connection logic
-      // This would typically redirect to Amazon Ads authorization flow
+      // Get the application ID from environment variable
+      const applicationId = import.meta.env.VITE_APP_ID;
+  
+      if (!applicationId) {
+        throw new Error('Application ID not configured. Please check environment variables.');
+      }
+  
+      // Construct the Amazon authorization URL
+      const redirectUri = `${window.location.origin}/auth/callback`;
+      const state = crypto.randomUUID(); // More secure random state string
+  
+      const amazonAuthUrl = new URL('https://sellercentral.amazon.com/apps/authorize/consent');
+      amazonAuthUrl.searchParams.append('application_id', applicationId);
+      amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
+      amazonAuthUrl.searchParams.append('state', state);
+      amazonAuthUrl.searchParams.append('version', 'beta'); // Double-check if this is necessary
+  
+      setSuccessMessage('Redirecting to Amazon Seller Central authorization...');
+  
+      // Redirect to Amazon authorization page
       setTimeout(() => {
-        setAmazonAdsLoading(false);
-        setSuccessMessage('Redirecting to Amazon Ads authorization...');
-        // Example redirect (replace with actual authorization URL)
-        // window.location.href = 'https://advertising.amazon.com/API/docs/en-us/setting-up/generate-api-tokens';
-      }, 1500);
+        window.location.href = amazonAuthUrl.toString();
+      }, 1000);
+      
     } catch (error) {
-      setAmazonAdsLoading(false);
-      setErrorMessage('Failed to connect to Amazon Ads. Please try again.');
+      setSellerCentralLoading(false);
+      setErrorMessage(error.message || 'Failed to connect to Seller Central. Please try again.');
+      console.error('Amazon authorization error:', error);
     }
   };
 
