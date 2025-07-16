@@ -192,7 +192,7 @@ const AnalysingAccount = () => {
                         Please Wait
                     </motion.p>
                 )}
-            </div>
+            </div>//div
         </div>
     );
 };
