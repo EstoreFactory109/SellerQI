@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Right from "../Components/Forms/Right";
 import axios from 'axios'
 import BeatLoader from "react-spinners/BeatLoader";
@@ -7,6 +8,7 @@ const AmazonConnect = () => {
   const [marketPlace, setMarketPlace] = useState("");
   const [region, setRegion] = useState("");
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
   const handleMarketPlaceChange = (e) => {
     setMarketPlace(e.target.value);
     console.log("Selected Marketplace:", e.target.value);
@@ -26,11 +28,10 @@ const AmazonConnect = () => {
         country: marketPlace
       }, { withCredentials: true });
 
-      //Here will be the redirection logic
-
+      //Redirect to connect accounts page after successful data saving
       if (response.status === 201) {
         setLoading(false);
-       
+        navigate('/connect-accounts');
       }
 
     } catch (error) {

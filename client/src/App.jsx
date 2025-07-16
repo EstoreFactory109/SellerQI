@@ -41,6 +41,7 @@ import Advertisement from './Pages/advertisement.jsx';
 import Features from './Pages/features.jsx';
 import InventoryManagement from './Pages/inventoryManagement.jsx';
 import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
+import ConnectAccounts from './Pages/ConnectAccounts.jsx';
 
 const App = () => {
 
@@ -59,6 +60,7 @@ const App = () => {
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
+        <Route path='/connect-accounts' element={<ConnectAccounts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />

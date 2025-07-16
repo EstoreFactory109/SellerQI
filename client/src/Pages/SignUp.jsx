@@ -112,10 +112,25 @@ const SignUp = () => {
         const response = await googleAuthService.handleGoogleSignUp();
         
         if (response.status === 200) {
-            // Existing user logging in through signup page - redirect to connect Amazon
             dispatch(loginSuccess(response.data));
             localStorage.setItem("isAuth", true);
-            navigate("/connect-to-amazon");
+            
+            // Check subscription status before redirecting
+            try {
+                const subscriptionStatus = await stripeService.getSubscriptionStatus();
+                
+                if (subscriptionStatus.hasSubscription) {
+                    // User has a subscription, redirect to dashboard
+                    window.location.href = "/seller-central-checker/dashboard";
+                } else {
+                    // No subscription, redirect to pricing page
+                    navigate("/pricing");
+                }
+            } catch (error) {
+                console.error('Error checking subscription status:', error);
+                // If subscription check fails, default to pricing page
+                navigate("/pricing");
+            }
         } else if (response.status === 201) {
             // New user registered, redirect to connect Amazon
             dispatch(loginSuccess(response.data));
@@ -137,9 +152,6 @@ const SignUp = () => {
     }
     
     // TODO: Implement Amazon signup functionality
-    // When implemented, ensure it redirects to connect-to-amazon after successful signup:
-    // navigate("/connect-to-amazon");
-    
     // For now, show a message that this feature is coming soon
     setErrorMessage('Amazon signup is coming soon. Please use email signup or Google signup for now.');
   };

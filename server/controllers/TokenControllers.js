@@ -7,7 +7,7 @@ const asyncHandler = require('../utils/AsyncHandler');
 const {createLocationToken}=require('../utils/Tokens.js');
 const logger = require('../utils/Logger.js');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
-
+const {v4:uuidv4}=require('uuid');
 
 const SaveAllDetails=asyncHandler(async(req,res)=>{
     const {region,country}=req.body;
@@ -28,7 +28,7 @@ const SaveAllDetails=asyncHandler(async(req,res)=>{
         region:region,
         
     }
-    const createSellerCentral=await Seller.create({User:userId,selling_partner_id:"",sellerAccount:sellerCentral});
+    const createSellerCentral=await Seller.create({User:userId,selling_partner_id:uuidv4(),sellerAccount:sellerCentral});
     if(!createSellerCentral){
         logger.error(new ApiError(500,"Error in creating sellercentral"));
         return res.status(500).json(new ApiResponse(500,"","Error in creating sellercentral"));
@@ -90,8 +90,9 @@ const saveDetailsOfOtherAccounts=asyncHandler(async(req,res)=>{
     .json(new ApiResponse(201,"","New account added successfully"));
 })
 
-const addNewAccount=asyncHandler(async(req,res)=>{
-    const {region,country}=req.body;
+const addNewSellerCentralAccount=asyncHandler(async(req,res)=>{
+    const region=req.region;
+    const country=req.country;
     const userId=req.userId;
     if(!country || !region){
         return res.status(400).json(new ApiResponse(400,"","Credentials are missing"));
@@ -124,30 +125,48 @@ const addNewAccount=asyncHandler(async(req,res)=>{
 
 
 const generateSPAPITokens=asyncHandler(async(req,res)=>{
-    const {authCode,sellerId}=req.body;
+    const {authCode}=req.body;
     const userId=req.userId;
-    if(!authCode || !sellerId){
-        return res.status(400).json({message:"Code is missing"});
+    const region=req.region;
+    const country=req.country;
+    if(!region || !country){
+        return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
+    }
+    if(!authCode){
+        return res.status(400).json({message:"Authorization code is missing"});
     }
     
-    const Refreshtoken=await generateRefreshToken(userId,authCode);
-    if(!Refreshtoken){
+    const {refreshToken,sellerId}=await generateRefreshToken(authCode);
+    if(!refreshToken){
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
-    const AccessToken=await generateAccessToken(userId,Refreshtoken);
-    if(!AccessToken){
-        return res.status(500).json(new ApiError(500,"Internal server error in generating access token"));
-    }
+    
 
     const sellerCentral=await Seller.findOne({User:userId});
     if(!sellerCentral){
         return res.status(404).json(new ApiError(404,"SellerCentral not found"));
     }
 
-    sellerCentral.selling_partner_id=sellerId;
-    await sellerCentral.save()
+    // Find the seller account that matches the current region and country
+    const sellerAccount = sellerCentral.sellerAccount.find(account => 
+        account.country === country && account.region === region
+    );
+    
+    if(!sellerAccount){
+        return res.status(404).json(new ApiError(404,"Seller account not found for the specified region and country"));
+    }
+
+    // Store the refresh token in the seller account
+    sellerAccount.spiRefreshToken = refreshToken;
+    
+    // Update sellerId if provided
+    if(sellerId){
+        sellerCentral.selling_partner_id=sellerId;
+    }
+    
+    await sellerCentral.save();
     return res.status(200).json(new ApiResponse(200,"","Tokens generated successfully"));
 })
 
 
-module.exports={generateSPAPITokens,SaveAllDetails,addNewAccount,saveDetailsOfOtherAccounts}
+module.exports={generateSPAPITokens,SaveAllDetails,addNewSellerCentralAccount,saveDetailsOfOtherAccounts}

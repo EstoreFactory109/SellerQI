@@ -1,39 +1,58 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import HashLoader from "react-spinners/HashLoader";
-import axios from "axios";
-import { useNavigate,useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import axiosInstance from "../config/axios.config";
 
 const FetchingTokens = () => {
   const [showAccessText, setShowAccessText] = useState(true);
- 
-  const navigate = useNavigate(); // Add useNavigate hook
-  const [searcParams]=useSearchParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Extract 'code' and 'state' from URL
+  const authCode = searchParams.get("code");
+  const state = searchParams.get("state");
 
   useEffect(() => {
     // Toggle between "Getting Access..." and "Please Wait"
     const interval = setInterval(() => {
-      setShowAccessText(prev => !prev);
+      setShowAccessText((prev) => !prev);
     }, 2000); // Switch text every 2 seconds
 
     return () => clearInterval(interval); // Cleanup on unmount
   }, []);
 
-  useEffect(()=>{
-    const payload=searcParams.get("payload");
-    (async()=>{
-      try {
-        const response=await axios.get(`${import.meta.env.VITE_BASE_URI}/app/token/generateSPAPITokens/${payload}`, { withCredentials: true });
-      if(response.status===200){
-        navigate("/failure"); //Or some failure route.
-        
+  useEffect(() => {
+    const generateTokens = async () => {
+      if (authCode && state) {
+        try {
+          console.log("Authorization Code (authCode):", authCode);
+          console.log("State Parameter:", state);
+          
+          // Send the authorization code to the backend
+          const response = await axiosInstance.post('/app/token/generateSPAPITokens', {
+            authCode: authCode
+          });
+          
+          if (response.status === 200) {
+            console.log("Tokens generated successfully");
+            // Navigate to dashboard or appropriate page after successful token generation
+            navigate('/seller-central-checker/dashboard');
+          }
+        } catch (error) {
+          console.error("Error generating tokens:", error);
+          // Navigate to error page or show error message
+          navigate('/error/500');
+        }
+      } else {
+        // Redirect to failure route if codes are missing
+        console.log("Failed to fetch tokens - missing authorization code or state");
+        navigate('/error/400');
       }
-      } catch (error) {
-        throw new error
-      }
-      
-    })()
-  })
+    };
+
+    generateTokens();
+  }, [authCode, state, navigate]);
 
   return (
     <div className="w-full h-[100vh] flex flex-col justify-center items-center">
@@ -50,7 +69,7 @@ const FetchingTokens = () => {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.8 }}
           >
-            Getting Access...
+            Generating Tokens...
           </motion.p>
         ) : (
           <motion.p

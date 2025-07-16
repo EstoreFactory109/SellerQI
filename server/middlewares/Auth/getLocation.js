@@ -20,7 +20,7 @@ const getLocation=asyncHandler(async(req,res,next)=>{
     }
 
     if(decoded){
-        req.country="US";
+        req.country=decoded.country;
         req.region=decoded.region;
         next();
     }else{
