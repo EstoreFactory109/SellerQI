@@ -1,11 +1,17 @@
 // Utility to generate a secure random key for encryption
-// Run this script to generate a new key: node generateSecureKey.js
+// This is a browser-compatible version
 
-const crypto = require('crypto');
-
-// Generate a secure random key
+// Generate a secure random key using Web Crypto API
 function generateSecureKey(length = 64) {
-  return crypto.randomBytes(length).toString('base64');
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint8Array(length);
+    window.crypto.getRandomValues(array);
+    return btoa(String.fromCharCode.apply(null, array));
+  } else {
+    // Fallback for environments without Web Crypto API
+    console.warn('Web Crypto API not available, using fallback');
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
 }
 
 // Generate multiple key options

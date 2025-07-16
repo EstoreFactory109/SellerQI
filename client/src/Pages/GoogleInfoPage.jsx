@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle, Shield, Database, Users } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useDispatch } from "react-redux";
+import { loginSuccess } from "../redux/slices/authSlice.js";
+import googleAuthService from "../services/googleAuthService.js";
+import stripeService from "../services/stripeService.js";
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
