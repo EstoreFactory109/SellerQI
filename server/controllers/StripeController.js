@@ -334,5 +334,8 @@ module.exports = {
     getSubscriptionStatus,
     cancelSubscription,
     reactivateSubscription,
-    updateSubscriptionPlan
+    updateSubscriptionPlan,
+    getInvoicePreview,
+    getPaymentMethods,
+    getInvoices
 };
