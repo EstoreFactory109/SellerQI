@@ -19,13 +19,13 @@ const axios=require('axios');
 
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
-    const redirectUri = "https://www.sellerqi.com/auth/result"; // Define redirect URI
+    const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
         
         // Build token request parameters according to Amazon's API spec
-        const tokenParams = {
+        const body = {
             grant_type: 'authorization_code',  // CRITICAL: This was missing!
             code: authCode,
             redirect_uri: redirectUri,
@@ -38,7 +38,7 @@ const axios=require('axios');
 
         const response = await axios.post(
             "https://api.amazon.com/auth/o2/token",
-            new URLSearchParams(tokenParams),
+            body,
             {
                 headers: { 
                     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
