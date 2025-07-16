@@ -92,7 +92,7 @@ const generateRefreshToken=async(authCode,state)=>{
         
         // Network or other errors
         logger.error(`Token exchange error: ${error.message}`);
-        throw new ApiError(500, "Failed to connect to Amazon authorization server");
+        throw new ApiError(500, error);
     }
 }
 
