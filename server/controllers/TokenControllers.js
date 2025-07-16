@@ -1,6 +1,6 @@
 const User = require('../models/userModel.js');
 const Seller=require('../models/sellerCentralModel.js')
-const {generateRefreshToken,generateAccessToken}=require('../Services/Sp_API/GenerateTokens');
+const {generateRefreshToken,generateAdsRefreshToken}=require('../Services/Sp_API/GenerateTokens');
 const { ApiError } = require('../utils/ApiError');
 const { ApiResponse } = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/AsyncHandler');
@@ -167,5 +167,47 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
     return res.status(200).json(new ApiResponse(200,sellerAccount,"Tokens generated successfully"));
 })
 
+const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
+    const {authCode}=req.body;
+    const userId=req.userId;
+    const region=req.region;
+    const country=req.country;
+    if(!region || !country){
+        return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
+    }
+    if(!authCode){
+        return res.status(400).json({message:"Authorization code, selling partner id and state are missing"});
+    }
+    
+    const {refreshToken}=await generateAdsRefreshToken(authCode);
+    if(!refreshToken){
+        return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
+    }
+    
 
-module.exports={generateSPAPITokens,SaveAllDetails,addNewSellerCentralAccount,saveDetailsOfOtherAccounts}
+    const sellerCentral=await Seller.findOne({User:userId});
+    if(!sellerCentral){
+        return res.status(404).json(new ApiError(404,"SellerCentral not found"));
+    }
+
+
+    // Find the seller account that matches the current region and country
+    const sellerAccount = sellerCentral.sellerAccount.find(account => 
+        account.country === country && account.region === region
+    );
+    
+    if(!sellerAccount){
+        return res.status(404).json(new ApiError(404,"Seller account not found for the specified region and country"));
+    }
+
+    // Store the refresh token in the seller account
+    sellerAccount.adsRefreshToken = refreshToken;
+    
+    
+    
+    await sellerCentral.save();
+    return res.status(200).json(new ApiResponse(200,sellerAccount,"Tokens generated successfully"));
+})
+
+
+module.exports={generateSPAPITokens,SaveAllDetails,addNewSellerCentralAccount,saveDetailsOfOtherAccounts,generateAmazonAdsTokens}

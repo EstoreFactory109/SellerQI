@@ -15,6 +15,8 @@ const FetchingTokens = () => {
   const authCode = searchParams.get("spapi_oauth_code");
   const state = searchParams.get("state");
   const sellingPartnerId = searchParams.get("selling_partner_id"); // SP-API also returns this
+  const amazonAdsAuthCode = searchParams.get("code");
+
 
   useEffect(() => {
     // Toggle between "Getting Access..." and "Please Wait"
@@ -34,11 +36,11 @@ const FetchingTokens = () => {
         console.error("Missing required parameters: authCode or state");
         setError("Invalid authorization response from Amazon");
         // Give user time to see the error before redirecting
-        /*setTimeout(() => {
+        setTimeout(() => {
           navigate('/seller-central-checker/auth-error', { 
             state: { error: 'Missing authorization parameters' } 
           });
-        }, 2000);*/
+        }, 2000);
         return;
       }
 
@@ -78,7 +80,7 @@ const FetchingTokens = () => {
           }
           
           // Navigate to dashboard with success message
-         console.log(response.data)
+         navigate('/connect-accounts')
         }
       } catch (error) {
         console.error("Error generating tokens:", error);
@@ -114,7 +116,7 @@ const FetchingTokens = () => {
         }
         
         setError(errorMessage);
-      /*  
+       
         // Navigate to error page with context
         setTimeout(() => {
           navigate('/seller-central-checker/auth-error', {
@@ -125,11 +127,106 @@ const FetchingTokens = () => {
             }
           });
         }, 2000);
-        */
+        
       }
     };
 
-    generateTokens();
+    const generateAmazonAdsTokens = async () => {
+      if (hasProcessed.current) return;
+      
+      if (!amazonAdsAuthCode) {
+        console.error("Missing required parameters: authCode ");
+        setError("Invalid authorization response from Amazon");
+        // Give user time to see the error before redirecting
+        setTimeout(() => {
+          navigate('/seller-central-checker/auth-error', { 
+            state: { error: 'Missing authorization parameters' } 
+          });
+        }, 2000);
+        return;
+      }
+
+      hasProcessed.current = true;
+
+      try {
+        console.log("Processing SP-API authorization callback...");
+        console.log("Authorization Code:", authCode);
+        console.log("State Parameter:", state);
+        
+
+        // Validate state parameter (should match what was sent initially)
+        
+        
+        // Send the authorization code and state to the backend
+        const response = await axiosInstance.post('/app/token/generateAdsTokens', {
+          code: amazonAdsAuthCode,
+        });
+        
+        if (response.status === 200 && response.data) {
+          console.log("Tokens generated successfully");
+          
+          // Store any necessary data from the response
+          if (response.data.sellerId) {
+            sessionStorage.setItem('sp_seller_id', response.data.sellerId);
+          }
+          
+          // Navigate to dashboard with success message
+         navigate('/analyse-account')
+        }
+      } catch (error) {
+        console.error("Error generating tokens:", error);
+        
+        let errorMessage = "Failed to connect to Amazon Seller Central";
+        let errorCode = 500;
+        
+        // Handle specific error cases
+        if (error.response) {
+          errorCode = error.response.status;
+          
+          switch (errorCode) {
+            case 400:
+              errorMessage = error.response.data?.message || "Invalid authorization code";
+              break;
+            case 401:
+              errorMessage = "Authorization failed - please try again";
+              break;
+            case 409:
+              errorMessage = "This seller account is already connected";
+              break;
+            case 422:
+              errorMessage = "Invalid request parameters";
+              break;
+            case 429:
+              errorMessage = "Too many requests - please try again later";
+              break;
+            default:
+              errorMessage = error.response.data?.message || errorMessage;
+          }
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        setError(errorMessage);
+       
+        // Navigate to error page with context
+        setTimeout(() => {
+          navigate('/seller-central-checker/auth-error', {
+            state: { 
+              error: errorMessage,
+              errorCode: errorCode,
+              canRetry: errorCode !== 409 // Don't retry if already connected
+            }
+          });
+        }, 2000);
+        
+      }
+    }
+
+    if (localStorage.getItem('amazonAdsLoading') === 'true') {
+      generateAmazonAdsTokens();
+    } else {
+      generateTokens();
+    }
   }, [authCode, state, sellingPartnerId, navigate]);
 
   return (

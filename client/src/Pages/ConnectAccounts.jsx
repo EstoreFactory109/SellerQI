@@ -26,7 +26,8 @@ const ConnectAccounts = () => {
     setErrorMessage('');
     setSuccessMessage('');
 
-    
+    localStorage.setItem('sellerCentralLoading', 'true');
+    localStorage.setItem('amazonAdsLoading', 'false');
   
     try {
       // Get the application ID from environment variable
@@ -65,7 +66,9 @@ const ConnectAccounts = () => {
     setAmazonAdsLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
-    
+
+    localStorage.setItem('sellerCentralLoading', 'false');
+    localStorage.setItem('amazonAdsLoading', 'true');
     
     try {
       // Get the application ID from environment variable
@@ -79,13 +82,10 @@ const ConnectAccounts = () => {
       const redirectUri = `${window.location.origin}/auth/callback`;
       const state = crypto.randomUUID(); // More secure random state string
   
-      const amazonAuthUrl = new URL('https://apac.account.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93&scope=advertising::campaign_management&response_type=code&redirect_uri=https://www.sellerqi.com/auth/callback');
-      amazonAuthUrl.searchParams.append('application_id', applicationId);
-      amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
-      amazonAuthUrl.searchParams.append('state', state);
-      amazonAuthUrl.searchParams.append('version', 'beta'); // Double-check if this is necessary
+      const amazonAuthUrl = new URL('https://na.account.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93&redirect_uri=https%3A%2F%2Fwww.sellerqi.com%2Fauth%2Fcallback&response_type=code&scope=advertising%3A%3Acampaign_management&state=random-state-string');
+
   
-      setSuccessMessage('Redirecting to Amazon Seller Central authorization...');
+      setSuccessMessage('Redirecting to Amazon ads authorization...');
   
       // Redirect to Amazon authorization page
       setTimeout(() => {
