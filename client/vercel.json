@@ -4,12 +4,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "https://www.sellerqi.com",
-      "permanent": true
-    }
   ]
 }

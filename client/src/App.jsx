@@ -60,8 +60,8 @@ const App = () => {
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
-        <Route path='/connect-accounts' element={<ConnectAccounts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
+        <Route path='/connect-accounts' element={<ConnectAccounts />} />
         <Route path='auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />

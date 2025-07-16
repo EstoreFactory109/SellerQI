@@ -25,6 +25,8 @@ const ConnectAccounts = () => {
     setSellerCentralLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
+
+    
   
     try {
       // Get the application ID from environment variable
