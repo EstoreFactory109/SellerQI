@@ -4,7 +4,7 @@ const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
 
-const generateRefreshToken=async(authCode)=>{
+const generateRefreshToken=async(authCode,state)=>{
 
     if (!authCode) {
         logger.error("Authorization code is missing");
@@ -31,7 +31,7 @@ const generateRefreshToken=async(authCode)=>{
         
         // IMPORTANT: redirect_uri MUST be included and match exactly
         const tokenParams = {
-            grant_type: "authorization_code",
+            state: state,
             code: authCode,
             client_id: clientId,
             client_secret: clientSecret,
