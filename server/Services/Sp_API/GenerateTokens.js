@@ -4,64 +4,67 @@ const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
 
-const generateRefreshToken=async(authCode,state)=>{
-
+ const generateRefreshToken = async (authCode) => {
+    // Validate required parameters
     if (!authCode) {
         logger.error("Authorization code is missing");
         throw new ApiError(400, "Authorization code is required");
     }
 
-    if (!redirectUri) {
-        logger.error("Redirect URI is missing");
-        throw new ApiError(400, "Redirect URI is required");
-    }
-
     // Credentials validation
-    if (!credentials.clientId || !credentials.clientSecret) {
+    if (!credentials || !credentials.clientId || !credentials.clientSecret) {
         logger.error("Missing SP-API credentials");
         throw new ApiError(500, "SP-API credentials not configured");
     }
 
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
-
+    const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
         
-        // IMPORTANT: redirect_uri MUST be included and match exactly
+        // Build token request parameters according to Amazon's API spec
         const tokenParams = {
-            state: state,
+            grant_type: 'authorization_code',  // CRITICAL: This was missing!
             code: authCode,
+            redirect_uri: redirectUri,
             client_id: clientId,
-            client_secret: clientSecret,
-            redirect_uri: "https://www.sellerqi.com/auth/callback"  // CRITICAL: This was missing!
+            client_secret: clientSecret
         };
+
+        // Note: 'state' is not part of the token exchange request
+        // It's only used during the authorization request
 
         const response = await axios.post(
             "https://api.amazon.com/auth/o2/token",
             new URLSearchParams(tokenParams),
             {
                 headers: { 
-                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
                     "Accept": "application/json"
                 },
                 timeout: 30000 // 30 second timeout
             }
         );
-        console.log(response.data)
+
+        console.log("Token response:", response.data);
+
         // Validate response
         if (!response.data || !response.data.refresh_token) {
             logger.error("Invalid token response from Amazon", response.data);
             throw new ApiError(500, "Invalid response from Amazon token endpoint");
         }
 
-        // Extract all tokens and metadata
+        // Extract tokens from response
         const tokenData = {
-            refreshToken: response.data.refresh_token
+            refreshToken: response.data.refresh_token,
+            accessToken: response.data.access_token,
+            tokenType: response.data.token_type,
+            expiresIn: response.data.expires_in
         };
 
-        logger.info(`Successfully obtained tokens for seller: ${tokenData.sellerId || 'unknown'}`);
+        logger.info("Successfully obtained tokens");
         
         return tokenData;
 
@@ -76,7 +79,7 @@ const generateRefreshToken=async(authCode,state)=>{
             
             switch (errorCode) {
                 case 'invalid_grant':
-                    throw new ApiError(400, "Invalid or expired authorization code");
+                    throw new ApiError(400, "Invalid or expired authorization code. Each code can only be used once.");
                 case 'invalid_client':
                     throw new ApiError(401, "Invalid client credentials");
                 case 'invalid_request':
@@ -92,9 +95,11 @@ const generateRefreshToken=async(authCode,state)=>{
         
         // Network or other errors
         logger.error(`Token exchange error: ${error.message}`);
-        throw new ApiError(500, error);
+        throw new ApiError(500, error.message || "Failed to exchange authorization code");
     }
-}
+};
+
+
 
 const generateAccessToken=async(userId,refreshToken)=>{
     if(!refreshToken){
