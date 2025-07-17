@@ -15,7 +15,7 @@ const FetchingTokens = () => {
   const authCode = searchParams.get("spapi_oauth_code");
   const state = searchParams.get("state");
   const sellingPartnerId = searchParams.get("selling_partner_id"); // SP-API also returns this
-  console.log(sellingPartnerId)
+
   const amazonAdsAuthCode = searchParams.get("code");
 
 
@@ -33,7 +33,7 @@ const FetchingTokens = () => {
       // Prevent double execution in React 18 StrictMode
       if (hasProcessed.current) return;
       
-      if (!authCode || !state) {
+      if (!authCode || !sellingPartnerId) {
         console.error("Missing required parameters: authCode or state");
         setError("Invalid authorization response from Amazon");
         // Give user time to see the error before redirecting
@@ -67,9 +67,7 @@ const FetchingTokens = () => {
         // Send the authorization code and state to the backend
         const response = await axiosInstance.post('/app/token/generateSPAPITokens', {
           authCode: authCode,
-          state: state,
           sellingPartnerId: sellingPartnerId, // Include if available
-          redirectUri: window.location.origin + window.location.pathname // Backend needs this for token exchange
         });
         
         if (response.status === 200 && response.data) {
@@ -174,7 +172,7 @@ const FetchingTokens = () => {
           }
           
           // Navigate to dashboard with success message
-         
+          navigate('/analyse-account')
         }
       } catch (error) {
         console.error("Error generating tokens:", error);

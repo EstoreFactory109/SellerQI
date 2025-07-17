@@ -125,18 +125,18 @@ const addNewSellerCentralAccount=asyncHandler(async(req,res)=>{
 
 
 const generateSPAPITokens=asyncHandler(async(req,res)=>{
-    const {authCode,sellingPartnerId,state}=req.body;
+    const {authCode,sellingPartnerId}=req.body;
     const userId=req.userId;
     const region=req.region;
     const country=req.country;
     if(!region || !country){
         return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
     }
-    if(!authCode || !sellingPartnerId || !state){
+    if(!authCode || !sellingPartnerId){
         return res.status(400).json({message:"Authorization code, selling partner id and state are missing"});
     }
     
-    const {refreshToken}=await generateRefreshToken(authCode,state);
+    const {refreshToken}=await generateRefreshToken(authCode);
     if(!refreshToken){
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
