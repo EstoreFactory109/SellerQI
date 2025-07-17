@@ -17,13 +17,6 @@ const axios=require('axios');
         throw new ApiError(500, "SP-API credentials not configured");
     }
 
-    const regionEndpoints = {
-        'NA': 'https://advertising-api.amazon.com',
-        'EU': 'https://advertising-api-eu.amazon.com',
-        'FE': 'https://advertising-api-fe.amazon.com'
-    };
-
-    const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
 
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
@@ -122,14 +115,6 @@ const generateAdsRefreshToken = async (authCode,region) => {
     const clientSecret = process.env.AMAZON_ADS_CLIENT_SECRET;
     const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
 
-    const regionEndpoints = {
-        'NA': 'https://advertising-api.amazon.com',
-        'EU': 'https://advertising-api-eu.amazon.com',
-        'FE': 'https://advertising-api-fe.amazon.com'
-    };
-    
-    const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
-
     try {
         logger.info(`Exchanging auth code for tokens...`);
         
@@ -146,7 +131,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
         // It's only used during the authorization request
 
         const response = await axios.post(
-            `${baseURL}/auth/o2/token`,
+            "https://api.amazon.com/auth/o2/token",
             body,
             {
                 headers: { 
