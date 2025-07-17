@@ -164,7 +164,7 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
     
     
     await sellerCentral.save();
-    return res.status(200).json(new ApiResponse(200,sellerAccount,"Tokens generated successfully"));
+    return res.status(200).json(new ApiResponse(200,sellerCentral,"Tokens generated successfully"));
 })
 
 const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{

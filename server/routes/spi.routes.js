@@ -9,6 +9,6 @@ const router=express.Router();
 
 // Updated: Allow all authenticated users to access SP API data
 // Since competitive pricing is disabled, this endpoint is now available to all users
-router.get('/getSpApiData',auth,getSubscriptionInfo,getLocation,getSpApiData)
+router.get('/getSpApiData',auth,getLocation,getSpApiData)
 
 module.exports=router;

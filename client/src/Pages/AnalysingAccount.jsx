@@ -44,7 +44,7 @@ const AnalysingAccount = () => {
                         }
                     }
                 } catch (spApiError) {
-                    console.warn("⚠️ SP API data fetch failed:", spApiError);
+                    console.warn("⚠️ data fetch failed:", spApiError);
                     // Continue processing without SP API data
                 }
 
