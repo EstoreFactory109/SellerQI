@@ -8,14 +8,99 @@ import {
   CheckCircle,
   ExternalLink
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+
+// Region to Seller Central URL mapping
+const SELLER_CENTRAL_URLS = {
+  // North America
+  'US': 'https://sellercentral.amazon.com',
+  'CA': 'https://sellercentral.amazon.com',
+  'MX': 'https://sellercentral.amazon.com.mx',
+  'BR': 'https://sellercentral.amazon.com.br',
+  
+  // Europe
+  'UK': 'https://sellercentral-europe.amazon.com',
+  'GB': 'https://sellercentral-europe.amazon.com', // Alternative code for UK
+  'DE': 'https://sellercentral-europe.amazon.com',
+  'FR': 'https://sellercentral-europe.amazon.com',
+  'IT': 'https://sellercentral-europe.amazon.com',
+  'ES': 'https://sellercentral-europe.amazon.com',
+  'IE': 'https://sellercentral-europe.amazon.com',
+  'NL': 'https://sellercentral.amazon.nl',
+  'BE': 'https://sellercentral.amazon.com.be',
+  'SE': 'https://sellercentral.amazon.se',
+  'PL': 'https://sellercentral.amazon.pl',
+  'TR': 'https://sellercentral.amazon.com.tr',
+  'AE': 'https://sellercentral.amazon.ae',
+  'SA': 'https://sellercentral.amazon.sa',
+  'EG': 'https://sellercentral.amazon.eg',
+  'IN': 'https://sellercentral.amazon.in',
+  'ZA': 'https://sellercentral.amazon.co.za',
+  
+  // Far East
+  'JP': 'https://sellercentral.amazon.co.jp',
+  'AU': 'https://sellercentral.amazon.com.au',
+  'SG': 'https://sellercentral.amazon.sg'
+};
+
+// Region to Amazon Ads URL mapping
+const AMAZON_ADS_URLS = {
+  // North America
+  'US': 'https://na.account.amazon.com',
+  'CA': 'https://na.account.amazon.com',
+  'MX': 'https://na.account.amazon.com',
+  'BR': 'https://na.account.amazon.com',
+  
+  // Europe
+  'UK': 'https://eu.account.amazon.com',
+  'GB': 'https://eu.account.amazon.com',
+  'DE': 'https://eu.account.amazon.com',
+  'FR': 'https://eu.account.amazon.com',
+  'IT': 'https://eu.account.amazon.com',
+  'ES': 'https://eu.account.amazon.com',
+  'IE': 'https://eu.account.amazon.com',
+  'NL': 'https://eu.account.amazon.com',
+  'BE': 'https://eu.account.amazon.com',
+  'SE': 'https://eu.account.amazon.com',
+  'PL': 'https://eu.account.amazon.com',
+  'TR': 'https://eu.account.amazon.com',
+  'AE': 'https://eu.account.amazon.com',
+  'SA': 'https://eu.account.amazon.com',
+  'EG': 'https://eu.account.amazon.com',
+  'IN': 'https://eu.account.amazon.com',
+  'ZA': 'https://eu.account.amazon.com',
+  
+  // Far East
+  'JP': 'https://fe.account.amazon.com',
+  'AU': 'https://fe.account.amazon.com',
+  'SG': 'https://fe.account.amazon.com'
+};
+
+// Helper function to get region from country code
+const getRegionFromCountry = (countryCode) => {
+  const upperCountry = countryCode?.toUpperCase();
+  
+  // North America
+  if (['US', 'CA', 'MX', 'BR'].includes(upperCountry)) return 'NA';
+  
+  // Far East
+  if (['JP', 'AU', 'SG'].includes(upperCountry)) return 'FE';
+  
+  // Europe (default for all others)
+  return 'EU';
+};
 
 const ConnectAccounts = () => {
+  const [searchParams] = useSearchParams();
   const [sellerCentralLoading, setSellerCentralLoading] = useState(false);
   const [amazonAdsLoading, setAmazonAdsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const navigate = useNavigate();
+
+  // Get country code and region from URL params
+  const countryCode = searchParams.get('country') || searchParams.get('countryCode') || 'US';
+  const region = searchParams.get('region') || getRegionFromCountry(countryCode);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -28,6 +113,8 @@ const ConnectAccounts = () => {
 
     localStorage.setItem('sellerCentralLoading', 'true');
     localStorage.setItem('amazonAdsLoading', 'false');
+    localStorage.setItem('amazonRegion', region);
+    localStorage.setItem('amazonCountry', countryCode);
   
     try {
       // Get the application ID from environment variable
@@ -36,18 +123,30 @@ const ConnectAccounts = () => {
       if (!applicationId) {
         throw new Error('Application ID not configured. Please check environment variables.');
       }
+
+      // Get the appropriate Seller Central URL for the country
+      const sellerCentralBaseUrl = SELLER_CENTRAL_URLS[countryCode.toUpperCase()] || SELLER_CENTRAL_URLS['US'];
   
       // Construct the Amazon authorization URL
       const redirectUri = `${window.location.origin}/auth/callback`;
-      const state = crypto.randomUUID(); // More secure random state string
+      const state = JSON.stringify({
+        random: crypto.randomUUID(),
+        region: region,
+        country: countryCode,
+        type: 'seller_central'
+      });
   
-      const amazonAuthUrl = new URL('https://sellercentral.amazon.com/apps/authorize/consent');
+      const amazonAuthUrl = new URL(`${sellerCentralBaseUrl}/apps/authorize/consent`);
       amazonAuthUrl.searchParams.append('application_id', applicationId);
       amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAuthUrl.searchParams.append('state', state);
-      amazonAuthUrl.searchParams.append('version', 'beta'); // Double-check if this is necessary
+      
+      // Only add version=beta if in development
+      if (import.meta.env.MODE === 'development') {
+        amazonAuthUrl.searchParams.append('version', 'beta');
+      }
   
-      setSuccessMessage('Redirecting to Amazon Seller Central authorization...');
+      setSuccessMessage(`Redirecting to Amazon Seller Central (${countryCode.toUpperCase()}) authorization...`);
   
       // Redirect to Amazon authorization page
       setTimeout(() => {
@@ -61,7 +160,6 @@ const ConnectAccounts = () => {
     }
   };
   
-
   const handleConnectAmazonAds = async () => {
     setAmazonAdsLoading(true);
     setErrorMessage('');
@@ -69,23 +167,33 @@ const ConnectAccounts = () => {
 
     localStorage.setItem('sellerCentralLoading', 'false');
     localStorage.setItem('amazonAdsLoading', 'true');
+    localStorage.setItem('amazonRegion', region);
+    localStorage.setItem('amazonCountry', countryCode);
     
     try {
-      // Get the application ID from environment variable
-      const applicationId = import.meta.env.VITE_APP_ID;
+      // Get the ads client ID from environment variable
+      const adsClientId = import.meta.env.VITE_AMAZON_ADS_CLIENT_ID || 'amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93';
   
-      if (!applicationId) {
-        throw new Error('Application ID not configured. Please check environment variables.');
-      }
+      // Get the appropriate Amazon Ads URL for the country
+      const amazonAdsBaseUrl = AMAZON_ADS_URLS[countryCode.toUpperCase()] || AMAZON_ADS_URLS['US'];
   
-      // Construct the Amazon authorization URL
+      // Construct the Amazon Ads authorization URL
       const redirectUri = `${window.location.origin}/auth/callback`;
-      const state = crypto.randomUUID(); // More secure random state string
+      const state = JSON.stringify({
+        random: crypto.randomUUID(),
+        region: region,
+        country: countryCode,
+        type: 'amazon_ads'
+      });
   
-      const amazonAuthUrl = new URL('https://na.account.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93&redirect_uri=https%3A%2F%2Fwww.sellerqi.com%2Fauth%2Fcallback&response_type=code&scope=advertising%3A%3Acampaign_management&state=random-state-string');
-
+      const amazonAuthUrl = new URL(`${amazonAdsBaseUrl}/ap/oa`);
+      amazonAuthUrl.searchParams.append('client_id', adsClientId);
+      amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
+      amazonAuthUrl.searchParams.append('response_type', 'code');
+      amazonAuthUrl.searchParams.append('scope', 'advertising::campaign_management');
+      amazonAuthUrl.searchParams.append('state', state);
   
-      setSuccessMessage('Redirecting to Amazon ads authorization...');
+      setSuccessMessage(`Redirecting to Amazon Ads (${countryCode.toUpperCase()}) authorization...`);
   
       // Redirect to Amazon authorization page
       setTimeout(() => {
@@ -93,9 +201,9 @@ const ConnectAccounts = () => {
       }, 1000);
       
     } catch (error) {
-      setSellerCentralLoading(false);
-      setErrorMessage(error.message || 'Failed to connect to Seller Central. Please try again.');
-      console.error('Amazon authorization error:', error);
+      setAmazonAdsLoading(false);
+      setErrorMessage(error.message || 'Failed to connect to Amazon Ads. Please try again.');
+      console.error('Amazon Ads authorization error:', error);
     }
   };
 
@@ -105,6 +213,37 @@ const ConnectAccounts = () => {
 
   const navigateToDashboard = () => {
     navigate('/seller-central-checker/dashboard');
+  };
+
+  // Get display name for the region/country
+  const getRegionDisplayName = () => {
+    const countryNames = {
+      'US': 'United States',
+      'CA': 'Canada',
+      'MX': 'Mexico',
+      'BR': 'Brazil',
+      'UK': 'United Kingdom',
+      'GB': 'United Kingdom',
+      'DE': 'Germany',
+      'FR': 'France',
+      'IT': 'Italy',
+      'ES': 'Spain',
+      'IE': 'Ireland',
+      'NL': 'Netherlands',
+      'BE': 'Belgium',
+      'SE': 'Sweden',
+      'PL': 'Poland',
+      'TR': 'Turkey',
+      'AE': 'UAE',
+      'SA': 'Saudi Arabia',
+      'EG': 'Egypt',
+      'IN': 'India',
+      'ZA': 'South Africa',
+      'JP': 'Japan',
+      'AU': 'Australia',
+      'SG': 'Singapore'
+    };
+    return countryNames[countryCode.toUpperCase()] || countryCode.toUpperCase();
   };
 
   return (
@@ -138,10 +277,13 @@ const ConnectAccounts = () => {
                 />
               </motion.div>
               <h1 className="text-xl lg:text-2xl font-bold text-gray-900 mb-2">
-                Connect Your Accounts
+                Connect Your Amazon Accounts
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-gray-600 text-sm mb-1">
                 Connect your Amazon accounts to start optimizing your business
+              </p>
+              <p className="text-sm text-gray-500">
+                Region: <span className="font-medium text-gray-700">{getRegionDisplayName()} ({region})</span>
               </p>
             </div>
 
@@ -176,7 +318,7 @@ const ConnectAccounts = () => {
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <>
-                      Connect Seller Central
+                      Connect Seller Central ({countryCode.toUpperCase()})
                       <ExternalLink className="w-5 h-5" />
                     </>
                   )}
@@ -212,7 +354,7 @@ const ConnectAccounts = () => {
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <>
-                      Connect Amazon Ads
+                      Connect Amazon Ads ({countryCode.toUpperCase()})
                       <ExternalLink className="w-5 h-5" />
                     </>
                   )}
@@ -283,10 +425,34 @@ const ConnectAccounts = () => {
               )}
             </AnimatePresence>
           </motion.div>
+
+          {/* Region Selector (Optional) */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="mt-4 text-center"
+          >
+            <p className="text-sm text-gray-600">
+              Wrong region? 
+              <button
+                onClick={() => {
+                  const newCountry = prompt('Enter country code (e.g., US, UK, DE, JP):');
+                  if (newCountry) {
+                    const newRegion = getRegionFromCountry(newCountry);
+                    navigate(`?country=${newCountry}&region=${newRegion}`);
+                  }
+                }}
+                className="ml-1 text-[#3B4A6B] hover:text-[#2d3a52] font-medium underline"
+              >
+                Change Region
+              </button>
+            </p>
+          </motion.div>
         </div>
       </div>
     </div>
   );
 };
 
-export default ConnectAccounts; 
+export default ConnectAccounts;

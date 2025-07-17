@@ -9,6 +9,7 @@ const AmazonConnect = () => {
   const [region, setRegion] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  
   const handleMarketPlaceChange = (e) => {
     setMarketPlace(e.target.value);
     console.log("Selected Marketplace:", e.target.value);
@@ -21,6 +22,13 @@ const AmazonConnect = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate selections
+    if (!region || !marketPlace) {
+      alert("Please select both region and marketplace");
+      return;
+    }
+    
     setLoading(true);
     try {
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/token/SaveAllDetails`, {
@@ -28,24 +36,33 @@ const AmazonConnect = () => {
         country: marketPlace
       }, { withCredentials: true });
 
-      //Redirect to connect accounts page after successful data saving
+      // Redirect to connect accounts page with region and country parameters
       if (response.status === 201) {
         setLoading(false);
-        navigate('/connect-accounts');
+        
+        // Navigate with query parameters
+        navigate(`/connect-accounts?country=${marketPlace}&region=${region}`);
+        
+        // Alternative: Using navigate with object syntax
+        // navigate({
+        //   pathname: '/connect-accounts',
+        //   search: `?country=${marketPlace}&region=${region}`
+        // });
       }
 
     } catch (error) {
       setLoading(false);
-      throw new Error(error)
+      console.error("Error saving details:", error);
+      alert("Failed to save marketplace details. Please try again.");
     }
-  }     //handleSubmit
+  };
 
   return (
     <div className="w-screen h-screen flex font-roboto">
       
       {/* Left Section */}
       <section className="w-1/2 h-full flex flex-col justify-center items-center">
-        <form className="w-3/4">
+        <form className="w-3/4" onSubmit={handleSubmit}>
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-2xl font-semibold mb-2">Connect to Amazon</h1>
@@ -56,11 +73,12 @@ const AmazonConnect = () => {
 
           {/* Region Selection */}
           <label className="block text-gray-700 mb-2">Region</label>
-          <div className="w-full border border-gray-300 rounded-md p-2 flex items-center">
+          <div className="w-full border border-gray-300 rounded-md p-2 flex items-center mb-4">
             <select
               className="w-full bg-transparent outline-none"
               value={region}
               onChange={handleRegionChange}
+              required
             >
               <option value="">-- Select Region --</option>
               <option value="NA">North America</option>
@@ -70,12 +88,14 @@ const AmazonConnect = () => {
           </div>
 
           {/* Primary Marketplace Selection */}
-          <label className="block text-gray-700 mt-4 mb-2">Primary Marketplace</label>
+          <label className="block text-gray-700 mb-2">Primary Marketplace</label>
           <div className="w-full border border-gray-300 rounded-md p-2 flex items-center">
             <select
               className="w-full bg-transparent outline-none"
               value={marketPlace}
               onChange={handleMarketPlaceChange}
+              disabled={!region}
+              required
             >
               <option value="">-- Select Marketplace --</option>
 
@@ -121,9 +141,17 @@ const AmazonConnect = () => {
             </select>
           </div>
 
+          {/* Helper Text */}
+          {!region && (
+            <p className="text-xs text-gray-500 mt-1">Please select a region first</p>
+          )}
 
           {/* Submit Button */}
-          <button className="w-full h-12 mt-6 bg-gray-800 text-white font-semibold rounded-md hover:bg-gray-700" onClick={handleSubmit}>
+          <button 
+            type="submit"
+            className="w-full h-12 mt-6 bg-gray-800 text-white font-semibold rounded-md hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            disabled={loading || !region || !marketPlace}
+          >
             {loading ? <BeatLoader color="#ffffff" size={10} /> : <p>Connect To Amazon</p>}
           </button>
         </form>
