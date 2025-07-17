@@ -115,7 +115,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating the access token"));
     }
 
-    const ProfileId = await getProfileById(AdsAccessToken, Region, Country);
+    const ProfileId = await getProfileById(AdsAccessToken, Region, Country, userId);
 
     if(!ProfileId){
         logger.error(new ApiError(500, "Internal server error in getting the profile id"));

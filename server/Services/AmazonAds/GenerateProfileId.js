@@ -3,7 +3,7 @@ const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const sellerCentral=require('../../models/sellerCentralModel.js');
 
-const getProfileById = async (accessToken,region ,country) => {
+const getProfileById = async (accessToken,region ,country,userId) => {
     try {
         // Validate input
         if (!accessToken || !region) {
