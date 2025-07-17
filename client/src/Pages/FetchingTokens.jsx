@@ -159,7 +159,7 @@ const FetchingTokens = () => {
         
         // Send the authorization code and state to the backend
         const response = await axiosInstance.post('/app/token/generateAdsTokens', {
-          code: amazonAdsAuthCode,
+          authCode: amazonAdsAuthCode,
         });
         
         if (response.status === 200 && response.data) {

@@ -176,7 +176,7 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
         return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
     }
     if(!authCode){
-        return res.status(400).json({message:"Authorization code, selling partner id and state are missing"});
+        return res.status(400).json({message:"Authorization code"});
     }
     
     const {refreshToken}=await generateAdsRefreshToken(authCode);
