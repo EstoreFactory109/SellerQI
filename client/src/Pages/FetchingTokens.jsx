@@ -63,7 +63,7 @@ const FetchingTokens = () => {
         
         // Clear the stored state after validation
         sessionStorage.removeItem('spapi_oauth_state');
-        return;
+        
         
         // Send the authorization code and state to the backend
         const response = await axiosInstance.post('/app/token/generateSPAPITokens', {
