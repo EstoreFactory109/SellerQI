@@ -18,6 +18,7 @@ const FetchingTokens = () => {
 
   const amazonAdsAuthCode = searchParams.get("code");
 
+  
 
   useEffect(() => {
     // Toggle between "Getting Access..." and "Please Wait"

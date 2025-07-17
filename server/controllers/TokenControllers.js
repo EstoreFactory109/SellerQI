@@ -141,6 +141,7 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
     
+    return res.status(200).json(new ApiResponse(200,refreshToken,"Tokens generated successfully"));
 
     const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
     if(!sellerCentral){
@@ -184,6 +185,7 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
     
+    return res.status(200).json(new ApiResponse(200,refreshToken,"Tokens generated successfully"));
 
     const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
     if(!sellerCentral){
