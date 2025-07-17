@@ -15,7 +15,7 @@ const FetchingTokens = () => {
   const authCode = searchParams.get("spapi_oauth_code");
   const state = searchParams.get("state");
   const sellingPartnerId = searchParams.get("selling_partner_id"); // SP-API also returns this
-  const amazonAdsAuthCode = searchParams.get("code");
+ // const amazonAdsAuthCode = searchParams.get("code");
 
 
   useEffect(() => {
@@ -131,7 +131,7 @@ const FetchingTokens = () => {
       }
     };
 
-    const generateAmazonAdsTokens = async () => {
+ /*   const generateAmazonAdsTokens = async () => {
       if (hasProcessed.current) return;
       
       if (!amazonAdsAuthCode) {
@@ -221,12 +221,15 @@ const FetchingTokens = () => {
         
       }
     }
+*/
+    generateTokens();
 
-    if (localStorage.getItem('amazonAdsLoading') === 'true') {
+   /* if (localStorage.getItem('amazonAdsLoading') === 'true') {
       generateAmazonAdsTokens();
     } else {
       generateTokens();
-    }
+    }*/
+    generateTokens();
   }, [authCode, state, sellingPartnerId, navigate]);
 
   return (
