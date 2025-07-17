@@ -6,6 +6,6 @@ const router=express.Router();
 
 router.post('/generateSPAPITokens',auth,getLocation,generateSPAPITokens);
 router.post('/SaveAllDetails',auth,SaveAllDetails);
-router.post('/generateAdsTokens',auth,generateAmazonAdsTokens);
+router.post('/generateAdsTokens',auth,getLocation,generateAmazonAdsTokens);
 
 module.exports=router;
