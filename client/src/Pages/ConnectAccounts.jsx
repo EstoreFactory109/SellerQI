@@ -8,26 +8,190 @@ import {
   CheckCircle,
   ExternalLink
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+
+// Marketplace configuration mapping
+const MARKETPLACE_CONFIG = {
+  // North America
+  'US': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com',
+    adsUrl: 'https://advertising.amazon.com',
+    region: 'NA'
+  },
+  'CA': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.ca',
+    adsUrl: 'https://advertising.amazon.ca',
+    region: 'NA'
+  },
+  'MX': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com.mx',
+    adsUrl: 'https://advertising.amazon.com.mx',
+    region: 'NA'
+  },
+  'BR': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com.br',
+    adsUrl: 'https://advertising.amazon.com.br',
+    region: 'NA'
+  },
+  
+  // Europe
+  'GB': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.co.uk',
+    region: 'EU'
+  },
+  'DE': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.de',
+    region: 'EU'
+  },
+  'FR': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.fr',
+    region: 'EU'
+  },
+  'IT': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.it',
+    region: 'EU'
+  },
+  'ES': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.es',
+    region: 'EU'
+  },
+  'NL': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.nl',
+    adsUrl: 'https://advertising.amazon.nl',
+    region: 'EU'
+  },
+  'SE': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.se',
+    adsUrl: 'https://advertising.amazon.se',
+    region: 'EU'
+  },
+  'PL': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.pl',
+    adsUrl: 'https://advertising.amazon.pl',
+    region: 'EU'
+  },
+  'BE': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com.be',
+    adsUrl: 'https://advertising.amazon.com.be',
+    region: 'EU'
+  },
+  'EG': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.eg',
+    adsUrl: 'https://advertising.amazon.eg',
+    region: 'EU'
+  },
+  'TR': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com.tr',
+    adsUrl: 'https://advertising.amazon.com.tr',
+    region: 'EU'
+  },
+  'SA': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.sa',
+    adsUrl: 'https://advertising.amazon.sa',
+    region: 'EU'
+  },
+  'AE': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.ae',
+    adsUrl: 'https://advertising.amazon.ae',
+    region: 'EU'
+  },
+  'IN': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.in',
+    adsUrl: 'https://advertising.amazon.in',
+    region: 'EU'
+  },
+  'ZA': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.co.za',
+    adsUrl: 'https://advertising.amazon.co.za',
+    region: 'EU'
+  },
+  
+  // Far East
+  'JP': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.co.jp',
+    adsUrl: 'https://advertising.amazon.co.jp',
+    region: 'FE'
+  },
+  'AU': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.com.au',
+    adsUrl: 'https://advertising.amazon.com.au',
+    region: 'FE'
+  },
+  'SG': { 
+    sellerCentralUrl: 'https://sellercentral.amazon.sg',
+    adsUrl: 'https://advertising.amazon.sg',
+    region: 'FE'
+  }
+};
 
 const ConnectAccounts = () => {
   const [sellerCentralLoading, setSellerCentralLoading] = useState(false);
   const [amazonAdsLoading, setAmazonAdsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [marketplaceConfig, setMarketplaceConfig] = useState(null);
+  
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  
+  // Get country code and region from URL parameters
+  const countryCode = searchParams.get('country') || searchParams.get('countryCode');
+  const region = searchParams.get('region');
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+    
+    // Set marketplace configuration based on country code or region
+    if (countryCode && MARKETPLACE_CONFIG[countryCode.toUpperCase()]) {
+      setMarketplaceConfig(MARKETPLACE_CONFIG[countryCode.toUpperCase()]);
+    } else if (region) {
+      // If only region is provided, default to main marketplace for that region
+      const defaultMarketplace = getDefaultMarketplaceForRegion(region.toUpperCase());
+      if (defaultMarketplace) {
+        setMarketplaceConfig(defaultMarketplace);
+      }
+    } else {
+      // Default to US if no parameters provided
+      setMarketplaceConfig(MARKETPLACE_CONFIG['US']);
+    }
+  }, [countryCode, region]);
+
+  const getDefaultMarketplaceForRegion = (region) => {
+    switch (region) {
+      case 'NA':
+        return MARKETPLACE_CONFIG['US'];
+      case 'EU':
+        return MARKETPLACE_CONFIG['GB'];
+      case 'FE':
+        return MARKETPLACE_CONFIG['JP'];
+      default:
+        return MARKETPLACE_CONFIG['US'];
+    }
+  };
 
   const handleConnectSellerCentral = async () => {
+    if (!marketplaceConfig) {
+      setErrorMessage('Marketplace configuration not found. Please check your region settings.');
+      return;
+    }
+
     setSellerCentralLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     localStorage.setItem('sellerCentralLoading', 'true');
     localStorage.setItem('amazonAdsLoading', 'false');
+    // Store the marketplace info for later use
+    localStorage.setItem('selectedMarketplace', JSON.stringify({
+      countryCode: countryCode || 'US',
+      region: marketplaceConfig.region,
+      sellerCentralUrl: marketplaceConfig.sellerCentralUrl
+    }));
   
     try {
       // Get the application ID from environment variable
@@ -37,17 +201,24 @@ const ConnectAccounts = () => {
         throw new Error('Application ID not configured. Please check environment variables.');
       }
   
-      // Construct the Amazon authorization URL
+      // Construct the Amazon authorization URL with dynamic marketplace
       const redirectUri = `${window.location.origin}/auth/callback`;
-      const state = crypto.randomUUID(); // More secure random state string
+      const state = crypto.randomUUID();
+      
+      // Store state in sessionStorage for validation on callback
+      sessionStorage.setItem('oauth_state', state);
   
-      const amazonAuthUrl = new URL('https://sellercentral.amazon.com/apps/authorize/consent');
+      const amazonAuthUrl = new URL(`${marketplaceConfig.sellerCentralUrl}/apps/authorize/consent`);
       amazonAuthUrl.searchParams.append('application_id', applicationId);
       amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAuthUrl.searchParams.append('state', state);
-      amazonAuthUrl.searchParams.append('version', 'beta'); // Double-check if this is necessary
+      
+      // Add version=beta only if specified in environment or for testing
+      if (import.meta.env.VITE_APP_BETA === 'true') {
+        amazonAuthUrl.searchParams.append('version', 'beta');
+      }
   
-      setSuccessMessage('Redirecting to Amazon Seller Central authorization...');
+      setSuccessMessage(`Redirecting to Amazon Seller Central for ${countryCode || 'your region'}...`);
   
       // Redirect to Amazon authorization page
       setTimeout(() => {
@@ -60,42 +231,65 @@ const ConnectAccounts = () => {
       console.error('Amazon authorization error:', error);
     }
   };
-  
 
   const handleConnectAmazonAds = async () => {
+    if (!marketplaceConfig) {
+      setErrorMessage('Marketplace configuration not found. Please check your region settings.');
+      return;
+    }
+
     setAmazonAdsLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     localStorage.setItem('sellerCentralLoading', 'false');
     localStorage.setItem('amazonAdsLoading', 'true');
+    // Store the marketplace info for later use
+    localStorage.setItem('selectedMarketplace', JSON.stringify({
+      countryCode: countryCode || 'US',
+      region: marketplaceConfig.region,
+      adsUrl: marketplaceConfig.adsUrl
+    }));
     
     try {
-      // Get the application ID from environment variable
-      const applicationId = import.meta.env.VITE_APP_ID;
+      // Get the ads client ID from environment variable
+      const adsClientId = import.meta.env.VITE_ADS_CLIENT_ID || 'amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93';
   
-      if (!applicationId) {
-        throw new Error('Application ID not configured. Please check environment variables.');
+      if (!adsClientId) {
+        throw new Error('Ads Client ID not configured. Please check environment variables.');
       }
   
-      // Construct the Amazon authorization URL
+      // Construct the Amazon Ads authorization URL
       const redirectUri = `${window.location.origin}/auth/callback`;
-      const state = crypto.randomUUID(); // More secure random state string
+      const state = crypto.randomUUID();
+      
+      // Store state in sessionStorage for validation on callback
+      sessionStorage.setItem('oauth_state_ads', state);
   
-      const amazonAuthUrl = new URL('https://na.account.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93&redirect_uri=https%3A%2F%2Fwww.sellerqi.com%2Fauth%2Fcallback&response_type=code&scope=advertising%3A%3Acampaign_management&state=random-state-string');
-
+      // Amazon Ads uses a different OAuth flow
+      const amazonAdsAuthUrl = new URL('https://www.amazon.com/ap/oa');
+      amazonAdsAuthUrl.searchParams.append('client_id', adsClientId);
+      amazonAdsAuthUrl.searchParams.append('redirect_uri', redirectUri);
+      amazonAdsAuthUrl.searchParams.append('response_type', 'code');
+      amazonAdsAuthUrl.searchParams.append('scope', 'advertising::campaign_management');
+      amazonAdsAuthUrl.searchParams.append('state', state);
+      
+      // Add marketplace-specific parameters if needed
+      if (countryCode && countryCode !== 'US') {
+        amazonAdsAuthUrl.searchParams.append('marketplace', countryCode);
+      }
   
-      setSuccessMessage('Redirecting to Amazon ads authorization...');
+      setSuccessMessage(`Redirecting to Amazon Ads authorization for ${countryCode || 'your region'}...`);
   
       // Redirect to Amazon authorization page
       setTimeout(() => {
-        window.location.href = amazonAuthUrl.toString();
+        window.location.href = amazonAdsAuthUrl.toString();
       }, 1000);
       
     } catch (error) {
-      setSellerCentralLoading(false);
-      setErrorMessage(error.message || 'Failed to connect to Seller Central. Please try again.');
-      console.error('Amazon authorization error:', error);
+      setAmazonAdsLoading(false);
+      setErrorMessage(error.message || 'Failed to connect to Amazon Ads. Please try again.');
+      console.error('Amazon Ads authorization error:', error);
     }
   };
 
@@ -143,6 +337,12 @@ const ConnectAccounts = () => {
               <p className="text-gray-600 text-sm">
                 Connect your Amazon accounts to start optimizing your business
               </p>
+              {/* Display current marketplace if available */}
+              {marketplaceConfig && countryCode && (
+                <p className="text-sm text-gray-500 mt-2">
+                  Marketplace: {countryCode.toUpperCase()} ({marketplaceConfig.region})
+                </p>
+              )}
             </div>
 
             {/* Connection Options */}
@@ -165,9 +365,9 @@ const ConnectAccounts = () => {
                 </div>
                 <button
                   onClick={handleConnectSellerCentral}
-                  disabled={sellerCentralLoading}
+                  disabled={sellerCentralLoading || !marketplaceConfig}
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    sellerCentralLoading
+                    sellerCentralLoading || !marketplaceConfig
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
                   }`}
@@ -201,9 +401,9 @@ const ConnectAccounts = () => {
                 </div>
                 <button
                   onClick={handleConnectAmazonAds}
-                  disabled={amazonAdsLoading}
+                  disabled={amazonAdsLoading || !marketplaceConfig}
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    amazonAdsLoading
+                    amazonAdsLoading || !marketplaceConfig
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-lg hover:shadow-xl'
                   }`}
@@ -289,4 +489,4 @@ const ConnectAccounts = () => {
   );
 };
 
-export default ConnectAccounts; 
+export default ConnectAccounts;
