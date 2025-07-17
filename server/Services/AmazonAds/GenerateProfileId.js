@@ -4,6 +4,8 @@ const { ApiError } = require('../../utils/ApiError.js');
 const sellerCentral=require('../../models/sellerCentralModel.js');
 
 const getProfileById = async (accessToken,region ,country,userId) => {
+
+   
     try {
         // Validate input
         if (!accessToken || !region) {
@@ -20,6 +22,8 @@ const getProfileById = async (accessToken,region ,country,userId) => {
 
         const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
 
+        
+
         // Make GET request to fetch specific profile
         const response = await axios.get(
             `${baseURL}/v2/profiles`,
@@ -32,29 +36,34 @@ const getProfileById = async (accessToken,region ,country,userId) => {
             }
         );
 
+        
+
         if (!response || !response.data) {
             logger.error(new ApiError(404, 'Profile id not found'));
             return false;
         }
-
         const profileIdScope= response.data.find(scope => scope.countryCode === country);
 
         profileId= profileIdScope.profileId;
 
+        
+
         // Log successful response
         logger.info(`Successfully fetched profile id`);
 
-        const sellerCentral=await sellerCentral.findOne({User:userId});
-        if(!sellerCentral){
+        const sellercentral=await sellerCentral.findOne({User:userId});
+        if(!sellercentral){
             return res.status(404).json(new ApiError(404,"SellerCentral not found"));
         }
 
-        sellerAccount = sellerCentral.sellerAccount.find(account => 
+        
+
+        const acnt = sellercentral.sellerAccount.find(account => 
             account.country === country && account.region === region
         );
 
-        sellerAccount.ProfileId=profileId;
-        await sellerCentral.save();
+        acnt.ProfileId=profileId;
+        await sellercentral.save();
 
         return profileId;
 

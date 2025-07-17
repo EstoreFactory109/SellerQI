@@ -143,7 +143,7 @@ const getReviewData = async (req, res) => {
 
 const testAmazonAds = async (req, res) => {
     const { accessToken, region } = req.body;
-    const result = await getProfileById(accessToken, region);
+    const result = await getProfileById(accessToken, region,"US","681b7e41525925e8abb7d3c6");
     return res.status(200).json({
         data: result
     })
