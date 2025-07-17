@@ -184,7 +184,6 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
     
-   
 
     const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
     if(!sellerCentral){
