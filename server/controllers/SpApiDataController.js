@@ -37,6 +37,7 @@ const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsMo
 const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
 const {getAdGroups}= require('../Services/AmazonAds/AdGroups.js');
+const {getProfileById} = require('../Services/AmazonAds/GenerateProfileId.js');
 
 const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -99,10 +100,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
     
     const RefreshToken = getSellerAccount.spiRefreshToken;
     const AdsRefreshToken = getSellerAccount.adsRefreshToken;
-    const ProfileId = getSellerAccount.ProfileId;
+    
     
 
-    if (!RefreshToken || !AdsRefreshToken || !ProfileId) {
+    if (!RefreshToken || !AdsRefreshToken) {
         logger.error(new ApiError(500, "Internal server error in getting the refresh tokens or profile id"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the refresh tokens or profile id"));
     }
@@ -112,6 +113,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (!AccessToken || !AdsAccessToken) {
         logger.error(new ApiError(500, "Internal server error in generating the access token"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating the access token"));
+    }
+
+    const ProfileId = await getProfileById(AdsAccessToken, Region, Country);
+
+    if(!ProfileId){
+        logger.error(new ApiError(500, "Internal server error in getting the profile id"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting the profile id"));
     }
 
     // Initialize tokens in TokenManager for automatic refresh

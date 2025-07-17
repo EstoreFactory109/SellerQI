@@ -1,8 +1,9 @@
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
+const sellerCentral=require('../../models/sellerCentralModel.js');
 
-const getProfileById = async (accessToken,region = 'NA') => {
+const getProfileById = async (accessToken,region ,country) => {
     try {
         // Validate input
         if (!accessToken || !region) {
@@ -36,12 +37,28 @@ const getProfileById = async (accessToken,region = 'NA') => {
             return false;
         }
 
+        const profileIdScope= response.data.find(scope => scope.countryCode === country);
+
+        profileId= profileIdScope.profileId;
+
         // Log successful response
         logger.info(`Successfully fetched profile id`);
 
+        const sellerCentral=await sellerCentral.findOne({User:userId});
+        if(!sellerCentral){
+            return res.status(404).json(new ApiError(404,"SellerCentral not found"));
+        }
+
+        sellerAccount = sellerCentral.sellerAccount.find(account => 
+            account.country === country && account.region === region
+        );
+
+        sellerAccount.ProfileId=profileId;
+        await sellerCentral.save();
+
         return {
             success: true,
-            profile: response.data
+            profile: profileId
         };
 
     } catch (error) {
