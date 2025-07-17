@@ -50,7 +50,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     //Getting all the required credentials
 
-    const getSellerData = await Seller.findOne({ User: userId, })
+    const getSellerData = await Seller.findOne({ User: userId, }).sort({createdAt: -1})
     // console.log(getSellerData);
 
     if (!getSellerData) {
@@ -60,6 +60,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     const Region = req.region;
     const Country = req.country;
+
+    console.log("region: ",Region);
+    console.log("country: ",Country);
 
     if (!Region || !Country) {
         logger.error(new ApiError(400, "Region and country is missing"));
@@ -101,6 +104,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const RefreshToken = getSellerAccount.spiRefreshToken;
     const AdsRefreshToken = getSellerAccount.adsRefreshToken;
     
+    console.log("refresh token: ",RefreshToken);
+    console.log("ads refresh token: ",AdsRefreshToken);
     
 
     if (!RefreshToken || !AdsRefreshToken) {

@@ -142,7 +142,7 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
     }
     
 
-    const sellerCentral=await Seller.findOne({User:userId});
+    const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
     if(!sellerCentral){
         return res.status(404).json(new ApiError(404,"SellerCentral not found"));
     }
@@ -185,7 +185,7 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
     }
     
 
-    const sellerCentral=await Seller.findOne({User:userId});
+    const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
     if(!sellerCentral){
         return res.status(404).json(new ApiError(404,"SellerCentral not found"));
     }

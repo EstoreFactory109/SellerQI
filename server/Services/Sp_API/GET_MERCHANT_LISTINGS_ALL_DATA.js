@@ -4,6 +4,9 @@ const { ApiError } = require('../../utils/ApiError');
 const SellerModel = require('../../models/sellerCentralModel.js');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
+
+    console.log("accessToken: ",accessToken);
+    console.log("marketplaceIds: ",marketplaceIds);
     try {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
