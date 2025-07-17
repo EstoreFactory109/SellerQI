@@ -56,10 +56,7 @@ const getProfileById = async (accessToken,region ,country,userId) => {
         sellerAccount.ProfileId=profileId;
         await sellerCentral.save();
 
-        return {
-            success: true,
-            profile: profileId
-        };
+        return profileId;
 
     } catch (error) {
         // Handle specific error cases
