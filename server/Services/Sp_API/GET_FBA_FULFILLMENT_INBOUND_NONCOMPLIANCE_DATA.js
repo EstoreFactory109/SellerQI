@@ -14,7 +14,7 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             `https://${baseuri}/reports/2021-06-30/reports`,
             {
                 reportType: "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA",
-                marketplaceIds: ["ATVPDKIKX0DER"],
+                marketplaceIds: marketplaceIds, // Use dynamic marketplaceIds instead of hardcoded
                 dataStartTime: StartTime.toISOString(),
                 dataEndTime: EndTime.toISOString(),
             },
@@ -63,6 +63,10 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
 
             case "IN_PROGRESS":
                 // console.log("⏳ Report is still processing...");
+                return null;
+
+            case "IN_QUEUE":
+                // console.log("📋 Report is queued for processing...");
                 return null;
 
             case "DONE_NO_DATA":

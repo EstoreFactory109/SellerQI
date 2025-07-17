@@ -31,20 +31,86 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
             throw new Error('AMAZON_ADVERTISING_CLIENT_ID not found in environment variables');
         }
 
+        // VALIDATE INPUT ARRAYS
+        if (!Array.isArray(campaignIdArray)) {
+            console.warn('Campaign ID array is not an array, converting to empty array', { campaignIdArray, userId });
+            campaignIdArray = [];
+        }
+
+        if (!Array.isArray(adGroupIdArray)) {
+            console.warn('Ad Group ID array is not an array, converting to empty array', { adGroupIdArray, userId });
+            adGroupIdArray = [];
+        }
+
+        // Filter out invalid IDs
+        const validCampaignIds = campaignIdArray.filter(id => id !== null && id !== undefined && id !== '');
+        const validAdGroupIds = adGroupIdArray.filter(id => id !== null && id !== undefined && id !== '');
+
+        console.log(`📊 Negative Keywords Input Validation:`, {
+            originalCampaignIds: campaignIdArray.length,
+            validCampaignIds: validCampaignIds.length,
+            originalAdGroupIds: adGroupIdArray.length,
+            validAdGroupIds: validAdGroupIds.length,
+            userId
+        });
+
+        // Check if we have any valid IDs to work with
+        if (validCampaignIds.length === 0 && validAdGroupIds.length === 0) {
+            console.warn('No valid campaign or ad group IDs provided, returning empty negative keywords result', { userId, region, country });
+            
+            // Save empty result to database for consistency
+            const negativeKeywords = await NegativeKeywords.findOneAndUpdate(
+                { 
+                    userId: userId,
+                    country: country,
+                    region: region 
+                },
+                { 
+                    negativeKeywordsData: []
+                },
+                { 
+                    new: true, 
+                    upsert: true 
+                }
+            );
+            
+            return negativeKeywords;
+        }
+
         // Construct the base URL
         const baseUrl = BASE_URIS[region];
 
         // Chunk the arrays into groups of 50
-        const campaignIdChunks = chunkArray(campaignIdArray, 50);
-        const adGroupIdChunks = chunkArray(adGroupIdArray, 50);
+        const campaignIdChunks = chunkArray(validCampaignIds, 50);
+        const adGroupIdChunks = chunkArray(validAdGroupIds, 50);
+
+        // If one array is empty, create a single chunk with empty array to ensure at least one iteration
+        const finalCampaignChunks = campaignIdChunks.length > 0 ? campaignIdChunks : [[]];
+        const finalAdGroupChunks = adGroupIdChunks.length > 0 ? adGroupIdChunks : [[]];
 
         // Array to store all fetched data
         let allNegativeKeywordsData = [];
 
+        console.log(`📡 Processing ${finalCampaignChunks.length} campaign chunks × ${finalAdGroupChunks.length} ad group chunks for negative keywords`);
+
         // Fetch data for each combination of chunks
-        for (const campaignChunk of campaignIdChunks) {
-            for (const adGroupChunk of adGroupIdChunks) {
+        for (const campaignChunk of finalCampaignChunks) {
+            for (const adGroupChunk of finalAdGroupChunks) {
                 try {
+                    // Skip if both chunks are empty
+                    if (campaignChunk.length === 0 && adGroupChunk.length === 0) {
+                        continue;
+                    }
+
+                    // Build query parameters dynamically
+                    const params = {};
+                    if (campaignChunk.length > 0) {
+                        params.campaignIdFilter = campaignChunk.join(',');
+                    }
+                    if (adGroupChunk.length > 0) {
+                        params.adGroupIdFilter = adGroupChunk.join(',');
+                    }
+
                     // Configure the request for current chunks
                     const config = {
                         method: 'GET',
@@ -55,10 +121,7 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
                             'Amazon-Advertising-API-Scope': profileId,
                             'Content-Type': 'application/json'
                         },
-                        params: {
-                            campaignIdFilter: campaignChunk.join(','),
-                            adGroupIdFilter: adGroupChunk.join(',')
-                        }
+                        params: params
                     };
 
                     // Make the request for current chunk combination
@@ -75,13 +138,14 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
                         }));
                         
                         allNegativeKeywordsData.push(...chunkData);
+                        console.log(`✅ Negative keywords chunk processed: ${chunkData.length} keywords`);
                     }
 
                     // Add a small delay between requests to avoid rate limiting
                     await new Promise(resolve => setTimeout(resolve, 100));
                     
                 } catch (chunkError) {
-                    console.error(`Error fetching chunk - Campaign IDs: ${campaignChunk.join(',')}, AdGroup IDs: ${adGroupChunk.join(',')}:`, chunkError.message);
+                    console.error(`Error fetching negative keywords chunk - Campaign IDs: ${campaignChunk.join(',')}, AdGroup IDs: ${adGroupChunk.join(',')}:`, chunkError.message);
                     // Continue with other chunks even if one fails
                     continue;
                 }
@@ -92,6 +156,8 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
         const uniqueNegativeKeywordsData = allNegativeKeywordsData.filter((item, index, self) => 
             index === self.findIndex(t => t.keywordId === item.keywordId)
         );
+
+        console.log(`✅ Negative keywords processing complete: ${uniqueNegativeKeywordsData.length} unique keywords found`);
 
         // Save all merged data to database (update if exists, create if not)
         const negativeKeywords = await NegativeKeywords.findOneAndUpdate(
@@ -115,27 +181,11 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
         return negativeKeywords;
 
     } catch (error) {
-        // Handle specific axios errors
-        if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
-            console.error('API Error Response:', {
-                status: error.response.status,
-                data: error.response.data,
-                headers: error.response.headers
-            });
-            throw new Error(`API request failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
-        } else if (error.request) {
-            // The request was made but no response was received
-            console.error('No response received:', error.request);
-            throw new Error('No response received from Amazon Advertising API');
-        } else {
-            // Something happened in setting up the request that triggered an Error
-            console.error('Request setup error:', error.message);
-            throw error;
-        }
+        console.error('Error in getNegativeKeywords:', error.message);
+        throw error;
     }
 }
 
-
-module.exports = { getNegativeKeywords }
+module.exports = {
+    getNegativeKeywords
+};

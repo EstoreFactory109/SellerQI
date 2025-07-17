@@ -69,9 +69,11 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
     };
 
     aws4.sign(request, {
-        accessKeyId: process.env.AWS_ACCESS_KEY,
-        secretAccessKey: process.env.AWS_SECRET_KEY,
-        sessionToken: dataToReceive.SessionToken
+        accessKeyId: dataToReceive.AccessKey,
+        secretAccessKey: dataToReceive.SecretKey,
+        sessionToken: dataToReceive.SessionToken,
+        service: 'execute-api',
+        region: 'us-east-1'
     });
 
     try {

@@ -249,9 +249,35 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 async function getSearchKeywords(accessToken, profileId, userId, country, region) {
-            // console.log(`Getting search keywords for region: ${region}`);
-
     try {
+        // ===== INPUT VALIDATION =====
+        if (!accessToken) {
+            throw new Error('Access token is required');
+        }
+
+        if (!profileId) {
+            throw new Error('Profile ID is required');
+        }
+
+        if (!userId) {
+            throw new Error('User ID is required');
+        }
+
+        if (!country) {
+            throw new Error('Country is required');
+        }
+
+        if (!region) {
+            throw new Error('Region is required');
+        }
+
+        // Validate region
+        if (!BASE_URIS[region]) {
+            throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
+        }
+
+        console.log(`📡 Getting search keywords for region: ${region}, country: ${country}, userId: ${userId}`);
+
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -262,7 +288,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             throw new Error('Failed to get report ID');
         }
 
-        // console.log(`Report ID generated: ${reportData.reportId}`);
+        console.log(`✅ Search keywords report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);
@@ -272,14 +298,23 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
 
             // Add validation and logging
-            console.log(`Processing ${reportContent.length} search terms for user ${userId}`);
+            console.log(`✅ Processing ${reportContent.length} search terms for user ${userId}`);
             
             if (!reportContent || reportContent.length === 0) {
-                console.log('No search terms data to save');
+                console.warn('No search terms data available for the specified period', { userId, region, country });
+                
+                // Save empty result for consistency
+                const createSearchTermsData = await SearchTerms.create({
+                    userId: userId,
+                    country: country,
+                    region: region,
+                    searchTermsData: []
+                });
+                
                 return {
                     success: true,
                     message: "No search terms data available for the specified period",
-                    data: null
+                    data: createSearchTermsData
                 };
             }
 
@@ -288,33 +323,62 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                     userId: userId,
                     country: country,
                     region: region,
-                    searchTermData: reportContent
+                    searchTermsData: reportContent
                 });
-                
+
                 if (!createSearchTermsData) {
-                    console.error('Failed to create search terms data - no data returned from database');
+                    console.warn('Failed to save search terms data to database, but continuing with API data', { 
+                        userId, 
+                        region, 
+                        country,
+                        dataLength: reportContent.length 
+                    });
+                    
                     return {
-                        success: false,
-                        message: "Error in creating search terms data",
+                        success: true,
+                        message: "Search terms data retrieved but not saved to database",
+                        data: {
+                            userId,
+                            country,
+                            region,
+                            searchTermsData: reportContent,
+                            _isTemporary: true
+                        }
                     };
                 }
-                
-                console.log(`Successfully saved search terms data with ID: ${createSearchTermsData._id}`);
+
+                console.log(`✅ Search terms data saved successfully: ${reportContent.length} search terms stored`);
                 return {
                     success: true,
-                    message: "Search terms data fetched successfully",
+                    message: "Search terms data fetched and saved successfully",
                     data: createSearchTermsData
                 };
+
             } catch (dbError) {
-                console.error('Database error while saving search terms:', dbError);
+                console.error('Database error while saving search terms data', { 
+                    error: dbError.message, 
+                    userId, 
+                    region, 
+                    country,
+                    dataLength: reportContent.length
+                });
+                
+                // Return the data anyway, even if DB save failed
                 return {
-                    success: false,
-                    message: `Database error: ${dbError.message}`,
-                    error: dbError
+                    success: true,
+                    message: "Search terms data retrieved but database save failed",
+                    data: {
+                        userId,
+                        country,
+                        region,
+                        searchTermsData: reportContent,
+                        _isTemporary: true,
+                        _dbError: dbError.message
+                    }
                 };
             }
         } else {
-            console.error('Report generation failed:', reportStatus.error);
+            console.error('❌ Search keywords report generation failed:', reportStatus.error);
             return {
                 success: false,
                 reportId: reportStatus.reportId,
@@ -323,13 +387,12 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         }
 
     } catch (error) {
-        console.error('Error in getSearchKeywords:', error.message);
-        
-        // Handle specific 425 errors with more helpful messaging
-        if (error.message.includes('425')) {
-            throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');
-        }
-        
+        console.error('❌ Error in getSearchKeywords:', {
+            message: error.message,
+            userId,
+            region,
+            country
+        });
         throw error;
     }
 }

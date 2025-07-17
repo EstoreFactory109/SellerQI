@@ -104,18 +104,87 @@ class TokenManager {
         const errorMessage = error.message || '';
         const errorString = errorMessage.toLowerCase();
         
-        return (
+        // ===== ENHANCED AMAZON API ERROR DETECTION =====
+        
+        // Check response status codes first
+        if ((error.response && error.response.status === 401) ||
+            (error.statusCode === 401) ||
+            (error.status === 401)) {
+            console.log("🔍 TokenManager: Detected 401 status code");
+            return true;
+        }
+        
+        // Check Amazon's specific error structure: error.response.data.errors[]
+        if (error.response && error.response.data) {
+            const responseData = error.response.data;
+            
+            // Amazon SP-API error format: { errors: [{ code: 'Unauthorized', message: '...' }] }
+            if (Array.isArray(responseData.errors)) {
+                const hasUnauthorizedError = responseData.errors.some(err => {
+                    if (!err) return false;
+                    
+                    const code = (err.code || '').toLowerCase();
+                    const message = (err.message || '').toLowerCase();
+                    
+                    const isUnauthorized = (
+                        code === 'unauthorized' ||
+                        code === 'invalid_token' ||
+                        code === 'token_expired' ||
+                        message.includes('unauthorized') ||
+                        message.includes('access denied') ||
+                        message.includes('access to requested resource is denied') ||
+                        message.includes('invalid access token') ||
+                        message.includes('authentication failed') ||
+                        message.includes('token expired')
+                    );
+                    
+                    if (isUnauthorized) {
+                        console.log("🔍 TokenManager: Detected unauthorized in Amazon errors array", { code, message: err.message });
+                    }
+                    
+                    return isUnauthorized;
+                });
+                
+                if (hasUnauthorizedError) return true;
+            }
+            
+            // Direct error properties (some APIs return errors directly)
+            const directCode = (responseData.code || '').toLowerCase();
+            const directMessage = (responseData.message || '').toLowerCase();
+            
+            if (directCode === 'unauthorized' ||
+                directMessage.includes('unauthorized') ||
+                directMessage.includes('access denied') ||
+                directMessage.includes('access to requested resource is denied')) {
+                console.log("🔍 TokenManager: Detected unauthorized in direct response", { code: directCode, message: responseData.message });
+                return true;
+            }
+        }
+        
+        // Check standard error message patterns
+        const messageChecks = (
             errorString.includes('unauthorized') ||
             errorString.includes('401') ||
             errorString.includes('invalid_token') ||
             errorString.includes('token expired') ||
             errorString.includes('access denied') ||
+            errorString.includes('access to requested resource is denied') ||
             errorString.includes('invalid access token') ||
-            errorString.includes('authentication failed') ||
-            (error.response && error.response.status === 401) ||
-            (error.statusCode === 401) ||
-            (error.status === 401)
+            errorString.includes('authentication failed')
         );
+        
+        if (messageChecks) {
+            console.log("🔍 TokenManager: Detected unauthorized in error message", { message: errorMessage });
+            return true;
+        }
+        
+        // Check if error was thrown with Amazon API error structure preserved
+        if (error.amazonApiError) {
+            console.log("🔍 TokenManager: Detected amazonApiError flag");
+            return true;
+        }
+        
+        return false;
     }
 
     // Get valid tokens with proactive refresh
@@ -139,41 +208,66 @@ class TokenManager {
     async executeWithTokenRefresh(fn, params, userId, spRefreshToken, adsRefreshToken, maxRetries = 2) {
         let lastError;
         
+        console.log(`🔄 TokenManager: Executing function for user ${userId} (maxRetries: ${maxRetries})`);
+        
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
+                console.log(`🔄 TokenManager: Attempt ${attempt + 1}/${maxRetries + 1} for user ${userId}`);
+                
                 // Get valid tokens (with proactive refresh if needed)
                 const validTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
+                
+                console.log(`✅ TokenManager: Got valid tokens for user ${userId} (attempt ${attempt + 1})`);
                 
                 // Update params with fresh tokens if they contain token fields
                 const updatedParams = this.updateParamsWithTokens(params, validTokens);
                 
                 // Execute the function
-                return await fn(updatedParams);
+                const result = await fn(updatedParams);
+                console.log(`✅ TokenManager: Function executed successfully for user ${userId} on attempt ${attempt + 1}`);
+                return result;
                 
             } catch (error) {
                 lastError = error;
+                console.log(`❌ TokenManager: Function failed for user ${userId} on attempt ${attempt + 1}:`, error.message);
+                
+                // Check if this is an unauthorized error
+                const isUnauthorized = this.isUnauthorizedError(error);
+                console.log(`🔍 TokenManager: Is unauthorized error: ${isUnauthorized} (attempt ${attempt + 1})`);
                 
                 // If it's an unauthorized error and we haven't exceeded retries, refresh tokens and retry
-                if (this.isUnauthorizedError(error) && attempt < maxRetries) {
-                    logger.warn(`Unauthorized error detected on attempt ${attempt + 1}, refreshing tokens and retrying...`);
+                if (isUnauthorized && attempt < maxRetries) {
+                    console.log(`⚠️ TokenManager: Unauthorized error detected on attempt ${attempt + 1}, refreshing tokens and retrying...`);
                     
                     try {
+                        console.log(`🔄 TokenManager: Starting token refresh for user ${userId}...`);
                         await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
+                        console.log(`✅ TokenManager: Token refresh completed for user ${userId}`);
                         
                         // Add a small delay before retry to allow token propagation
+                        console.log(`⏳ TokenManager: Waiting 1 second before retry for user ${userId}...`);
                         await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        console.log(`🔄 TokenManager: Retrying function execution for user ${userId}...`);
                         continue;
                     } catch (refreshError) {
+                        console.error(`❌ TokenManager: Token refresh failed for user ${userId}:`, refreshError.message);
                         logger.error(`Token refresh failed: ${refreshError.message}`);
                         throw refreshError;
                     }
                 } else {
                     // Not an unauthorized error or max retries exceeded
+                    if (isUnauthorized) {
+                        console.log(`❌ TokenManager: Max retries exceeded for unauthorized error (user ${userId})`);
+                    } else {
+                        console.log(`❌ TokenManager: Non-unauthorized error, not retrying (user ${userId})`);
+                    }
                     throw error;
                 }
             }
         }
         
+        console.log(`❌ TokenManager: All attempts failed for user ${userId}`);
         throw lastError;
     }
 

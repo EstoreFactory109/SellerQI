@@ -70,6 +70,10 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
                 logger.info("⏳ Report is still processing...");
                 return null;
 
+            case "IN_QUEUE":
+                logger.info("📋 Report is queued for processing...");
+                return null;
+
             case "DONE_NO_DATA":
                 console.warn("⚠️ Report completed but contains no data.");
                 return false;

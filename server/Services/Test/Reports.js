@@ -9,10 +9,10 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
     // console.log(baseURI)
     try {
         const response = await axios.post(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports`,
+            `https://${baseURI}/reports/2021-06-30/reports`,
             {
                 reportType: "GET_STRANDED_INVENTORY_UI_DATA",
-                marketplaceIds: ["ATVPDKIKX0DER"],
+                marketplaceIds: marketplaceIds, // Use dynamic marketplaceIds instead of hardcoded
                 dataStartTime: "2025-01-10T00:00:00.000Z",
                 dataEndTime: "2025-03-10T23:59:59.999Z",
             },
@@ -35,7 +35,7 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
 const checkReportStatus = async (accessToken, reportId, baseURI) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/${reportId}`,
+            `https://${baseURI}/reports/2021-06-30/reports/${reportId}`,
             {
                 headers: { "x-amz-access-token": accessToken },
             }
@@ -78,7 +78,7 @@ const checkReportStatus = async (accessToken, reportId, baseURI) => {
 const getReportLink = async (accessToken, reportDocumentId, baseURI) => {
     try {
         const response = await axios.get(
-            `https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/${reportDocumentId}`,
+            `https://${baseURI}/reports/2021-06-30/documents/${reportDocumentId}`,
             { headers: { "x-amz-access-token": accessToken } }
         );
 

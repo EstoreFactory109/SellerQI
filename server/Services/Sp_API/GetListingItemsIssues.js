@@ -51,8 +51,8 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       // console.log("request: ", request);
   // ✅ AWS signing
   aws4.sign(request, {
-    accessKeyId: process.env.AWS_ACCESS_KEY,
-    secretAccessKey: process.env.AWS_SECRET_KEY,
+    accessKeyId: dataToReceive.AccessKey,
+    secretAccessKey: dataToReceive.SecretKey,
     sessionToken: dataToReceive.SessionToken,
     service: 'execute-api',
     region: 'us-east-1'
@@ -99,6 +99,55 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       // console.log("🔍 Request headers:", JSON.stringify(request.headers, null, 2));
     
     console.error(`❌ Error fetching catalog for SKU: ${sku}:`, error.response?.data || error.message);
+    
+    // ===== ENHANCED ERROR PROPAGATION FOR TOKENMANAGER =====
+    if (error.response) {
+        // Check if this is an Amazon API unauthorized error
+        const responseData = error.response.data;
+        let isUnauthorizedError = false;
+        
+        // Check for errors array (Amazon SP-API format)
+        if (Array.isArray(responseData?.errors)) {
+            isUnauthorizedError = responseData.errors.some(err => 
+                err && (
+                    (err.code || '').toLowerCase() === 'unauthorized' ||
+                    (err.message || '').toLowerCase().includes('access to requested resource is denied') ||
+                    (err.message || '').toLowerCase().includes('unauthorized')
+                )
+            );
+        }
+        
+        // Check direct error properties
+        if (!isUnauthorizedError) {
+            const directCode = (responseData?.code || '').toLowerCase();
+            const directMessage = (responseData?.message || '').toLowerCase();
+            isUnauthorizedError = (
+                directCode === 'unauthorized' ||
+                directMessage.includes('access to requested resource is denied') ||
+                directMessage.includes('unauthorized')
+            );
+        }
+        
+        // Check status code
+        if (!isUnauthorizedError && error.response.status === 401) {
+            isUnauthorizedError = true;
+        }
+        
+        if (isUnauthorizedError) {
+            console.log(`🔍 GetListingItem: Detected unauthorized error for SKU ${sku}, preserving for TokenManager`);
+            
+            // Create enhanced error that TokenManager can detect
+            const enhancedError = new Error(`Amazon SP-API Unauthorized for SKU ${sku}: ${JSON.stringify(responseData)}`);
+            enhancedError.response = error.response;
+            enhancedError.status = error.response.status;
+            enhancedError.statusCode = error.response.status;
+            enhancedError.amazonApiError = true; // Flag for TokenManager
+            
+            throw enhancedError;
+        }
+    }
+    
+    // For non-unauthorized errors, return false as before
     return false;
   }
 };

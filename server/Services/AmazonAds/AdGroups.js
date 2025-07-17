@@ -18,7 +18,48 @@ async function getAdGroups(accessToken, profileId, region,userId,country,campaig
       throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
     }
 
-    const query = campaignIds.map(campaignId => `${campaignId}`).join(',');
+    // VALIDATE CAMPAIGN IDS ARRAY
+    if (!Array.isArray(campaignIds)) {
+      logger.warn('Campaign IDs is not an array, converting to empty array', { campaignIds, userId });
+      campaignIds = [];
+    }
+
+    if (campaignIds.length === 0) {
+      logger.warn('No campaign IDs provided to getAdGroups, returning empty result', { userId, region, country });
+      
+      // Create empty record in database to maintain consistency
+      const createEmptyAdGroupData = await AdsGroup.create({
+        userId,
+        country,
+        region,
+        adsGroupData: []
+      });
+
+      return createEmptyAdGroupData;
+    }
+
+    // Filter out any invalid campaign IDs (null, undefined, empty strings)
+    const validCampaignIds = campaignIds.filter(id => id !== null && id !== undefined && id !== '');
+    
+    if (validCampaignIds.length === 0) {
+      logger.warn('No valid campaign IDs after filtering, returning empty result', { 
+        originalCount: campaignIds.length, 
+        validCount: validCampaignIds.length,
+        userId 
+      });
+      
+      // Create empty record in database to maintain consistency
+      const createEmptyAdGroupData = await AdsGroup.create({
+        userId,
+        country,
+        region,
+        adsGroupData: []
+      });
+
+      return createEmptyAdGroupData;
+    }
+
+    const query = validCampaignIds.map(campaignId => `${campaignId}`).join(',');
 
     // Construct the endpoint URL with query parameters
     const url = `${baseUri}/v2/adGroups?campaignIdFilter=${query}`;
@@ -30,13 +71,12 @@ async function getAdGroups(accessToken, profileId, region,userId,country,campaig
       'Amazon-Advertising-API-Scope': String(profileId)
     };
 
+    console.log(`📡 Making Ad Groups API call with ${validCampaignIds.length} campaign IDs`);
+
     // Make the GET request
     const response = await axios.get(url, { headers });
 
-    
-
     // Return the response data
-
     const createCampaignData= await AdsGroup.create({
       userId,
       country,
@@ -50,6 +90,8 @@ async function getAdGroups(accessToken, profileId, region,userId,country,campaig
         message: 'Failed to create campaign data'
       })
     }
+
+    console.log(`✅ Ad Groups data saved: ${response.data ? response.data.length : 0} ad groups`);
 
     return createCampaignData;
 

@@ -74,17 +74,13 @@ const getAmazonFeesDetails = async (asin, itemPrice, accessToken, credentials, m
 };
 
 const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, OrderDetails) => {
-    // AWS credentials object
+    // AWS credentials object - use temporary credentials from dataToReceive
     const credentials = {
-        accessKeyId: process.env.AWS_ACCESS_KEY,
-        secretAccessKey: process.env.AWS_SECRET_KEY
+        accessKeyId: dataToReceive.AccessKey,
+        secretAccessKey: dataToReceive.SecretKey,
+        sessionToken: dataToReceive.SessionToken
     };
     
-    // Add session token if available
-    if (dataToReceive.SessionToken) {
-        credentials.sessionToken = dataToReceive.SessionToken;
-    }
-
     const feesResults = [];
     const failedASINs = [];
     const marketplaceId = dataToReceive.marketplaceId;
