@@ -15,6 +15,7 @@ const FetchingTokens = () => {
   const authCode = searchParams.get("spapi_oauth_code");
   const state = searchParams.get("state");
   const sellingPartnerId = searchParams.get("selling_partner_id"); // SP-API also returns this
+  console.log(sellingPartnerId)
   const amazonAdsAuthCode = searchParams.get("code");
 
 
@@ -161,6 +162,8 @@ const FetchingTokens = () => {
         const response = await axiosInstance.post('/app/token/generateAdsTokens', {
           authCode: amazonAdsAuthCode,
         });
+
+        console.log(response)
         
         if (response.status === 200 && response.data) {
           console.log("Tokens generated successfully");
@@ -171,7 +174,7 @@ const FetchingTokens = () => {
           }
           
           // Navigate to dashboard with success message
-         navigate('/analyse-account')
+         
         }
       } catch (error) {
         console.error("Error generating tokens:", error);
