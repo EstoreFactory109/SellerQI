@@ -51,7 +51,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     //Getting all the required credentials
 
     const getSellerData = await Seller.findOne({ User: userId, }).sort({createdAt: -1})
-    // console.log(getSellerData);
+
 
     if (!getSellerData) {
         logger.error(new ApiError(500, "Internal server error in getting the seller data"));
@@ -68,6 +68,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         logger.error(new ApiError(400, "Region and country is missing"));
         return res.status(400).json(new ApiResponse(400, "", "Region and country is missing"));
     }
+    
 
     // Safer access to configuration objects
     const Base_URI = URIs && URIs[Region] ? URIs[Region] : null;

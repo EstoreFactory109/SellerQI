@@ -2,14 +2,16 @@ const calculateAccountHealthPercentage=(data)=>{
     let status="";
     let percentage=0;
 
-    if(data.ahrScore>=800){
+    const ahrScore = data?.ahrScore || 0;
+
+    if(ahrScore>=800){
         status="Healthy";
         percentage=100;
-    }else if(data.ahrScore<=800 && data.ahrScore>=200){
+    }else if(ahrScore<=800 && ahrScore>=200){
         status="Healthy";
         percentage=80;
     }
-    else if(data.ahrScore<=199 && data.ahrScore>=100){
+    else if(ahrScore<=199 && ahrScore>=100){
         status="At Risk";
         percentage=50;
     }else{
@@ -32,7 +34,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     let errorCounter=0;
     let result={}
 
-    if(v2Data.accountStatuses!=='NORMAL'){
+    if(v2Data?.accountStatuses!=='NORMAL'){
         errorCounter++;
         result.accountStatus={
             status:"Error",
@@ -48,7 +50,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     }
 
     //policy violations
-    if(v2Data.listingPolicyViolations!=='GOOD'){
+    if(v2Data?.listingPolicyViolations!=='GOOD'){
         errorCounter++;
         result.PolicyViolations={
             status:"Error",
@@ -63,7 +65,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         }
     }
     //valid tracking rate
-    if(v2Data.validTrackingRateStatus!=='GOOD'){
+    if(v2Data?.validTrackingRateStatus!=='GOOD'){
         errorCounter++;
         result.validTrackingRateStatus={
             status:"Error",
@@ -78,7 +80,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         }
     }
     //order defect rate
-    if(v2Data.orderWithDefectsStatus!=='GOOD'){
+    if(v2Data?.orderWithDefectsStatus!=='GOOD'){
         errorCounter++;
         result.orderWithDefectsStatus={
             status:"Error",
@@ -95,7 +97,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
 
     //Late Shipment rate
 
-    if(v2Data.lateShipmentRateStatus!=='GOOD'){
+    if(v2Data?.lateShipmentRateStatus!=='GOOD'){
         errorCounter++;
         result.lateShipmentRateStatus={
             status:"Error",
@@ -112,7 +114,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
 
     //cancellation rate
 
-    if(v2Data.CancellationRate!=='GOOD'){
+    if(v2Data?.CancellationRate!=='GOOD'){
         errorCounter++;
         result.CancellationRate={
             status:"Error",
@@ -129,7 +131,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     
     //all v1 checks
 
-    if(Number(v1Data.negativeFeedbacks.count)>0){
+    if(Number(v1Data?.negativeFeedbacks?.count || 0)>0){
         errorCounter++;
         result.negativeFeedbacks={
             status:"Error",
@@ -145,7 +147,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
     }
 
 
-    const NCX=Number(v1Data.lateShipmentCount.count)+Number(v1Data.preFulfillmentCancellationCount.count)+Number(v1Data.refundsCount.count);
+    const NCX=Number(v1Data?.lateShipmentCount?.count || 0)+Number(v1Data?.preFulfillmentCancellationCount?.count || 0)+Number(v1Data?.refundsCount?.count || 0);
     if(NCX>0){
         errorCounter++;
         result.NCX={
@@ -161,7 +163,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         }
     }
 
-    if(Number(v1Data.a_z_claims.count)!=0){
+    if(Number(v1Data?.a_z_claims?.count || 0)!=0){
         errorCounter++;
         result.a_z_claims={
             status:"Error",
@@ -176,7 +178,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
         }
     }
     
-    if(Number(v1Data.responseUnder24HoursCount)!=0){
+    if(Number(v1Data?.responseUnder24HoursCount || 0)!=0){
         errorCounter++;
         result.responseUnder24HoursCount={
             status:"Error",
