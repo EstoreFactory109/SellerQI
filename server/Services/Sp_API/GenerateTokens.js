@@ -4,7 +4,7 @@ const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
 
- const generateRefreshToken = async (authCode) => {
+ const generateRefreshToken = async (authCode,region) => {
     // Validate required parameters
     if (!authCode) {
         logger.error("Authorization code is missing");
@@ -17,9 +17,17 @@ const axios=require('axios');
         throw new ApiError(500, "SP-API credentials not configured");
     }
 
+    const regionEndpoints = {
+        'NA': 'https://advertising-api.amazon.com',
+        'EU': 'https://advertising-api-eu.amazon.com',
+        'FE': 'https://advertising-api-fe.amazon.com'
+    };
+
+    const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
+
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
-    const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
+    const redirectUri = `${baseURL}/auth/callback`; // Define redirect URI
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
@@ -100,7 +108,7 @@ const axios=require('axios');
 };
 
 
-const generateAdsRefreshToken = async (authCode) => {
+const generateAdsRefreshToken = async (authCode,region) => {
     // Validate required parameters
     if (!authCode) {
         logger.error("Authorization code is missing");
@@ -113,6 +121,14 @@ const generateAdsRefreshToken = async (authCode) => {
     const clientId = process.env.AMAZON_ADS_CLIENT_ID;
     const clientSecret = process.env.AMAZON_ADS_CLIENT_SECRET;
     const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
+
+    const regionEndpoints = {
+        'NA': 'https://advertising-api.amazon.com',
+        'EU': 'https://advertising-api-eu.amazon.com',
+        'FE': 'https://advertising-api-fe.amazon.com'
+    };
+    
+    const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
 
     try {
         logger.info(`Exchanging auth code for tokens...`);
@@ -130,7 +146,7 @@ const generateAdsRefreshToken = async (authCode) => {
         // It's only used during the authorization request
 
         const response = await axios.post(
-            "https://api.amazon.com/auth/o2/token",
+            `${baseURL}/auth/o2/token`,
             body,
             {
                 headers: { 

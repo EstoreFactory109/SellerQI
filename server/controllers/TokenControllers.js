@@ -136,7 +136,7 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
         return res.status(400).json({message:"Authorization code, selling partner id and state are missing"});
     }
     
-    const {refreshToken}=await generateRefreshToken(authCode);
+    const {refreshToken}=await generateRefreshToken(authCode,region);
     if(!refreshToken){
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
@@ -179,7 +179,7 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
         return res.status(400).json({message:"Authorization code"});
     }
     
-    const {refreshToken}=await generateAdsRefreshToken(authCode);
+    const {refreshToken}=await generateAdsRefreshToken(authCode,region);
     if(!refreshToken){
         return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
     }
