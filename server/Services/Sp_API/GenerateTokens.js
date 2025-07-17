@@ -17,13 +17,15 @@ const axios=require('axios');
         throw new ApiError(500, "SP-API credentials not configured");
     }
 
-
     const clientId = credentials.clientId;
     const clientSecret = credentials.clientSecret;
-    const redirectUri = 'https://www.sellerqi.com/auth/callback'; // Define redirect URI
+    
+    // Use environment variable for redirect URI, fallback to production URL
+    const redirectUri = 'https://www.sellerqi.com/auth/callback';
 
     try {
-        logger.info(`Exchanging auth code for tokens...`);
+        logger.info(`Exchanging auth code for tokens using redirect URI: ${redirectUri}`);
+        logger.info(`Using client ID: ${clientId.substring(0, 10)}...`); // Log partial client ID for debugging
         
         // Build token request parameters according to Amazon's API spec
         // Use URLSearchParams to properly format as application/x-www-form-urlencoded
@@ -34,6 +36,13 @@ const axios=require('axios');
             client_id: clientId,
             client_secret: clientSecret
         });
+
+        logger.info(`Request body parameters: ${JSON.stringify({
+            grant_type: 'authorization_code',
+            code: authCode.substring(0, 10) + '...',
+            redirect_uri: redirectUri,
+            client_id: clientId.substring(0, 10) + '...'
+        })}`);
 
         // Note: 'state' is not part of the token exchange request
         // It's only used during the authorization request
@@ -78,6 +87,7 @@ const axios=require('axios');
             const errorDescription = error.response.data?.error_description;
             
             logger.error(`Amazon API error: ${status} - ${errorCode}: ${errorDescription}`);
+            logger.error(`Full error response:`, error.response.data);
             
             switch (errorCode) {
                 case 'invalid_grant':
@@ -97,6 +107,9 @@ const axios=require('axios');
         
         // Network or other errors
         logger.error(`Token exchange error: ${error.message}`);
+        if (error.code) {
+            logger.error(`Error code: ${error.code}`);
+        }
         throw new ApiError(500, error.message || "Failed to exchange authorization code");
     }
 };
@@ -110,14 +123,14 @@ const generateAdsRefreshToken = async (authCode,region) => {
     }
 
     // Credentials validation
-    
-
     const clientId = process.env.AMAZON_ADS_CLIENT_ID;
     const clientSecret = process.env.AMAZON_ADS_CLIENT_SECRET;
-    const redirectUri = "https://www.sellerqi.com/auth/callback"; // Define redirect URI
+    
+    // Use environment variable for redirect URI, fallback to production URL
+    const redirectUri = process.env.AMAZON_REDIRECT_URI || 'https://www.sellerqi.com/auth/callback';
 
     try {
-        logger.info(`Exchanging auth code for tokens...`);
+        logger.info(`Exchanging ads auth code for tokens using redirect URI: ${redirectUri}`);
         
         // Build token request parameters according to Amazon's API spec
         // Use URLSearchParams to properly format as application/x-www-form-urlencoded
@@ -157,7 +170,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
             refreshToken: response.data.refresh_token
         };
 
-        logger.info("Successfully obtained tokens");
+        logger.info("Successfully obtained ads tokens");
         
         return tokenData;
 

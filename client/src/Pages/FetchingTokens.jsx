@@ -63,6 +63,7 @@ const FetchingTokens = () => {
         
         // Clear the stored state after validation
         sessionStorage.removeItem('spapi_oauth_state');
+        return;
         
         // Send the authorization code and state to the backend
         const response = await axiosInstance.post('/app/token/generateSPAPITokens', {
@@ -91,24 +92,36 @@ const FetchingTokens = () => {
         if (error.response) {
           errorCode = error.response.status;
           
+          // Extract message from ApiResponse structure
+          const apiMessage = error.response.data?.message;
+          
           switch (errorCode) {
             case 400:
-              errorMessage = error.response.data?.message || "Invalid authorization code";
+              errorMessage = apiMessage || "Invalid authorization code or request parameters";
               break;
             case 401:
-              errorMessage = "Authorization failed - please try again";
+              errorMessage = apiMessage || "Authorization failed - please try again";
+              break;
+            case 403:
+              errorMessage = apiMessage || "Access forbidden - check your permissions";
+              break;
+            case 404:
+              errorMessage = apiMessage || "Account or configuration not found";
               break;
             case 409:
-              errorMessage = "This seller account is already connected";
+              errorMessage = apiMessage || "This seller account is already connected";
               break;
             case 422:
-              errorMessage = "Invalid request parameters";
+              errorMessage = apiMessage || "Invalid request parameters";
               break;
             case 429:
-              errorMessage = "Too many requests - please try again later";
+              errorMessage = apiMessage || "Too many requests - please try again later";
+              break;
+            case 500:
+              errorMessage = apiMessage || "Server error during token generation";
               break;
             default:
-              errorMessage = error.response.data?.message || errorMessage;
+              errorMessage = apiMessage || "Failed to connect to Amazon Seller Central";
           }
         } else if (error.message) {
           errorMessage = error.message;
@@ -184,24 +197,36 @@ const FetchingTokens = () => {
         if (error.response) {
           errorCode = error.response.status;
           
+          // Extract message from ApiResponse structure
+          const apiMessage = error.response.data?.message;
+          
           switch (errorCode) {
             case 400:
-              errorMessage = error.response.data?.message || "Invalid authorization code";
+              errorMessage = apiMessage || "Invalid authorization code or request parameters";
               break;
             case 401:
-              errorMessage = "Authorization failed - please try again";
+              errorMessage = apiMessage || "Authorization failed - please try again";
+              break;
+            case 403:
+              errorMessage = apiMessage || "Access forbidden - check your permissions";
+              break;
+            case 404:
+              errorMessage = apiMessage || "Account or configuration not found";
               break;
             case 409:
-              errorMessage = "This seller account is already connected";
+              errorMessage = apiMessage || "This seller account is already connected";
               break;
             case 422:
-              errorMessage = "Invalid request parameters";
+              errorMessage = apiMessage || "Invalid request parameters";
               break;
             case 429:
-              errorMessage = "Too many requests - please try again later";
+              errorMessage = apiMessage || "Too many requests - please try again later";
+              break;
+            case 500:
+              errorMessage = apiMessage || "Server error during ads token generation";
               break;
             default:
-              errorMessage = error.response.data?.message || errorMessage;
+              errorMessage = apiMessage || "Failed to connect to Amazon Ads";
           }
         } else if (error.message) {
           errorMessage = error.message;

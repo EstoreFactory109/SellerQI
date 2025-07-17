@@ -129,42 +129,59 @@ const generateSPAPITokens=asyncHandler(async(req,res)=>{
     const userId=req.userId;
     const region=req.region;
     const country=req.country;
+    
     if(!region || !country){
         return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
     }
     if(!authCode || !sellingPartnerId){
-        return res.status(400).json({message:"Authorization code, selling partner id and state are missing"});
+        return res.status(400).json(new ApiResponse(400,"","Authorization code and selling partner id are missing"));
     }
     
-    const {refreshToken}=await generateRefreshToken(authCode,region);
-    if(!refreshToken){
-        return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
+    try {
+        // Call generateRefreshToken with proper error handling
+        const tokenData = await generateRefreshToken(authCode, region);
+        
+        if(!tokenData || !tokenData.refreshToken){
+            logger.error("No refresh token received from generateRefreshToken function");
+            return res.status(500).json(new ApiResponse(500,"","Failed to generate refresh token - no token data received"));
+        }
+        
+        const refreshToken = tokenData.refreshToken;
+        
+        const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
+        if(!sellerCentral){
+            return res.status(404).json(new ApiResponse(404,"","SellerCentral not found"));
+        }
+
+        sellerCentral.selling_partner_id=sellingPartnerId;
+
+        // Find the seller account that matches the current region and country
+        const sellerAccount = sellerCentral.sellerAccount.find(account => 
+            account.country === country && account.region === region
+        );
+        
+        if(!sellerAccount){
+            return res.status(404).json(new ApiResponse(404,"","Seller account not found for the specified region and country"));
+        }
+
+        // Store the refresh token in the seller account
+        sellerAccount.spiRefreshToken = refreshToken;
+        
+        await sellerCentral.save();
+        return res.status(200).json(new ApiResponse(200,sellerCentral,"Tokens generated successfully"));
+        
+    } catch (error) {
+        // Handle specific errors from generateRefreshToken
+        logger.error(`Error in generateSPAPITokens: ${error.message}`);
+        
+        // If it's an ApiError, preserve the status code and message
+        if (error.statusCode) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode,"",error.message));
+        }
+        
+        // For other errors, return a generic 500
+        return res.status(500).json(new ApiResponse(500,"",`Failed to generate refresh token: ${error.message}`));
     }
-    
-
-    const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
-    if(!sellerCentral){
-        return res.status(404).json(new ApiError(404,"SellerCentral not found"));
-    }
-
-    sellerCentral.selling_partner_id=sellingPartnerId;
-
-    // Find the seller account that matches the current region and country
-    const sellerAccount = sellerCentral.sellerAccount.find(account => 
-        account.country === country && account.region === region
-    );
-    
-    if(!sellerAccount){
-        return res.status(404).json(new ApiError(404,"Seller account not found for the specified region and country"));
-    }
-
-    // Store the refresh token in the seller account
-    sellerAccount.spiRefreshToken = refreshToken;
-    
-    
-    
-    await sellerCentral.save();
-    return res.status(200).json(new ApiResponse(200,sellerCentral,"Tokens generated successfully"));
 })
 
 const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
@@ -172,41 +189,57 @@ const generateAmazonAdsTokens=asyncHandler(async(req,res)=>{
     const userId=req.userId;
     const region=req.region;
     const country=req.country;
+    
     if(!region || !country){
         return res.status(400).json(new ApiResponse(400,"","Region and country are missing"));
     }
     if(!authCode){
-        return res.status(400).json({message:"Authorization code"});
+        return res.status(400).json(new ApiResponse(400,"","Authorization code is missing"));
     }
     
-    const {refreshToken}=await generateAdsRefreshToken(authCode,region);
-    if(!refreshToken){
-        return res.status(500).json(new ApiError(500,"Internal server error in generating refresh token"));
+    try {
+        // Call generateAdsRefreshToken with proper error handling
+        const tokenData = await generateAdsRefreshToken(authCode, region);
+        
+        if(!tokenData || !tokenData.refreshToken){
+            logger.error("No refresh token received from generateAdsRefreshToken function");
+            return res.status(500).json(new ApiResponse(500,"","Failed to generate ads refresh token - no token data received"));
+        }
+        
+        const refreshToken = tokenData.refreshToken;
+        
+        const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
+        if(!sellerCentral){
+            return res.status(404).json(new ApiResponse(404,"","SellerCentral not found"));
+        }
+
+        // Find the seller account that matches the current region and country
+        const sellerAccount = sellerCentral.sellerAccount.find(account => 
+            account.country === country && account.region === region
+        );
+        
+        if(!sellerAccount){
+            return res.status(404).json(new ApiResponse(404,"","Seller account not found for the specified region and country"));
+        }
+
+        // Store the refresh token in the seller account
+        sellerAccount.adsRefreshToken = refreshToken;
+        
+        await sellerCentral.save();
+        return res.status(200).json(new ApiResponse(200,sellerAccount,"Amazon Ads tokens generated successfully"));
+        
+    } catch (error) {
+        // Handle specific errors from generateAdsRefreshToken
+        logger.error(`Error in generateAmazonAdsTokens: ${error.message}`);
+        
+        // If it's an ApiError, preserve the status code and message
+        if (error.statusCode) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode,"",error.message));
+        }
+        
+        // For other errors, return a generic 500
+        return res.status(500).json(new ApiResponse(500,"",`Failed to generate ads refresh token: ${error.message}`));
     }
-    
-
-    const sellerCentral=await Seller.findOne({User:userId}).sort({createdAt: -1});
-    if(!sellerCentral){
-        return res.status(404).json(new ApiError(404,"SellerCentral not found"));
-    }
-
-
-    // Find the seller account that matches the current region and country
-    const sellerAccount = sellerCentral.sellerAccount.find(account => 
-        account.country === country && account.region === region
-    );
-    
-    if(!sellerAccount){
-        return res.status(404).json(new ApiError(404,"Seller account not found for the specified region and country"));
-    }
-
-    // Store the refresh token in the seller account
-    sellerAccount.adsRefreshToken = refreshToken;
-    
-    
-    
-    await sellerCentral.save();
-    return res.status(200).json(new ApiResponse(200,sellerAccount,"Tokens generated successfully"));
 })
 
 
