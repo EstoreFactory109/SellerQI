@@ -26,13 +26,14 @@ const axios=require('axios');
         logger.info(`Exchanging auth code for tokens...`);
         
         // Build token request parameters according to Amazon's API spec
-        const body = {
-            grant_type: 'authorization_code',  // CRITICAL: This was missing!
+        // Use URLSearchParams to properly format as application/x-www-form-urlencoded
+        const body = new URLSearchParams({
+            grant_type: 'authorization_code',
             code: authCode,
             redirect_uri: redirectUri,
             client_id: clientId,
             client_secret: clientSecret
-        };
+        });
 
         // Note: 'state' is not part of the token exchange request
         // It's only used during the authorization request
@@ -42,7 +43,7 @@ const axios=require('axios');
             body,
             {
                 headers: { 
-                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    "Content-Type": "application/x-www-form-urlencoded",
                     "Accept": "application/json"
                 },
                 timeout: 30000 // 30 second timeout
@@ -119,13 +120,14 @@ const generateAdsRefreshToken = async (authCode,region) => {
         logger.info(`Exchanging auth code for tokens...`);
         
         // Build token request parameters according to Amazon's API spec
-        const body = {
-            grant_type: 'authorization_code',  // CRITICAL: This was missing!
+        // Use URLSearchParams to properly format as application/x-www-form-urlencoded
+        const body = new URLSearchParams({
+            grant_type: 'authorization_code',
             code: authCode,
             redirect_uri: redirectUri,
             client_id: clientId,
             client_secret: clientSecret
-        };
+        });
 
         // Note: 'state' is not part of the token exchange request
         // It's only used during the authorization request
@@ -135,7 +137,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
             body,
             {
                 headers: { 
-                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    "Content-Type": "application/x-www-form-urlencoded",
                     "Accept": "application/json"
                 },
                 timeout: 30000 // 30 second timeout
