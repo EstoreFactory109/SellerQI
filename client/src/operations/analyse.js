@@ -551,7 +551,7 @@ const analyseData = (data) => {
     }
 
     
-
+console.log("ProductWiseSponsoredAdsGraphData: ", data.ProductWiseSponsoredAdsGraphData)
     const dashboardData = {
         Country: data.Country || "US",
         createdAccountDate: data.createdAccountDate || null,

@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/AsyncHandler.js');
 const logger = require('../utils/Logger.js');
 const SubscriptionModel = require('../models/SubscriptionModel.js');
 const UserModel = require('../models/userModel.js');
+const { sendWelcomeLiteEmail } = require('../Services/Email/SendWelcomeLiteEmail.js');
 
 // Get Stripe publishable key
 const getPublishableKey = asyncHandler(async (req, res) => {
@@ -67,6 +68,20 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
                     currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
                     cancelAtPeriodEnd: false
                 });
+
+                // Send welcome email for lite package after subscription is created
+                try {
+                    const connectAccountUrl = `${process.env.CLIENT_URL}/connect-accounts`;
+                    const emailSent = await sendWelcomeLiteEmail(user.email, user.firstName, connectAccountUrl);
+                    if (emailSent) {
+                        logger.info(`Welcome Lite email sent successfully to ${user.email} for user ${userId}`);
+                    } else {
+                        logger.warn(`Failed to send welcome Lite email to ${user.email} for user ${userId}`);
+                    }
+                } catch (emailError) {
+                    logger.error(`Error sending welcome Lite email to ${user.email} for user ${userId}:`, emailError);
+                    // Don't fail the subscription process if email fails
+                }
             }
             
             return res.status(200).json(new ApiResponse(200, { url: successUrl }, 'Free plan activated'));

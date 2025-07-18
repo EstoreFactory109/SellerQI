@@ -10,18 +10,26 @@ import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 
-const mockChartData = [
-  { date: 'Apr 1', spend: 150, netProfit: 350 },
-  { date: 'Apr 5', spend: 180, netProfit: 420 },
-  { date: 'Apr 8', spend: 200, netProfit: 380 },
-  { date: 'Apr 12', spend: 175, netProfit: 450 },
-  { date: 'Apr 15', spend: 190, netProfit: 390 },
-  { date: 'Apr 18', spend: 165, netProfit: 480 },
-  { date: 'Apr 22', spend: 185, netProfit: 410 },
-  { date: 'Apr 25', spend: 170, netProfit: 440 },
-  { date: 'Apr 28', spend: 195, netProfit: 395 },
-  { date: 'Apr 30', spend: 160, netProfit: 460 },
-];
+// Create empty chart data with zero values when no data is available
+const createEmptyProfitabilityData = () => {
+  const today = new Date();
+  const emptyData = [];
+  
+  // Generate last 7 days with zero values
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    
+    emptyData.push({
+      date: formattedDate,
+      grossProfit: 0,
+      totalSales: 0
+    });
+  }
+  
+  return emptyData;
+};
 
 const ProfitabilityDashboard = () => {
   const [suggestionsData, setSuggestionsData] = useState([]);
@@ -175,19 +183,8 @@ const ProfitabilityDashboard = () => {
       }).filter(item => item !== null);
     }
     
-    // Final fallback to mock data (updated for gross profit)
-    return [
-      { date: 'Apr 1', grossProfit: 750, totalSales: 1000 },
-      { date: 'Apr 5', grossProfit: 920, totalSales: 1200 },
-      { date: 'Apr 8', grossProfit: 1033, totalSales: 1333 },
-      { date: 'Apr 12', grossProfit: 892, totalSales: 1167 },
-      { date: 'Apr 15', grossProfit: 977, totalSales: 1267 },
-      { date: 'Apr 18', grossProfit: 835, totalSales: 1100 },
-      { date: 'Apr 22', grossProfit: 948, totalSales: 1233 },
-      { date: 'Apr 25', grossProfit: 863, totalSales: 1133 },
-      { date: 'Apr 28', grossProfit: 1005, totalSales: 1300 },
-      { date: 'Apr 30', grossProfit: 807, totalSales: 1067 },
-    ];
+    // Final fallback: Return empty data with zero values
+    return createEmptyProfitabilityData();
   }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance]);
 
   // Get COGs values from Redux store

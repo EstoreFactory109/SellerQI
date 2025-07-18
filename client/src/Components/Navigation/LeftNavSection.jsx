@@ -458,6 +458,26 @@ const LeftNavSection = () => {
                                             Plans & Billing
                                         </NavLink>
                                     </motion.div>
+                                    <motion.div
+                                        initial={{ y: -10, opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: -10, opacity: 0 }}
+                                        transition={{ delay: 0.14, duration: 0.15 }}
+                                    >
+                                        <NavLink
+                                            to="/seller-central-checker/settings?tab=support"
+                                            className={() =>
+                                                `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 ${
+                                                    isSettingsPage && currentSettingsTab === 'support'
+                                                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                        : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                }`
+                                            }
+                                        >
+                                            <div className="w-1.5 h-1.5 bg-current rounded-full opacity-60"></div>
+                                            Support
+                                        </NavLink>
+                                    </motion.div>
                                 </motion.div>
                             )}
                         </AnimatePresence>

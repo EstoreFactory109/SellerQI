@@ -84,25 +84,15 @@ const Dashboard = () => {
     }
   }, [])
 
-  // Calculate PPC sales using the exact same logic as sponsored ads page
+  // Calculate PPC sales using only real Amazon Advertising data
   const calculatePPCSales = () => {
-    // Prioritize actual PPC sales from sponsored ads data
+    // Only use actual PPC sales from sponsored ads data
     if (sponsoredAdsMetrics?.totalSalesIn30Days && sponsoredAdsMetrics.totalSalesIn30Days > 0) {
       return sponsoredAdsMetrics.totalSalesIn30Days;
     }
     
-    // Calculate totals from filtered TotalSales data as fallback
-    const totalSalesData = dashboardInfo?.TotalSales;
-    let filteredTotalSales = 0;
-    let estimatedPPCSales = 0;
-    
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      // Calculate totals from filtered date range
-      filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      estimatedPPCSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
-    }
-    
-    return estimatedPPCSales;
+    // Return 0 when no real PPC data is available - no assumptions
+    return 0;
   };
 
   // Calculate PPC Spend using actual ProductAdsPayment data from finance
@@ -119,13 +109,12 @@ const Dashboard = () => {
     // Use actual dashboard data for CSV export
     const ppcSales = calculatePPCSales();
     const ppcSpend = calculatePPCSpend();
-    const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '25.00';
     const csvData = [
       ['Metric', 'Value', 'Change'],
-      ['Revenue', formatCurrency(totalSales), '+12.5%'],
-      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '+8.3%'],
-      ['ACOS', `${acos}%`, '-2.1%'],
-      ['Total Issues', totalIssues.toLocaleString(), '+15.3%'],
+      ['Revenue', formatCurrency(totalSales), 'N/A'],
+      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'N/A'],
+      ['ACOS', `${acos}%`, 'N/A'],
+      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
     ]
     
@@ -147,13 +136,12 @@ const Dashboard = () => {
     // In a real implementation, you might want to use a library like xlsx
     const ppcSales = calculatePPCSales();
     const ppcSpend = calculatePPCSpend();
-    const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '25.00';
     const excelData = [
       ['Metric', 'Value', 'Change'],
-      ['Revenue', formatCurrency(totalSales), '+12.5%'],
-      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '+8.3%'],
-      ['ACOS', `${acos}%`, '-2.1%'],
-      ['Total Issues', totalIssues.toLocaleString(), '+15.3%'],
+      ['Revenue', formatCurrency(totalSales), 'N/A'],
+      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'N/A'],
+      ['ACOS', `${acos}%`, 'N/A'],
+      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
     ]
     
@@ -199,8 +187,8 @@ const Dashboard = () => {
   const ppcSales = calculatePPCSales();
   const ppcSpend = calculatePPCSpend();
   
-  // Calculate ACOS using the exact same logic as sponsored ads page
-  const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '25.00';
+  // Calculate ACOS using only real data - no assumptions
+  const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
 
   // Format sales value
   const formatCurrency = (value) => {
@@ -214,10 +202,10 @@ const Dashboard = () => {
   };
 
   const quickStats = [
-    { icon: BarChart3, label: 'Sales', value: `$${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: '+12.5%', trend: 'up', color: 'emerald' },
-    { icon: Zap, label: 'PPC Sales', value: `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: '+8.3%', trend: 'up', color: 'blue' },
-    { icon: Target, label: 'ACOS', value: `${acos}%`, change: '-2.1%', trend: 'down', color: 'purple' },
-    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: '+15.3%', trend: 'up', color: 'orange' }
+    { icon: BarChart3, label: 'Sales', value: `$${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: 'N/A', trend: 'neutral', color: 'emerald' },
+    { icon: Zap, label: 'PPC Sales', value: `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: 'N/A', trend: 'neutral', color: 'blue' },
+    { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple' },
+    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange' }
   ]
 
   return (

@@ -11,7 +11,7 @@ export default function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-8">
           <div>
             <img 
-              src="https://res.cloudinary.com/ddoa960le/image/upload/v1750194049/Seller_QI_Logo___White_bcthaw.png"
+              src="https://res.cloudinary.com/ddoa960le/image/upload/v1752822595/Seller_QI_Logo___V3__1_-removebg-preview_ah8gbe.png"
               alt="SellerQI Logo"
               className="h-16 w-auto"
               loading="lazy"
@@ -59,7 +59,7 @@ export default function Footer() {
 
         <div className="border-t border-gray-800 pt-8 flex items-center justify-center">
           <p className="text-gray-400">
-            © Copyright 2014 - 2024. All Rights Reserved.
+            © Copyright 2025. All Rights Reserved.
           </p>
         </div>
       </div>

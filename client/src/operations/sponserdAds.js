@@ -4,6 +4,8 @@
  * @returns {Object} Object containing totalCost, totalSalesIn30Days, and totalProductsPurchased
  */
 const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
+    console.log("=== CALCULATING SPONSORED ADS METRICS ===");
+    console.log("productWiseSponsoredAds: ", productWiseSponsoredAds);
     // Initialize totals
     console.log("productWiseSponsoredAds: ", productWiseSponsoredAds);
     let totalCost = 0;

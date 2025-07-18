@@ -74,12 +74,12 @@ export default function ContactPage() {
   ];
 
   const helpTopics = [
-    "I have a question about SellerQI Pro",
     "I need product optimization help", 
     "SellerQI fails to analyze my product",
     "I want to report a bug",
     "Billing and subscription questions",
     "Partnership opportunities",
+    "Suggest new feature",
     "Other"
   ];
 

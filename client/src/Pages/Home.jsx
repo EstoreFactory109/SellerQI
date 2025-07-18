@@ -151,7 +151,7 @@ export default function SellerQIHomepage() {
 
             {/* Trust Indicators */}
             <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-500 mb-12">
-              <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> No credit card required</span>
+              <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 7 Days Free Trial</span>
               <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Free forever plan</span>
               <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 5-minute setup</span>
               <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-[#3B4A6B]" /> SOC 2 Compliant</span>
@@ -731,12 +731,12 @@ export default function SellerQIHomepage() {
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Issue Breakdown</li>
                 </ul>
                 <button className="w-full bg-white text-[#3B4A6B] py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
-                  Start 14-Day Trial
+                  Start 7-Days Free Trial
                 </button>
               </div>
             </div>
             
-            <p className="text-gray-500">30-day money-back guarantee • Cancel anytime • No setup fees</p>
+            <p className="text-gray-500">7-days free trial • Cancel anytime • No setup fees</p>
           </motion.div>
         </div>
       </section>
@@ -857,7 +857,7 @@ export default function SellerQIHomepage() {
             </div>
             
             <div className="flex justify-center gap-8 text-sm opacity-75">
-              <span>✓ No credit card required</span>
+              <span>7 Days Free Trial</span>
               <span>✓ 5-minute setup</span>
               <span>✓ Instant results</span>
             </div>

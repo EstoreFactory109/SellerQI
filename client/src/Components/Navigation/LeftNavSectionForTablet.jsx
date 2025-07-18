@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, X} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -82,7 +82,17 @@ const LeftNavSection = () => {
 
 
     return (
-        <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm " style={{ left: position }}>
+        <>
+            {/* Mobile Menu Backdrop */}
+            {position === "0%" && (
+                <div 
+                    className="fixed inset-0 bg-black bg-opacity-50 z-[98] lg:hidden transition-opacity duration-300"
+                    onClick={() => dispatch(setPosition("-100%"))}
+                />
+            )}
+            
+            {/* Mobile Menu */}
+            <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm " style={{ left: position }}>
             {/* Logo Section */}
             <div className="w-full px-4 py-4 border-b border-gray-200/50 flex-shrink-0">
                 <div className="flex items-center justify-between">
@@ -96,9 +106,10 @@ const LeftNavSection = () => {
                     />
                     <button
                         onClick={() => dispatch(setPosition("-100%"))}
-                        className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+                        className="p-2 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition-colors duration-200 touch-manipulation"
+                        aria-label="Close mobile menu"
                     >
-                        <img src={Close} alt="Close" className="w-3 h-3" />
+                        <X className="w-5 h-5 text-gray-600" />
                     </button>
                 </div>
             </div>
@@ -465,6 +476,26 @@ const LeftNavSection = () => {
                                                 Plans & Billing
                                             </NavLink>
                                         </motion.div>
+                                        <motion.div
+                                            initial={{ y: -10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ delay: 0.14, duration: 0.15 }}
+                                        >
+                                            <NavLink
+                                                to="/seller-central-checker/settings?tab=support"
+                                                className={() =>
+                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                        isSettingsPage && currentSettingsTab === 'support'
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                    }`
+                                                }
+                                            >
+                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                Support
+                                            </NavLink>
+                                        </motion.div>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
@@ -487,6 +518,7 @@ const LeftNavSection = () => {
                 </button>
             </div>
         </aside>
+        </>
     );
 };
 

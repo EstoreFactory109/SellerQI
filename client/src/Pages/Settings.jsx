@@ -7,6 +7,7 @@ import Security from '../Components/settings/Security/Security.jsx';
 import Teams from '../Components/settings/Teams/Teams.jsx';
 import AccountIntegration from '../Components/settings/AccountIntegrations/AccountIntegrations.jsx';
 import PlansAndBilling from '../Components/settings/PlansAndBilling/PlansAndBilling.jsx';
+import Support from '../Components/settings/Support/Support.jsx';
 
 const Settings = () => {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,8 @@ const Settings = () => {
         return <PlansAndBilling />;
       case 'teams':
         return <Teams />;
+      case 'support':
+        return <Support />;
       default:
         return <Profile />;
     }

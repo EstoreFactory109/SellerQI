@@ -37,21 +37,7 @@ export const fetchDashboardDataWithNotifications = async () => {
   }
 };
 
-// Example: Manual trigger for testing
-export const manualAnalysisTrigger = () => {
-  // Simulate dashboard data for testing
-  const mockDashboardData = {
-    user: { brand: 'Test Brand' },
-    TotalRankingerrors: 5,
-    totalErrorInConversion: 3,
-    totalErrorInAccount: 2,
-    totalProfitabilityErrors: 1,
-    totalSponsoredAdsErrors: 4,
-    totalInventoryErrors: 2
-  };
-  
-  handleAnalysisComplete(mockDashboardData, false);
-};
+// Note: Manual trigger removed - only real analysis data will be processed
 
 // Integration points where you might call these functions:
 /* 

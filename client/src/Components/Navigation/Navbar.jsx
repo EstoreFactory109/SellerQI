@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Menu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 export default function Navbar() {
   const [showSolutionsDropdown, setShowSolutionsDropdown] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showMobileSolutions, setShowMobileSolutions] = useState(false);
   const dropdownRef = useRef(null);
+  const mobileMenuRef = useRef(null);
   const navigate = useNavigate();
 
   const loginNavigate = (e) => {
@@ -19,12 +22,28 @@ export default function Navbar() {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setShowSolutionsDropdown(false);
       }
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target)) {
+        setShowMobileMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (showMobileMenu) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showMobileMenu]);
 
   const solutionsItems = [
     { name: 'Inventory Management', path: '/inventory-management' },
@@ -38,7 +57,7 @@ export default function Navbar() {
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             <Link to="/">
-              <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png' alt='SellerQI' className='w-28 h-9' />
+              <img src='https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png' alt='SellerQI' className='h-9' />
             </Link>
           </div>
           <nav className="hidden md:flex items-center space-x-6">
@@ -92,8 +111,154 @@ export default function Navbar() {
               Login
             </button>
           </nav>
+          
+          {/* Mobile Menu Button */}
+          <button
+            className="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            aria-label="Toggle mobile menu"
+          >
+            {showMobileMenu ? (
+              <X className="w-6 h-6 text-gray-600" />
+            ) : (
+              <Menu className="w-6 h-6 text-gray-600" />
+            )}
+          </button>
         </div>
       </div>
+
+      {/* Mobile Menu Overlay */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setShowMobileMenu(false)}
+            />
+            
+            {/* Mobile Menu */}
+            <motion.div
+              ref={mobileMenuRef}
+              className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 md:hidden overflow-y-auto"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'tween', duration: 0.3, ease: 'easeInOut' }}
+            >
+              <div className="p-6">
+                {/* Close Button */}
+                <div className="flex justify-end mb-8">
+                  <button
+                    onClick={() => setShowMobileMenu(false)}
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    aria-label="Close mobile menu"
+                  >
+                    <X className="w-6 h-6 text-gray-600" />
+                  </button>
+                </div>
+
+                {/* Mobile Navigation Items */}
+                <nav className="space-y-6">
+                  <Link 
+                    to="/" 
+                    className="block text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                    onClick={() => setShowMobileMenu(false)}
+                  >
+                    Home
+                  </Link>
+                  
+                  <Link 
+                    to="/features" 
+                    className="block text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                    onClick={() => setShowMobileMenu(false)}
+                  >
+                    Features
+                  </Link>
+                  
+                  {/* Mobile Solutions Dropdown */}
+                  <div className="space-y-3">
+                    <button
+                      className="flex items-center justify-between w-full text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                      onClick={() => setShowMobileSolutions(!showMobileSolutions)}
+                    >
+                      Solutions
+                      <ChevronDown className={`w-5 h-5 transition-transform duration-200 ${showMobileSolutions ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    <AnimatePresence>
+                      {showMobileSolutions && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2, ease: "easeInOut" }}
+                          className="ml-4 space-y-3 overflow-hidden"
+                        >
+                          {solutionsItems.map((item, index) => (
+                            <Link
+                              key={index}
+                              to={item.path}
+                              className="block text-base text-gray-700 hover:text-blue-600 transition-colors"
+                              onClick={() => {
+                                setShowMobileSolutions(false);
+                                setShowMobileMenu(false);
+                              }}
+                            >
+                              {item.name}
+                            </Link>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  
+                  <Link 
+                    to="/how-it-works" 
+                    className="block text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                    onClick={() => setShowMobileMenu(false)}
+                  >
+                    How It Works
+                  </Link>
+                  
+                  <Link 
+                    to="/pricing" 
+                    className="block text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                    onClick={() => setShowMobileMenu(false)}
+                  >
+                    Pricing
+                  </Link>
+                  
+                  <Link 
+                    to="/contact-us" 
+                    className="block text-lg font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                    onClick={() => setShowMobileMenu(false)}
+                  >
+                    Support
+                  </Link>
+                </nav>
+
+                {/* Mobile Login Button */}
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <button 
+                    className="w-full bg-gray-900 text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors font-medium"
+                    onClick={(e) => {
+                      loginNavigate(e);
+                      setShowMobileMenu(false);
+                    }}
+                  >
+                    Login
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </header>
   );
 } 

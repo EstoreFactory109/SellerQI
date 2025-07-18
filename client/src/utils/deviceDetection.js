@@ -56,11 +56,11 @@ export const getDeviceType = () => {
 };
 
 /**
- * Check if the device supports the application (desktop or tablet)
- * @returns {boolean} True if device is supported, false if mobile
+ * Check if the device supports the application (all devices now supported)
+ * @returns {boolean} Always returns true - mobile restrictions removed
  */
 export const isDeviceSupported = () => {
-  return !isMobileDevice();
+  return true; // Mobile restrictions removed - all devices now supported
 };
 
 /**

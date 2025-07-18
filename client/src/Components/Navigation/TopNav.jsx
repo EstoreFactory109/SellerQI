@@ -8,7 +8,7 @@ import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
-import { Building, Plus, ChevronRight, Bell, User } from 'lucide-react'
+import { Building, Plus, ChevronRight, Bell, User, Menu } from 'lucide-react'
 import axios from 'axios'
 
 const TopNav = () => {
@@ -135,7 +135,14 @@ const TopNav = () => {
 
     return (
         <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between lg:justify-end p-10 lg:gap-7 gap-2 shadow-md bg-white border-b-[1px] border-gray-200 fixed top-0 z-50 lg:static">
-            <img src={hamburger} className='w-[1.5rem] lg:hidden' onClick={handleHamburger} />
+            {/* Enhanced Mobile Hamburger Button */}
+            <button 
+                className="lg:hidden p-2 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition-colors duration-200 touch-manipulation"
+                onClick={handleHamburger}
+                aria-label="Open mobile menu"
+            >
+                <Menu className="w-6 h-6 text-gray-700" />
+            </button>
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div 

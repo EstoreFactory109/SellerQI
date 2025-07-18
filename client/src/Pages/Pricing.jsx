@@ -148,7 +148,7 @@ export default function PricingPage() {
       }
     }
     
-    return planType === 'LITE' ? 'Get Started Free' : 'Start 14-Day Trial';
+    return planType === 'LITE' ? 'Get Started Free' : 'Start 7-Days Free Trial';
   };
 
   const isButtonDisabled = (planType) => {
@@ -172,10 +172,7 @@ export default function PricingPage() {
       q: 'How often is my product data updated?',
       a: 'Product data is updated in real-time for Pro plans. Free plan users get basic analysis with standard refresh rates.',
     },
-    {
-      q: 'Do you offer refunds?',
-      a: 'Yes, we offer a 30-day money-back guarantee. If you\'re not satisfied, contact our support team for a full refund.',
-    },
+    
     {
       q: 'What is the Agency plan for?',
       a: 'The Agency plan is designed for agencies and consultants managing multiple client accounts. It includes everything in Pro plus agency-specific features like client management and white-label reporting.',
@@ -204,21 +201,21 @@ export default function PricingPage() {
               {/* Announcement Bar */}
               <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium mb-8">
                 <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                30-day money-back guarantee • Cancel anytime
+                7 Days Free Trial • Cancel anytime
               </div>
               
               <h1 className="text-5xl lg:text-6xl font-bold leading-tight text-gray-900 mb-6">
                 Choose the <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B4A6B] to-emerald-600">Perfect Plan</span> for Your Business
               </h1>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-12">
-                Start with our powerful free plan. Upgrade when you're ready for unlimited insights, advanced features, and priority support.
+                Start with our powerful 7 Days free plan. Upgrade when you're ready for unlimited insights, advanced features, and priority support.
               </p>
 
               {/* Trust Indicators */}
               <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-500 mb-8">
                 <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> No setup fees</span>
                 <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Cancel anytime</span>
-                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 30-day guarantee</span>
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 7 Days Free Trial</span>
                 <span className="flex items-center gap-2"><Shield className="w-4 h-4 text-[#3B4A6B]" /> SOC 2 Compliant</span>
               </div>
               
@@ -434,7 +431,7 @@ export default function PricingPage() {
                 {
                   icon: Zap,
                   title: "Lightning Fast Analysis",
-                  description: "Get comprehensive product insights in under 60 seconds with our AI-powered analysis engine.",
+                  description: "Get comprehensive product insights with our AI-powered analysis engine.",
                   color: "yellow"
                 },
                 {
@@ -614,7 +611,7 @@ export default function PricingPage() {
                   disabled={isButtonDisabled('PRO')}
                   className="bg-white text-[#3B4A6B] px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all duration-300 shadow-lg"
                 >
-                  Start 14-Day Free Trial
+                  Start 7-Days Free Trial
                 </button>
                 <Link 
                   to="/contact-us"
@@ -625,7 +622,7 @@ export default function PricingPage() {
               </div>
               
               <div className="flex justify-center gap-8 text-sm opacity-75">
-                <span>✓ 30-day money-back guarantee</span>
+                <span>✓ 7 Days Free Trial</span>
                 <span>✓ Cancel anytime</span>
                 <span>✓ No setup fees</span>
               </div>

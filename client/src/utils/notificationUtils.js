@@ -77,20 +77,4 @@ export const triggerAnalysisNotifications = (dashboardInfo, isFirstTime = false)
   }
 };
 
-// Utility to add demo notifications (for testing)
-export const addDemoNotifications = () => {
-  // Add a demo analysis complete notification
-  setTimeout(() => {
-    triggerAnalysisCompleteNotification(false, 'Demo Account');
-  }, 1000);
-  
-  // Add a demo issues notification
-  setTimeout(() => {
-    triggerIssuesFoundNotification(12, 'Demo Account', '5 ranking, 3 conversion, 4 inventory issues');
-  }, 2000);
-  
-  // Add another analysis notification
-  setTimeout(() => {
-    triggerAnalysisCompleteNotification(true, 'New Demo Account');
-  }, 3000);
-}; 
+// Note: Demo notifications removed - only real notifications will be shown 

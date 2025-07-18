@@ -8,6 +8,8 @@ const logger = require('../utils/Logger.js');
 const Seller = require('../models/sellerCentralModel.js')
 const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js')
 const tokenManager = require('../utils/TokenManager.js');
+const { sendAnalysisReadyEmail } = require('../Services/Email/SendAnalysisReadyEmail.js');
+const { getUserById } = require('../Services/User/userServices.js');
 
 const ListingItemsModel = require('../models/GetListingItemsModel.js');
 
@@ -1165,6 +1167,44 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // ===== RETURN APPROPRIATE RESPONSE =====
     if (overallSuccess) {
         console.log("🎉 Overall processing successful!");
+
+        // ===== SEND ANALYSIS READY EMAIL =====
+        try {
+            console.log("📧 Sending analysis ready email...");
+            const userInfo = await getUserById(userId);
+            
+            if (userInfo && userInfo.email && userInfo.firstName) {
+                const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
+                const emailSent = await sendAnalysisReadyEmail(
+                    userInfo.email, 
+                    userInfo.firstName, 
+                    dashboardUrl
+                );
+                
+                if (emailSent) {
+                    console.log(`✅ Analysis ready email sent successfully to ${userInfo.email}`);
+                } else {
+                    logger.warn("Failed to send analysis ready email, but continuing with response", { 
+                        userId, 
+                        email: userInfo.email 
+                    });
+                }
+            } else {
+                logger.warn("User information not found for email notification", { 
+                    userId, 
+                    hasUserInfo: !!userInfo,
+                    hasEmail: !!(userInfo && userInfo.email),
+                    hasFirstName: !!(userInfo && userInfo.firstName)
+                });
+            }
+        } catch (emailError) {
+            logger.error("Error sending analysis ready email", {
+                error: emailError.message,
+                userId
+            });
+            // Don't fail the entire response because of email error
+        }
+
         return res.status(200).json(new ApiResponse(200, {
             data: result,
             summary: {

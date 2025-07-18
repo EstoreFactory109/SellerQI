@@ -7,38 +7,29 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 
-// Enhanced mock data for smoother chart
-const mockChartData = [
-  { date: 'Apr 3', ppcSales: 1200, spend: 950, acos: 480, tacos: 450, units: 50 },
-  { date: 'Apr 4', ppcSales: 1450, spend: 1000, acos: 500, tacos: 480, units: 65 },
-  { date: 'Apr 5', ppcSales: 1520, spend: 1050, acos: 520, tacos: 490, units: 70 },
-  { date: 'Apr 6', ppcSales: 1350, spend: 1020, acos: 510, tacos: 470, units: 58 },
-  { date: 'Apr 7', ppcSales: 1280, spend: 980, acos: 490, tacos: 455, units: 52 },
-  { date: 'Apr 8', ppcSales: 1100, spend: 950, acos: 500, tacos: 465, units: 45 },
-  { date: 'Apr 9', ppcSales: 1150, spend: 980, acos: 520, tacos: 475, units: 48 },
-  { date: 'Apr 10', ppcSales: 1380, spend: 1050, acos: 540, tacos: 485, units: 60 },
-  { date: 'Apr 11', ppcSales: 1420, spend: 1080, acos: 550, tacos: 490, units: 64 },
-  { date: 'Apr 12', ppcSales: 1500, spend: 1100, acos: 560, tacos: 495, units: 68 },
-  { date: 'Apr 13', ppcSales: 1380, spend: 1120, acos: 580, tacos: 500, units: 62 },
-  { date: 'Apr 14', ppcSales: 1250, spend: 1150, acos: 590, tacos: 505, units: 55 },
-  { date: 'Apr 15', ppcSales: 1050, spend: 1180, acos: 600, tacos: 510, units: 42 },
-  { date: 'Apr 16', ppcSales: 1100, spend: 1200, acos: 610, tacos: 515, units: 45 },
-  { date: 'Apr 17', ppcSales: 1180, spend: 1280, acos: 620, tacos: 520, units: 50 },
-  { date: 'Apr 18', ppcSales: 1250, spend: 1350, acos: 640, tacos: 525, units: 54 },
-  { date: 'Apr 19', ppcSales: 1150, spend: 1400, acos: 660, tacos: 530, units: 48 },
-  { date: 'Apr 20', ppcSales: 1080, spend: 1420, acos: 680, tacos: 535, units: 44 },
-  { date: 'Apr 21', ppcSales: 1100, spend: 1450, acos: 700, tacos: 540, units: 46 },
-  { date: 'Apr 22', ppcSales: 1050, spend: 1480, acos: 720, tacos: 545, units: 43 },
-  { date: 'Apr 23', ppcSales: 980, spend: 1400, acos: 680, tacos: 540, units: 40 },
-  { date: 'Apr 24', ppcSales: 1150, spend: 1350, acos: 650, tacos: 535, units: 48 },
-  { date: 'Apr 25', ppcSales: 1280, spend: 1450, acos: 700, tacos: 545, units: 55 },
-  { date: 'Apr 26', ppcSales: 1180, spend: 1500, acos: 720, tacos: 550, units: 50 },
-  { date: 'Apr 27', ppcSales: 1150, spend: 1480, acos: 750, tacos: 560, units: 48 },
-  { date: 'Apr 28', ppcSales: 1450, spend: 1450, acos: 780, tacos: 570, units: 65 },
-  { date: 'Apr 29', ppcSales: 1680, spend: 1520, acos: 800, tacos: 580, units: 78 },
-  { date: 'Apr 30', ppcSales: 1750, spend: 1500, acos: 820, tacos: 590, units: 82 },
-  { date: 'Apr 31', ppcSales: 1800, spend: 1480, acos: 840, tacos: 600, units: 85 },
-];
+// Create empty chart data with zero values when no data is available
+const createEmptyChartData = () => {
+  const today = new Date();
+  const emptyData = [];
+  
+  // Generate last 7 days with zero values
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    
+    emptyData.push({
+      date: formattedDate,
+      ppcSales: 0,
+      spend: 0,
+      acos: 0,
+      tacos: 0,
+      units: 0
+    });
+  }
+  
+  return emptyData;
+};
 
 // Reusable Pagination Component
 const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }) => {
@@ -146,6 +137,7 @@ const PPCDashboard = () => {
   
   // Get ProductWiseSponsoredAdsGraphData from Redux store
   const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || [];
+  console.log("productWiseSponsoredAdsGraphData: ", productWiseSponsoredAdsGraphData)
   
   // Get ProductWiseSponsoredAds for error calculation
   const productWiseSponsoredAds = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAds) || [];
@@ -296,6 +288,7 @@ const PPCDashboard = () => {
     
     // First priority: Use actual dateWiseTotalCosts for spend and TotalSales for PPC sales
     if (costsDataToUse && Array.isArray(costsDataToUse) && costsDataToUse.length > 0) {
+      console.log("🟢 CHART DATA: Using dateWiseTotalCosts (Priority 1)");
       // console.log('=== Using dateWiseTotalCosts for chart data ===');
       // console.log('dateWiseTotalCosts:', costsDataToUse);
       
@@ -328,9 +321,9 @@ const PPCDashboard = () => {
           const dateStr = startDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD format
           const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           
-          // For PPC sales, estimate as percentage of total sales
+          // Only use real PPC sales data - no estimates
           const totalSales = parseFloat(item.TotalAmount) || 0;
-          const estimatedPPCSales = totalSales * 0.3; // Assume 30% of sales come from PPC
+          const estimatedPPCSales = 0; // No assumptions - return 0 when no real PPC data
           
           // Get actual spend for this date using the formatted date (Jun 18 format)
           const actualSpend = spendByDate.get(formattedDate) || 0;
@@ -362,8 +355,8 @@ const PPCDashboard = () => {
         const date = new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // Estimate PPC sales based on spend (assume 2:1 sales to spend ratio)
-        const estimatedPPCSales = item.totalCost * 2;
+        // Only use real PPC sales data - no estimates based on spend
+        const estimatedPPCSales = 0;
         
         // Debug: Log fallback data for first few items
         if ((info?.startDate && info?.endDate) && index < 3) {
@@ -390,14 +383,14 @@ const PPCDashboard = () => {
       return fallbackData;
     }
     
-    // Second priority: Use date-filtered TotalSales data from Redux with estimated spend
+    // Second priority: Use date-filtered TotalSales data from Redux with zero spend
     const totalSalesData = info?.TotalSales;
     if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      console.log("🟡 CHART DATA: Using TotalSales with zero spend (Priority 2)");
       // console.log('Using TotalSales data with estimated spend distribution');
       
-      // Get actual PPC spend from finance data and distribute it across days
-      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-      const dailySpend = actualPPCSpend / totalSalesData.length; // Distribute spend across days
+      // Don't distribute spend - show zero when no real daily PPC data
+      const dailySpend = 0; // Show zero instead of estimated/distributed spend
       
       // Transform date-filtered sales data for the chart
       return totalSalesData.map(item => {
@@ -405,20 +398,21 @@ const PPCDashboard = () => {
         const startDate = new Date(item.interval.split('--')[0]);
         const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // For PPC data, we'll use a percentage of total sales as PPC sales (estimated)
+        // Only use real PPC data - no estimates
         const totalSales = parseFloat(item.TotalAmount) || 0;
-        const estimatedPPCSales = totalSales * 0.3; // Assume 30% of sales come from PPC
+        const estimatedPPCSales = 0; // No assumptions - return 0 when no real PPC data
         
         return {
           date: formattedDate,
           ppcSales: estimatedPPCSales,
-          spend: dailySpend, // Use actual spend distributed daily
+          spend: dailySpend, // Show zero when no real daily PPC data
         };
       });
     }
     
     // Third priority: Fallback to original productWiseSponsoredAdsGraphData
     if (productWiseSponsoredAdsGraphData.length > 0) {
+      console.log("🔵 CHART DATA: Using productWiseSponsoredAdsGraphData (Priority 3)");
       // console.log('Using productWiseSponsoredAdsGraphData fallback');
       return productWiseSponsoredAdsGraphData.map(item => ({
         date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -427,17 +421,17 @@ const PPCDashboard = () => {
       }));
     }
     
-    // Final fallback: Use mock data
-    // console.log('Using mock chart data as final fallback');
-    const finalMockData = mockChartData.slice();
+    // Final fallback: Return empty data with zero values
+    console.log("🔴 CHART DATA: Using empty data fallback (Priority 4 - No data available)");
+    const emptyData = createEmptyChartData();
     
     if (info?.startDate && info?.endDate) {
-      console.log('=== Using Final Mock Data Fallback ===');
-      console.log('mockData length:', finalMockData.length);
-      console.log('mockData sample:', finalMockData.slice(0, 3));
+      console.log('=== Using Empty Data Fallback (No Data Available) ===');
+      console.log('emptyData length:', emptyData.length);
+      console.log('emptyData sample:', emptyData.slice(0, 3));
     }
     
-    return finalMockData;
+    return emptyData;
   }, [filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.TotalSales, info?.accountFinance, productWiseSponsoredAdsGraphData]);
   
   // Final debug: Log the actual chart data being used
@@ -447,6 +441,16 @@ const PPCDashboard = () => {
     console.log('chartData first 3 items:', chartData.slice(0, 3));
     console.log('chartData last 3 items:', chartData.slice(-3));
   }
+  
+  // Debug: Check all possible chart data sources
+  console.log("=== CHART DATA SOURCE DEBUG ===");
+  console.log("1. dateWiseTotalCosts length:", dateWiseTotalCosts.length);
+  console.log("2. filteredDateWiseTotalCosts length:", filteredDateWiseTotalCosts.length);
+  console.log("3. info?.TotalSales length:", info?.TotalSales?.length || 0);
+  console.log("4. info?.accountFinance?.ProductAdsPayment:", info?.accountFinance?.ProductAdsPayment || 0);
+  console.log("5. productWiseSponsoredAdsGraphData length:", productWiseSponsoredAdsGraphData.length);
+  console.log("Final chartData length:", chartData.length);
+  console.log("Final chartData sample:", chartData.slice(0, 3));
   
   // Tab configuration
   const tabs = [
@@ -807,41 +811,22 @@ const PPCDashboard = () => {
       console.log('Using filtered spend data:', spend);
       console.log('Filtered data points:', filteredDateWiseTotalCosts.length);
     } else {
-      // Use default spend calculation when no date range selected
-      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-      spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 7654.21);
+      // Only use real PPC data - no estimates from ProductAdsPayment
+      spend = sponsoredAdsMetrics?.totalCost || 0;
       console.log('=== KPI Calculation (Default) ===');
-      console.log('Using default spend data:', spend);
+      console.log('Using real PPC spend data only:', spend);
     }
     
-    // Calculate PPC sales based on date range selection
+    // Calculate PPC sales - only use real data, no assumptions
     let ppcSales = 0;
     if (isDateRangeSelected) {
-      // For date range selection, calculate from filtered TotalSales data
-      const totalSalesData = info?.TotalSales;
-      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        const filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-        ppcSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC
-        console.log('Filtered total sales:', filteredTotalSales);
-        console.log('Estimated PPC sales (30%):', ppcSales);
-      }
-    } else {
-      // Use default PPC sales calculation
+      // For date range selection, only use actual PPC sales data
       ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-      
-      // If no sponsored ads data, calculate from TotalSales data as fallback
-      if (!ppcSales || ppcSales === 0) {
-        const totalSalesData = info?.TotalSales;
-        if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-          const filteredTotalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-          ppcSales = filteredTotalSales * 0.3; // Assume 30% of sales come from PPC as fallback
-        }
-      }
-      
-      // Final fallback
-      if (!ppcSales || ppcSales === 0) {
-        ppcSales = 25432.96;
-      }
+      console.log('Using real PPC sales for date range:', ppcSales);
+    } else {
+      // Use only real PPC sales data - no fallbacks or estimates
+      ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
+      console.log('Using real PPC sales (default):', ppcSales);
     }
     
     // Calculate total sales for TACoS calculation
@@ -858,12 +843,12 @@ const PPCDashboard = () => {
       if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
         totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
       } else {
-        totalSales = Number(info?.TotalWeeklySale || 0) || 84776.44;
+        totalSales = Number(info?.TotalWeeklySale || 0);
       }
     }
     
-    // Calculate units sold - always use default data (don't filter by date range)
-    const unitsSold = sponsoredAdsMetrics?.totalProductsPurchased || Math.round((sponsoredAdsMetrics?.totalSalesIn30Days || 25432.96) / 85);
+    // Calculate units sold - only use real data
+    const unitsSold = sponsoredAdsMetrics?.totalProductsPurchased || 0;
     
     // Log final calculations
     if (isDateRangeSelected) {
@@ -887,11 +872,11 @@ const PPCDashboard = () => {
       },
       { 
         label: 'ACOS', 
-        value: ppcSales > 0 ? `${((spend / ppcSales) * 100).toFixed(2)}%` : '25.00%'
+        value: ppcSales > 0 ? `${((spend / ppcSales) * 100).toFixed(2)}%` : '0.00%'
       },
       { 
         label: 'TACoS', 
-        value: totalSales > 0 ? `${((spend / totalSales) * 100).toFixed(2)}%` : '9.04%'
+        value: totalSales > 0 ? `${((spend / totalSales) * 100).toFixed(2)}%` : '0.00%'
       },
       { 
         label: 'Units Sold', 
