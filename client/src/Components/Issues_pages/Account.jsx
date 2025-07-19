@@ -103,6 +103,8 @@ export default function AccountHealthDashboard() {
         }
     ];
 
+    
+
     // Calculate health overview
     const totalIssues = accountMetrics.filter(metric => metric.data?.status === "Error").length;
     const totalMetrics = accountMetrics.length;

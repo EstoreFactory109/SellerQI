@@ -184,8 +184,12 @@ const FetchingTokens = () => {
             sessionStorage.setItem('sp_seller_id', response.data.sellerId);
           }
           
-          // Navigate to dashboard with success message
-          navigate('/analyse-account')
+          // Get the stored marketplace info to determine region
+          const selectedMarketplace = JSON.parse(localStorage.getItem('selectedMarketplace') || '{}');
+          const region = selectedMarketplace.region || 'NA';
+          
+          // Navigate to profile selection page with region parameter
+          navigate(`/profile-selection?region=${region}`)
         }
       } catch (error) {
         console.error("Error generating tokens:", error);

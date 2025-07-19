@@ -217,6 +217,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 })
     ]);
 
+    console.log("GetDateWisePPCspendData: ", GetDateWisePPCspendData);
+
     // console.log("userId: ", userId);
     // console.log("inventoryPlanningData: ", inventoryPlanningData);
     // console.log("inventoryStrandedData: ", inventoryStrandedData);

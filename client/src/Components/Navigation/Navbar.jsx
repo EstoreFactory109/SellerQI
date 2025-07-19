@@ -7,6 +7,7 @@ export default function Navbar() {
   const [showSolutionsDropdown, setShowSolutionsDropdown] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showMobileSolutions, setShowMobileSolutions] = useState(false);
+  const [buttonName,SetButtonName] = useState('Login');
   const dropdownRef = useRef(null);
   const mobileMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -15,6 +16,14 @@ export default function Navbar() {
     e.preventDefault();
     navigate('/log-in');
   }
+
+  useEffect(()=>{
+    const authStatus=localStorage.getItem('isAuth');
+    console.log("authStatus: ",authStatus);
+    let button = authStatus=="true"?'Dashboard' : 'Login';
+    console.log("button: ",button);
+    SetButtonName(button);
+  },[])
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -108,7 +117,7 @@ export default function Navbar() {
             <button className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-800"
               onClick={loginNavigate}
             >
-              Login
+              {buttonName}
             </button>
           </nav>
           

@@ -25,6 +25,7 @@ const generateAdsAccessToken=async(refreshToken)=>{
                         headers: { "Content-Type": "application/x-www-form-urlencoded" }
                     }
                 );
+            
             if(!response){
                 logger.error(new ApiError(500,"Internal server error in generating access token"));
                 return false;

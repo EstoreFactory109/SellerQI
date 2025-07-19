@@ -291,23 +291,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
     // ===== PROFILE ID GENERATION WITH VALIDATION =====
-    let ProfileId;
-    try {
-        ProfileId = await getProfileById(AdsAccessToken, Region, Country, userId);
-        if (!ProfileId) {
-            throw new Error("Profile ID generation returned false/null");
-        }
-        console.log("✅ Profile ID obtained successfully");
-    } catch (profileError) {
-        logger.error("Failed to get profile ID", { 
-            error: profileError.message, 
-            userId, 
-            Region, 
-            Country,
-            hasAdsToken: !!AdsAccessToken
-        });
-        return res.status(500).json(new ApiError(500, `Profile ID retrieval failed: ${profileError.message}`));
-    }
+    let ProfileId=getSellerAccount.ProfileId;
+    
 
     // Initialize tokens in TokenManager for automatic refresh
     tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);

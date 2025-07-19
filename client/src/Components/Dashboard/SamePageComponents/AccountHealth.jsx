@@ -11,8 +11,8 @@ const [tooltip,setToolTip] = useState(false)
 console.log(info)
 const navigatie = useNavigate()
 
-  const healthPercentage = info?.accountHealthPercentage?.Percentage || 50;
-  const healthStatus = info?.accountHealthPercentage?.status || 'GOOD';
+  const healthPercentage = info?.accountHealthPercentage?.Percentage || 0;
+  const healthStatus = info?.accountHealthPercentage?.status || 'POOR' ;
 
   const options = {
     chart: {

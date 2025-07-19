@@ -42,6 +42,7 @@ import Features from './Pages/features.jsx';
 import InventoryManagement from './Pages/inventoryManagement.jsx';
 import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
 import ConnectAccounts from './Pages/ConnectAccounts.jsx';
+import ProfileIDSelection from './Pages/ProfileIDSeclection.jsx';
 
 const App = () => {
 
@@ -88,6 +89,7 @@ const App = () => {
             </ProtectedRouteWrapper>
           }
         >
+          <Route path='/profile-selection' element={<ProfileIDSelection />} />
 
           <Route path='/seller-central-checker' element={<MainLayout />}>
 
@@ -100,6 +102,7 @@ const App = () => {
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />
+            
             
           </Route>
         </Route>

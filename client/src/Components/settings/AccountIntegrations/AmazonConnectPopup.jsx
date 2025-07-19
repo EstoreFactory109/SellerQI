@@ -35,7 +35,8 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
 
       if (response.status === 201) {
         setLoading(false);
-        navigate('/analyse-account')
+        // Navigate to profile selection page with region parameter
+        navigate(`/profile-selection?region=${region}`)
       }
     } catch (error) {
       setLoading(false);

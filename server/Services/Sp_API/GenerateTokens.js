@@ -207,6 +207,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
 
 
 const generateAccessToken=async(userId,refreshToken)=>{
+  
     if(!refreshToken){
         logger.error(new ApiError(400,"Refresh token is missing"));
         return false;
@@ -229,6 +230,8 @@ const generateAccessToken=async(userId,refreshToken)=>{
                         headers: { "Content-Type": "application/x-www-form-urlencoded" }
                     }
                 );
+
+            console.log(response);
             if(!response){
                 logger.error(new ApiError(500,"Internal server error in generating access token"));
                 return false;

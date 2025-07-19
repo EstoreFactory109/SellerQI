@@ -19,6 +19,7 @@ const ProductChecker = () => {
    const accountErrors = info?.totalErrorInAccount || 0;
    
    const [seriesData,setSeriesData]=useState([rankingErrors, conversionErrors, inventoryErrors, accountErrors, profitabilityErrors, sponsoredAdsErrors]);
+ 
    const [LableData, setDableData] = useState(["Rankings", "Conversion", "Inventory", "Account Health", "Profitability", "Sponsored Ads"])
    const [productErrors, setProductErrors] = useState([]);
    
@@ -40,6 +41,7 @@ const ProductChecker = () => {
   
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
+  console.log("totalErrors",totalErrors)
   
   const [chartData, setChartData] = useState({
     series: seriesData, // Data values

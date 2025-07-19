@@ -43,6 +43,10 @@ const sellerCentral=new mongoose.Schema({
     type: String,
     required: false,
   },
+  countryCode:{
+    type:String,
+    required:false
+  },
   country: {
     type: String,
     required: false,

@@ -42,30 +42,8 @@ const getProfileById = async (accessToken,region ,country,userId) => {
             logger.error(new ApiError(404, 'Profile id not found'));
             return false;
         }
-        const profileIdScope= response.data.find(scope => scope.countryCode === country);
-
-        profileId= profileIdScope.profileId;
-
+        return response.data;
         
-
-        // Log successful response
-        logger.info(`Successfully fetched profile id`);
-
-        const sellercentral=await sellerCentral.findOne({User:userId});
-        if(!sellercentral){
-            return res.status(404).json(new ApiError(404,"SellerCentral not found"));
-        }
-
-        
-
-        const acnt = sellercentral.sellerAccount.find(account => 
-            account.country === country && account.region === region
-        );
-
-        acnt.ProfileId=profileId;
-        await sellercentral.save();
-
-        return profileId;
 
     } catch (error) {
         // Handle specific error cases
