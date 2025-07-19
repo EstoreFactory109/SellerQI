@@ -727,7 +727,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                     const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
                         getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
                     )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
-            
+        
                     if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
                         competitivePriceData.push(...competitiveResponseData);
                         console.log(`✅ Chunk processed: ${competitiveResponseData.length} records added`);
@@ -745,7 +745,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                     });
                     // Continue processing other chunks rather than failing completely
                 }
-        
+    
                 start = end;
                 
                 // Add delay between chunks to respect rate limits
@@ -811,7 +811,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         });
     }
 
-    // ===== THIRD BATCH OF API CALLS WITH STRUCTURED ERROR HANDLING =====
+    // ===== THIRD BATCH OF API CALLS =====
     console.log("🔄 Starting third batch of API calls...");
     
     const thirdBatchResults = await Promise.allSettled([
@@ -1055,11 +1055,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // ===== COMPREHENSIVE DATA VALIDATION AND FINAL PREPARATION =====
     console.log("🔄 Preparing final response data...");
 
-    // Create the final result object with ALL restored data
+    // Create the final result object
     const result = {
-        // RESTORED - ALL SP-API FUNCTIONS
         MerchantlistingData: merchantListingsData || null,
         financeData: Array.isArray(financeData) ? financeData : [],
+        feesData: feesResult.success ? feesResult.data : null,
         v2data: v2data.success ? v2data.data : null,
         v1data: v1data.success ? v1data.data : null,
         competitivePriceData: Array.isArray(competitivePriceData) ? competitivePriceData : [],
@@ -1068,9 +1068,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
         WeeklySales: WeeklySales.success ? WeeklySales.data : null,
         shipment: shipment.success ? shipment.data : null,
         brandData: brandData.success ? brandData.data : null,
-        feesData: feesResult.success ? feesResult.data : null,
         
-        // ENHANCED KEYWORDS-RELATED DATA
+        // Keywords-related data
         adsKeywords: adsKeywords.success ? adsKeywords.data : null,
         adsKeywordsPerformanceData: adsKeywordsPerformanceData.success ? adsKeywordsPerformanceData.data : null,
         negativeKeywords: negativeKeywords.success ? negativeKeywords.data : null,
@@ -1080,20 +1079,20 @@ const getSpApiData = asyncHandler(async (req, res) => {
         campaignData: campaignData.success ? campaignData.data : null,
         adGroupsData: adGroupsData.success ? adGroupsData.data : null,
         
-        // RESTORED - ALL INVENTORY AND COMPLIANCE DATA
+        // Inventory and compliance data
         fbaInventoryPlanningData: fbaInventoryPlanningData.success ? fbaInventoryPlanningData.data : null,
         strandedInventoryData: strandedInventoryData.success ? strandedInventoryData.data : null,
         inboundNonComplianceData: inboundNonComplianceData.success ? inboundNonComplianceData.data : null
     };
 
-    // ===== COMPREHENSIVE SUCCESS/FAILURE SUMMARY - KEYWORDS ONLY =====
+    // ===== COMPREHENSIVE SUCCESS/FAILURE SUMMARY =====
     const serviceSummary = {
         successful: [],
         failed: [],
         warnings: []
     };
 
-    // Track ALL restored service results
+    // Track all services
     const services = [
         { name: "Merchant Listings", result: { success: !!merchantListingsData } },
         { name: "V2 Seller Performance", result: v2data },
@@ -1101,8 +1100,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         { name: "PPC Spends by SKU", result: ppcSpendsBySKU },
         { name: "Ads Keywords Performance", result: adsKeywordsPerformanceData },
         { name: "PPC Spends Date Wise", result: ppcSpendsDateWise },
-        { name: "Competitive Pricing", result: { success: competitivePriceData.length > 0 || asinArray.length === 0 } },
-        { name: "Restock Inventory", result: RestockinventoryData },
+        { name: "Restock Inventory Recommendations", result: RestockinventoryData },
         { name: "Product Reviews", result: productReview },
         { name: "Ads Keywords", result: adsKeywords },
         { name: "Campaign Data", result: campaignData },
@@ -1114,7 +1112,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         { name: "Brand Data", result: brandData },
         { name: "Amazon Fees", result: feesResult },
         { name: "Financial Events", result: financeDataFromAPI },
-        { name: "Ad Groups", result: adGroupsData },
+        { name: "Ad Groups Data", result: adGroupsData },
         { name: "Negative Keywords", result: negativeKeywords },
         { name: "Search Keywords", result: searchKeywords }
     ];
@@ -1137,12 +1135,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (financeData.length === 0) {
         serviceSummary.warnings.push("No financial data available");
     }
-    if (campaignids.length === 0) {
-        serviceSummary.warnings.push("No campaigns found - this may affect ad group related functions");
-    }
 
     // ===== DETERMINE OVERALL SUCCESS STATUS =====
-    const criticalServices = ["Merchant Listings", "V2 Seller Performance", "V1 Seller Performance"];
+    const criticalServices = ["Merchant Listings", "Financial Events", "Amazon Fees", "V2 Seller Performance", "Campaign Data"];
     const criticalFailures = serviceSummary.failed.filter(failed => 
         criticalServices.includes(failed.service)
     );
@@ -1166,7 +1161,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     // ===== RETURN APPROPRIATE RESPONSE =====
     if (overallSuccess) {
-        console.log("🎉 Overall processing successful!");
+        console.log("🎉 SP-API data processing completed successfully!");
 
         // ===== SEND ANALYSIS READY EMAIL =====
         try {
@@ -1214,11 +1209,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 successfulServices: serviceSummary.successful.length,
                 failedServices: serviceSummary.failed.length,
                 warnings: serviceSummary.warnings,
-                processingTime: Date.now() - Date.parse(new Date().toISOString()),
-                restoredFunctionality: "FULL",
-                enhancedFunctions: ["getKeywords", "getSearchKeywords", "getCampaign", "getAdGroups", "getNegativeKeywords"]
+                processingTime: Date.now() - Date.parse(new Date().toISOString())
             }
-        }, "SP-API and Amazon Ads data fetched successfully"));
+        }, "SP-API data processing completed successfully"));
     } else {
         logger.error("Critical services failed", { 
             criticalFailures: criticalFailures.map(f => f.service),
@@ -1234,9 +1227,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 failedServices: serviceSummary.failed.length,
                 criticalFailures: criticalFailures,
                 warnings: serviceSummary.warnings,
-                processingTime: Date.now() - Date.parse(new Date().toISOString()),
-                restoredFunctionality: "FULL",
-                enhancedFunctions: ["getKeywords", "getSearchKeywords", "getCampaign", "getAdGroups", "getNegativeKeywords"]
+                processingTime: Date.now() - Date.parse(new Date().toISOString())
             }
         }, "Partial success - some critical services failed"));
     }

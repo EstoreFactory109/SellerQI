@@ -6,8 +6,8 @@ const FBAFeesModel = require('../../models/FBAFees.js');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper function to fetch fee details for a single ASIN
-const getAmazonFeesDetails = async (asin, itemPrice, accessToken, credentials, marketplaceId) => {
-    const host = 'sellingpartnerapi-na.amazon.com';
+const getAmazonFeesDetails = async (asin, itemPrice, accessToken, credentials, marketplaceId, baseuri) => {
+    const host = baseuri;
     const path = `/products/fees/v0/items/${asin}/feesEstimate`;
     
     const body = {
@@ -107,7 +107,8 @@ const getAmazonFees = async (dataToReceive, UserId, baseuri, country, region, Or
                         order.price,
                         dataToReceive.AccessToken,
                         credentials,
-                        marketplaceId
+                        marketplaceId,
+                        baseuri
                     );
 
                     if (feeData) {
