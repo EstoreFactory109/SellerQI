@@ -94,6 +94,7 @@ export default function Login() {
 
         // Check subscription status and redirect accordingly
         const user = response.data.data;
+        console.log("user: ",user);
         const hasSelectedPlan = user.packageType;
         
         if (!hasSelectedPlan) {

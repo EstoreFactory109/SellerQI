@@ -57,9 +57,15 @@ const ProtectedRouteWrapper = ({ children }) => {
           
           // Check subscription status before allowing access to protected routes
           const hasSelectedPlan = userData.packageType; // User has selected any plan (including LITE)
+          const subscriptionStatus = userData.subscriptionStatus;
           
           if (!hasSelectedPlan) {
             // User hasn't selected any plan, redirect to pricing
+            localStorage.setItem("isAuth", "true"); // Keep them logged in
+            navigate("/pricing");
+            return;
+          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus)) {
+            // User has a plan but subscription is explicitly inactive, redirect to pricing
             localStorage.setItem("isAuth", "true"); // Keep them logged in
             navigate("/pricing");
             return;

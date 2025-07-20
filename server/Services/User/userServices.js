@@ -57,8 +57,7 @@ const getUserById =async(id)=>{
         return false;
     }
 
-    
-    return {
+    const userData = {
         firstName : user.firstName,
         lastName : user.lastName ,
         phone:user.phone ,
@@ -68,6 +67,17 @@ const getUserById =async(id)=>{
         packageType: user.packageType,
         subscriptionStatus: user.subscriptionStatus
     };
+    
+    // Debug logging
+    console.log('=== BACKEND getUserById DEBUG ===');
+    console.log('Raw user from DB:', {
+        packageType: user.packageType,
+        subscriptionStatus: user.subscriptionStatus,
+        email: user.email
+    });
+    console.log('Returned userData:', userData);
+    
+    return userData;
 }
 
 

@@ -190,14 +190,28 @@ const GoogleInfoPage = () => {
         // Check subscription status and redirect accordingly
         const user = response.data;
         const hasSelectedPlan = user.packageType;
+        const subscriptionStatus = user.subscriptionStatus;
+        
+        // Debug logging
+        console.log('=== GOOGLE LOGIN DEBUG ===');
+        console.log('Full user data:', user);
+        console.log('packageType:', hasSelectedPlan);
+        console.log('subscriptionStatus:', subscriptionStatus);
+        console.log('hasSelectedPlan?', !!hasSelectedPlan);
+        console.log('subscriptionStatus check:', subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus));
         
         setTimeout(() => {
           if (!hasSelectedPlan) {
             // User hasn't selected any plan, redirect to pricing
+            console.log('Google: Redirecting to pricing: No plan selected');
+            window.location.href = "/pricing";
+          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus)) {
+            // User has a plan but subscription is explicitly inactive, redirect to pricing
+            console.log('Google: Redirecting to pricing: Inactive subscription');
             window.location.href = "/pricing";
           } else {
-            // All users with plans (LITE, PRO, AGENCY) go to dashboard
-            // Dashboard will handle feature restrictions based on plan type
+            // User has a plan and subscription is active (or undefined/null), redirect to dashboard
+            console.log('Google: Redirecting to dashboard: Valid plan and active subscription');
             window.location.href = "/seller-central-checker/dashboard";
           }
         }, 1000);

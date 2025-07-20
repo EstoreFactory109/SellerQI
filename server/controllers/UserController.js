@@ -241,7 +241,9 @@ const loginUser = asyncHandler(async (req, res) => {
         email: checkUserIfExists.email,
         phone: checkUserIfExists.phone,
         whatsapp: checkUserIfExists.whatsapp,
-        accessType: checkUserIfExists.accessType
+        accessType: checkUserIfExists.accessType,
+        packageType: checkUserIfExists.packageType,
+        subscriptionStatus: checkUserIfExists.subscriptionStatus
     };
 
     // Add all seller accounts data if user is superAdmin
