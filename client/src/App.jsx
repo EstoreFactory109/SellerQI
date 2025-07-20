@@ -32,7 +32,6 @@ import LoadingPage from './Pages/LoadingPage.jsx';
 import ResultsPage from './Pages/ResultsPage.jsx';
 import RefundPolicy from './Pages/RefundPolicy.jsx';
 import SubscriptionSuccess from './Pages/SubscriptionSuccess.jsx';
-import SubscriptionCancel from './Pages/SubscriptionCancel.jsx';
 import ASINAnalyzer from './Pages/ASINAnalyzer.jsx';
 import AboutUs from './Pages/AboutUs.jsx';
 import HowItWorks from './Pages/HowItWorks.jsx';
@@ -43,6 +42,8 @@ import InventoryManagement from './Pages/inventoryManagement.jsx';
 import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
 import ConnectAccounts from './Pages/ConnectAccounts.jsx';
 import ProfileIDSelection from './Pages/ProfileIDSeclection.jsx';
+import PaymentCancel from './Pages/PaymentCancel.jsx';
+import PaymentFailed from './Pages/PaymentFailed.jsx';
 
 const App = () => {
 
@@ -74,7 +75,8 @@ const App = () => {
         <Route path='/loading' element={<LoadingPage />} />
         <Route path='/results' element={<ResultsPage />} />
         <Route path='/subscription-success' element={<SubscriptionSuccess />} />
-        <Route path='/subscription-cancel' element={<SubscriptionCancel />} />
+        <Route path='/payment-cancel' element={<PaymentCancel />} />
+        <Route path='/payment-failed' element={<PaymentFailed />} />
         <Route path='/about-us' element={<AboutUs />} />
         <Route path='/how-it-works' element={<HowItWorks />} />
         <Route path='/promotions' element={<PromotionsPage />} />

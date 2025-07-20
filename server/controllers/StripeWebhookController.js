@@ -1,41 +1,79 @@
-const StripeWebhookService = require('../Services/Stripe/StripeWebhookService.js');
-const { ApiResponse } = require('../utils/ApiResponse.js');
-const logger = require('../utils/Logger.js');
+const stripeWebhookService = require('../Services/Stripe/StripeWebhookService');
+const asyncHandler = require('../utils/AsyncHandler');
+const { ApiResponse } = require('../utils/ApiResponse');
+const logger = require('../utils/Logger');
 
-const handleWebhook = async (req, res) => {
-    const signature = req.headers['stripe-signature'];
-    const payload = req.body; // With express.raw middleware, body contains the raw buffer
-
-    logger.info(`Received webhook with signature: ${signature ? 'present' : 'missing'}`);
-    logger.info(`Payload type: ${typeof payload}, length: ${payload ? payload.length : 'null'}`);
-
+/**
+ * Handle Stripe webhook events
+ */
+const handleWebhook = asyncHandler(async (req, res) => {
     try {
-        // Verify webhook signature
-        const event = StripeWebhookService.verifyWebhookSignature(payload, signature);
+        const signature = req.headers['stripe-signature'];
+        const payload = req.body;
+
+        if (!signature) {
+            logger.error('Missing Stripe signature header');
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Missing Stripe signature')
+            );
+        }
+
+        // Verify webhook signature and get event
+        const event = stripeWebhookService.verifyWebhookSignature(payload, signature);
         
-        logger.info(`Webhook event verified: ${event.type} - ${event.id}`);
+        logger.info(`Received webhook event: ${event.type}, ID: ${event.id}`);
 
-        // Process the event
-        await StripeWebhookService.processWebhookEvent(event);
+        // Handle the webhook event
+        const result = await stripeWebhookService.handleWebhookEvent(event);
 
-        logger.info(`Webhook event processed successfully: ${event.type} - ${event.id}`);
+        logger.info(`Successfully processed webhook event: ${event.type}`);
 
-        // Return 200 OK to acknowledge receipt
-        res.status(200).json({ received: true, eventType: event.type, eventId: event.id });
+        // Always return 200 to acknowledge receipt
+        return res.status(200).json(
+            new ApiResponse(200, result, 'Webhook processed successfully')
+        );
+
     } catch (error) {
-        logger.error(`Webhook error: ${error.message}`);
-        logger.error(`Webhook error stack: ${error.stack}`);
+        logger.error('Webhook processing failed:', error);
         
-        // Log request details for debugging
-        logger.error(`Request headers: ${JSON.stringify(req.headers)}`);
-        logger.error(`Payload info: type=${typeof payload}, length=${payload ? payload.length : 'null'}`);
-        
-        // Return 400 to indicate webhook processing failed
-        // Stripe will retry the webhook
-        return res.status(400).json(new ApiResponse(400, null, `Webhook Error: ${error.message}`));
+        // For signature verification errors, return 400
+        if (error.message === 'Invalid signature') {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Invalid webhook signature')
+            );
+        }
+
+        // For other errors, still return 200 to prevent webhook retries
+        // but log the error for investigation
+        return res.status(200).json(
+            new ApiResponse(200, null, 'Webhook received but processing failed')
+        );
     }
-};
+});
+
+/**
+ * Test webhook endpoint (for development)
+ */
+const testWebhook = asyncHandler(async (req, res) => {
+    try {
+        logger.info('Test webhook endpoint called');
+        
+        return res.status(200).json(
+            new ApiResponse(200, { 
+                message: 'Webhook endpoint is working',
+                timestamp: new Date().toISOString()
+            }, 'Test webhook successful')
+        );
+
+    } catch (error) {
+        logger.error('Test webhook failed:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, 'Test webhook failed')
+        );
+    }
+});
 
 module.exports = {
-    handleWebhook
-};
+    handleWebhook,
+    testWebhook
+}; 

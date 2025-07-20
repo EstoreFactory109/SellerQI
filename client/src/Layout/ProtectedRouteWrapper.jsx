@@ -55,6 +55,19 @@ const ProtectedRouteWrapper = ({ children }) => {
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
           
+          // Check subscription status before allowing access to protected routes
+          const hasSelectedPlan = userData.packageType; // User has selected any plan (including LITE)
+          
+          if (!hasSelectedPlan) {
+            // User hasn't selected any plan, redirect to pricing
+            localStorage.setItem("isAuth", "true"); // Keep them logged in
+            navigate("/pricing");
+            return;
+          }
+          
+          // All users with selected plans (LITE, PRO, AGENCY) can access dashboard
+          // But with different feature restrictions based on their plan
+          
           setAuthChecked(true);
 
           await fetchData();

@@ -52,15 +52,8 @@ const OtpVerification = () => {
         setLoading(false);
         localStorage.setItem("isAuth", true);
         
-        // Check if user came here for subscription purchase
-        const intendedPlan = localStorage.getItem('intendedPlan');
-        if (intendedPlan) {
-          // Redirect back to pricing page to complete subscription
-          navigate("/pricing");
-        } else {
-          // Normal flow - redirect to connect amazon
-          navigate("/connect-to-amazon");
-        }
+        // After email verification, always redirect to pricing page for plan selection
+        navigate("/pricing");
       }
     } catch (error) {
       console.error("Verification failed", error);

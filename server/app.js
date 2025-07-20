@@ -15,8 +15,8 @@ const testRoute=require('./routes/testRoutes.js')
 const accountHistoryRoute=require('./routes/AccountHistory.routes.js')
 const cacheRoute=require('./routes/cache.routes.js')
 const backgroundJobsRoute=require('./routes/backgroundJobs.routes.js')
-const stripeRoute=require('./routes/stripe.routes.js')
 const profileRoute=require('./routes/profile.routes.js')
+const stripeRoute=require('./routes/stripe.routes.js')
 
 const dbConnect=require('./config/dbConn.js')
 const logger=require('./utils/Logger.js')
@@ -26,6 +26,12 @@ const { jobScheduler } = require('./Services/BackgroundJobs/JobScheduler.js')
 
 app.use(cors({origin:process.env.CORS_ORIGIN,credentials:true}))
 app.use(cookieParser());
+
+// Stripe webhook route MUST come before express.json() middleware
+// because Stripe requires raw body for signature verification
+app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
+
+// Apply JSON parsing for all other routes
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
 
@@ -38,8 +44,8 @@ app.use('/app/test',testRoute);
 app.use('/app/accountHistory',accountHistoryRoute)
 app.use('/app/cache',cacheRoute)
 app.use('/app/jobs',backgroundJobsRoute)
-app.use('/app/stripe',stripeRoute)
 app.use('/app/profile',profileRoute)
+app.use('/app/stripe',stripeRoute)
 
 
 app.get('/',(req,res)=>{

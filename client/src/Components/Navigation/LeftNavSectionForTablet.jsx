@@ -23,6 +23,11 @@ const LeftNavSection = () => {
 
     const position = useSelector(state => state.MobileMenu.position);
     
+    // Get user subscription plan from Redux store
+    const user = useSelector((state) => state.Auth?.user);
+    const userPlan = user?.packageType || 'LITE';
+    const isLiteUser = userPlan === 'LITE';
+    
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'overview';
@@ -120,32 +125,36 @@ const LeftNavSection = () => {
                     <div className="mb-6">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-2">Navigation</p>
                         <div className="space-y-1">
-                            <NavLink
-                                to="/seller-central-checker/dashboard"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-blue-50 group-hover:bg-blue-100'
-                                        }`}>
-                                            <LayoutDashboard className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-blue-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">Dashboard</span>
-                                    </>
-                                )}
-                            </NavLink>
+                            {/* Dashboard - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <NavLink
+                                    to="/seller-central-checker/dashboard"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-blue-50 group-hover:bg-blue-100'
+                                            }`}>
+                                                <LayoutDashboard className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-blue-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Dashboard</span>
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
 
-                            {/* Issues with Dropdown */}
-                            <div className="space-y-1">
+                            {/* Issues with Dropdown - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <div className="space-y-1">
                                 <div
                                     className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
                                         isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
@@ -271,55 +280,63 @@ const LeftNavSection = () => {
                                     )}
                                 </AnimatePresence>
                             </div>
+                            )}
 
-                            <NavLink
-                                to="/seller-central-checker/ppc-dashboard"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-green-50 group-hover:bg-green-100'
-                                        }`}>
-                                            <LaptopMinimalCheck className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-green-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">Sponsored Ads</span>
-                                    </>
-                                )}
-                            </NavLink>
+                            {/* PPC Dashboard - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <NavLink
+                                    to="/seller-central-checker/ppc-dashboard"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-green-50 group-hover:bg-green-100'
+                                            }`}>
+                                                <LaptopMinimalCheck className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-green-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Sponsored Ads</span>
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
                             
-                            <NavLink
-                                to="/seller-central-checker/profitibility-dashboard"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'
-                                        }`}>
-                                            <ChartLine className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-purple-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">Profitibility</span>
-                                    </>
-                                )}
-                            </NavLink>
+                            {/* Profitability Dashboard - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <NavLink
+                                    to="/seller-central-checker/profitibility-dashboard"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'
+                                            }`}>
+                                                <ChartLine className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-purple-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Profitibility</span>
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
 
+                            {/* ASIN Analyzer - Available for ALL users including LITE */}
                             <NavLink
                                 to="/seller-central-checker/asin-analyzer"
                                 className={({ isActive }) =>
@@ -344,29 +361,32 @@ const LeftNavSection = () => {
                                 )}
                             </NavLink>
 
-                            <NavLink
-                                to="/seller-central-checker/account-history"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-amber-50 group-hover:bg-amber-100'
-                                        }`}>
-                                            <Clock8 className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-amber-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">Accounts History</span>
-                                    </>
-                                )}
-                            </NavLink>
+                            {/* Account History - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <NavLink
+                                    to="/seller-central-checker/account-history"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-amber-50 group-hover:bg-amber-100'
+                                            }`}>
+                                                <Clock8 className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-amber-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Accounts History</span>
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
                         </div>
                     </div>
 
@@ -436,26 +456,32 @@ const LeftNavSection = () => {
                                                 User Profile
                                             </NavLink>
                                         </motion.div>
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.08, duration: 0.15 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/settings?tab=account-integration"
-                                                className={() =>
-                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                        isSettingsPage && currentSettingsTab === 'account-integration'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                    }`
-                                                }
+                                        
+                                        {/* Account Integration - Only for PRO/AGENCY users */}
+                                        {!isLiteUser && (
+                                            <motion.div
+                                                initial={{ y: -10, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -10, opacity: 0 }}
+                                                transition={{ delay: 0.08, duration: 0.15 }}
                                             >
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Account Integration
-                                            </NavLink>
-                                        </motion.div>
+                                                <NavLink
+                                                    to="/seller-central-checker/settings?tab=account-integration"
+                                                    className={() =>
+                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                            isSettingsPage && currentSettingsTab === 'account-integration'
+                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                        }`
+                                                    }
+                                                >
+                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                    Account Integration
+                                                </NavLink>
+                                            </motion.div>
+                                        )}
+                                        
+                                        {/* Plans & Billing - Available for ALL users */}
                                         <motion.div
                                             initial={{ y: -10, opacity: 0 }}
                                             animate={{ y: 0, opacity: 1 }}

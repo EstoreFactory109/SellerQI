@@ -51,7 +51,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic");
+    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -64,7 +64,9 @@ const getUserById =async(id)=>{
         phone:user.phone ,
         whatsapp:user.whatsapp ,
         email:user.email ,
-        profilePic:user.profilePic
+        profilePic:user.profilePic,
+        packageType: user.packageType,
+        subscriptionStatus: user.subscriptionStatus
     };
 }
 

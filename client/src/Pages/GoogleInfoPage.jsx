@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle, Shield, Database, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { loginSuccess } from "../redux/slices/authSlice.js";
 import googleAuthService from "../services/googleAuthService.js";
-import stripeService from "../services/stripeService.js";
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -188,36 +187,29 @@ const GoogleInfoPage = () => {
         
         setStatus('Checking subscription status...');
         
-        try {
-          const subscriptionStatus = await stripeService.getSubscriptionStatus();
-          
-          if (subscriptionStatus.hasSubscription) {
-            setStatus('Redirecting to dashboard...');
-            setTimeout(() => {
-              window.location.href = "/seller-central-checker/dashboard";
-            }, 1000);
+        // Check subscription status and redirect accordingly
+        const user = response.data;
+        const hasSelectedPlan = user.packageType;
+        
+        setTimeout(() => {
+          if (!hasSelectedPlan) {
+            // User hasn't selected any plan, redirect to pricing
+            window.location.href = "/pricing";
           } else {
-            setStatus('Redirecting to pricing...');
-            setTimeout(() => {
-              navigate("/pricing");
-            }, 1000);
+            // All users with plans (LITE, PRO, AGENCY) go to dashboard
+            // Dashboard will handle feature restrictions based on plan type
+            window.location.href = "/seller-central-checker/dashboard";
           }
-        } catch (error) {
-          console.error('Error checking subscription status:', error);
-          setStatus('Redirecting to pricing...');
-          setTimeout(() => {
-            navigate("/pricing");
-          }, 1000);
-        }
+        }, 1000);
         
       } else if (response.status === 201) {
         // New user registration
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         
-        setStatus('Registration successful! Redirecting...');
+        setStatus('Registration successful! Redirecting to pricing...');
         setTimeout(() => {
-          navigate("/connect-to-amazon");
+          navigate("/pricing");
         }, 1000);
       }
       

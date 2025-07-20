@@ -1,356 +1,230 @@
-const StripeService = require('../Services/Stripe/StripeService.js');
-const { ApiError } = require('../utils/ApiError.js');
-const { ApiResponse } = require('../utils/ApiResponse.js');
-const asyncHandler = require('../utils/AsyncHandler.js');
-const logger = require('../utils/Logger.js');
-const SubscriptionModel = require('../models/SubscriptionModel.js');
-const UserModel = require('../models/userModel.js');
-const { sendWelcomeLiteEmail } = require('../Services/Email/SendWelcomeLiteEmail.js');
+const stripeService = require('../Services/Stripe/StripeService');
+const Subscription = require('../models/SubscriptionModel');
+const User = require('../models/userModel');
+const asyncHandler = require('../utils/AsyncHandler');
+const { ApiResponse } = require('../utils/ApiResponse');
+const logger = require('../utils/Logger');
 
-// Get Stripe publishable key
-const getPublishableKey = asyncHandler(async (req, res) => {
-    try {
-        const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-        
-        if (!publishableKey) {
-            logger.error('STRIPE_PUBLISHABLE_KEY not found in environment variables');
-            return res.status(500).json(new ApiResponse(500, null, 'Stripe configuration error'));
-        }
-
-        return res.status(200).json(new ApiResponse(200, { 
-            publishableKey 
-        }, 'Publishable key retrieved'));
-    } catch (error) {
-        logger.error(`Error getting publishable key: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to get publishable key'));
-    }
-});
-
-// Create checkout session
+/**
+ * Create checkout session for subscription
+ */
 const createCheckoutSession = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    const { planType } = req.body;
-
-    if (!planType || !['LITE', 'PRO', 'AGENCY'].includes(planType)) {
-        return res.status(400).json(new ApiResponse(400, null, 'Invalid plan type'));
-    }
-
     try {
-        const successUrl = `${process.env.CLIENT_URL}/subscription-success?session_id={CHECKOUT_SESSION_ID}`;
-        const cancelUrl = `${process.env.CLIENT_URL}/pricing`;
+        const userId = req.userId;
+        const { planType } = req.body;
 
-        // For LITE plan, update user directly and return success URL
-        if (planType === 'LITE') {
-            const user = await UserModel.findById(userId);
-            if (!user) {
-                throw new ApiError(404, 'User not found');
-            }
-            
-            user.subscriptionPlan = 'LITE';
-            user.subscriptionStatus = 'active';
-            await user.save();
-            
-            // Check if subscription record already exists
-            const existingSubscription = await SubscriptionModel.findOne({
-                userId: userId,
-                planType: 'LITE'
-            });
-            
-            if (!existingSubscription) {
-                // Create subscription record for LITE plan
-                await SubscriptionModel.create({
-                    userId: userId,
-                    stripeSubscriptionId: 'LITE_' + userId, // Special ID for LITE plan
-                    stripeCustomerId: 'LITE_' + userId, // Special ID for LITE plan
-                    planType: 'LITE',
-                    status: 'active',
-                    currentPeriodStart: new Date(),
-                    currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
-                    cancelAtPeriodEnd: false
-                });
-
-                // Send welcome email for lite package after subscription is created
-                try {
-                    const connectAccountUrl = `${process.env.CLIENT_URL}/connect-accounts`;
-                    const emailSent = await sendWelcomeLiteEmail(user.email, user.firstName, connectAccountUrl);
-                    if (emailSent) {
-                        logger.info(`Welcome Lite email sent successfully to ${user.email} for user ${userId}`);
-                    } else {
-                        logger.warn(`Failed to send welcome Lite email to ${user.email} for user ${userId}`);
-                    }
-                } catch (emailError) {
-                    logger.error(`Error sending welcome Lite email to ${user.email} for user ${userId}:`, emailError);
-                    // Don't fail the subscription process if email fails
-                }
-            }
-            
-            return res.status(200).json(new ApiResponse(200, { url: successUrl }, 'Free plan activated'));
+        // Validate plan type
+        if (!planType || !['PRO', 'AGENCY'].includes(planType)) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Invalid plan type. Only PRO and AGENCY plans require payment.')
+            );
         }
 
-        // For paid plans, create Stripe checkout session
-        const session = await StripeService.createCheckoutSession(userId, planType, successUrl, cancelUrl);
-
-        return res.status(200).json(new ApiResponse(200, session, 'Checkout session created'));
-    } catch (error) {
-        logger.error(`Error creating checkout session: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to create checkout session'));
-    }
-});
-
-// Create portal session for subscription management
-const createPortalSession = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-
-    try {
-        const session = await StripeService.createPortalSession(userId);
-        return res.status(200).json(new ApiResponse(200, session, 'Portal session created'));
-    } catch (error) {
-        logger.error(`Error creating portal session: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to create portal session'));
-    }
-});
-
-// Get subscription status
-const getSubscriptionStatus = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-
-    try {
-        logger.info(`Getting subscription status for user: ${userId}`);
-        
-        // First check user record
-        const user = await UserModel.findById(userId);
+        // Check if user exists
+        const user = await User.findById(userId);
         if (!user) {
-            logger.error(`User not found: ${userId}`);
-            return res.status(404).json(new ApiResponse(404, null, 'User not found'));
+            return res.status(404).json(
+                new ApiResponse(404, null, 'User not found')
+            );
         }
 
-        logger.info(`User found - current status: ${user.subscriptionStatus}, plan: ${user.subscriptionPlan}`);
+        // Create success and cancel URLs
+        const baseUrl = process.env.NODE_ENV === 'production' 
+            ? process.env.FRONTEND_URL 
+            : 'https://www.sellerqi.com';
 
-        // Get subscription record from database
-        const subscription = await SubscriptionModel.findOne({
-            userId: userId,
-            status: { $in: ['active', 'trialing'] }
-        }).sort({ createdAt: -1 });
+        const successUrl = `${baseUrl}/subscription-success?session_id={CHECKOUT_SESSION_ID}`;
+        const cancelUrl = `${baseUrl}/payment-cancel`;
 
-        if (!subscription) {
-            logger.info(`No active subscription found for user: ${userId}`);
-            return res.status(200).json(new ApiResponse(200, {
-                hasSubscription: false,
-                plan: 'LITE',
-                status: 'none',
-                userRecord: {
-                    subscriptionStatus: user.subscriptionStatus,
-                    subscriptionPlan: user.subscriptionPlan
-                }
-            }, 'No active subscription'));
-        }
+        // Create checkout session
+        const checkoutSession = await stripeService.createCheckoutSession(
+            userId,
+            planType,
+            successUrl,
+            cancelUrl
+        );
 
-        logger.info(`Found subscription: ${subscription._id}, plan: ${subscription.planType}, status: ${subscription.status}`);
+        logger.info(`Checkout session created for user: ${userId}, plan: ${planType}`);
 
-        // For non-LITE plans, also check Stripe data
-        let stripeData = null;
-        if (subscription.planType !== 'LITE' && !subscription.stripeSubscriptionId.startsWith('LITE_')) {
-            try {
-                const stripeSubscription = await StripeService.getActiveSubscription(userId);
-                if (stripeSubscription) {
-                    stripeData = {
-                        id: stripeSubscription.id,
-                        status: stripeSubscription.status,
-                        currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
-                        cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end
-                    };
-                    logger.info(`Stripe data: status=${stripeSubscription.status}, cancelAtPeriodEnd=${stripeSubscription.cancel_at_period_end}`);
-                }
-            } catch (error) {
-                logger.warn(`Error fetching Stripe subscription data: ${error.message}`);
-            }
-        }
+        return res.status(200).json(
+            new ApiResponse(200, {
+                sessionId: checkoutSession.sessionId,
+                url: checkoutSession.url
+            }, 'Checkout session created successfully')
+        );
 
-        return res.status(200).json(new ApiResponse(200, {
-            hasSubscription: true,
-            plan: subscription.planType,
-            status: subscription.status,
-            currentPeriodEnd: subscription.currentPeriodEnd,
-            cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
-            stripeData: stripeData,
-            userRecord: {
-                subscriptionStatus: user.subscriptionStatus,
-                subscriptionPlan: user.subscriptionPlan
-            },
-            subscriptionRecord: {
-                id: subscription._id,
-                status: subscription.status,
-                planType: subscription.planType,
-                createdAt: subscription.createdAt
-            }
-        }, 'Subscription status retrieved'));
     } catch (error) {
-        logger.error(`Error getting subscription status: ${error.message}`);
-        logger.error(`Error stack: ${error.stack}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to get subscription status'));
+        logger.error('Error creating checkout session:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to create checkout session')
+        );
     }
 });
 
-// Cancel subscription
+/**
+ * Handle successful payment
+ */
+const handlePaymentSuccess = asyncHandler(async (req, res) => {
+    try {
+        const { session_id } = req.query;
+
+        if (!session_id) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Session ID is required')
+            );
+        }
+
+        // Handle successful payment
+        const result = await stripeService.handleSuccessfulPayment(session_id);
+
+        logger.info(`Payment success handled for session: ${session_id}`);
+
+        return res.status(200).json(
+            new ApiResponse(200, result, 'Payment processed successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error handling payment success:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to process payment')
+        );
+    }
+});
+
+/**
+ * Get user subscription details
+ */
+const getSubscription = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const subscription = await stripeService.getSubscription(userId);
+
+        return res.status(200).json(
+            new ApiResponse(200, subscription, 'Subscription details retrieved successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error getting subscription:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get subscription')
+        );
+    }
+});
+
+/**
+ * Cancel subscription
+ */
 const cancelSubscription = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-
     try {
-        const subscription = await SubscriptionModel.findOne({
-            userId: userId,
-            status: { $in: ['active', 'trialing'] }
-        });
+        const userId = req.userId;
+        const { cancelAtPeriodEnd = true } = req.body;
 
-        if (!subscription) {
-            return res.status(404).json(new ApiResponse(404, null, 'No active subscription found'));
-        }
+        const result = await stripeService.cancelSubscription(userId, cancelAtPeriodEnd);
 
-        const canceledSubscription = await StripeService.cancelSubscription(subscription.stripeSubscriptionId);
+        const message = cancelAtPeriodEnd 
+            ? 'Subscription will be cancelled at the end of the current period'
+            : 'Subscription cancelled immediately';
 
-        return res.status(200).json(new ApiResponse(200, {
-            cancelAtPeriodEnd: canceledSubscription.cancel_at_period_end,
-            currentPeriodEnd: new Date(canceledSubscription.current_period_end * 1000)
-        }, 'Subscription will be canceled at the end of the billing period'));
+        logger.info(`Subscription cancellation requested for user: ${userId}, cancelAtPeriodEnd: ${cancelAtPeriodEnd}`);
+
+        return res.status(200).json(
+            new ApiResponse(200, result, message)
+        );
+
     } catch (error) {
-        logger.error(`Error canceling subscription: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to cancel subscription'));
+        logger.error('Error cancelling subscription:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to cancel subscription')
+        );
     }
 });
 
-// Reactivate subscription
+/**
+ * Reactivate cancelled subscription
+ */
 const reactivateSubscription = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-
     try {
-        const subscription = await SubscriptionModel.findOne({
-            userId: userId,
-            status: 'active',
-            cancelAtPeriodEnd: true
-        });
+        const userId = req.userId;
 
-        if (!subscription) {
-            return res.status(404).json(new ApiResponse(404, null, 'No subscription scheduled for cancellation'));
-        }
+        const result = await stripeService.reactivateSubscription(userId);
 
-        const reactivatedSubscription = await StripeService.reactivateSubscription(subscription.stripeSubscriptionId);
+        logger.info(`Subscription reactivated for user: ${userId}`);
 
-        return res.status(200).json(new ApiResponse(200, {
-            status: reactivatedSubscription.status,
-            cancelAtPeriodEnd: reactivatedSubscription.cancel_at_period_end
-        }, 'Subscription reactivated'));
-    } catch (error) {
-        logger.error(`Error reactivating subscription: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to reactivate subscription'));
-    }
-});
-
-// Update subscription plan
-const updateSubscriptionPlan = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    const { newPlanType } = req.body;
-
-    if (!newPlanType || !['PRO', 'AGENCY'].includes(newPlanType)) {
-        return res.status(400).json(new ApiResponse(400, null, 'Invalid plan type'));
-    }
-
-    try {
-        const subscription = await SubscriptionModel.findOne({
-            userId: userId,
-            status: { $in: ['active', 'trialing'] }
-        });
-
-        if (!subscription) {
-            return res.status(404).json(new ApiResponse(404, null, 'No active subscription found'));
-        }
-
-        if (subscription.planType === newPlanType) {
-            return res.status(400).json(new ApiResponse(400, null, 'Already subscribed to this plan'));
-        }
-
-        const updatedSubscription = await StripeService.updateSubscription(
-            subscription.stripeSubscriptionId,
-            newPlanType
+        return res.status(200).json(
+            new ApiResponse(200, result, 'Subscription reactivated successfully')
         );
 
-        return res.status(200).json(new ApiResponse(200, {
-            planType: newPlanType,
-            status: updatedSubscription.status
-        }, 'Subscription plan updated'));
     } catch (error) {
-        logger.error(`Error updating subscription plan: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to update subscription plan'));
+        logger.error('Error reactivating subscription:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to reactivate subscription')
+        );
     }
 });
 
-// Get invoice preview for plan change
-const getInvoicePreview = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    const { newPlanType } = req.query;
-
-    if (!newPlanType || !['PRO', 'AGENCY'].includes(newPlanType)) {
-        return res.status(400).json(new ApiResponse(400, null, 'Invalid plan type'));
-    }
-
+/**
+ * Get user's payment history
+ */
+const getPaymentHistory = asyncHandler(async (req, res) => {
     try {
-        const subscription = await SubscriptionModel.findOne({
-            userId: userId,
-            status: { $in: ['active', 'trialing'] }
-        });
+        const userId = req.userId;
 
-        if (!subscription) {
-            return res.status(404).json(new ApiResponse(404, null, 'No active subscription found'));
-        }
+        const subscription = await Subscription.findOne({ userId }).select('paymentHistory');
+        
+        const paymentHistory = subscription ? subscription.paymentHistory : [];
 
-        const preview = await StripeService.getInvoicePreview(
-            subscription.stripeSubscriptionId,
-            newPlanType
+        return res.status(200).json(
+            new ApiResponse(200, { paymentHistory }, 'Payment history retrieved successfully')
         );
 
-        return res.status(200).json(new ApiResponse(200, preview, 'Invoice preview retrieved'));
     } catch (error) {
-        logger.error(`Error getting invoice preview: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to get invoice preview'));
+        logger.error('Error getting payment history:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get payment history')
+        );
     }
 });
 
-// Get payment methods
-const getPaymentMethods = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-
+/**
+ * Get subscription configuration (for frontend)
+ */
+const getSubscriptionConfig = asyncHandler(async (req, res) => {
     try {
-        const paymentMethods = await StripeService.getPaymentMethods(userId);
+        const config = {
+            publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+            plans: {
+                PRO: {
+                    priceId: process.env.STRIPE_PRO_PRICE_ID,
+                    name: 'PRO',
+                    features: ['Advanced Analytics', 'Priority Support', 'API Access']
+                },
+                AGENCY: {
+                    priceId: process.env.STRIPE_AGENCY_PRICE_ID,
+                    name: 'AGENCY',
+                    features: ['Everything in PRO', 'White Label', 'Unlimited Users', 'Custom Integrations']
+                }
+            }
+        };
 
-        return res.status(200).json(new ApiResponse(200, paymentMethods, 'Payment methods retrieved'));
+        return res.status(200).json(
+            new ApiResponse(200, config, 'Subscription configuration retrieved successfully')
+        );
+
     } catch (error) {
-        logger.error(`Error getting payment methods: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to get payment methods'));
-    }
-});
-
-// Get invoices
-const getInvoices = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    const { limit = 10 } = req.query;
-
-    try {
-        const invoices = await StripeService.getInvoices(userId, parseInt(limit));
-
-        return res.status(200).json(new ApiResponse(200, invoices, 'Invoices retrieved'));
-    } catch (error) {
-        logger.error(`Error getting invoices: ${error.message}`);
-        return res.status(500).json(new ApiResponse(500, null, 'Failed to get invoices'));
+        logger.error('Error getting subscription config:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, 'Failed to get subscription configuration')
+        );
     }
 });
 
 module.exports = {
-    getPublishableKey,
     createCheckoutSession,
-    createPortalSession,
-    getSubscriptionStatus,
+    handlePaymentSuccess,
+    getSubscription,
     cancelSubscription,
     reactivateSubscription,
-    updateSubscriptionPlan,
-    getInvoicePreview,
-    getPaymentMethods,
-    getInvoices
-};
+    getPaymentHistory,
+    getSubscriptionConfig
+}; 

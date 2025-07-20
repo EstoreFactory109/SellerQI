@@ -1,128 +1,118 @@
 import axiosInstance from '../config/axios.config.js';
 
-// Create API instance with proper base URL for Stripe endpoints
-const api = {
-  get: (url, config) => axiosInstance.get(`/app${url}`, config),
-  post: (url, data, config) => axiosInstance.post(`/app${url}`, data, config),
-  put: (url, data, config) => axiosInstance.put(`/app${url}`, data, config),
-  delete: (url, config) => axiosInstance.delete(`/app${url}`, config),
-};
-
-// Stripe API service
-const stripeService = {
-  // Get Stripe publishable key
-  getPublishableKey: async () => {
-    try {
-      const response = await api.get('/stripe/publishable-key');
-      return response.data.data.publishableKey;
-    } catch (error) {
-      console.error('Error fetching publishable key:', error);
-      throw error;
+class StripeService {
+    constructor() {
+        this.publishableKey = null;
     }
-  },
 
-  // Create checkout session
-  createCheckoutSession: async (planType) => {
-    try {
-      const response = await api.post('/stripe/create-checkout-session', {
-        planType
-      });
-      return response.data.data;
-    } catch (error) {
-      console.error('Error creating checkout session:', error);
-      throw error;
+    /**
+     * Get Stripe configuration including publishable key
+     */
+    async getConfig() {
+        try {
+            const response = await axiosInstance.get('/app/stripe/config');
+            this.publishableKey = response.data.data.publishableKey;
+            return response.data.data;
+        } catch (error) {
+            console.error('Error getting Stripe config:', error);
+            throw error;
+        }
     }
-  },
 
-  // Create portal session
-  createPortalSession: async () => {
-    try {
-      const response = await api.post('/stripe/create-portal-session');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error creating portal session:', error);
-      throw error;
+    /**
+     * Create checkout session and redirect to Stripe
+     */
+    async createCheckoutSession(planType) {
+        try {
+            const response = await axiosInstance.post('/app/stripe/create-checkout-session', {
+                planType: planType
+            });
+
+            const { url } = response.data.data;
+            
+            // Redirect to Stripe checkout
+            window.location.href = url;
+            
+            return response.data;
+        } catch (error) {
+            console.error('Error creating checkout session:', error);
+            throw error;
+        }
     }
-  },
 
-  // Get subscription status
-  getSubscriptionStatus: async () => {
-    try {
-      const response = await api.get('/stripe/subscription-status');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error fetching subscription status:', error);
-      throw error;
+    /**
+     * Handle payment success
+     */
+    async handlePaymentSuccess(sessionId) {
+        try {
+            const response = await axiosInstance.get(`/app/stripe/payment-success?session_id=${sessionId}`);
+            return response.data;
+        } catch (error) {
+            console.error('Error handling payment success:', error);
+            throw error;
+        }
     }
-  },
 
-  // Cancel subscription
-  cancelSubscription: async () => {
-    try {
-      const response = await api.post('/stripe/cancel-subscription');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error canceling subscription:', error);
-      throw error;
+    /**
+     * Get user subscription details
+     */
+    async getSubscription() {
+        try {
+            const response = await axiosInstance.get('/app/stripe/subscription');
+            return response.data.data;
+        } catch (error) {
+            console.error('Error getting subscription:', error);
+            throw error;
+        }
     }
-  },
 
-  // Reactivate subscription
-  reactivateSubscription: async () => {
-    try {
-      const response = await api.post('/stripe/reactivate-subscription');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error reactivating subscription:', error);
-      throw error;
+    /**
+     * Cancel subscription
+     */
+    async cancelSubscription(cancelAtPeriodEnd = true) {
+        try {
+            const response = await axiosInstance.post('/app/stripe/cancel-subscription', {
+                cancelAtPeriodEnd
+            });
+            return response.data;
+        } catch (error) {
+            console.error('Error cancelling subscription:', error);
+            throw error;
+        }
     }
-  },
 
-  // Update subscription plan
-  updateSubscriptionPlan: async (newPlanType) => {
-    try {
-      const response = await api.put('/stripe/update-subscription', {
-        newPlanType
-      });
-      return response.data.data;
-    } catch (error) {
-      console.error('Error updating subscription:', error);
-      throw error;
+    /**
+     * Reactivate subscription
+     */
+    async reactivateSubscription() {
+        try {
+            const response = await axiosInstance.post('/app/stripe/reactivate-subscription');
+            return response.data;
+        } catch (error) {
+            console.error('Error reactivating subscription:', error);
+            throw error;
+        }
     }
-  },
 
-  // Get invoice preview
-  getInvoicePreview: async (newPlanType) => {
-    try {
-      const response = await api.get(`/stripe/invoice-preview?newPlanType=${newPlanType}`);
-      return response.data.data;
-    } catch (error) {
-      console.error('Error fetching invoice preview:', error);
-      throw error;
+    /**
+     * Get payment history
+     */
+    async getPaymentHistory() {
+        try {
+            const response = await axiosInstance.get('/app/stripe/payment-history');
+            return response.data.data.paymentHistory;
+        } catch (error) {
+            console.error('Error getting payment history:', error);
+            throw error;
+        }
     }
-  },
 
-  // Get payment methods
-  getPaymentMethods: async () => {
-    try {
-      const response = await api.get('/stripe/payment-methods');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error fetching payment methods:', error);
-      throw error;
+    /**
+     * Check if plan requires payment
+     */
+    isPaymentRequired(planType) {
+        return ['PRO', 'AGENCY'].includes(planType);
     }
-  },
+}
 
-  // Get invoices
-  getInvoices: async (limit = 10) => {
-    try {
-      const response = await api.get(`/stripe/invoices?limit=${limit}`);
-      return response.data.data;
-    } catch (error) {
-      console.error('Error fetching invoices:', error);
-      throw error;
-    }
-  }
-};
-
-export default stripeService;
+export default new StripeService(); 

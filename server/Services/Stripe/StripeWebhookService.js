@@ -1,201 +1,384 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const logger = require('../../utils/Logger.js');
-const UserModel = require('../../models/userModel.js');
-const SubscriptionModel = require('../../models/SubscriptionModel.js');
+const Subscription = require('../../models/SubscriptionModel');
+const User = require('../../models/userModel');
+const logger = require('../../utils/Logger');
 
 class StripeWebhookService {
     constructor() {
         this.stripe = stripe;
-        this.endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+        this.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     }
 
-    // Verify webhook signature
+    /**
+     * Safe date conversion from Unix timestamp
+     */
+    safeDate(timestamp) {
+        if (!timestamp || typeof timestamp !== 'number' || isNaN(timestamp)) {
+            return null;
+        }
+        const date = new Date(timestamp * 1000);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    /**
+     * Verify webhook signature
+     */
     verifyWebhookSignature(payload, signature) {
         try {
-            return this.stripe.webhooks.constructEvent(
+            const event = this.stripe.webhooks.constructEvent(
                 payload,
                 signature,
-                this.endpointSecret
+                this.webhookSecret
             );
+            return event;
         } catch (error) {
-            logger.error(`Webhook signature verification failed: ${error.message}`);
-            throw error;
+            logger.error('Webhook signature verification failed:', error.message);
+            throw new Error('Invalid signature');
         }
     }
 
-    // Handle checkout session completed
-    async handleCheckoutSessionCompleted(session) {
+    /**
+     * Handle webhook events
+     */
+    async handleWebhookEvent(event) {
         try {
-            const userId = session.metadata.userId;
-            const planType = session.metadata.planType;
-            const subscriptionId = session.subscription;
+            logger.info(`Processing webhook event: ${event.type}, ID: ${event.id}`);
 
-            // Get the subscription details
-            const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-
-            // Update user with subscription info
-            const user = await UserModel.findById(userId);
-            if (!user) {
-                throw new Error(`User ${userId} not found`);
-            }
-
-            user.stripeSubscriptionId = subscriptionId;
-            user.subscriptionStatus = 'active';
-            user.subscriptionPlan = planType;
-            await user.save();
-
-            // Create subscription record
-            await SubscriptionModel.create({
-                userId: userId,
-                stripeSubscriptionId: subscriptionId,
-                stripeCustomerId: session.customer,
-                planType: planType,
-                status: 'active',
-                currentPeriodStart: new Date(subscription.current_period_start * 1000),
-                currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-                cancelAtPeriodEnd: false
-            });
-
-            logger.info(`Subscription created for user ${userId} - Plan: ${planType}`);
-        } catch (error) {
-            logger.error(`Error handling checkout session completed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Handle subscription updated
-    async handleSubscriptionUpdated(subscription) {
-        try {
-            const subscriptionRecord = await SubscriptionModel.findOne({
-                stripeSubscriptionId: subscription.id
-            });
-
-            if (!subscriptionRecord) {
-                logger.warn(`Subscription record not found for ${subscription.id}`);
-                return;
-            }
-
-            // Update subscription record
-            subscriptionRecord.status = subscription.status;
-            subscriptionRecord.currentPeriodStart = new Date(subscription.current_period_start * 1000);
-            subscriptionRecord.currentPeriodEnd = new Date(subscription.current_period_end * 1000);
-            subscriptionRecord.cancelAtPeriodEnd = subscription.cancel_at_period_end;
-            
-            if (subscription.canceled_at) {
-                subscriptionRecord.canceledAt = new Date(subscription.canceled_at * 1000);
-            }
-
-            // Update plan type if changed
-            if (subscription.metadata.planType) {
-                subscriptionRecord.planType = subscription.metadata.planType;
-            }
-
-            await subscriptionRecord.save();
-
-            // Update user record
-            const user = await UserModel.findById(subscriptionRecord.userId);
-            if (user) {
-                user.subscriptionStatus = subscription.status;
-                user.subscriptionPlan = subscriptionRecord.planType;
-                await user.save();
-            }
-
-            logger.info(`Subscription updated for ${subscription.id}`);
-        } catch (error) {
-            logger.error(`Error handling subscription updated: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Handle subscription deleted
-    async handleSubscriptionDeleted(subscription) {
-        try {
-            const subscriptionRecord = await SubscriptionModel.findOne({
-                stripeSubscriptionId: subscription.id
-            });
-
-            if (!subscriptionRecord) {
-                logger.warn(`Subscription record not found for ${subscription.id}`);
-                return;
-            }
-
-            // Update subscription record
-            subscriptionRecord.status = 'canceled';
-            subscriptionRecord.endedAt = new Date();
-            await subscriptionRecord.save();
-
-            // Update user record
-            const user = await UserModel.findById(subscriptionRecord.userId);
-            if (user) {
-                user.subscriptionStatus = 'canceled';
-                user.subscriptionPlan = 'LITE'; // Revert to free plan
-                await user.save();
-            }
-
-            logger.info(`Subscription canceled for ${subscription.id}`);
-        } catch (error) {
-            logger.error(`Error handling subscription deleted: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Handle invoice payment succeeded
-    async handleInvoicePaymentSucceeded(invoice) {
-        try {
-            logger.info(`Invoice payment succeeded: ${invoice.id} for ${invoice.amount_paid / 100} ${invoice.currency}`);
-            
-            // You can add custom logic here like sending receipt emails
-        } catch (error) {
-            logger.error(`Error handling invoice payment succeeded: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Handle invoice payment failed
-    async handleInvoicePaymentFailed(invoice) {
-        try {
-            logger.warn(`Invoice payment failed: ${invoice.id} for customer ${invoice.customer}`);
-            
-            // You can add custom logic here like sending payment failure emails
-            // or updating user access
-        } catch (error) {
-            logger.error(`Error handling invoice payment failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Process webhook event
-    async processWebhookEvent(event) {
-        try {
             switch (event.type) {
                 case 'checkout.session.completed':
                     await this.handleCheckoutSessionCompleted(event.data.object);
                     break;
-                
+
+                case 'customer.subscription.created':
+                    await this.handleSubscriptionCreated(event.data.object);
+                    break;
+
                 case 'customer.subscription.updated':
                     await this.handleSubscriptionUpdated(event.data.object);
                     break;
-                
+
                 case 'customer.subscription.deleted':
                     await this.handleSubscriptionDeleted(event.data.object);
                     break;
-                
+
                 case 'invoice.payment_succeeded':
                     await this.handleInvoicePaymentSucceeded(event.data.object);
                     break;
-                
+
                 case 'invoice.payment_failed':
                     await this.handleInvoicePaymentFailed(event.data.object);
                     break;
-                
+
+                case 'customer.subscription.trial_will_end':
+                    await this.handleTrialWillEnd(event.data.object);
+                    break;
+
                 default:
                     logger.info(`Unhandled webhook event type: ${event.type}`);
             }
+
+            return { success: true, eventType: event.type };
+
         } catch (error) {
-            logger.error(`Error processing webhook event ${event.type}: ${error.message}`);
+            logger.error(`Error handling webhook event ${event.type}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle checkout session completed
+     */
+    async handleCheckoutSessionCompleted(session) {
+        try {
+            const userId = session.metadata.userId;
+            const planType = session.metadata.planType;
+
+            logger.info(`Checkout completed for user: ${userId}, plan: ${planType}, session: ${session.id}`);
+
+            // If it's a subscription checkout, the subscription will be handled in subscription.created event
+            if (session.mode === 'subscription') {
+                logger.info(`Subscription checkout completed, waiting for subscription.created event`);
+                return;
+            }
+
+            // Handle one-time payments if needed
+            if (session.mode === 'payment') {
+                // Handle one-time payment logic here if needed
+                logger.info(`One-time payment completed for user: ${userId}`);
+            }
+
+        } catch (error) {
+            logger.error('Error handling checkout session completed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle subscription created
+     */
+    async handleSubscriptionCreated(subscription) {
+        try {
+            const userId = subscription.metadata.userId;
+            const planType = subscription.metadata.planType;
+
+            logger.info(`Subscription created for user: ${userId}, plan: ${planType}, subscription: ${subscription.id}`);
+
+            // Update subscription in our database
+            const subscriptionData = {
+                stripeSubscriptionId: subscription.id,
+                stripeCustomerId: subscription.customer,
+                planType: planType,
+                stripePriceId: subscription.items.data[0].price.id,
+                status: subscription.status,
+                paymentStatus: subscription.status === 'active' ? 'paid' : 'pending',
+                amount: subscription.items.data[0].price.unit_amount,
+                currency: subscription.items.data[0].price.currency,
+                currentPeriodStart: this.safeDate(subscription.current_period_start),
+                currentPeriodEnd: this.safeDate(subscription.current_period_end),
+                nextBillingDate: this.safeDate(subscription.current_period_end),
+                cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            };
+
+            await this.updateSubscription(userId, subscriptionData);
+
+            // Update user's package type and subscription status
+            await this.updateUserSubscription(userId, planType, subscription.status);
+
+            logger.info(`Successfully updated subscription for user: ${userId}`);
+
+        } catch (error) {
+            logger.error('Error handling subscription created:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle subscription updated
+     */
+    async handleSubscriptionUpdated(subscription) {
+        try {
+            const userId = subscription.metadata.userId;
+            const planType = subscription.metadata.planType;
+
+            logger.info(`Subscription updated for user: ${userId}, status: ${subscription.status}`);
+
+            // Update subscription in our database
+            const subscriptionData = {
+                status: subscription.status,
+                currentPeriodStart: this.safeDate(subscription.current_period_start),
+                currentPeriodEnd: this.safeDate(subscription.current_period_end),
+                nextBillingDate: this.safeDate(subscription.current_period_end),
+                cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            };
+
+            // Update payment status based on subscription status
+            if (subscription.status === 'active') {
+                subscriptionData.paymentStatus = 'paid';
+            } else if (subscription.status === 'past_due') {
+                subscriptionData.paymentStatus = 'unpaid';
+            }
+
+            await this.updateSubscription(userId, subscriptionData);
+
+            // Update user subscription status
+            await this.updateUserSubscription(userId, planType, subscription.status);
+
+            // If subscription is cancelled, downgrade user to LITE
+            if (subscription.status === 'canceled') {
+                await this.downgradeUserToLite(userId);
+            }
+
+            logger.info(`Successfully updated subscription for user: ${userId}, status: ${subscription.status}`);
+
+        } catch (error) {
+            logger.error('Error handling subscription updated:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle subscription deleted
+     */
+    async handleSubscriptionDeleted(subscription) {
+        try {
+            const userId = subscription.metadata.userId;
+
+            logger.info(`Subscription deleted for user: ${userId}`);
+
+            // Update subscription status to cancelled
+            await this.updateSubscription(userId, {
+                status: 'cancelled',
+                paymentStatus: 'unpaid'
+            });
+
+            // Downgrade user to LITE plan
+            await this.downgradeUserToLite(userId);
+
+            logger.info(`Successfully handled subscription deletion for user: ${userId}`);
+
+        } catch (error) {
+            logger.error('Error handling subscription deleted:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle successful invoice payment
+     */
+    async handleInvoicePaymentSucceeded(invoice) {
+        try {
+            const subscriptionId = invoice.subscription;
+            
+            if (!subscriptionId) {
+                return; // Not a subscription invoice
+            }
+
+            // Get subscription from Stripe to get metadata
+            const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            const userId = subscription.metadata.userId;
+
+            logger.info(`Invoice payment succeeded for user: ${userId}, amount: ${invoice.amount_paid}`);
+
+            // Add payment to history
+            await this.addPaymentToHistory(userId, {
+                amount: invoice.amount_paid,
+                currency: invoice.currency,
+                status: 'paid',
+                paymentDate: this.safeDate(invoice.status_transitions.paid_at),
+                stripePaymentIntentId: invoice.payment_intent
+            });
+
+            // Update subscription payment status
+            await this.updateSubscription(userId, {
+                paymentStatus: 'paid',
+                lastPaymentDate: this.safeDate(invoice.status_transitions.paid_at)
+            });
+
+            logger.info(`Successfully recorded payment for user: ${userId}`);
+
+        } catch (error) {
+            logger.error('Error handling invoice payment succeeded:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle failed invoice payment
+     */
+    async handleInvoicePaymentFailed(invoice) {
+        try {
+            const subscriptionId = invoice.subscription;
+            
+            if (!subscriptionId) {
+                return; // Not a subscription invoice
+            }
+
+            // Get subscription from Stripe to get metadata
+            const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            const userId = subscription.metadata.userId;
+
+            logger.warn(`Invoice payment failed for user: ${userId}, amount: ${invoice.amount_due}`);
+
+            // Update subscription payment status
+            await this.updateSubscription(userId, {
+                paymentStatus: 'unpaid'
+            });
+
+            // TODO: Send email notification about failed payment
+            // TODO: Implement retry logic or grace period
+
+            logger.info(`Updated payment status for failed payment, user: ${userId}`);
+
+        } catch (error) {
+            logger.error('Error handling invoice payment failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle trial will end
+     */
+    async handleTrialWillEnd(subscription) {
+        try {
+            const userId = subscription.metadata.userId;
+
+            logger.info(`Trial will end for user: ${userId}`);
+
+            // TODO: Send email notification about trial ending
+            // TODO: Implement any trial-specific logic
+
+        } catch (error) {
+            logger.error('Error handling trial will end:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update subscription in database
+     */
+    async updateSubscription(userId, updateData) {
+        try {
+            await Subscription.findOneAndUpdate(
+                { userId },
+                updateData,
+                { new: true, upsert: true }
+            );
+        } catch (error) {
+            logger.error('Error updating subscription in database:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update user subscription details
+     */
+    async updateUserSubscription(userId, planType, subscriptionStatus) {
+        try {
+            await User.findByIdAndUpdate(userId, {
+                packageType: planType,
+                subscriptionStatus: subscriptionStatus
+            });
+        } catch (error) {
+            logger.error('Error updating user subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Downgrade user to LITE plan
+     */
+    async downgradeUserToLite(userId) {
+        try {
+            await User.findByIdAndUpdate(userId, {
+                packageType: 'LITE',
+                subscriptionStatus: 'cancelled'
+            });
+
+            logger.info(`Downgraded user ${userId} to LITE plan`);
+        } catch (error) {
+            logger.error('Error downgrading user to LITE:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Add payment to history
+     */
+    async addPaymentToHistory(userId, paymentData) {
+        try {
+            await Subscription.findOneAndUpdate(
+                { userId },
+                { 
+                    $push: { 
+                        paymentHistory: paymentData 
+                    } 
+                }
+            );
+        } catch (error) {
+            logger.error('Error adding payment to history:', error);
             throw error;
         }
     }
 }
 
-module.exports = new StripeWebhookService();
+module.exports = new StripeWebhookService(); 

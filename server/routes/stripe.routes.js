@@ -2,48 +2,37 @@ const express = require('express');
 const router = express.Router();
 
 // Import controllers
-const StripeController = require('../controllers/StripeController.js');
-const StripeWebhookController = require('../controllers/StripeWebhookController.js');
+const {
+    createCheckoutSession,
+    handlePaymentSuccess,
+    getSubscription,
+    cancelSubscription,
+    reactivateSubscription,
+    getPaymentHistory,
+    getSubscriptionConfig
+} = require('../controllers/StripeController');
+
+const {
+    handleWebhook,
+    testWebhook
+} = require('../controllers/StripeWebhookController');
 
 // Import middleware
-const auth = require('../middlewares/Auth/auth.js');
+const auth = require('../middlewares/Auth/auth');
 
-// Debug endpoint for testing webhook connectivity (no auth required)
-router.get('/webhook-debug', (req, res) => {
-    res.json({
-        message: 'Webhook endpoint is accessible',
-        timestamp: new Date().toISOString(),
-        environment: {
-            hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
-            hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
-            nodeEnv: process.env.NODE_ENV
-        }
-    });
-});
+// Webhook routes (no auth required, Stripe handles verification)
+router.post('/webhook', handleWebhook);
+router.get('/webhook/test', testWebhook);
 
-// Webhook endpoint (must be before express.json middleware and auth)
-// This needs to use raw body parsing for Stripe signature verification
-router.post('/webhook', express.raw({ type: 'application/json' }), StripeWebhookController.handleWebhook);
+// Subscription management routes (auth required)
+router.post('/create-checkout-session', auth, createCheckoutSession);
+router.get('/payment-success', auth, handlePaymentSuccess);
+router.get('/subscription', auth, getSubscription);
+router.post('/cancel-subscription', auth, cancelSubscription);
+router.post('/reactivate-subscription', auth, reactivateSubscription);
+router.get('/payment-history', auth, getPaymentHistory);
 
-// Get publishable key (no auth required for frontend setup)
-router.get('/publishable-key', StripeController.getPublishableKey);
-
-// Protected routes (require authentication)
-router.use(auth);
-
-// Subscription management
-router.post('/create-checkout-session', StripeController.createCheckoutSession);
-router.post('/create-portal-session', StripeController.createPortalSession);
-router.get('/subscription-status', StripeController.getSubscriptionStatus);
-router.post('/cancel-subscription', StripeController.cancelSubscription);
-router.post('/reactivate-subscription', StripeController.reactivateSubscription);
-router.put('/update-subscription', StripeController.updateSubscriptionPlan);
-
-// Invoice and pricing
-router.get('/invoice-preview', StripeController.getInvoicePreview);
-router.get('/invoices', StripeController.getInvoices);
-
-// Payment methods
-router.get('/payment-methods', StripeController.getPaymentMethods);
+// Configuration routes (no auth required for config)
+router.get('/config', getSubscriptionConfig);
 
 module.exports = router; 

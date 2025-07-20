@@ -66,13 +66,16 @@ const userSchema = new mongoose.Schema(
         enum: ["user", "superAdmin", "enterpriseAdmin"],
         default: "user"
       },
-      appRefreshToken: {
-        type: String,
-        required: false,
+      packageType:{
+        type:String,
+        required:true,
+        enum: ["LITE", "PRO", "AGENCY"],
+        default:"LITE"
       },
-      spiAccessToken: {
+      subscriptionStatus: {
         type: String,
-        required: false,
+        enum: ["active", "inactive", "cancelled", "past_due"],
+        default: "active"
       },
       sellerCentral:{
         type:mongoose.Schema.Types.ObjectId,
@@ -125,26 +128,6 @@ const userSchema = new mongoose.Schema(
         type:mongoose.Schema.Types.ObjectId,
         ref:"APlusContent",
         require:true
-      },
-      // Subscription-related fields
-      stripeCustomerId: {
-        type: String,
-        required: false,
-        index: true
-      },
-      subscriptionStatus: {
-        type: String,
-        enum: ['active', 'canceled', 'incomplete', 'incomplete_expired', 'past_due', 'trialing', 'unpaid', 'none'],
-        default: 'none'
-      },
-      subscriptionPlan: {
-        type: String,
-        enum: ['LITE', 'PRO', 'AGENCY'],
-        default: 'LITE'
-      },
-      stripeSubscriptionId: {
-        type: String,
-        required: false
       }
     },
     {

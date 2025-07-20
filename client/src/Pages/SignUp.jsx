@@ -16,7 +16,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice';
 import googleAuthService from '../services/googleAuthService.js';
-import stripeService from '../services/stripeService.js';
 
 const SignUp = () => {
   const [formData, setFormData] = useState({
@@ -112,27 +111,14 @@ const SignUp = () => {
         const response = await googleAuthService.handleGoogleSignUp();
         
         if (response.status === 200) {
-            dispatch(loginSuccess(response.data));
-            localStorage.setItem("isAuth", true);
-            
-            // Check subscription status before redirecting
-            try {
-                const subscriptionStatus = await stripeService.getSubscriptionStatus();
-                
-                if (subscriptionStatus.hasSubscription) {
-                    // User has a subscription, redirect to dashboard
-                    window.location.href = "/seller-central-checker/dashboard";
-                } else {
-                    // No subscription, redirect to pricing page
-                    navigate("/pricing");
-                }
-            } catch (error) {
-                console.error('Error checking subscription status:', error);
-                // If subscription check fails, default to pricing page
-                navigate("/pricing");
-            }
-        } else if (response.status === 201) {
-            // New user registered, redirect to connect Amazon
+          // Store auth information
+          localStorage.setItem("isAuth", true);
+          dispatch(loginSuccess(response.data.data));
+          
+          // Redirect to pricing page for plan selection
+          navigate('/pricing');
+          
+        } else {
             dispatch(loginSuccess(response.data));
             localStorage.setItem("isAuth", true);
             navigate("/connect-to-amazon");

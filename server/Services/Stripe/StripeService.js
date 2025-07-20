@@ -1,128 +1,104 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const logger = require('../../utils/Logger.js');
-const { ApiError } = require('../../utils/ApiError.js');
-const UserModel = require('../../models/userModel.js');
+const Subscription = require('../../models/SubscriptionModel');
+const User = require('../../models/userModel');
+const logger = require('../../utils/Logger');
 
 class StripeService {
     constructor() {
         this.stripe = stripe;
-        
-        // Define your product/price IDs
-        this.products = {
-            LITE: {
-                priceId: null, // Free tier - no Stripe price ID needed
-                amount: 0,
-                name: 'LITE',
-                features: [
-                    'Product Audit Summary'
-                ]
-            },
-            PRO: {
-                priceId: process.env.STRIPE_PRO_PRICE_ID || 'price_1RZ9XXQ2Bl5VhXOdPROPRICE', // You'll need to create this in Stripe Dashboard
-                amount: 99,
-                name: 'PRO',
-                features: [
-                    'Product Audit Summary',
-                    'Download Reports',
-                    'Fix Recommendations',
-                    'Expert Consultation',
-                    'Track Multiple Products',
-                    'Issue Breakdown'
-                ]
-            },
-            AGENCY: {
-                priceId: process.env.STRIPE_AGENCY_PRICE_ID || 'price_1RZ9XXQ2Bl5VhXOdAGENCYPRICE', // You'll need to create this in Stripe Dashboard
-                amount: 49,
-                name: 'AGENCY',
-                features: [
-                    'Product Audit Summary',
-                    'Download Reports',
-                    'Fix Recommendations',
-                    'Expert Consultation',
-                    'Track Multiple Products',
-                    'Issue Breakdown'
-                ]
-            }
-        };
     }
 
-    // Create a new customer in Stripe
-    async createCustomer(user) {
-        try {
-            const customer = await this.stripe.customers.create({
-                email: user.email,
-                name: `${user.firstName} ${user.lastName}`,
-                metadata: {
-                    userId: user._id.toString()
-                }
-            });
-            
-            return customer;
-        } catch (error) {
-            logger.error(`Stripe createCustomer error: ${error.message}`);
-            throw new ApiError(500, 'Failed to create customer in Stripe');
+    /**
+     * Safe date conversion from Unix timestamp
+     */
+    safeDate(timestamp) {
+        if (!timestamp || typeof timestamp !== 'number' || isNaN(timestamp)) {
+            return null;
         }
+        
+        const date = new Date(timestamp * 1000);
+        const isValidDate = !isNaN(date.getTime());
+        
+        return isValidDate ? date : null;
     }
 
-    // Get or create customer
-    async getOrCreateCustomer(userId) {
+    /**
+     * Create or get existing Stripe customer
+     */
+    async createOrGetCustomer(userId, email, name) {
         try {
-            const user = await UserModel.findById(userId);
-            if (!user) {
-                throw new ApiError(404, 'User not found');
-            }
-
-            // Check if user already has a Stripe customer ID
-            if (user.stripeCustomerId) {
-                // Verify customer still exists in Stripe
+            // Check if user already has a subscription with Stripe customer ID
+            const existingSubscription = await Subscription.findOne({ userId });
+            
+            if (existingSubscription && existingSubscription.stripeCustomerId) {
+                // Verify customer exists in Stripe
                 try {
-                    const customer = await this.stripe.customers.retrieve(user.stripeCustomerId);
+                    const customer = await this.stripe.customers.retrieve(existingSubscription.stripeCustomerId);
                     return customer;
                 } catch (error) {
-                    // Customer doesn't exist in Stripe, create new one
-                    logger.warn(`Stripe customer ${user.stripeCustomerId} not found, creating new customer`);
+                    logger.warn(`Stripe customer not found: ${existingSubscription.stripeCustomerId}`);
                 }
             }
 
             // Create new customer
-            const customer = await this.createCustomer(user);
-            
-            // Save Stripe customer ID to user
-            user.stripeCustomerId = customer.id;
-            await user.save();
+            const customer = await this.stripe.customers.create({
+                email: email,
+                name: name,
+                metadata: {
+                    userId: userId.toString()
+                }
+            });
 
+            logger.info(`Created Stripe customer: ${customer.id} for user: ${userId}`);
             return customer;
+
         } catch (error) {
-            logger.error(`Stripe getOrCreateCustomer error: ${error.message}`);
-            throw error;
+            logger.error('Error creating/getting Stripe customer:', error);
+            throw new Error('Failed to create customer');
         }
     }
 
-    // Create checkout session for subscription
+    /**
+     * Create checkout session for subscription
+     */
     async createCheckoutSession(userId, planType, successUrl, cancelUrl) {
         try {
-            if (!this.products[planType]) {
-                throw new ApiError(400, 'Invalid plan type');
+            const user = await User.findById(userId);
+            if (!user) {
+                throw new Error('User not found');
             }
 
-            const plan = this.products[planType];
-            
-            // Free plan doesn't need Stripe checkout
-            if (planType === 'LITE') {
-                return { 
-                    url: successUrl,
-                    isFree: true 
-                };
+            // Get price ID based on plan type
+            let priceId;
+            switch (planType) {
+                case 'PRO':
+                    priceId = process.env.STRIPE_PRO_PRICE_ID;
+                    break;
+                case 'AGENCY':
+                    priceId = process.env.STRIPE_AGENCY_PRICE_ID;
+                    break;
+                default:
+                    throw new Error('Invalid plan type for Stripe checkout');
             }
 
-            const customer = await this.getOrCreateCustomer(userId);
+            if (!priceId) {
+                throw new Error(`Price ID not configured for plan: ${planType}`);
+            }
 
+            // Create or get customer
+            const customer = await this.createOrGetCustomer(
+                userId, 
+                user.email, 
+                `${user.firstName} ${user.lastName}`
+            );
+
+            // Create checkout session
             const session = await this.stripe.checkout.sessions.create({
                 customer: customer.id,
                 payment_method_types: ['card'],
                 line_items: [
                     {
-                        price: plan.priceId,
+                        price: priceId,
                         quantity: 1,
                     },
                 ],
@@ -131,197 +107,285 @@ class StripeService {
                 cancel_url: cancelUrl,
                 metadata: {
                     userId: userId.toString(),
-                    planType: planType
+                    planType: planType,
                 },
                 subscription_data: {
                     metadata: {
                         userId: userId.toString(),
-                        planType: planType
-                    }
+                        planType: planType,
+                    },
                 },
-                allow_promotion_codes: true,
-                billing_address_collection: 'auto'
             });
 
-            return session;
-        } catch (error) {
-            logger.error(`Stripe createCheckoutSession error: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Create portal session for managing subscription
-    async createPortalSession(userId, returnUrl) {
-        try {
-            const customer = await this.getOrCreateCustomer(userId);
-
-            const session = await this.stripe.billingPortal.sessions.create({
-                customer: customer.id,
-                return_url: returnUrl,
+            // Save session info to subscription
+            await this.updateOrCreateSubscription(userId, {
+                stripeCustomerId: customer.id,
+                stripeSessionId: session.id,
+                planType: planType,
+                stripePriceId: priceId,
+                status: 'incomplete',
+                paymentStatus: 'pending'
             });
 
-            return session;
-        } catch (error) {
-            logger.error(`Stripe createPortalSession error: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Get customer's active subscription
-    async getActiveSubscription(userId) {
-        try {
-            const user = await UserModel.findById(userId);
-            if (!user || !user.stripeCustomerId) {
-                return null;
-            }
-
-            const subscriptions = await this.stripe.subscriptions.list({
-                customer: user.stripeCustomerId,
-                status: 'active',
-                limit: 1
-            });
-
-            return subscriptions.data[0] || null;
-        } catch (error) {
-            logger.error(`Stripe getActiveSubscription error: ${error.message}`);
-            return null;
-        }
-    }
-
-    // Cancel subscription
-    async cancelSubscription(subscriptionId) {
-        try {
-            const subscription = await this.stripe.subscriptions.update(subscriptionId, {
-                cancel_at_period_end: true
-            });
-
-            return subscription;
-        } catch (error) {
-            logger.error(`Stripe cancelSubscription error: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Reactivate subscription (remove cancellation)
-    async reactivateSubscription(subscriptionId) {
-        try {
-            const subscription = await this.stripe.subscriptions.update(subscriptionId, {
-                cancel_at_period_end: false
-            });
-
-            return subscription;
-        } catch (error) {
-            logger.error(`Stripe reactivateSubscription error: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Update subscription (upgrade/downgrade)
-    async updateSubscription(subscriptionId, newPlanType) {
-        try {
-            if (!this.products[newPlanType] || newPlanType === 'LITE') {
-                throw new ApiError(400, 'Invalid plan type for update');
-            }
-
-            const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            logger.info(`Created checkout session: ${session.id} for user: ${userId}, plan: ${planType}`);
             
-            const updatedSubscription = await this.stripe.subscriptions.update(subscriptionId, {
-                items: [{
-                    id: subscription.items.data[0].id,
-                    price: this.products[newPlanType].priceId,
-                }],
-                proration_behavior: 'always_invoice',
-                metadata: {
-                    planType: newPlanType
-                }
-            });
-
-            return updatedSubscription;
-        } catch (error) {
-            logger.error(`Stripe updateSubscription error: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // Get invoice preview for subscription update
-    async getInvoicePreview(subscriptionId, newPlanType) {
-        try {
-            if (!this.products[newPlanType] || newPlanType === 'LITE') {
-                throw new ApiError(400, 'Invalid plan type');
-            }
-
-            const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-            
-            const items = [{
-                id: subscription.items.data[0].id,
-                price: this.products[newPlanType].priceId,
-            }];
-
-            const invoice = await this.stripe.invoices.retrieveUpcoming({
-                customer: subscription.customer,
-                subscription: subscriptionId,
-                subscription_items: items,
-                subscription_proration_behavior: 'always_invoice',
-            });
-
             return {
-                amountDue: invoice.amount_due / 100, // Convert from cents
-                currency: invoice.currency,
-                nextPaymentDate: new Date(invoice.period_end * 1000)
+                sessionId: session.id,
+                url: session.url
             };
+
         } catch (error) {
-            logger.error(`Stripe getInvoicePreview error: ${error.message}`);
+            logger.error('Error creating checkout session:', error);
             throw error;
         }
     }
 
-    // Get customer's payment methods
-    async getPaymentMethods(userId) {
+    /**
+     * Update or create subscription record
+     */
+    async updateOrCreateSubscription(userId, updateData) {
         try {
-            const user = await UserModel.findById(userId);
-            if (!user || !user.stripeCustomerId) {
-                return [];
-            }
+            logger.info(`Updating subscription for user: ${userId}`);
+            logger.debug(`Update data:`, JSON.stringify(updateData, null, 2));
+            
+            const subscription = await Subscription.findOneAndUpdate(
+                { userId },
+                updateData,
+                { 
+                    new: true, 
+                    upsert: true,
+                    runValidators: true 
+                }
+            );
 
-            const paymentMethods = await this.stripe.paymentMethods.list({
-                customer: user.stripeCustomerId,
-                type: 'card',
-            });
+            logger.info(`Successfully updated subscription for user: ${userId}, subscription ID: ${subscription._id}`);
+            return subscription;
 
-            return paymentMethods.data;
         } catch (error) {
-            logger.error(`Stripe getPaymentMethods error: ${error.message}`);
-            return [];
+            logger.error(`Error updating subscription for user ${userId}:`, error);
+            
+            // Log specific validation errors
+            if (error.name === 'ValidationError') {
+                logger.error('Validation errors:', error.errors);
+                for (const field in error.errors) {
+                    logger.error(`Field ${field}: ${error.errors[field].message}`);
+                }
+            }
+            
+            throw error;
         }
     }
 
-    // Get customer's invoices
-    async getInvoices(userId, limit = 10) {
+    /**
+     * Handle successful payment
+     */
+    async handleSuccessfulPayment(sessionId) {
         try {
-            const user = await UserModel.findById(userId);
-            if (!user || !user.stripeCustomerId) {
-                return [];
-            }
-
-            const invoices = await this.stripe.invoices.list({
-                customer: user.stripeCustomerId,
-                limit: limit,
+            logger.info(`Processing payment success for session: ${sessionId}`);
+            
+            // Retrieve the session from Stripe
+            const session = await this.stripe.checkout.sessions.retrieve(sessionId, {
+                expand: ['subscription', 'customer']
             });
 
-            return invoices.data.map(invoice => ({
-                id: invoice.id,
-                amount: invoice.amount_paid / 100,
-                currency: invoice.currency,
-                status: invoice.status,
-                date: new Date(invoice.created * 1000),
-                invoicePdf: invoice.invoice_pdf,
-                hostedUrl: invoice.hosted_invoice_url
-            }));
+            logger.info(`Retrieved session: ${session.id}, payment_status: ${session.payment_status}`);
+
+            if (!session.subscription) {
+                throw new Error('No subscription found in session');
+            }
+
+            const userId = session.metadata.userId;
+            const planType = session.metadata.planType;
+
+            if (!userId || !planType) {
+                throw new Error('Missing userId or planType in session metadata');
+            }
+
+            logger.info(`Processing for user: ${userId}, plan: ${planType}`);
+
+            // Get subscription details from Stripe
+            const stripeSubscription = session.subscription;
+            
+            // Validate subscription data
+            if (!stripeSubscription.items || !stripeSubscription.items.data || stripeSubscription.items.data.length === 0) {
+                throw new Error('No subscription items found');
+            }
+
+            const priceItem = stripeSubscription.items.data[0];
+            if (!priceItem.price) {
+                throw new Error('No price information found in subscription');
+            }
+
+            logger.info(`Subscription details: status=${stripeSubscription.status}, period_start=${stripeSubscription.current_period_start}, period_end=${stripeSubscription.current_period_end}`);
+            
+            // Update subscription in our database
+            const subscriptionData = {
+                stripeCustomerId: session.customer.id,
+                stripeSubscriptionId: stripeSubscription.id,
+                stripeSessionId: sessionId,
+                planType: planType,
+                stripePriceId: priceItem.price.id,
+                status: stripeSubscription.status,
+                paymentStatus: 'paid',
+                amount: priceItem.price.unit_amount,
+                currency: priceItem.price.currency,
+                currentPeriodStart: this.safeDate(stripeSubscription.current_period_start),
+                currentPeriodEnd: this.safeDate(stripeSubscription.current_period_end),
+                lastPaymentDate: new Date(),
+                nextBillingDate: this.safeDate(stripeSubscription.current_period_end),
+            };
+
+            // Validate subscription data before saving
+            for (const [key, value] of Object.entries(subscriptionData)) {
+                if (value instanceof Date && isNaN(value.getTime())) {
+                    logger.error(`Invalid date found in ${key}: ${value}`);
+                    throw new Error(`Invalid date in field ${key}: ${value}`);
+                }
+            }
+
+            logger.info(`Subscription data prepared for user: ${userId}`);
+
+            await this.updateOrCreateSubscription(userId, subscriptionData);
+
+            // Update user's package type and subscription status
+            await User.findByIdAndUpdate(userId, {
+                packageType: planType,
+                subscriptionStatus: stripeSubscription.status
+            });
+
+            // Add to payment history
+            await this.addPaymentHistory(userId, {
+                sessionId: sessionId,
+                amount: priceItem.price.unit_amount,
+                currency: priceItem.price.currency,
+                status: 'paid',
+                stripePaymentIntentId: session.payment_intent
+            });
+
+            logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}`);
+            
+            return { success: true, planType, userId };
+
         } catch (error) {
-            logger.error(`Stripe getInvoices error: ${error.message}`);
-            return [];
+            logger.error('Error handling successful payment:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Add payment to history
+     */
+    async addPaymentHistory(userId, paymentData) {
+        try {
+            await Subscription.findOneAndUpdate(
+                { userId },
+                { 
+                    $push: { 
+                        paymentHistory: paymentData 
+                    } 
+                }
+            );
+        } catch (error) {
+            logger.error('Error adding payment history:', error);
+        }
+    }
+
+    /**
+     * Cancel subscription
+     */
+    async cancelSubscription(userId, cancelAtPeriodEnd = true) {
+        try {
+            const subscription = await Subscription.findOne({ userId });
+            
+            if (!subscription || !subscription.stripeSubscriptionId) {
+                throw new Error('No active subscription found');
+            }
+
+            // Cancel in Stripe
+            const updatedSubscription = await this.stripe.subscriptions.update(
+                subscription.stripeSubscriptionId,
+                {
+                    cancel_at_period_end: cancelAtPeriodEnd
+                }
+            );
+
+            // Update our database
+            await Subscription.findOneAndUpdate(
+                { userId },
+                {
+                    cancelAtPeriodEnd: cancelAtPeriodEnd,
+                    status: cancelAtPeriodEnd ? 'active' : 'cancelled'
+                }
+            );
+
+            // Update user status if immediately cancelled
+            if (!cancelAtPeriodEnd) {
+                await User.findByIdAndUpdate(userId, {
+                    packageType: 'LITE',
+                    subscriptionStatus: 'cancelled'
+                });
+            }
+
+            logger.info(`Subscription ${cancelAtPeriodEnd ? 'scheduled for cancellation' : 'cancelled'} for user: ${userId}`);
+            
+            return { success: true, cancelAtPeriodEnd };
+
+        } catch (error) {
+            logger.error('Error cancelling subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get subscription details
+     */
+    async getSubscription(userId) {
+        try {
+            const subscription = await Subscription.findOne({ userId });
+            return subscription;
+        } catch (error) {
+            logger.error('Error getting subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Reactivate cancelled subscription
+     */
+    async reactivateSubscription(userId) {
+        try {
+            const subscription = await Subscription.findOne({ userId });
+            
+            if (!subscription || !subscription.stripeSubscriptionId) {
+                throw new Error('No subscription found');
+            }
+
+            // Reactivate in Stripe
+            const updatedSubscription = await this.stripe.subscriptions.update(
+                subscription.stripeSubscriptionId,
+                {
+                    cancel_at_period_end: false
+                }
+            );
+
+            // Update our database
+            await Subscription.findOneAndUpdate(
+                { userId },
+                {
+                    cancelAtPeriodEnd: false,
+                    status: updatedSubscription.status
+                }
+            );
+
+            logger.info(`Subscription reactivated for user: ${userId}`);
+            
+            return { success: true };
+
+        } catch (error) {
+            logger.error('Error reactivating subscription:', error);
+            throw error;
         }
     }
 }
 
-module.exports = new StripeService();
+module.exports = new StripeService(); 

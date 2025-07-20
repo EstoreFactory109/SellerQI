@@ -927,8 +927,64 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
     }
 });
 
+// Update user subscription plan to LITE
+const updateSubscriptionPlan = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { planType } = req.body;
 
+        // Validate plan type
+        if (!planType || !['LITE', 'PRO', 'AGENCY'].includes(planType)) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Invalid plan type')
+            );
+        }
 
-module.exports = { registerUser, verifyUser, loginUser, profileUser, logoutUser, updateProfilePic, updateDetails, switchAccount, verifyEmailForPasswordReset, verifyResetPasswordCode, resetPassword, TrackIP, getIPTracking, googleLoginUser, googleRegisterUser,
-    
+        // Find and update user
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json(
+                new ApiResponse(404, null, 'User not found')
+            );
+        }
+
+        // Update user subscription plan
+        user.subscriptionPlan = planType;
+        user.subscriptionStatus = 'active';
+        await user.save();
+
+        logger.info(`User ${userId} subscription plan updated to ${planType}`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                subscriptionPlan: user.subscriptionPlan,
+                subscriptionStatus: user.subscriptionStatus
+            }, `Subscription plan updated to ${planType}`)
+        );
+
+    } catch (error) {
+        logger.error('Error updating subscription plan:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, 'Failed to update subscription plan')
+        );
+    }
+});
+
+module.exports = {
+    registerUser,
+    verifyUser,
+    loginUser,
+    profileUser,
+    logoutUser,
+    updateProfilePic,
+    updateDetails,
+    switchAccount,
+    verifyEmailForPasswordReset,
+    verifyResetPasswordCode,
+    resetPassword,
+    TrackIP,
+    getIPTracking,
+    googleLoginUser,
+    googleRegisterUser,
+    updateSubscriptionPlan  // Add the new function
 };

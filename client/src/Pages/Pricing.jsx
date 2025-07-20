@@ -1,69 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { Check, X, Loader2, Star, Shield, Zap, BarChart3, Users, Crown, Plus, Minus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
-import stripeService from '../services/stripeService';
 import { useSelector } from 'react-redux';
+import axiosInstance from '../config/axios.config.js';
+import stripeService from '../services/stripeService.js';
 
 export default function PricingPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState({});
   const [openFaq, setOpenFaq] = useState(null);
-  const [loading, setLoading] = useState({
-    LITE: false,
-    PRO: false,
-    AGENCY: false
-  });
-  const [currentPlan, setCurrentPlan] = useState(null);
-  const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+  const [showCancelledMessage, setShowCancelledMessage] = useState(false);
   
   // Get user auth status from Redux and localStorage fallback
   const isAuthenticatedRedux = useSelector(state => state.auth?.isAuthenticated || false);
   const isAuthenticatedLocal = localStorage.getItem('isAuth') === 'true';
   const isAuthenticated = isAuthenticatedRedux || isAuthenticatedLocal;
   
+  // Get user data to access current plan
+  const user = useSelector((state) => state.Auth?.user);
+  const currentPlan = user?.packageType || 'LITE';
+  
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
-    // Fetch current subscription status if authenticated
-    if (isAuthenticated) {
-      fetchSubscriptionStatus();
+    // Check if user came here from cancelled payment
+    if (searchParams.get('cancelled') === 'true') {
+      setShowCancelledMessage(true);
+      // Hide message after 5 seconds
+      setTimeout(() => {
+        setShowCancelledMessage(false);
+      }, 5000);
     }
-    
-  }, [isAuthenticated, isAuthenticatedRedux, isAuthenticatedLocal]);
-
-  // Separate useEffect to handle intended plan after authentication is confirmed
-  useEffect(() => {
-    if (isAuthenticated && subscriptionStatus !== null) {
-      // Check if user came here for a specific subscription plan
-      const intendedPlan = localStorage.getItem('intendedPlan');
-      if (intendedPlan && ['PRO', 'AGENCY', 'LITE'].includes(intendedPlan)) {
-        // Auto-trigger subscription for the intended plan
-        setTimeout(() => {
-          handleSubscribe(intendedPlan);
-        }, 500); // Small delay to ensure page is loaded
-      }
-    }
-  }, [isAuthenticated, subscriptionStatus]);
-
-  const fetchSubscriptionStatus = async () => {
-    try {
-      const status = await stripeService.getSubscriptionStatus();
-      setSubscriptionStatus(status);
-      setCurrentPlan(status.plan);
-    } catch (error) {
-      console.error('Error fetching subscription status:', error);
-    }
-  };
+  }, [searchParams]);
 
   const handleSubscribe = async (planType) => {
     // Check if user is authenticated
     if (!isAuthenticated) {
       // Store the intended plan in localStorage
       localStorage.setItem('intendedPlan', planType);
-      // Redirect to signup page for subscription purchases
+      // Redirect to signup page
       navigate('/sign-up');
       return;
     }
@@ -71,60 +51,42 @@ export default function PricingPage() {
     // Set loading state
     setLoading(prev => ({ ...prev, [planType]: true }));
 
-        try {
-      // Create checkout session for all plans
-      const session = await stripeService.createCheckoutSession(planType);
-      
-      if (session && session.url) {
-        if (planType === 'LITE') {
-          // For LITE plan, redirect to success page
-          navigate('/subscription-success');
-        } else {
-          // For paid plans, redirect to Stripe Checkout
-          window.location.href = session.url;
-        }
-      } else {
-        alert('Failed to get checkout URL. Please try again.');
-      }
-        } catch (error) {
-      console.error('Error creating checkout session:', error);
-      
-      // Handle specific error cases
-      if (error.response) {
-        if (error.response.status === 401) {
-          alert('Session expired. Please log in again.');
-          localStorage.removeItem('isAuth');
-          navigate('/log-in');
-          return;
-        } else if (error.response.status === 403) {
-          alert('Permission denied. Please check your account status.');
-          return;
-        }
-      } else if (error.request) {
-        alert('Network error. Please check your connection and try again.');
-        return;
-      }
-      
-      alert(`Failed to start subscription process: ${error.response?.data?.message || error.message}`);
-    } finally {
-      setLoading(prev => ({ ...prev, [planType]: false }));
-    }
-  };
-
-  const handleManageSubscription = async () => {
-    if (!isAuthenticated) {
-      navigate('/log-in');
-      return;
-    }
-
     try {
-      const session = await stripeService.createPortalSession();
-      if (session.url) {
-        window.location.href = session.url;
+      if (planType === 'LITE') {
+        // Call API to update user subscription plan to LITE
+        const response = await axiosInstance.put('/app/update-subscription-plan', {
+          planType: 'LITE'
+        });
+
+        if (response.status === 200) {
+          // Clear any intended plan since user has now selected LITE
+          localStorage.removeItem('intendedPlan');
+          
+          // Redirect to dashboard for LITE plan users (with limited features)
+          setTimeout(() => {
+            navigate('/seller-central-checker/dashboard');
+          }, 1000);
+        }
+      } else if (['PRO', 'AGENCY'].includes(planType)) {
+        // Store current plan for post-payment redirect logic
+        if (isAuthenticated && currentPlan) {
+          localStorage.setItem('previousPlan', currentPlan);
+        }
+        
+        // For PRO/AGENCY plans, redirect to Stripe checkout
+        await stripeService.createCheckoutSession(planType);
+        // The user will be redirected to Stripe, so no need for further processing
+      } else {
+        throw new Error('Invalid plan type');
       }
+      
     } catch (error) {
-      console.error('Error creating portal session:', error);
-      alert('Failed to open subscription management. Please try again.');
+      console.error('Error handling subscription:', error);
+      alert(error.response?.data?.message || 'Failed to process subscription. Please try again.');
+    } finally {
+      setTimeout(() => {
+        setLoading(prev => ({ ...prev, [planType]: false }));
+      }, planType === 'LITE' ? 1000 : 500);
     }
   };
 
@@ -133,26 +95,20 @@ export default function PricingPage() {
       return <Loader2 className="w-5 h-5 animate-spin mx-auto" />;
     }
     
-    if (currentPlan === planType && subscriptionStatus?.hasSubscription) {
-      return 'Current Plan';
+    switch(planType) {
+      case 'LITE':
+        return 'Get Started Free';
+      case 'PRO':
+        return 'Upgrade to Pro';
+      case 'AGENCY':
+        return 'Upgrade to Agency';
+      default:
+        return 'Select Plan';
     }
-    
-    if (currentPlan && currentPlan !== planType && subscriptionStatus?.hasSubscription) {
-      const currentPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
-      const targetPlanPrices = { LITE: 0, AGENCY: 49, PRO: 99 };
-      
-      if (targetPlanPrices[planType] > currentPlanPrices[currentPlan]) {
-        return 'Upgrade';
-      } else if (targetPlanPrices[planType] < currentPlanPrices[currentPlan]) {
-        return 'Downgrade';
-      }
-    }
-    
-    return planType === 'LITE' ? 'Get Started Free' : 'Start 7-Days Free Trial';
   };
 
   const isButtonDisabled = (planType) => {
-    return (currentPlan === planType && subscriptionStatus?.hasSubscription) || loading[planType];
+    return loading[planType];
   };
   
   const faqs = [
@@ -172,7 +128,6 @@ export default function PricingPage() {
       q: 'How often is my product data updated?',
       a: 'Product data is updated in real-time for Pro plans. Free plan users get basic analysis with standard refresh rates.',
     },
-    
     {
       q: 'What is the Agency plan for?',
       a: 'The Agency plan is designed for agencies and consultants managing multiple client accounts. It includes everything in Pro plus agency-specific features like client management and white-label reporting.',
@@ -183,6 +138,37 @@ export default function PricingPage() {
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
       <Navbar />
+      
+      {/* Cancelled Payment Notification */}
+      <AnimatePresence>
+        {showCancelledMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -100 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -100 }}
+            className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mx-4 mt-4 rounded-r-lg shadow-sm"
+          >
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <X className="h-5 w-5 text-yellow-400" />
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-yellow-700">
+                  Payment was cancelled. No charges were made to your account. You can try again anytime!
+                </p>
+              </div>
+              <div className="ml-auto pl-3">
+                <button
+                  onClick={() => setShowCancelledMessage(false)}
+                  className="text-yellow-500 hover:text-yellow-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       <main className="flex-1 w-full">
         {/* Hero Section */}
@@ -201,35 +187,23 @@ export default function PricingPage() {
               {/* Announcement Bar */}
               <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium mb-8">
                 <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                7 Days Free Trial • Cancel anytime
+                Choose Your Perfect Plan • All Plans Available Now
               </div>
               
               <h1 className="text-5xl lg:text-6xl font-bold leading-tight text-gray-900 mb-6">
                 Choose the <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B4A6B] to-emerald-600">Perfect Plan</span> for Your Business
               </h1>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-12">
-                Start with our powerful 7 Days free plan. Upgrade when you're ready for unlimited insights, advanced features, and priority support.
+                Start with our free plan or choose a premium option for advanced features and analytics.
               </p>
 
               {/* Trust Indicators */}
               <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-500 mb-8">
                 <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> No setup fees</span>
-                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Cancel anytime</span>
-                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> 7 Days Free Trial</span>
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Always free plan</span>
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Full access</span>
                 <span className="flex items-center gap-2"><Shield className="w-4 h-4 text-[#3B4A6B]" /> SOC 2 Compliant</span>
               </div>
-              
-              {/* Show manage subscription button if user has active subscription */}
-              {subscriptionStatus?.hasSubscription && (
-                <motion.button
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  onClick={handleManageSubscription}
-                  className="mb-8 bg-[#3B4A6B] text-white px-6 py-3 rounded-lg hover:bg-[#2d3a52] transition-all duration-300 font-semibold shadow-lg"
-                >
-                  Manage Your Subscription
-                </motion.button>
-              )}
             </motion.div>
           </div>
         </section>
@@ -284,7 +258,7 @@ export default function PricingPage() {
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 ${
                     isButtonDisabled('LITE')
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                      : 'border-2 border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50'
+                      : 'border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50'
                   }`}
                 >
                   {getButtonText('LITE')}
@@ -338,7 +312,7 @@ export default function PricingPage() {
                   </li>
                 </ul>
                 
-                <button 
+                <button
                   onClick={() => handleSubscribe('PRO')}
                   disabled={isButtonDisabled('PRO')}
                   className={`w-full py-4 px-6 rounded-lg font-bold transition-all duration-300 text-lg ${
@@ -419,7 +393,7 @@ export default function PricingPage() {
               className="text-center mb-16"
             >
               <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
-                Why Choose SellerQI Pro?
+                Why Choose SellerQI?
               </h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
                 Join thousands of successful Amazon sellers who've transformed their business with our comprehensive platform.
@@ -607,11 +581,10 @@ export default function PricingPage() {
               
               <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
                 <button 
-                  onClick={() => handleSubscribe('PRO')}
-                  disabled={isButtonDisabled('PRO')}
+                  onClick={() => handleSubscribe('LITE')}
                   className="bg-white text-[#3B4A6B] px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all duration-300 shadow-lg"
                 >
-                  Start 7-Days Free Trial
+                  Start Free Today
                 </button>
                 <Link 
                   to="/contact-us"
@@ -620,11 +593,11 @@ export default function PricingPage() {
                   Contact Sales
                 </Link>
               </div>
-              
+
               <div className="flex justify-center gap-8 text-sm opacity-75">
-                <span>✓ 7 Days Free Trial</span>
-                <span>✓ Cancel anytime</span>
+                <span>✓ Always Free Plan</span>
                 <span>✓ No setup fees</span>
+                <span>✓ Full feature access</span>
               </div>
             </motion.div>
           </div>

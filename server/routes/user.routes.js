@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser }=require('../controllers/UserController.js')
+const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan }=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -22,6 +22,7 @@ router.post('/verify-reset-password-code',verifyResetPasswordCode);
 router.post('/reset-password', resetPassword);
 router.post('/track-ip', TrackIP);
 router.post('/get-ip-tracking', getIPTracking);
+router.put('/update-subscription-plan', auth, updateSubscriptionPlan); // New route
 
 
 router.post('/google-login', googleLoginUser);
