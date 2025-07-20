@@ -7,43 +7,53 @@ const GET_V2_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
     User:{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
-        require:true
+        required:false,
+        default: null
     },
     region:{
         type:String,
-        require:true
+        required:false,
+        default: ""
     },
     country:{
         type:String,
-        require:true
+        required:false,
+        default: ""
     },
     ahrScore:{
         type:Number,
-        required:true
+        required:false,
+        default: 0
     },
     accountStatuses:{
         type:String,
-        required:true
+        required:false,
+        default: ""
     },
     listingPolicyViolations:{
         type:String,
-        required:true
+        required:false,
+        default: ""
     },
     validTrackingRateStatus:{
        type:String,
-       required:true
+       required:false,
+       default: ""
    },
    orderWithDefectsStatus:{
     type:String,
-    required:true
+    required:false,
+    default: ""
    },
    lateShipmentRateStatus:{
     type:String,
-    required:true
+    required:false,
+    default: ""
    },
    CancellationRate:{
     type:String,
-    required:true
+    required:false,
+    default: ""
    }
   },
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed

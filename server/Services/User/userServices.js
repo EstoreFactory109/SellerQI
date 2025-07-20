@@ -17,14 +17,14 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
     }
 
     try {
-        const hashedPassword = await hashPassword(password);
+       // const hashedPassword = await hashPassword(password);
         const user = new UserModel({
             firstName: firstname,
             lastName: lastname,
             phone: phone,
             whatsapp: whatsapp,
             email: email,
-            password: hashedPassword,
+            password: password,
             OTP: otp,
             allTermsAndConditionsAgreed: allTermsAndConditionsAgreed
         });

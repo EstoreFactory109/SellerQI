@@ -28,7 +28,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
             },
             count:{
                 type:String,
-                require:true
+                default:""
             }
     },
     lateShipmentCount:{
@@ -43,7 +43,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
             },
             count:{
                 type:String,
-                require:true
+                default:""
             }
 
     },
@@ -59,7 +59,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
             },
             count:{
                 type:String,
-                require:true
+                default:""
             }
         
     },
@@ -75,7 +75,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
             },
             count:{
                 type:String,
-                require:true
+                default:""
             }
        
     },
@@ -91,13 +91,13 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
             },
             count:{
                 type:String,
-                require:true
+                default:""
             }
 
     },
    responseUnder24HoursCount:{
     type:String,
-    required:true
+    default:""
    },
 
   },

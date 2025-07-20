@@ -1,4 +1,9 @@
 const calculateAccountHealthPercentage=(data)=>{
+    // Return empty result if data is empty
+    if (!data || Object.keys(data).length === 0) {
+        return {};
+    }
+
     let status="";
     let percentage=0;
 
@@ -27,6 +32,34 @@ const calculateAccountHealthPercentage=(data)=>{
 
 
 const checkAccountHealth=(v2Data,v1Data)=>{
+
+    console.log("v2Data: ",v2Data)
+  
+    // Return empty result if both v2Data and v1Data are empty
+    const v2DataHasEmptyFields = v2Data && (
+        v2Data==null ||
+        v2Data.accountStatuses?.length === 0 ||
+        v2Data.listingPolicyViolations?.length === 0 ||
+        v2Data.validTrackingRateStatus?.length === 0 ||
+        v2Data.orderWithDefectsStatus?.length === 0 ||
+        v2Data.lateShipmentRateStatus?.length === 0 ||
+        v2Data.CancellationRate?.length === 0
+    );
+    
+    const v1DataHasEmptyCounts = v1Data && (
+        v1Data.negativeFeedbacks?.count.length === 0 ||
+        v1Data.lateShipmentCount?.count.length === 0 ||
+        v1Data.preFulfillmentCancellationCount?.count.length === 0 ||
+        v1Data.refundsCount?.count.length === 0 ||
+        v1Data.a_z_claims?.count.length === 0 ||
+        v1Data.responseUnder24HoursCount.length === 0
+    );
+
+ 
+    
+    if ((!v2Data || Object.keys(v2Data).length === 0 || v2DataHasEmptyFields) && (!v1Data || Object.keys(v1Data).length === 0 || v1DataHasEmptyCounts)) {
+        return {};
+    }
 
     //All V2 checks
 
@@ -139,11 +172,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
             HowTOSolve:"Review the negative feedback in Seller Central and identify common issues. If the feedback is related to fulfillment by Amazon (FBA), you may request Amazon to remove it. For valid complaints, reach out to the customer to resolve their concerns professionally. Improving response time, order accuracy, and customer service can help prevent future negative feedback."
         }
     }else{
-        result.negativeFeedbacks={
-            status:"Success",
-            Message:"Great job! You have no negative seller feedback, which strengthens your credibility and improves customer trust in your store.",
-            HowTOSolve:""
-        }
+        result.negativeFeedbacks={}
     }
 
 
@@ -156,11 +185,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
             HowTOSolve:"Analyze the root causes of negative customer experiences through Seller Central. Identify common complaints related to product quality, description accuracy, late shipments, or customer service issues. Address these concerns by improving product listings, ensuring accurate descriptions, enhancing quality control, and optimizing fulfillment processes. Take proactive measures such as responding to negative feedback and improving post-purchase support."
         }
     }else{
-        result.NCX={
-            status:"Success",
-            Message:"Excellent! Your NCX score is at 0, which means customers are having a positive experience with your products, helping to maintain strong account health and sales performance.",
-            HowTOSolve:""
-        }
+        result.NCX={}
     }
 
     if(Number(v1Data?.a_z_claims?.count || 0)!=0){
@@ -171,11 +196,7 @@ const checkAccountHealth=(v2Data,v1Data)=>{
             HowTOSolve:"Review the claim details in Seller Central > Performance > A-to-Z Guarantee Claims. If the claim is valid, work with the customer to resolve the issue promptly by issuing a refund or replacement. If you believe the claim is unjustified, submit an appeal with supporting evidence, such as tracking details, delivery confirmation, or proof of product quality. Prevent future claims by improving order accuracy, shipping reliability, and customer communication."
         }
     }else{
-        result.a_z_claims={
-            status:"Success",
-            Message:"Excellent! You have no open A-to-Z Guarantee Claims, which helps maintain a strong Order Defect Rate and ensures a positive experience for your customers.",
-            HowTOSolve:""
-        }
+        result.a_z_claims={}
     }
     
     if(Number(v1Data?.responseUnder24HoursCount || 0)!=0){
@@ -186,14 +207,12 @@ const checkAccountHealth=(v2Data,v1Data)=>{
             HowTOSolve:"Ensure that all customer inquiries are responded to within 24 hours, including weekends and holidays. Use Amazon’s Buyer-Seller Messaging Service to track and manage messages efficiently. Set up automated responses acknowledging inquiries and follow up with a detailed reply as soon as possible. If needed, consider using a virtual assistant or customer support software to handle messages faster."
         }
     }else{
-        result.responseUnder24HoursCount={
-            status:"Success",
-            Message:"Great job! You are responding to customer messages within 24 hours, maintaining high customer satisfaction and a strong seller performance record.",
-            HowTOSolve:""
-        }
+        result.responseUnder24HoursCount={}
     }
 
     result.TotalErrors=errorCounter;
+
+ 
     return result;
 }
 

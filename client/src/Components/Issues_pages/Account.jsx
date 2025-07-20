@@ -9,12 +9,20 @@ import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
 export default function AccountHealthDashboard() {
     const info = useSelector(state => state.Dashboard.DashBoardInfo)
+    console.log("info",info)
     const [showExportDropdown, setShowExportDropdown] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedFilter, setSelectedFilter] = useState('all')
     const exportRef = useRef(null)
 
-    const AccountErrors = info.AccountErrors;
+    const AccountErrors = info?.AccountErrors;
+
+    console.log("AccountErrors",AccountErrors)
+
+    // Check if we have any data
+    const hasData = info && AccountErrors && Object.keys(AccountErrors).length > 0;
+    const hasSalesData = info?.TotalSales && info.TotalSales.length > 0;
+    const hasHealthData = info?.accountHealthPercentage?.Percentage !== undefined;
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -34,70 +42,70 @@ export default function AccountHealthDashboard() {
         {
             key: 'accountStatus',
             name: 'Account Status',
-            data: AccountErrors.accountStatus,
+            data: AccountErrors?.accountStatus,
             icon: Shield,
             priority: 'high'
         },
         {
             key: 'negativeFeedbacks',
             name: 'Negative Seller Feedback',
-            data: AccountErrors.negativeFeedbacks,
+            data: AccountErrors?.negativeFeedbacks,
             icon: AlertTriangle,
             priority: 'medium'
         },
         {
             key: 'NCX',
             name: 'NCX - Negative Customer Experience',
-            data: AccountErrors.NCX,
+            data: AccountErrors?.NCX,
             icon: XCircle,
             priority: 'high'
         },
         {
             key: 'PolicyViolations',
             name: 'Policy Violations',
-            data: AccountErrors.PolicyViolations,
+            data: AccountErrors?.PolicyViolations,
             icon: AlertTriangle,
             priority: 'high'
         },
         {
             key: 'validTrackingRateStatus',
             name: 'Valid Tracking Rate',
-            data: AccountErrors.validTrackingRateStatus,
+            data: AccountErrors?.validTrackingRateStatus,
             icon: Activity,
             priority: 'medium'
         },
         {
             key: 'orderWithDefectsStatus',
             name: 'Order Defect Rate',
-            data: AccountErrors.orderWithDefectsStatus,
+            data: AccountErrors?.orderWithDefectsStatus,
             icon: XCircle,
             priority: 'medium'
         },
         {
             key: 'lateShipmentRateStatus',
             name: 'Late Shipment Rate',
-            data: AccountErrors.lateShipmentRateStatus,
+            data: AccountErrors?.lateShipmentRateStatus,
             icon: Activity,
             priority: 'medium'
         },
         {
             key: 'a_z_claims',
             name: 'A-Z Guarantee Claim',
-            data: AccountErrors.a_z_claims,
+            data: AccountErrors?.a_z_claims,
             icon: Shield,
             priority: 'high'
         },
         {
             key: 'CancellationRate',
             name: 'Cancellation Rate (CR)',
-            data: AccountErrors.CancellationRate,
+            data: AccountErrors?.CancellationRate,
             icon: XCircle,
             priority: 'medium'
         },
         {
             key: 'responseUnder24HoursCount',
             name: 'Customer Response Time (More than 24 Hours)',
-            data: AccountErrors.responseUnder24HoursCount,
+            data: AccountErrors?.responseUnder24HoursCount,
             icon: Activity,
             priority: 'low'
         }
@@ -108,7 +116,7 @@ export default function AccountHealthDashboard() {
     // Calculate health overview
     const totalIssues = accountMetrics.filter(metric => metric.data?.status === "Error").length;
     const totalMetrics = accountMetrics.length;
-    const healthPercentage = info.accountHealthPercentage.Percentage;
+    const healthPercentage = info?.accountHealthPercentage?.Percentage || 0;
 
     // Filter metrics based on search and filter
     const filteredMetrics = accountMetrics.filter(metric => {
@@ -135,7 +143,7 @@ export default function AccountHealthDashboard() {
         }));
     };
 
-    const totalSales = info.TotalSales.slice(-10);
+    const totalSales = info?.TotalSales?.slice(-10) || [];
 
     const chartData = {
         series: [
@@ -219,6 +227,37 @@ export default function AccountHealthDashboard() {
             }
         }
     };
+
+    // If no data is available, show the no data found message
+    if (!hasData || !hasSalesData || !hasHealthData) {
+        return (
+            <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 flex items-center justify-center">
+                <div className="text-center max-w-md mx-auto">
+                    <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <Shield className="w-12 h-12 text-gray-400" />
+                    </div>
+                    <h3 className="text-2xl font-semibold text-gray-900 mb-2">No Data Found</h3>
+                    <p className="text-gray-500 mb-6">
+                        Account health data is not available at the moment. Please check back later or contact support if this issue persists.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                        <button 
+                            onClick={() => window.location.reload()}
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow font-medium"
+                        >
+                            Refresh Page
+                        </button>
+                        <button 
+                            onClick={() => window.history.back()}
+                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all duration-200 font-medium"
+                        >
+                            Go Back
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 space-y-8">

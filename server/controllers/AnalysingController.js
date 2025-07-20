@@ -152,8 +152,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const ThirtyDaysAgo = new Date(createdDate);
     ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
 
-    console.log("SellerAccount: ", SellerAccount);
-
     const [
         v2Data,
         v1Data,
@@ -217,16 +215,11 @@ const Analyse = async (userId, country, region, adminId = null) => {
         AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 })
     ]);
 
-    console.log("GetDateWisePPCspendData: ", GetDateWisePPCspendData);
-
-    // console.log("userId: ", userId);
-    // console.log("inventoryPlanningData: ", inventoryPlanningData);
-    // console.log("inventoryStrandedData: ", inventoryStrandedData);
-    // console.log("inboundNonComplianceData: ", inboundNonComplianceData);
+    console.log("v2Data: ",v2Data)
  
     // Create default values for missing data instead of returning error
-    const safeV2Data = v2Data || { Performance: [], AccountHealth: [] };
-    const safeV1Data = v1Data || { V1Reports: [] };
+    const safeV2Data = v2Data ;
+    const safeV1Data = v1Data ;
     const safeFinanceData = financeData || { 
         createdAt: createdDate,
         Gross_Profit: 0,
@@ -394,9 +387,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         sponsoredAdsGraphData = asinDataMap;
     }
 
-    // console.log("negetiveKeywords: ", safeNegetiveKeywords.negativeKeywordsData);
-    // console.log("FBAFeesData: ", FBAFeesData);
 
+  
     const result = {
         createdAccountDate: createdAccountDate,
         Brand: sellerCentral.brand,
@@ -406,7 +398,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         Country: country,
         TotalProducts: SellerAccount.products,
         AccountData: {
-            getAccountHealthPercentge: calculateAccountHealthPercentage(safeV2Data),
+            getAccountHealthPercentge: safeV2Data===null ?{status:"Data Not Found",Percentage:0} : calculateAccountHealthPercentage(safeV2Data),
             accountHealth: checkAccountHealth(safeV2Data, safeV1Data)
         },
         FinanceData: safeFinanceData,
@@ -513,7 +505,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
                     const planningResult = processInventoryPlanningData(item);
                     inventoryAnalysis.inventoryPlanning.push(planningResult);
                 } catch (error) {
-                    // console.error(`Error processing inventory planning data for ASIN ${item.asin}:`, error);
                     logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);
                 }
             }
@@ -530,7 +521,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
                             const strandedResult = processInventoryStrandedData(item);
                             inventoryAnalysis.strandedInventory.push(strandedResult);
                         } catch (error) {
-                            // console.error(`Error processing stranded inventory data for ASIN ${item.asin}:`, error);
                             logger.error(`Error processing stranded inventory data for ASIN ${item.asin}: ${error.message}`);
                         }
                     }
@@ -547,7 +537,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
                     const complianceResult = processInboundNonComplianceData(item);
                     inventoryAnalysis.inboundNonCompliance.push(complianceResult);
                 } catch (error) {
-                    // console.error(`Error processing inbound non-compliance data for ASIN ${item.asin}:`, error);
                     logger.error(`Error processing inbound non-compliance data for ASIN ${item.asin}: ${error.message}`);
                 }
             }
@@ -560,7 +549,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
             const replenishmentResults = replenishmentQty(safeRestockData.Products);
             inventoryAnalysis.replenishment = replenishmentResults || [];
         } catch (error) {
-            // console.error(`Error processing replenishment data:`, error);
             logger.error(`Error processing replenishment data: ${error.message}`);
             inventoryAnalysis.replenishment = [];
         }
@@ -640,7 +628,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (safeShipmentData && safeShipmentData.shipmentData && SellerAccount && SellerAccount.products) {
         reimburstmentData = calculateTotalReimbursement(safeShipmentData.shipmentData, SellerAccount.products);
     } else {
-        // console.log('No shipment data available or products data missing for reimbursement calculation - using defaults');
         reimburstmentData = {
             productWiseReimburstment: [],
             totalReimbursement: 0
