@@ -17,6 +17,7 @@ import IssuesByProducts from './Pages/IssuesPerProduct.jsx';
 import IssuesByProduct from './Pages/IssuesByProduct.jsx';
 import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
+import PackageRouteWrapper from './Layout/PackageRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
 import ProfitibilityDashboard from './Pages/ProfitibilityDashboard.jsx';
@@ -93,7 +94,11 @@ const App = () => {
         >
           <Route path='/profile-selection' element={<ProfileIDSelection />} />
 
-          <Route path='/seller-central-checker' element={<MainLayout />}>
+          <Route path='/seller-central-checker' element={
+            <PackageRouteWrapper>
+              <MainLayout />
+            </PackageRouteWrapper>
+          }>
 
             <Route path='dashboard' element={<DashBoard />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />

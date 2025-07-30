@@ -302,12 +302,21 @@ class StripeService {
             }
 
             // Cancel in Stripe
-            const updatedSubscription = await this.stripe.subscriptions.update(
-                subscription.stripeSubscriptionId,
-                {
-                    cancel_at_period_end: cancelAtPeriodEnd
-                }
-            );
+            let updatedSubscription;
+            if (cancelAtPeriodEnd) {
+                // Schedule cancellation at period end
+                updatedSubscription = await this.stripe.subscriptions.update(
+                    subscription.stripeSubscriptionId,
+                    {
+                        cancel_at_period_end: true
+                    }
+                );
+            } else {
+                // Cancel immediately
+                updatedSubscription = await this.stripe.subscriptions.cancel(
+                    subscription.stripeSubscriptionId
+                );
+            }
 
             // Update our database
             await Subscription.findOneAndUpdate(

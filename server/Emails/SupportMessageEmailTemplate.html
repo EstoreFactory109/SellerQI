@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support Message from {{clientName}}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            line-height: 1.6;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="white" opacity="0.1"/><circle cx="75" cy="75" r="1" fill="white" opacity="0.1"/><circle cx="50" cy="10" r="0.5" fill="white" opacity="0.1"/><circle cx="10" cy="60" r="0.5" fill="white" opacity="0.1"/><circle cx="90" cy="30" r="0.5" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .header .subtitle {
+            margin: 10px 0 0 0;
+            font-size: 16px;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .content {
+            padding: 40px 30px;
+        }
+        
+        .message-info {
+            background-color: #f8fafc;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .info-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .info-label {
+            font-weight: 600;
+            color: #4a5568;
+            min-width: 80px;
+            margin-right: 15px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .info-value {
+            color: #2d3748;
+            flex: 1;
+            font-size: 15px;
+        }
+        
+        .client-email {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .client-email:hover {
+            text-decoration: underline;
+        }
+        
+        .topic-badge {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-block;
+        }
+        
+        .message-section {
+            margin-top: 30px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .section-title::before {
+            content: '💬';
+            margin-right: 10px;
+            font-size: 20px;
+        }
+        
+        .message-content {
+            background-color: #ffffff;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 25px;
+            font-size: 15px;
+            line-height: 1.7;
+            color: #4a5568;
+            white-space: pre-wrap;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .footer {
+            background-color: #2d3748;
+            color: #a0aec0;
+            padding: 25px 30px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .footer .company-name {
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        
+        .priority-high {
+            border-left-color: #e53e3e;
+        }
+        
+        .priority-medium {
+            border-left-color: #dd6b20;
+        }
+        
+        .priority-low {
+            border-left-color: #38a169;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 20px;
+            text-align: right;
+            font-style: italic;
+        }
+        
+        @media (max-width: 600px) {
+            .email-container {
+                margin: 10px;
+                border-radius: 8px;
+            }
+            
+            .content {
+                padding: 25px 20px;
+            }
+            
+            .header {
+                padding: 25px 20px;
+            }
+            
+            .info-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .info-label {
+                margin-bottom: 5px;
+                margin-right: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>🎧 Support Request</h1>
+            <p class="subtitle">New message from your client</p>
+        </div>
+        
+        <div class="content">
+            <div class="message-info">
+                <div class="info-row">
+                    <span class="info-label">👤 Name:</span>
+                    <span class="info-value">{{clientName}}</span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">📧 Email:</span>
+                    <span class="info-value">
+                        <a href="mailto:{{clientEmail}}" class="client-email">{{clientEmail}}</a>
+                    </span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">🏷️ Topic:</span>
+                    <span class="info-value">
+                        <span class="topic-badge">{{topic}}</span>
+                    </span>
+                </div>
+                
+                
+            </div>
+            
+            <div class="message-section">
+                <div class="section-title">Client Message</div>
+                <div class="message-content">{{message}}</div>
+            </div>
+            
+            <div class="timestamp">
+                📅 Received on {{timestamp}}
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="company-name">SellerQi Support Team</div>
+            <p>This message was sent through your website's contact form.</p>
+            <p>Please respond to the client directly at their email address.</p>
+        </div>
+    </div>
+</body>
+</html>

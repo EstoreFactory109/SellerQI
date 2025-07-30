@@ -205,13 +205,14 @@ const GoogleInfoPage = () => {
             // User hasn't selected any plan, redirect to pricing
             console.log('Google: Redirecting to pricing: No plan selected');
             window.location.href = "/pricing";
-          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus)) {
-            // User has a plan but subscription is explicitly inactive, redirect to pricing
-            console.log('Google: Redirecting to pricing: Inactive subscription');
+          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus) && user.packageType !== 'LITE') {
+            // User has a paid plan but subscription is explicitly inactive, redirect to pricing
+            // LITE users can access dashboard even with cancelled status since it's free
+            console.log('Google: Redirecting to pricing: Inactive paid subscription');
             window.location.href = "/pricing";
           } else {
-            // User has a plan and subscription is active (or undefined/null), redirect to dashboard
-            console.log('Google: Redirecting to dashboard: Valid plan and active subscription');
+            // User has a plan and subscription is active (or LITE with any status), redirect to dashboard
+            console.log('Google: Redirecting to dashboard: Valid plan access');
             window.location.href = "/seller-central-checker/dashboard";
           }
         }, 1000);

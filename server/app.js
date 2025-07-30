@@ -17,14 +17,14 @@ const cacheRoute=require('./routes/cache.routes.js')
 const backgroundJobsRoute=require('./routes/backgroundJobs.routes.js')
 const profileRoute=require('./routes/profile.routes.js')
 const stripeRoute=require('./routes/stripe.routes.js')
-
+const supportTicketRoute=require('./routes/supportTicket.routes.js')
 const dbConnect=require('./config/dbConn.js')
 const logger=require('./utils/Logger.js')
 const {connectRedis} = require('./config/redisConn.js')
 const { jobScheduler } = require('./Services/BackgroundJobs/JobScheduler.js')
 
 
-app.use(cors({origin:process.env.CORS_ORIGIN,credentials:true}))
+app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
 app.use(cookieParser());
 
 // Stripe webhook route MUST come before express.json() middleware
@@ -46,7 +46,7 @@ app.use('/app/cache',cacheRoute)
 app.use('/app/jobs',backgroundJobsRoute)
 app.use('/app/profile',profileRoute)
 app.use('/app/stripe',stripeRoute)
-
+app.use('/app/support',supportTicketRoute)
 
 app.get('/',(req,res)=>{
     res.send("Hello world");

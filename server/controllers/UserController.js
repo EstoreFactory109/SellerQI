@@ -172,10 +172,10 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
-   const checkPassword = await verifyPassword(password, checkUserIfExists.password);
+ //  const checkPassword = await verifyPassword(password, checkUserIfExists.password);
     //console.log(checkPassword);
 
-  //  const checkPassword = checkUserIfExists.password === password;
+    const checkPassword = checkUserIfExists.password === password;
 
     if (!checkPassword) {
         logger.error(new ApiError(401, "Password not matched"))

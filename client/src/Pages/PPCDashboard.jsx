@@ -321,12 +321,53 @@ const PPCDashboard = () => {
           const dateStr = startDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD format
           const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           
-          // Only use real PPC sales data - no estimates
-          const totalSales = parseFloat(item.TotalAmount) || 0;
-          const estimatedPPCSales = 0; // No assumptions - return 0 when no real PPC data
-          
           // Get actual spend for this date using the formatted date (Jun 18 format)
           const actualSpend = spendByDate.get(formattedDate) || 0;
+          
+          // Calculate daily PPC sales and spend by summing ALL products' data for this date
+          let dailyPPCSales = 0;
+          let dailyPPCSpend = 0;
+          
+          if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
+            // Iterate through all ASINs and their data arrays to find matching dates
+            const matchingRecords = [];
+            
+            Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
+              if (asinData.data && Array.isArray(asinData.data)) {
+                const dateMatches = asinData.data.filter(dateRecord => {
+                  const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  return recordDate === formattedDate;
+                });
+                matchingRecords.push(...dateMatches);
+              }
+            });
+            
+            // Sum all salesIn7Days and spend values for this date
+            dailyPPCSales = matchingRecords.reduce((sum, record) => {
+              return sum + (parseFloat(record.salesIn7Days) || 0);
+            }, 0);
+            
+            dailyPPCSpend = matchingRecords.reduce((sum, record) => {
+              return sum + (parseFloat(record.spend) || 0);
+            }, 0);
+            
+            console.log(`📊 CHART SALES DATA - ${formattedDate}:`, {
+              source: 'productWiseSponsoredAdsGraphData (object aggregated)',
+              recordsFound: matchingRecords.length,
+              dailyPPCSales: dailyPPCSales,
+              dailyPPCSpend: dailyPPCSpend,
+              individualRecords: matchingRecords.map(r => ({
+                salesIn7Days: r.salesIn7Days,
+                spend: r.spend
+              }))
+            });
+          } else {
+            console.log(`📊 CHART SALES DATA - ${formattedDate}:`, {
+              source: 'no data available',
+              dailyPPCSales: 0,
+              dailyPPCSpend: 0
+            });
+          }
           
           // Debug: Log date matching for first few items
           if ((info?.startDate && info?.endDate) && index < 5) {
@@ -334,8 +375,8 @@ const PPCDashboard = () => {
             console.log('TotalSales interval:', item.interval);
             console.log('Extracted dateStr (YYYY-MM-DD):', dateStr);
             console.log('formattedDate (Jun 18):', formattedDate);
-            console.log('totalSales:', totalSales);
-            console.log('estimatedPPCSales:', estimatedPPCSales);
+            console.log('totalSales:', parseFloat(item.TotalAmount) || 0);
+            console.log('dailyPPCSales:', dailyPPCSales);
             console.log('actualSpend from map:', actualSpend);
             console.log('spendByDate has this formattedDate?', spendByDate.has(formattedDate));
             console.log('All available dates in spendByDate:', Array.from(spendByDate.keys()));
@@ -343,8 +384,8 @@ const PPCDashboard = () => {
           
           return {
             date: formattedDate,
-            ppcSales: estimatedPPCSales,
-            spend: actualSpend, // Use actual daily spend from dateWiseTotalCosts
+            ppcSales: dailyPPCSales,
+            spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
           };
         });
       }
@@ -355,8 +396,50 @@ const PPCDashboard = () => {
         const date = new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // Only use real PPC sales data - no estimates based on spend
-        const estimatedPPCSales = 0;
+        // Calculate daily PPC sales and spend by summing ALL products' data for this date
+        let dailyPPCSales = 0;
+        let dailyPPCSpend = 0;
+        
+        if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
+          // Iterate through all ASINs and their data arrays to find matching dates
+          const matchingRecords = [];
+          
+          Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
+            if (asinData.data && Array.isArray(asinData.data)) {
+              const dateMatches = asinData.data.filter(dateRecord => {
+                const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return recordDate === formattedDate;
+              });
+              matchingRecords.push(...dateMatches);
+            }
+          });
+          
+          // Sum all salesIn7Days and spend values for this date
+          dailyPPCSales = matchingRecords.reduce((sum, record) => {
+            return sum + (parseFloat(record.salesIn7Days) || 0);
+          }, 0);
+          
+          dailyPPCSpend = matchingRecords.reduce((sum, record) => {
+            return sum + (parseFloat(record.spend) || 0);
+          }, 0);
+          
+          console.log(`📊 FALLBACK CHART SALES DATA - ${formattedDate}:`, {
+            source: 'productWiseSponsoredAdsGraphData (object aggregated)',
+            recordsFound: matchingRecords.length,
+            dailyPPCSales: dailyPPCSales,
+            dailyPPCSpend: dailyPPCSpend,
+            individualRecords: matchingRecords.map(r => ({
+              salesIn7Days: r.salesIn7Days,
+              spend: r.spend
+            }))
+          });
+        } else {
+          console.log(`📊 FALLBACK CHART SALES DATA - ${formattedDate}:`, {
+            source: 'no data available',
+            dailyPPCSales: 0,
+            dailyPPCSpend: 0
+          });
+        }
         
         // Debug: Log fallback data for first few items
         if ((info?.startDate && info?.endDate) && index < 3) {
@@ -364,13 +447,13 @@ const PPCDashboard = () => {
           console.log('item.date:', item.date);
           console.log('formattedDate:', formattedDate);
           console.log('item.totalCost:', item.totalCost);
-          console.log('estimatedPPCSales:', estimatedPPCSales);
+          console.log('dailyPPCSales:', dailyPPCSales);
         }
         
         return {
           date: formattedDate,
-          ppcSales: estimatedPPCSales,
-          spend: item.totalCost,
+          ppcSales: dailyPPCSales,
+          spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
         };
       });
       
@@ -389,8 +472,7 @@ const PPCDashboard = () => {
       console.log("🟡 CHART DATA: Using TotalSales with zero spend (Priority 2)");
       // console.log('Using TotalSales data with estimated spend distribution');
       
-      // Don't distribute spend - show zero when no real daily PPC data
-      const dailySpend = 0; // Show zero instead of estimated/distributed spend
+      // Note: We now aggregate spend from productWiseSponsoredAdsGraphData instead of hardcoding zero
       
       // Transform date-filtered sales data for the chart
       return totalSalesData.map(item => {
@@ -398,27 +480,99 @@ const PPCDashboard = () => {
         const startDate = new Date(item.interval.split('--')[0]);
         const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // Only use real PPC data - no estimates
-        const totalSales = parseFloat(item.TotalAmount) || 0;
-        const estimatedPPCSales = 0; // No assumptions - return 0 when no real PPC data
+        // Calculate daily PPC sales and spend by summing ALL products' data for this date
+        let dailyPPCSales = 0;
+        let dailyPPCSpend = 0;
+        
+        if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
+          // Iterate through all ASINs and their data arrays to find matching dates
+          const matchingRecords = [];
+          
+          Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
+            if (asinData.data && Array.isArray(asinData.data)) {
+              const dateMatches = asinData.data.filter(dateRecord => {
+                const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return recordDate === formattedDate;
+              });
+              matchingRecords.push(...dateMatches);
+            }
+          });
+          
+          // Sum all salesIn7Days and spend values for this date
+          dailyPPCSales = matchingRecords.reduce((sum, record) => {
+            return sum + (parseFloat(record.salesIn7Days) || 0);
+          }, 0);
+          
+          dailyPPCSpend = matchingRecords.reduce((sum, record) => {
+            return sum + (parseFloat(record.spend) || 0);
+          }, 0);
+          
+          console.log(`📊 PRIORITY 2 CHART SALES DATA - ${formattedDate}:`, {
+            source: 'productWiseSponsoredAdsGraphData (object aggregated)',
+            recordsFound: matchingRecords.length,
+            dailyPPCSales: dailyPPCSales,
+            dailyPPCSpend: dailyPPCSpend,
+            individualRecords: matchingRecords.map(r => ({
+              salesIn7Days: r.salesIn7Days,
+              spend: r.spend
+            }))
+          });
+        } else {
+          console.log(`📊 PRIORITY 2 CHART SALES DATA - ${formattedDate}:`, {
+            source: 'no data available',
+            dailyPPCSales: 0,
+            dailyPPCSpend: 0
+          });
+        }
         
         return {
           date: formattedDate,
-          ppcSales: estimatedPPCSales,
-          spend: dailySpend, // Show zero when no real daily PPC data
+          ppcSales: dailyPPCSales,
+          spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
         };
       });
     }
     
-    // Third priority: Fallback to original productWiseSponsoredAdsGraphData
-    if (productWiseSponsoredAdsGraphData.length > 0) {
-      console.log("🔵 CHART DATA: Using productWiseSponsoredAdsGraphData (Priority 3)");
-      // console.log('Using productWiseSponsoredAdsGraphData fallback');
-      return productWiseSponsoredAdsGraphData.map(item => ({
-        date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        ppcSales: item.totalSalesIn30Days || 0,
-        spend: item.totalSpend || 0,
-      }));
+    // Third priority: Fallback to aggregating productWiseSponsoredAdsGraphData by date
+    if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
+      console.log("🔵 CHART DATA: Using productWiseSponsoredAdsGraphData (Priority 3 - Direct Object Aggregation)");
+      
+      // Group data by date and aggregate salesIn7Days from all ASINs
+      const dateMap = new Map();
+      
+      Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
+        if (asinData.data && Array.isArray(asinData.data)) {
+          asinData.data.forEach(dateRecord => {
+            const formattedDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            
+            if (!dateMap.has(formattedDate)) {
+              dateMap.set(formattedDate, {
+                date: formattedDate,
+                ppcSales: 0,
+                spend: 0,
+                recordCount: 0
+              });
+            }
+            
+            const dateEntry = dateMap.get(formattedDate);
+            dateEntry.ppcSales += parseFloat(dateRecord.salesIn7Days) || 0;
+            dateEntry.spend += parseFloat(dateRecord.spend) || 0;
+            dateEntry.recordCount += 1;
+          });
+        }
+      });
+      
+      const aggregatedData = Array.from(dateMap.values()).sort((a, b) => {
+        return new Date(a.date + " 2024") - new Date(b.date + " 2024");
+      });
+      
+      console.log("🔵 AGGREGATED CHART DATA:", {
+        totalDates: aggregatedData.length,
+        data: aggregatedData,
+        totalASINs: Object.keys(productWiseSponsoredAdsGraphData).length
+      });
+      
+      return aggregatedData;
     }
     
     // Final fallback: Return empty data with zero values
@@ -448,9 +602,32 @@ const PPCDashboard = () => {
   console.log("2. filteredDateWiseTotalCosts length:", filteredDateWiseTotalCosts.length);
   console.log("3. info?.TotalSales length:", info?.TotalSales?.length || 0);
   console.log("4. info?.accountFinance?.ProductAdsPayment:", info?.accountFinance?.ProductAdsPayment || 0);
-  console.log("5. productWiseSponsoredAdsGraphData length:", productWiseSponsoredAdsGraphData.length);
+  console.log("5. productWiseSponsoredAdsGraphData structure:", {
+    isObject: typeof productWiseSponsoredAdsGraphData === 'object',
+    isArray: Array.isArray(productWiseSponsoredAdsGraphData),
+    keys: Object.keys(productWiseSponsoredAdsGraphData || {}),
+    totalASINs: Object.keys(productWiseSponsoredAdsGraphData || {}).length
+  });
   console.log("Final chartData length:", chartData.length);
-  console.log("Final chartData sample:", chartData.slice(0, 3));
+  console.log("Final chartData sample:", chartData);
+  
+  // 🎯 DETAILED CHART DATA BEING PLOTTED
+  console.log('🎯 COMPLETE CHART DATA BEING PLOTTED:', {
+    totalDataPoints: chartData.length,
+    ppcSalesSum: chartData.reduce((sum, item) => sum + (item.ppcSales || 0), 0),
+    spendSum: chartData.reduce((sum, item) => sum + (item.spend || 0), 0),
+    dailyBreakdown: chartData.map(item => ({
+      date: item.date,
+      ppcSales: item.ppcSales,
+      spend: item.spend
+    })),
+    hasValidPPCSales: chartData.some(item => item.ppcSales > 0),
+    hasValidSpend: chartData.some(item => item.spend > 0),
+    maxPPCSales: Math.max(...chartData.map(item => item.ppcSales || 0)),
+    maxSpend: Math.max(...chartData.map(item => item.spend || 0)),
+    avgPPCSales: chartData.reduce((sum, item) => sum + (item.ppcSales || 0), 0) / chartData.length,
+    avgSpend: chartData.reduce((sum, item) => sum + (item.spend || 0), 0) / chartData.length
+  });
   
   // Tab configuration
   const tabs = [
@@ -802,7 +979,7 @@ const PPCDashboard = () => {
     // Check if date range is selected to determine which data to use
     const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
     
-    // Calculate spend based on date range selection
+    // Calculate spend based on date range selection - match main dashboard logic
     let spend = 0;
     if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
       // Use filtered spend data when date range is selected
@@ -811,10 +988,13 @@ const PPCDashboard = () => {
       console.log('Using filtered spend data:', spend);
       console.log('Filtered data points:', filteredDateWiseTotalCosts.length);
     } else {
-      // Only use real PPC data - no estimates from ProductAdsPayment
-      spend = sponsoredAdsMetrics?.totalCost || 0;
-      console.log('=== KPI Calculation (Default) ===');
-      console.log('Using real PPC spend data only:', spend);
+      // Use same logic as main dashboard - prioritize ProductAdsPayment, fallback to sponsoredAds
+      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
+      spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+      console.log('=== KPI Calculation (Default - Matching Main Dashboard) ===');
+      console.log('ProductAdsPayment:', actualPPCSpend);
+      console.log('sponsoredAdsMetrics?.totalCost:', sponsoredAdsMetrics?.totalCost || 0);
+      console.log('Final spend used:', spend);
     }
     
     // Calculate PPC sales - only use real data, no assumptions

@@ -64,8 +64,9 @@ const ProtectedRouteWrapper = ({ children }) => {
             localStorage.setItem("isAuth", "true"); // Keep them logged in
             navigate("/pricing");
             return;
-          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus)) {
-            // User has a plan but subscription is explicitly inactive, redirect to pricing
+          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus) && userData.packageType !== 'LITE') {
+            // User has a paid plan but subscription is explicitly inactive, redirect to pricing
+            // LITE users can access dashboard even with cancelled status since it's free
             localStorage.setItem("isAuth", "true"); // Keep them logged in
             navigate("/pricing");
             return;

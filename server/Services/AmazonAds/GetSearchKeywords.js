@@ -323,7 +323,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                     userId: userId,
                     country: country,
                     region: region,
-                    searchTermsData: reportContent
+                    searchTermData: reportContent
                 });
 
                 if (!createSearchTermsData) {

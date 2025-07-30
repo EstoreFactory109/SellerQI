@@ -11,10 +11,12 @@ import {
   ArrowRight,
   Shield,
   Zap,
-  Users
+  Users,
+  AlertCircle
 } from 'lucide-react';
 import Navbar from '../Components/Navigation/Navbar';
 import Footer from '../Components/Navigation/Footer';
+import axiosInstance from '../config/axios.config';
 
 export default function ContactPage() {
   const [form, setForm] = useState({ 
@@ -26,6 +28,7 @@ export default function ContactPage() {
   });
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -33,17 +36,51 @@ export default function ContactPage() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    // Clear error when user starts typing
+    if (error) {
+      setError('');
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError('');
     
-    // Simulate API call
-    setTimeout(() => {
-      setSubmitted(true);
+    try {
+      // Prepare the data for the backend
+      const supportTicketData = {
+        name: form.name,
+        email: form.email,
+        subject: form.subject,
+        message: form.message,
+        topic: form.helpType // Backend expects 'topic', frontend uses 'helpType'
+      };
+
+      // Send data to the backend
+      const response = await axiosInstance.post('/app/support', supportTicketData);
+      
+      if (response.status === 201) {
+        setSubmitted(true);
+        // Reset form
+        setForm({ name: '', email: '', subject: '', message: '', helpType: '' });
+      }
+    } catch (error) {
+      console.error('Error submitting support ticket:', error);
+      
+      // Handle different types of errors
+      if (error.response?.status === 401) {
+        setError('Please log in to submit a support ticket.');
+      } else if (error.response?.status === 400) {
+        setError('Please fill in all required fields correctly.');
+      } else if (error.response?.data?.message) {
+        setError(error.response.data.message);
+      } else {
+        setError('Something went wrong. Please try again or contact us directly at support@sellerqi.com');
+      }
+    } finally {
       setIsSubmitting(false);
-    }, 1500);
+    }
   };
 
   const contactMethods = [
@@ -184,6 +221,7 @@ export default function ContactPage() {
                         <button
                           onClick={() => {
                             setSubmitted(false);
+                            setError('');
                             setForm({ name: '', email: '', subject: '', message: '', helpType: '' });
                           }}
                           className="text-[#3B4A6B] hover:text-[#2d3a52] font-medium"
@@ -200,6 +238,21 @@ export default function ContactPage() {
                         onSubmit={handleSubmit}
                         className="space-y-6"
                       >
+                        {/* Error Message */}
+                        {error && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3"
+                          >
+                            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <h4 className="text-red-800 font-medium mb-1">Error</h4>
+                              <p className="text-red-700 text-sm">{error}</p>
+                            </div>
+                          </motion.div>
+                        )}
+                        
                         <div>
                           <label className="block text-gray-700 font-medium mb-2">
                             How can we help you? *

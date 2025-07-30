@@ -20,7 +20,7 @@ const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Services/Sp_API/GET_V1_SELL
 const { listFinancialEventsMethod } = require('../Services/Sp_API/Finance.js');
 const { getCompetitivePricing } = require('../Services/Sp_API/CompetitivePrices.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Services/Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
-const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
+//const { addReviewDataTODatabase } = require('../Services/Sp_API/NumberOfProductReviews.js');
 const { GetListingItem } = require('../Services/Sp_API/GetListingItemsIssues.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
@@ -590,10 +590,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
         tokenManager.wrapSpApiFunction(
             GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
         )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        
+      /*  
         addReviewDataTODatabase(
             Array.isArray(asinArray) ? asinArray : [], Country, userId, Region
-        ),
+        ),*/
         
         tokenManager.wrapAdsFunction(
             getKeywords, userId, RefreshToken, AdsRefreshToken

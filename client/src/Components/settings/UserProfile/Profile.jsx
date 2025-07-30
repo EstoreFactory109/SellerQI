@@ -3,7 +3,7 @@ import ProfilePic from "./ProfilePic";
 import Upload from "./Upload";
 import Preview from "./Preview";
 import { useSelector, useDispatch } from 'react-redux';
-import { loginSuccess } from '../../../redux/slices/authSlice.js';
+import { updateProfileDetails } from '../../../redux/slices/authSlice.js';
 import axios from 'axios';
 import BeatLoader from "react-spinners/BeatLoader";
 import { User, Phone, Mail, Edit3 } from "lucide-react";
@@ -78,7 +78,7 @@ export default function ProfileForm() {
     try {
       const response = await axios.put(`${import.meta.env.VITE_BASE_URI}/app/updateDetails`, data, { withCredentials: true });
       if (response.status === 200) {
-        dispatch(loginSuccess(response.data.data.UpdateInfo));
+        dispatch(updateProfileDetails(response.data.data.UpdateInfo));
        
       }
     } catch (error) {

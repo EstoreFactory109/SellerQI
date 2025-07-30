@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
+import { updatePackageType } from '../../../redux/slices/authSlice';
 import { motion } from 'framer-motion';
 import { 
   Check, 
@@ -18,7 +19,11 @@ import {
   TrendingUp,
   Award,
   MessageCircle,
-  X
+  X,
+  Receipt,
+  Download,
+  ChevronDown,
+  History
 } from 'lucide-react';
 import stripeService from '../../../services/stripeService';
 import axiosInstance from '../../../config/axios.config';
@@ -28,7 +33,14 @@ export default function PlansAndBilling() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('active');
   const [loading, setLoading] = useState({});
   const [userSubscription, setUserSubscription] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [visiblePayments, setVisiblePayments] = useState(5);
   const user = useSelector((state) => state.Auth.user);
+  const dispatch = useDispatch();
   const navigate = useNavigate();
 
   // Plan configurations with enhanced styling
@@ -100,6 +112,7 @@ export default function PlansAndBilling() {
 
   useEffect(() => {
     fetchUserSubscription();
+    fetchPaymentHistory();
   }, []);
 
   const fetchUserSubscription = async () => {
@@ -149,6 +162,101 @@ export default function PlansAndBilling() {
     }
   };
 
+  const handleCancelSubscription = async () => {
+    setCancelling(true);
+    setCancelMessage('');
+
+    try {
+      // Cancel subscription immediately
+      const result = await stripeService.cancelSubscription(false);
+      
+      // Check the correct response structure - result.data.success instead of result.success
+      if (result.data && result.data.success) {
+        // Update Redux state immediately
+        dispatch(updatePackageType({
+          packageType: 'LITE',
+          subscriptionStatus: 'cancelled'
+        }));
+        
+        // Update local state immediately
+        setCurrentPlan('LITE');
+        setSubscriptionStatus('cancelled');
+        setUserSubscription(null);
+        
+        // Show success message
+        setCancelMessage('Subscription cancelled successfully! You have been downgraded to the LITE plan.');
+        
+        // Hide confirmation modal
+        setShowCancelConfirm(false);
+        
+        // Refresh payment history in case cancellation creates a record
+        setTimeout(() => {
+          fetchPaymentHistory();
+        }, 1000);
+      } else {
+        // Handle case where API call succeeded but cancellation failed
+        setCancelMessage('Failed to cancel subscription. Please try again or contact support.');
+      }
+    } catch (error) {
+      console.error('Error cancelling subscription:', error);
+      // Show more detailed error message if available
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to cancel subscription. Please try again or contact support.';
+      setCancelMessage(errorMessage);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const fetchPaymentHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const history = await stripeService.getPaymentHistory();
+      // Sort by most recent first
+      const sortedHistory = history.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+      setPaymentHistory(sortedHistory);
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+      setPaymentHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleShowMore = () => {
+    setVisiblePayments(prev => prev + 5);
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const formatAmount = (amount, currency = 'USD') => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.toUpperCase()
+    }).format(amount / 100); // Stripe amounts are in cents
+  };
+
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'succeeded':
+      case 'paid':
+        return 'text-green-600 bg-green-100';
+      case 'pending':
+        return 'text-yellow-600 bg-yellow-100';
+      case 'failed':
+        return 'text-red-600 bg-red-100';
+      default:
+        return 'text-gray-600 bg-gray-100';
+    }
+  };
+
   const getPlanIcon = (plan) => {
     const IconComponent = plans[plan].icon;
     return <IconComponent className="w-6 h-6" />;
@@ -171,6 +279,110 @@ export default function PlansAndBilling() {
 
     return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+      {/* Cancel Success/Error Message */}
+      {cancelMessage && (
+        <motion.div 
+          initial={{ opacity: 0, y: -50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -50 }}
+          className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4 p-4 rounded-xl shadow-xl ${
+            cancelMessage.includes('successfully') 
+              ? 'bg-green-500 text-white' 
+              : 'bg-red-500 text-white'
+          }`}
+        >
+          <div className="flex items-center space-x-3">
+            {cancelMessage.includes('successfully') ? (
+              <Check className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <X className="w-5 h-5 flex-shrink-0" />
+            )}
+            <p className="text-sm font-medium">{cancelMessage}</p>
+            <button 
+              onClick={() => setCancelMessage('')}
+              className="ml-auto hover:opacity-80"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {showCancelConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl"
+          >
+            <div className="text-center">
+              <div className="relative w-20 h-20 mx-auto mb-6">
+                {/* Animated background circles */}
+                <div className="absolute inset-0 bg-red-100 rounded-full animate-pulse"></div>
+                <div className="absolute inset-2 bg-red-200 rounded-full animate-ping opacity-30"></div>
+                <div className="absolute inset-0 bg-gradient-to-r from-red-100 to-red-200 rounded-full flex items-center justify-center">
+                  <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg">
+                    <X className="w-6 h-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">Cancel Subscription</h3>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to cancel your subscription? You will be immediately downgraded to the LITE plan and lose access to all premium features.
+              </p>
+              
+              <div className="flex space-x-4">
+                {/* Keep Subscription Button */}
+                <button
+                  onClick={() => setShowCancelConfirm(false)}
+                  className="
+                    flex-1 py-4 px-6 bg-gradient-to-r from-gray-100 to-gray-200 
+                    hover:from-gray-200 hover:to-gray-300 text-gray-700 rounded-2xl 
+                    font-semibold transition-all duration-300 transform hover:scale-105 
+                    hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-gray-300/50
+                    active:scale-95
+                  "
+                >
+                  Keep Subscription
+                </button>
+                
+                {/* Cancel Now Button */}
+                <button
+                  onClick={handleCancelSubscription}
+                  disabled={cancelling}
+                  className="
+                    relative overflow-hidden flex-1 py-4 px-6 
+                    bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800
+                    text-white rounded-2xl font-semibold transition-all duration-300 
+                    transform hover:scale-105 hover:shadow-xl hover:shadow-red-500/25
+                    active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed 
+                    disabled:transform-none focus:outline-none focus:ring-4 focus:ring-red-500/20
+                    flex items-center justify-center space-x-2
+                  "
+                >
+                  {/* Loading spinner or text */}
+                  {cancelling ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <span>Cancelling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="w-4 h-4" />
+                      <span>Cancel Now</span>
+                    </>
+                  )}
+                  
+                  {/* Shimmer effect */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Header Section */}
       <div className="relative overflow-hidden">
         {/* Background Elements */}
@@ -323,10 +535,58 @@ export default function PlansAndBilling() {
             className="mb-16"
           >
             <div className="bg-white/80 backdrop-blur-lg rounded-3xl p-8 shadow-xl border border-white/20">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center space-x-3">
-                <CreditCard className="w-6 h-6 text-blue-600" />
-                <span>Billing Information</span>
-              </h3>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
+                  <CreditCard className="w-6 h-6 text-blue-600" />
+                  <span>Billing Information</span>
+                </h3>
+                
+                {/* Cancel Subscription Button */}
+                <div className="relative group">
+                  <button
+                    onClick={() => setShowCancelConfirm(true)}
+                    disabled={cancelling}
+                    className={`
+                      relative overflow-hidden flex items-center space-x-3 px-8 py-4 
+                      bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700
+                      text-white rounded-2xl font-semibold text-sm
+                      transition-all duration-300 ease-out transform
+                      hover:scale-105 hover:shadow-2xl hover:shadow-red-500/25
+                      active:scale-95 active:shadow-lg
+                      disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none
+                      before:absolute before:inset-0 before:bg-gradient-to-r before:from-white/20 before:to-transparent 
+                      before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300
+                      focus:outline-none focus:ring-4 focus:ring-red-500/20
+                    `}
+                  >
+                    {/* Background shimmer effect */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-out"></div>
+                    
+                    {/* Icon with animation */}
+                    <div className="relative z-10 flex items-center justify-center">
+                      {cancelling ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      ) : (
+                        <X className="w-5 h-5 transform group-hover:rotate-90 transition-transform duration-300" />
+                      )}
+                    </div>
+                    
+                    {/* Text */}
+                    <span className="relative z-10 whitespace-nowrap">
+                      {cancelling ? 'Cancelling...' : 'Cancel Subscription'}
+                    </span>
+                    
+                    {/* Ripple effect on click */}
+                    <div className="absolute inset-0 rounded-2xl opacity-0 group-active:opacity-100 bg-white/20 transition-opacity duration-150"></div>
+                  </button>
+                  
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap">
+                    This will immediately downgrade you to LITE plan
+                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                  </div>
+                </div>
+              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6">
@@ -401,11 +661,133 @@ export default function PlansAndBilling() {
           </motion.div>
         )}
 
+        {/* Payment History Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.5 }}
+          className="mb-16"
+        >
+          <div className="bg-white/80 backdrop-blur-lg rounded-3xl p-8 shadow-xl border border-white/20">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
+                <Receipt className="w-6 h-6 text-blue-600" />
+                <span>Payment History</span>
+              </h3>
+              
+              {/* Download all history button */}
+              <button
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
+                onClick={() => {
+                  // TODO: Implement download functionality
+                  console.log('Download payment history');
+                }}
+              >
+                <Download className="w-4 h-4" />
+                <span>Download</span>
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="flex items-center space-x-3">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                  <span className="text-gray-600">Loading payment history...</span>
+                </div>
+              </div>
+            ) : paymentHistory.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <History className="w-8 h-8 text-gray-400" />
+                </div>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2">No Payment History</h4>
+                <p className="text-gray-600">You haven't made any payments yet. Payment history will appear here once you upgrade to a paid plan.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {paymentHistory.slice(0, visiblePayments).map((payment, index) => (
+                  <motion.div
+                    key={payment.sessionId || index}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: index * 0.1 }}
+                    className="bg-gradient-to-r from-gray-50 to-white rounded-2xl p-6 border border-gray-200 hover:shadow-lg transition-all duration-300"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center">
+                          <Receipt className="w-6 h-6 text-white" />
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900 mb-1">
+                            Subscription Payment
+                          </h4>
+                          <p className="text-sm text-gray-600">
+                            {formatDate(payment.paymentDate)}
+                          </p>
+                          {payment.stripePaymentIntentId && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              ID: {payment.stripePaymentIntentId.slice(-8)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <div className="text-xl font-bold text-gray-900 mb-2">
+                          {formatAmount(payment.amount, payment.currency)}
+                        </div>
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(payment.status)}`}>
+                          {payment.status?.charAt(0).toUpperCase() + payment.status?.slice(1) || 'Unknown'}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+
+                {/* Show More Button */}
+                {visiblePayments < paymentHistory.length && (
+                  <div className="text-center pt-6">
+                    <button
+                      onClick={handleShowMore}
+                      className="
+                        inline-flex items-center space-x-3 px-8 py-4 
+                        bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700
+                        text-white rounded-2xl font-semibold transition-all duration-300 
+                        transform hover:scale-105 hover:shadow-xl hover:shadow-blue-500/25
+                        active:scale-95 focus:outline-none focus:ring-4 focus:ring-blue-500/20
+                      "
+                    >
+                      <span>Show More Payments</span>
+                      <ChevronDown className="w-5 h-5" />
+                    </button>
+                    <p className="text-sm text-gray-600 mt-3">
+                      Showing {visiblePayments} of {paymentHistory.length} payments
+                    </p>
+                  </div>
+                )}
+
+                {/* Show less option when showing more than 5 */}
+                {visiblePayments > 5 && visiblePayments >= paymentHistory.length && (
+                  <div className="text-center pt-4">
+                    <button
+                      onClick={() => setVisiblePayments(5)}
+                      className="text-blue-600 hover:text-blue-700 font-medium transition-colors duration-300"
+                    >
+                      Show Less
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </motion.div>
+
         {/* Support Section */}
         <motion.div 
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.6 }}
+          transition={{ duration: 0.7, delay: 0.7 }}
           className="text-center"
         >
           <div className="bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 rounded-3xl p-12 text-white">

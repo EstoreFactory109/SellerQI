@@ -25,7 +25,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
     setLoading(true);
     try {
       const response = await axios.post(
-        `${import.meta.env.VITE_BASE_URI}/app/token/addNewAccount`,
+        `${import.meta.env.VITE_BASE_URI}/app/token/saveDetailsOfOtherAccounts`,
         {
           region: region,
           country: marketPlace,
@@ -36,7 +36,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
       if (response.status === 201) {
         setLoading(false);
         // Navigate to profile selection page with region parameter
-        navigate(`/profile-selection?region=${region}`)
+        navigate(`/connect-accounts?region=${region}&country=${marketPlace}`)
       }
     } catch (error) {
       setLoading(false);
