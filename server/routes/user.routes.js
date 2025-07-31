@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan }=require('../controllers/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo }=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -27,4 +27,12 @@ router.put('/update-subscription-plan', auth, updateSubscriptionPlan); // New ro
 
 router.post('/google-login', googleLoginUser);
 router.post('/google-register', googleRegisterUser);
+router.post('/register-agency-client', auth, registerAgencyClient);
+
+// Admin routes
+router.get('/admin/profile', auth, getAdminProfile);
+router.get('/admin/clients', auth, getAdminClients);
+router.delete('/admin/clients/:clientId', auth, removeAdminClient);
+router.get('/admin/billing', auth, getAdminBillingInfo);
+
 module.exports=router;

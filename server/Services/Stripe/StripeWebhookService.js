@@ -334,10 +334,17 @@ class StripeWebhookService {
      */
     async updateUserSubscription(userId, planType, subscriptionStatus) {
         try {
-            await User.findByIdAndUpdate(userId, {
+            const updateData = {
                 packageType: planType,
                 subscriptionStatus: subscriptionStatus
-            });
+            };
+            
+            // If user purchased AGENCY plan, update accessType to enterpriseAdmin
+            if (planType === 'AGENCY') {
+                updateData.accessType = 'enterpriseAdmin';
+            }
+            
+            await User.findByIdAndUpdate(userId, updateData);
         } catch (error) {
             logger.error('Error updating user subscription:', error);
             throw error;
@@ -351,7 +358,8 @@ class StripeWebhookService {
         try {
             await User.findByIdAndUpdate(userId, {
                 packageType: 'LITE',
-                subscriptionStatus: 'cancelled'
+                subscriptionStatus: 'cancelled',
+                accessType: 'user' // Reset accessType to regular user when downgrading
             });
 
             logger.info(`Downgraded user ${userId} to LITE plan`);

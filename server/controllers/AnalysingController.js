@@ -77,7 +77,40 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
 
     if (adminId !== null) {
-        const getAllSellerAccounts = await Seller.find({})
+        let getAllSellerAccounts=[];
+        const getAdminStatus = await userModel.findOne({_id:adminId}).select('accessType');
+       
+        if(getAdminStatus.accessType === 'enterpriseAdmin'){
+            const getClientsSellerCentral = await userModel.find({adminId:adminId}).select('sellerCentral').sort({createdAt:-1});
+            if(!getClientsSellerCentral){
+                logger.error(new ApiError(404, "Client not found"));
+            }
+
+            
+            
+            for(const sellerId of getClientsSellerCentral){
+                console.log("sellerId: ",sellerId.sellerCentral);
+                const getSellerCentral = await Seller.findOne({_id:sellerId.sellerCentral});
+                console.log("getSellerCentral: ",getSellerCentral);
+                if(getSellerCentral){
+                    getAllSellerAccounts.push(getSellerCentral);
+                }
+            }
+
+            const getSelfSellerCentral = await Seller.findOne({User:adminId});
+            console.log("getSelfSellerCentral: ",getSelfSellerCentral);
+            if(getSelfSellerCentral){
+                getAllSellerAccounts.push(getSelfSellerCentral);
+            }
+           
+
+        }else{
+            getAllSellerAccounts = await Seller.find({})
+        }
+
+        console.log("getAllSellerAccounts: ",getAllSellerAccounts);
+     
+
         if (!getAllSellerAccounts) {
             logger.error(new ApiError(404, "Seller central not found"));
             return {

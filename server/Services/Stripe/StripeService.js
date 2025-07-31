@@ -2,6 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Subscription = require('../../models/SubscriptionModel');
 const User = require('../../models/userModel');
 const logger = require('../../utils/Logger');
+const { createAccessToken } = require('../../utils/Tokens');
 
 class StripeService {
     constructor() {
@@ -247,11 +248,30 @@ class StripeService {
 
             await this.updateOrCreateSubscription(userId, subscriptionData);
 
-            // Update user's package type and subscription status
-            await User.findByIdAndUpdate(userId, {
+            // Update user's package type, subscription status, and access type
+            const updateData = {
                 packageType: planType,
                 subscriptionStatus: stripeSubscription.status
-            });
+            };
+            
+            // If user purchased AGENCY plan, update accessType to enterpriseAdmin
+            if (planType === 'AGENCY') {
+                updateData.accessType = 'enterpriseAdmin';
+            }
+            
+            await User.findByIdAndUpdate(userId, updateData);
+
+            // Create admin token for AGENCY users
+            let adminToken = null;
+            if (planType === 'AGENCY') {
+                try {
+                    adminToken = await createAccessToken(userId);
+                    logger.info(`Admin token created for AGENCY user: ${userId}`);
+                } catch (error) {
+                    logger.error(`Error creating admin token for user ${userId}:`, error);
+                    // Don't fail the payment if token creation fails
+                }
+            }
 
             // Add to payment history
             await this.addPaymentHistory(userId, {
@@ -264,7 +284,7 @@ class StripeService {
 
             logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}`);
             
-            return { success: true, planType, userId };
+            return { success: true, planType, userId, adminToken };
 
         } catch (error) {
             logger.error('Error handling successful payment:', error);

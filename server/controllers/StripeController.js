@@ -79,6 +79,21 @@ const handlePaymentSuccess = asyncHandler(async (req, res) => {
 
         logger.info(`Payment success handled for session: ${session_id}`);
 
+        // If admin token was created for AGENCY user, set it as cookie
+        if (result.adminToken) {
+            const cookieOptions = {
+                httpOnly: true,
+                secure: true,
+                sameSite: "None"
+            };
+            
+            res.cookie("AdminToken", result.adminToken, cookieOptions);
+            logger.info(`Admin token cookie set for AGENCY user: ${result.userId}`);
+            
+            // Remove admin token from response for security
+            delete result.adminToken;
+        }
+
         return res.status(200).json(
             new ApiResponse(200, result, 'Payment processed successfully')
         );

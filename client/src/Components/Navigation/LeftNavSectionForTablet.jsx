@@ -27,6 +27,7 @@ const LeftNavSection = () => {
     const user = useSelector((state) => state.Auth?.user);
     const userPlan = user?.packageType || 'LITE';
     const isLiteUser = userPlan === 'LITE';
+    const isAgencyUser = userPlan === 'AGENCY';
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
@@ -457,8 +458,8 @@ const LeftNavSection = () => {
                                             </NavLink>
                                         </motion.div>
                                         
-                                        {/* Account Integration - Only for PRO/AGENCY users */}
-                                        {!isLiteUser && (
+                                        {/* Account Integration - Only for PRO users (not AGENCY) */}
+                                        {!isLiteUser && !isAgencyUser && (
                                             <motion.div
                                                 initial={{ y: -10, opacity: 0 }}
                                                 animate={{ y: 0, opacity: 1 }}
@@ -481,47 +482,162 @@ const LeftNavSection = () => {
                                             </motion.div>
                                         )}
                                         
-                                        {/* Plans & Billing - Available for ALL users */}
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.11, duration: 0.15 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/settings?tab=plans-billing"
-                                                className={() =>
-                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                        isSettingsPage && currentSettingsTab === 'plans-billing'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                    }`
-                                                }
+                                        {/* Plans & Billing - Available for non-AGENCY users */}
+                                        {!isAgencyUser && (
+                                            <motion.div
+                                                initial={{ y: -10, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -10, opacity: 0 }}
+                                                transition={{ delay: 0.11, duration: 0.15 }}
                                             >
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Plans & Billing
-                                            </NavLink>
-                                        </motion.div>
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.14, duration: 0.15 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/settings?tab=support"
-                                                className={() =>
-                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                        isSettingsPage && currentSettingsTab === 'support'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                    }`
-                                                }
+                                                <NavLink
+                                                    to="/seller-central-checker/settings?tab=plans-billing"
+                                                    className={() =>
+                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                            isSettingsPage && currentSettingsTab === 'plans-billing'
+                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                        }`
+                                                    }
+                                                >
+                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                    Plans & Billing
+                                                </NavLink>
+                                            </motion.div>
+                                        )}
+                                        {/* Support - Available for non-AGENCY users */}
+                                        {!isAgencyUser && (
+                                            <motion.div
+                                                initial={{ y: -10, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -10, opacity: 0 }}
+                                                transition={{ delay: 0.14, duration: 0.15 }}
                                             >
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Support
-                                            </NavLink>
-                                        </motion.div>
+                                                <NavLink
+                                                    to="/seller-central-checker/settings?tab=support"
+                                                    className={() =>
+                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                            isSettingsPage && currentSettingsTab === 'support'
+                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                        }`
+                                                    }
+                                                >
+                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                    Support
+                                                </NavLink>
+                                            </motion.div>
+                                        )}
+
+                                        {/* Admin Section - Only for AGENCY users */}
+                                        {isAgencyUser && (
+                                            <>
+                                                {/* Admin Section Divider */}
+                                                <motion.div
+                                                    initial={{ y: -10, opacity: 0 }}
+                                                    animate={{ y: 0, opacity: 1 }}
+                                                    exit={{ y: -10, opacity: 0 }}
+                                                    transition={{ delay: 0.17, duration: 0.15 }}
+                                                    className="my-2"
+                                                >
+                                                    <div className="flex items-center gap-2 px-3 py-1">
+                                                        <div className="h-px bg-gradient-to-r from-purple-200 to-purple-300 flex-1"></div>
+                                                        <span className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">Admin</span>
+                                                        <div className="h-px bg-gradient-to-r from-purple-300 to-purple-200 flex-1"></div>
+                                                    </div>
+                                                </motion.div>
+
+                                                {/* Admin User Profile */}
+                                                <motion.div
+                                                    initial={{ y: -10, opacity: 0 }}
+                                                    animate={{ y: 0, opacity: 1 }}
+                                                    exit={{ y: -10, opacity: 0 }}
+                                                    transition={{ delay: 0.20, duration: 0.15 }}
+                                                >
+                                                    <NavLink
+                                                        to="/seller-central-checker/settings?tab=admin-user-profile"
+                                                        className={() =>
+                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                                isSettingsPage && currentSettingsTab === 'admin-user-profile'
+                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
+                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                            }`
+                                                        }
+                                                    >
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Admin User Profile
+                                                    </NavLink>
+                                                </motion.div>
+
+
+
+                                                {/* Admin Account Integration */}
+                                                <motion.div
+                                                    initial={{ y: -10, opacity: 0 }}
+                                                    animate={{ y: 0, opacity: 1 }}
+                                                    exit={{ y: -10, opacity: 0 }}
+                                                    transition={{ delay: 0.24, duration: 0.15 }}
+                                                >
+                                                    <NavLink
+                                                        to="/seller-central-checker/settings?tab=admin-account-integration"
+                                                        className={() =>
+                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                                isSettingsPage && currentSettingsTab === 'admin-account-integration'
+                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
+                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                            }`
+                                                        }
+                                                    >
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Admin Integrations
+                                                    </NavLink>
+                                                </motion.div>
+
+                                                {/* Admin Plans & Billing */}
+                                                <motion.div
+                                                    initial={{ y: -10, opacity: 0 }}
+                                                    animate={{ y: 0, opacity: 1 }}
+                                                    exit={{ y: -10, opacity: 0 }}
+                                                    transition={{ delay: 0.26, duration: 0.15 }}
+                                                >
+                                                    <NavLink
+                                                        to="/seller-central-checker/settings?tab=admin-plans-billing"
+                                                        className={() =>
+                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                                isSettingsPage && currentSettingsTab === 'admin-plans-billing'
+                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
+                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                            }`
+                                                        }
+                                                    >
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Admin Billing
+                                                    </NavLink>
+                                                </motion.div>
+
+                                                {/* Admin Support */}
+                                                <motion.div
+                                                    initial={{ y: -10, opacity: 0 }}
+                                                    animate={{ y: 0, opacity: 1 }}
+                                                    exit={{ y: -10, opacity: 0 }}
+                                                    transition={{ delay: 0.28, duration: 0.15 }}
+                                                >
+                                                    <NavLink
+                                                        to="/seller-central-checker/settings?tab=admin-support"
+                                                        className={() =>
+                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                                isSettingsPage && currentSettingsTab === 'admin-support'
+                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
+                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                            }`
+                                                        }
+                                                    >
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Admin Support
+                                                    </NavLink>
+                                                </motion.div>
+                                            </>
+                                        )}
                                     </motion.div>
                                 )}
                             </AnimatePresence>

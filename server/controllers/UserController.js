@@ -9,6 +9,7 @@ const { generateOTP } = require('../utils/OTPGenerator.js');
 const { sendEmail } = require('../Services/Email/SendOtp.js');
 const UserModel = require('../models/userModel.js');
 const SellerCentralModel = require('../models/sellerCentralModel.js');
+const mongoose = require('mongoose');
 
 const { uploadToCloudinary } = require('../Services/Cloudinary/Cloudinary.js');
 const { sendEmailResetLink } = require('../Services/Email/SendResetLink.js');
@@ -68,6 +69,107 @@ const registerUser = asyncHandler(async (req, res) => {
 
 })
 
+const registerAgencyClient = asyncHandler(async (req, res) => {
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
+    const agencyOwnerId = req.userId; // Get the agency owner's ID from auth middleware
+
+    if (!firstname || !lastname || !phone || !email || !password) {
+        logger.error(new ApiError(400, "Details and credentials are missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
+    }
+
+    if (!agencyOwnerId) {
+        logger.error(new ApiError(401, "Unauthorized: Agency owner not found"));
+        return res.status(401).json(new ApiResponse(401, "", "Unauthorized: Agency owner not found"));
+    }
+
+    // Check if agency owner has AGENCY package
+    const agencyOwner = await UserModel.findById(agencyOwnerId);
+    if (!agencyOwner || agencyOwner.packageType !== 'AGENCY') {
+        logger.error(new ApiError(403, "Only AGENCY package users can register clients"));
+        return res.status(403).json(new ApiResponse(403, "", "Only AGENCY package users can register clients"));
+    }
+
+    // Check if client email already exists
+    const checkUserIfExists = await getUserByEmail(email);
+    if (checkUserIfExists) {
+        logger.error(new ApiError(409, "User already exists"));
+        return res.status(409).json(new ApiResponse(409, "", "User already exists"));
+    }
+
+    try {
+        // Hash the password
+        const hashedPassword = await hashPassword(password);
+
+        // Create the client user with adminId set to agency owner
+        const newClient = new UserModel({
+            firstName: firstname,
+            lastName: lastname,
+            phone: phone,
+            whatsapp: phone, // Use phone as whatsapp for simplicity
+            email: email,
+            password: hashedPassword,
+            isVerified: true, // Auto-verify agency clients
+            allTermsAndConditionsAgreed: allTermsAndConditionsAgreed || true,
+            packageType: 'PRO', // Give clients PRO access by default
+            adminId: agencyOwnerId, // Set the agency owner as admin
+            OTP: null
+        });
+
+        const savedClient = await newClient.save();
+
+        if (!savedClient) {
+            logger.error(new ApiError(500, "Internal server error in creating client"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating client"));
+        }
+
+        // Create tokens for the new client (switch to client context)
+        const AccessToken = await createAccessToken(savedClient._id);
+        const RefreshToken = await createRefreshToken(savedClient._id);
+
+        if (!AccessToken || !RefreshToken) {
+            logger.error(new ApiError(500, "Internal server error in creating tokens"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
+        }
+
+        // Update client with refresh token
+        await UserModel.findOneAndUpdate(
+            { _id: savedClient._id },
+            { $set: { appRefreshToken: RefreshToken } },
+            { new: true }
+        );
+
+        // Initialize background job scheduling for the new client
+        try {
+            await UserSchedulingService.initializeUserSchedule(savedClient._id);
+            logger.info(`Background job scheduling initialized for client ${savedClient._id}`);
+        } catch (error) {
+            logger.error(`Failed to initialize scheduling for client ${savedClient._id}:`, error);
+            // Don't fail the registration process if scheduling fails
+        }
+
+        const options = {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None"
+        };
+
+        // Set cookies to switch to client context
+        res.status(201)
+            .cookie("IBEXAccessToken", AccessToken, options)
+            .cookie("IBEXRefreshToken", RefreshToken, options)
+            .json(new ApiResponse(201, {
+                clientId: savedClient._id,
+                firstName: savedClient.firstName,
+                lastName: savedClient.lastName,
+                email: savedClient.email
+            }, "Client registered successfully"));
+
+    } catch (error) {
+        logger.error(new ApiError(500, `Error creating client: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating client"));
+    }
+});
 
 const verifyUser = asyncHandler(async (req, res) => {
 
@@ -165,7 +267,7 @@ const loginUser = asyncHandler(async (req, res) => {
     console.log(email,password);
     const checkUserIfExists = await getUserByEmail(email);
 
-    console.log(checkUserIfExists);
+    
 
     if (!checkUserIfExists) {
         logger.error(new ApiError(404, "User not found"));
@@ -206,7 +308,34 @@ const loginUser = asyncHandler(async (req, res) => {
         LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
         // Prepare all accounts data to send in response
 
-    } else {
+    }else if(checkUserIfExists.accessType === 'enterpriseAdmin'){
+        adminToken = await createAccessToken(checkUserIfExists._id);
+    
+        const sellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
+        if(!sellerCentral){
+            const getClient = await UserModel.findOne({adminId:checkUserIfExists._id}).sort({createdAt:-1});
+            if(!getClient){
+                AccessToken = await createAccessToken(checkUserIfExists._id);
+                RefreshToken = await createRefreshToken(checkUserIfExists._id);
+                LocationToken = await createLocationToken("US","NA");
+            }else{
+                AccessToken = await createAccessToken(getClient._id);
+                RefreshToken = await createRefreshToken(getClient._id);
+                const getClientSellerCentral = await SellerCentralModel.findOne({ User: getClient._id });
+                if(!getClientSellerCentral){
+                    LocationToken = await createLocationToken("US","NA");
+                }else{
+                    LocationToken = await createLocationToken(getClientSellerCentral.sellerAccount[0].country, getClientSellerCentral.sellerAccount[0].region);
+                }
+            }
+        }else{
+            AccessToken = await createAccessToken(checkUserIfExists._id);
+            RefreshToken = await createRefreshToken(checkUserIfExists._id);
+            LocationToken = await createLocationToken(sellerCentral.sellerAccount[0].country, sellerCentral.sellerAccount[0].region);
+        }
+        
+    }
+    else {
         getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
         if (!getSellerCentral) {
             logger.error(new ApiError(404, "Seller central not found"));
@@ -258,6 +387,7 @@ const loginUser = asyncHandler(async (req, res) => {
         };
     }
 
+    console.log(adminToken);
     res.status(200)
         .cookie("AdminToken", adminToken, option)
         .cookie("IBEXAccessToken", AccessToken, option)
@@ -974,8 +1104,222 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
     }
 });
 
+// Admin endpoints
+const getAdminProfile = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    try {
+        const adminUser = await UserModel.findById(adminId).select('-password');
+        console.log(adminUser);
+        
+        if (!adminUser) {
+            logger.error(new ApiError(404, "Admin user not found"));
+            return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+        }
+
+        // Get client statistics
+        const clientStats = await UserModel.aggregate([
+            { $match: { adminId: mongoose.Types.ObjectId(adminId) } },
+            {
+                $group: {
+                    _id: null,
+                    totalClients: { $sum: 1 },
+                    activeClients: {
+                        $sum: {
+                            $cond: [{ $eq: ["$subscriptionStatus", "active"] }, 1, 0]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        // Get clients added this month
+        const thisMonth = new Date();
+        thisMonth.setDate(1);
+        thisMonth.setHours(0, 0, 0, 0);
+
+        const newClientsThisMonth = await UserModel.countDocuments({
+            adminId: adminId,
+            createdAt: { $gte: thisMonth }
+        });
+
+        const stats = clientStats[0] || { totalClients: 0, activeClients: 0 };
+        stats.thisMonth = newClientsThisMonth;
+
+        const responseData = {
+            adminInfo: adminUser,
+            clientStats: stats
+        };
+
+        return res.status(200).json(new ApiResponse(200, responseData, "Admin profile fetched successfully"));
+    } catch (error) {
+        logger.error(new ApiError(500, `Error fetching admin profile: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }
+});
+
+const getAdminClients = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    try {
+        const clients = await UserModel.find({ adminId: adminId })
+            .select('firstName lastName email phone createdAt subscriptionStatus packageType')
+            .sort({ createdAt: -1 });
+
+        // Check Amazon connection status for each client
+        const clientsWithConnectionStatus = await Promise.all(
+            clients.map(async (client) => {
+                const clientObj = client.toObject();
+                
+                // Find seller central document for this client
+                const sellerDocument = await SellerCentralModel.findOne({ User: client._id });
+                
+                if (!sellerDocument || !sellerDocument.sellerAccount || sellerDocument.sellerAccount.length === 0) {
+                    // No seller document or no seller account
+                    return {
+                        ...clientObj,
+                        amazonStatus: 'Not Connected',
+                        amazonConnected: false,
+                        marketplace: null,
+                        connectedDate: null
+                    };
+                }
+
+                const sellerAccount = sellerDocument.sellerAccount[0];
+                const hasSpiToken = sellerAccount.spiRefreshToken && sellerAccount.spiRefreshToken.trim() !== '';
+                const hasAdsToken = sellerAccount.adsRefreshToken && sellerAccount.adsRefreshToken.trim() !== '';
+
+                let amazonStatus = 'Not Connected';
+                let amazonConnected = false;
+
+                if (hasSpiToken && hasAdsToken) {
+                    amazonStatus = 'Connected';
+                    amazonConnected = true;
+                } else if (hasSpiToken && !hasAdsToken) {
+                    amazonStatus = 'Seller Central';
+                    amazonConnected = true;
+                } else if (!hasSpiToken && hasAdsToken) {
+                    amazonStatus = 'Amazon Ads';
+                    amazonConnected = true;
+                } else {
+                    amazonStatus = 'Not Connected';
+                    amazonConnected = false;
+                }
+
+                return {
+                    ...clientObj,
+                    amazonStatus,
+                    amazonConnected,
+                    marketplace: amazonConnected ? (sellerAccount.country || null) : null,
+                    region: amazonConnected ? (sellerAccount.region || null) : null,
+                    connectedDate: amazonConnected ? sellerDocument.createdAt : null
+                };
+            })
+        );
+
+        return res.status(200).json(new ApiResponse(200, clientsWithConnectionStatus, "Admin clients fetched successfully"));
+    } catch (error) {
+        logger.error(new ApiError(500, `Error fetching admin clients: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }
+});
+
+const removeAdminClient = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    const { clientId } = req.params;
+    
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    try {
+        // Verify the client belongs to this admin
+        const client = await UserModel.findOne({ _id: clientId, adminId: adminId });
+        
+        if (!client) {
+            logger.error(new ApiError(404, "Client not found or doesn't belong to this admin"));
+            return res.status(404).json(new ApiResponse(404, "", "Client not found"));
+        }
+
+        // Remove the client
+        await UserModel.findByIdAndDelete(clientId);
+
+        return res.status(200).json(new ApiResponse(200, "", "Client removed successfully"));
+    } catch (error) {
+        logger.error(new ApiError(500, `Error removing client: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }
+});
+
+const getAdminBillingInfo = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    try {
+        const adminUser = await UserModel.findById(adminId).select('packageType subscriptionStatus createdAt');
+        
+        if (!adminUser) {
+            logger.error(new ApiError(404, "Admin user not found"));
+            return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+        }
+
+        // Mock billing data - replace with real Stripe data later
+        const billingInfo = {
+            planType: adminUser.packageType,
+            monthlyPrice: adminUser.packageType === 'AGENCY' ? 49 : 99,
+            status: adminUser.subscriptionStatus,
+            nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            paymentMethod: '**** **** **** 4242'
+        };
+
+        // Mock payment history
+        const paymentHistory = [
+            {
+                id: '1',
+                date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                amount: billingInfo.monthlyPrice,
+                status: 'paid',
+                invoiceNumber: 'INV-001'
+            },
+            {
+                id: '2',
+                date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+                amount: billingInfo.monthlyPrice,
+                status: 'paid',
+                invoiceNumber: 'INV-002'
+            }
+        ];
+
+        const responseData = {
+            billingInfo,
+            paymentHistory
+        };
+
+        return res.status(200).json(new ApiResponse(200, responseData, "Admin billing info fetched successfully"));
+    } catch (error) {
+        logger.error(new ApiError(500, `Error fetching admin billing info: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }
+});
+
 module.exports = {
     registerUser,
+    registerAgencyClient,
     verifyUser,
     loginUser,
     profileUser,
@@ -990,5 +1334,10 @@ module.exports = {
     getIPTracking,
     googleLoginUser,
     googleRegisterUser,
-    updateSubscriptionPlan  // Add the new function
+    updateSubscriptionPlan,
+    // Admin endpoints
+    getAdminProfile,
+    getAdminClients,
+    removeAdminClient,
+    getAdminBillingInfo
 };

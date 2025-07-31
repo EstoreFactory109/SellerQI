@@ -77,6 +77,11 @@ const userSchema = new mongoose.Schema(
         enum: ["active", "inactive", "cancelled", "past_due"],
         default: "active"
       },
+      adminId:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'User',
+        require:false
+      },
       sellerCentral:{
         type:mongoose.Schema.Types.ObjectId,
         ref:'Seller',

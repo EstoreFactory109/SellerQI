@@ -9,6 +9,13 @@ import AccountIntegration from '../Components/settings/AccountIntegrations/Accou
 import PlansAndBilling from '../Components/settings/PlansAndBilling/PlansAndBilling.jsx';
 import Support from '../Components/settings/Support/Support.jsx';
 
+// Admin Components
+import AdminUserProfile from '../Components/settings/Admin/AdminUserProfile.jsx';
+
+import AdminAccountIntegrations from '../Components/settings/Admin/AdminAccountIntegrations.jsx';
+import AdminPlansAndBilling from '../Components/settings/Admin/AdminPlansAndBilling.jsx';
+import AdminSupport from '../Components/settings/Admin/AdminSupport.jsx';
+
 const Settings = () => {
   const [searchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'profile';
@@ -27,6 +34,17 @@ const Settings = () => {
         return <Teams />;
       case 'support':
         return <Support />;
+      
+      // Admin tabs
+              case 'admin-user-profile':
+            return <AdminUserProfile />;
+        case 'admin-account-integration':
+            return <AdminAccountIntegrations />;
+        case 'admin-plans-billing':
+            return <AdminPlansAndBilling />;
+        case 'admin-support':
+            return <AdminSupport />;
+      
       default:
         return <Profile />;
     }

@@ -31,7 +31,11 @@ export default function SubscriptionSuccess() {
                         
                         // Redirect based on upgrade path
                         setTimeout(() => {
-                            if (previousPlan === 'LITE' || !previousPlan) {
+                            if (result.data.planType === 'AGENCY') {
+                                // User purchased AGENCY plan, redirect to client registration
+                                localStorage.removeItem('previousPlan');
+                                navigate('/agency-client-registration');
+                            } else if (previousPlan === 'LITE' || !previousPlan) {
                                 // User upgraded from LITE or new user, redirect to connect-to-amazon
                                 localStorage.removeItem('previousPlan');
                                 navigate('/connect-to-amazon');
