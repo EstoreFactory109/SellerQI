@@ -284,6 +284,28 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(401).json(new ApiResponse(401, "", "Password not matched"));
     }
 
+    // Check trial status on login
+    if (checkUserIfExists.isInTrialPeriod && checkUserIfExists.trialEndsDate) {
+        const currentDate = new Date();
+        const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
+        
+        // If trial has expired, update user status
+        if (currentDate > trialEndDate) {
+            await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
+                isInTrialPeriod: false,
+                packageType: 'LITE',
+                subscriptionStatus: 'inactive'
+            });
+            
+            // Update the local user object for the response
+            checkUserIfExists.isInTrialPeriod = false;
+            checkUserIfExists.packageType = 'LITE';
+            checkUserIfExists.subscriptionStatus = 'inactive';
+            
+            logger.info(`User ${checkUserIfExists._id} trial expired. Downgraded to LITE plan.`);
+        }
+    }
+
     let getSellerCentral;
     let allSellerAccounts = null;
     let AccessToken, RefreshToken, LocationToken, adminToken = "";
@@ -374,7 +396,9 @@ const loginUser = asyncHandler(async (req, res) => {
         whatsapp: checkUserIfExists.whatsapp,
         accessType: checkUserIfExists.accessType,
         packageType: checkUserIfExists.packageType,
-        subscriptionStatus: checkUserIfExists.subscriptionStatus
+        subscriptionStatus: checkUserIfExists.subscriptionStatus,
+        isInTrialPeriod: checkUserIfExists.isInTrialPeriod || false,
+        trialEndsDate: checkUserIfExists.trialEndsDate || null
     };
 
     // Add all seller accounts data if user is superAdmin
@@ -769,6 +793,28 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             return res.status(404).json(new ApiResponse(404, "", "User not found. Please sign up first."));
         }
 
+        // Check trial status on Google login
+        if (checkUserIfExists.isInTrialPeriod && checkUserIfExists.trialEndsDate) {
+            const currentDate = new Date();
+            const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
+            
+            // If trial has expired, update user status
+            if (currentDate > trialEndDate) {
+                await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
+                    isInTrialPeriod: false,
+                    packageType: 'LITE',
+                    subscriptionStatus: 'inactive'
+                });
+                
+                // Update the local user object for the response
+                checkUserIfExists.isInTrialPeriod = false;
+                checkUserIfExists.packageType = 'LITE';
+                checkUserIfExists.subscriptionStatus = 'inactive';
+                
+                logger.info(`User ${checkUserIfExists._id} trial expired during Google login. Downgraded to LITE plan.`);
+            }
+        }
+
         let getSellerCentral;
         let allSellerAccounts = null;
         let AccessToken, RefreshToken, LocationToken, adminToken = "";
@@ -820,7 +866,11 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             email: checkUserIfExists.email,
             phone: checkUserIfExists.phone,
             whatsapp: checkUserIfExists.whatsapp,
-            accessType: checkUserIfExists.accessType
+            accessType: checkUserIfExists.accessType,
+            packageType: checkUserIfExists.packageType,
+            subscriptionStatus: checkUserIfExists.subscriptionStatus,
+            isInTrialPeriod: checkUserIfExists.isInTrialPeriod || false,
+            trialEndsDate: checkUserIfExists.trialEndsDate || null
         };
 
         // Add all seller accounts data if user is superAdmin
@@ -1104,6 +1154,63 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
     }
 });
 
+// Activate 7-day free trial
+const activateFreeTrial = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        // Find user
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json(
+                new ApiResponse(404, null, 'User not found')
+            );
+        }
+
+        // Check if user is already in trial period
+        if (user.isInTrialPeriod) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'User is already in a trial period')
+            );
+        }
+
+        // Check if user already has a PRO or AGENCY package
+        if (user.packageType === 'PRO' || user.packageType === 'AGENCY') {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'User already has a paid subscription')
+            );
+        }
+
+        // Calculate trial end date (7 days from now)
+        const trialEndsDate = new Date();
+        trialEndsDate.setDate(trialEndsDate.getDate() + 7);
+
+        // Update user with trial information
+        user.isInTrialPeriod = true;
+        user.trialEndsDate = trialEndsDate;
+        user.packageType = 'PRO';
+        user.subscriptionStatus = 'active';
+        await user.save();
+
+        logger.info(`User ${userId} activated 7-day free trial. Trial ends on ${trialEndsDate}`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                isInTrialPeriod: user.isInTrialPeriod,
+                trialEndsDate: user.trialEndsDate,
+                packageType: user.packageType,
+                subscriptionStatus: user.subscriptionStatus
+            }, 'Free trial activated successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error activating free trial:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, 'Failed to activate free trial')
+        );
+    }
+});
+
 // Admin endpoints
 const getAdminProfile = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
@@ -1335,6 +1442,7 @@ module.exports = {
     googleLoginUser,
     googleRegisterUser,
     updateSubscriptionPlan,
+    activateFreeTrial,
     // Admin endpoints
     getAdminProfile,
     getAdminClients,

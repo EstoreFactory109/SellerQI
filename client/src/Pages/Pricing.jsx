@@ -36,7 +36,16 @@ export default function PricingPage() {
         setShowCancelledMessage(false);
       }, 5000);
     }
-  }, [searchParams]);
+
+    // Check if user intended to activate free trial after signup
+    const intendedAction = localStorage.getItem('intendedAction');
+    if (intendedAction === 'free-trial' && isAuthenticated) {
+      // Small delay to ensure the user sees the pricing page briefly
+      setTimeout(() => {
+        handleFreeTrial();
+      }, 1500);
+    }
+  }, [searchParams, isAuthenticated]);
 
   const handleSubscribe = async (planType) => {
     // Check if user is authenticated
@@ -87,6 +96,38 @@ export default function PricingPage() {
       setTimeout(() => {
         setLoading(prev => ({ ...prev, [planType]: false }));
       }, planType === 'LITE' ? 1000 : 500);
+    }
+  };
+
+  const handleFreeTrial = async () => {
+    if (!isAuthenticated) {
+      // Store the intended action and redirect to signup
+      localStorage.setItem('intendedAction', 'free-trial');
+      navigate('/sign-up');
+      return;
+    }
+
+    setLoading(prev => ({ ...prev, freeTrial: true }));
+
+    try {
+      const response = await axiosInstance.post('/app/activate-free-trial');
+      
+      if (response.status === 200) {
+        // Clear any intended action since trial is now activated
+        localStorage.removeItem('intendedAction');
+        
+        // Redirect to connect-to-amazon page for trial users
+        setTimeout(() => {
+          navigate('/connect-to-amazon');
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error activating free trial:', error);
+      alert(error.response?.data?.message || 'Failed to activate free trial. Please try again.');
+    } finally {
+      setTimeout(() => {
+        setLoading(prev => ({ ...prev, freeTrial: false }));
+      }, 1000);
     }
   };
 
@@ -323,6 +364,27 @@ export default function PricingPage() {
                 >
                   {getButtonText('PRO')}
                 </button>
+                
+                {/* Free Trial Button - Only for PRO plan */}
+                <div className="mt-4 text-center">
+                  <p className="text-white/80 text-sm mb-3">or</p>
+                  <button
+                    onClick={handleFreeTrial}
+                    disabled={loading.freeTrial}
+                    className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 border-2 ${
+                      loading.freeTrial
+                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed border-gray-400'
+                        : 'bg-transparent border-white text-white hover:bg-white hover:text-[#3B4A6B]'
+                    }`}
+                  >
+                    {loading.freeTrial ? (
+                      <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                    ) : (
+                      'Start 7-Day Free Trial'
+                    )}
+                  </button>
+                  <p className="text-white/60 text-xs mt-2">No credit card required</p>
+                </div>
               </motion.div>
 
               {/* Agency Plan */}

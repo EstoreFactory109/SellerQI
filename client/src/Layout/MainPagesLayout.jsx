@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import TopNav from '../Components/Navigation/TopNav'
 import LeftNavSection from '../Components/Navigation/LeftNavSection'
 import LeftNavSectionForTablet from '../Components/Navigation/LeftNavSectionForTablet'
+import TrialBanner from '../Components/TrialBanner/TrialBanner'
 
 const MainPagesLayout = () => {
 
@@ -11,6 +12,7 @@ const MainPagesLayout = () => {
         <LeftNavSectionForTablet/>
         <section className='w-full h-[100vh] overflow-hidden'>
             <TopNav/>
+            <TrialBanner/>
             <Outlet/>
         </section>
     </div>

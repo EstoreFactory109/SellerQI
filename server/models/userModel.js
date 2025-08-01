@@ -77,6 +77,14 @@ const userSchema = new mongoose.Schema(
         enum: ["active", "inactive", "cancelled", "past_due"],
         default: "active"
       },
+      isInTrialPeriod: {
+        type: Boolean,
+        default: false
+      },
+      trialEndsDate: {
+        type: Date,
+        required: false
+      },
       adminId:{
         type:mongoose.Schema.Types.ObjectId,
         ref:'User',

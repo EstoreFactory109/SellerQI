@@ -106,6 +106,13 @@ export default function SellerQIHomepage() {
     });
   }
 
+  const handleStartFreeTrial = () => {
+    // Store intended action for after signup
+    localStorage.setItem('intendedAction', 'free-trial');
+    // Navigate to signup page
+    navigate('/sign-up');
+  }
+
   return (
     <div className="min-h-screen w-full bg-white flex flex-col">
       {/* Navbar */}
@@ -730,7 +737,10 @@ export default function SellerQIHomepage() {
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Track Multiple Products</li>
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Issue Breakdown</li>
                 </ul>
-                <button className="w-full bg-white text-[#3B4A6B] py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
+                <button 
+                  onClick={handleStartFreeTrial}
+                  className="w-full bg-white text-[#3B4A6B] py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                >
                   Start 7-Days Free Trial
                 </button>
               </div>
