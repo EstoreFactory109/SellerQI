@@ -8,7 +8,8 @@ import {
   Phone, 
   Lock, 
   ArrowRight,
-  Loader2
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 
 import axios from 'axios';
@@ -16,6 +17,30 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice';
 import googleAuthService from '../services/googleAuthService.js';
+
+// Countries data with phone validation patterns
+const countries = [
+  { code: '+1', name: 'United States', flag: '🇺🇸', pattern: /^\d{10}$/, placeholder: '(123) 456-7890', minLength: 10, maxLength: 10 },
+  { code: '+1', name: 'Canada', flag: '🇨🇦', pattern: /^\d{10}$/, placeholder: '(123) 456-7890', minLength: 10, maxLength: 10 },
+  { code: '+44', name: 'United Kingdom', flag: '🇬🇧', pattern: /^\d{10,11}$/, placeholder: '7123 456789', minLength: 10, maxLength: 11 },
+  { code: '+91', name: 'India', flag: '🇮🇳', pattern: /^\d{10}$/, placeholder: '98765 43210', minLength: 10, maxLength: 10 },
+  { code: '+86', name: 'China', flag: '🇨🇳', pattern: /^\d{11}$/, placeholder: '138 0013 8000', minLength: 11, maxLength: 11 },
+  { code: '+49', name: 'Germany', flag: '🇩🇪', pattern: /^\d{10,12}$/, placeholder: '30 12345678', minLength: 10, maxLength: 12 },
+  { code: '+33', name: 'France', flag: '🇫🇷', pattern: /^\d{9,10}$/, placeholder: '6 12 34 56 78', minLength: 9, maxLength: 10 },
+  { code: '+39', name: 'Italy', flag: '🇮🇹', pattern: /^\d{9,10}$/, placeholder: '312 345 6789', minLength: 9, maxLength: 10 },
+  { code: '+34', name: 'Spain', flag: '🇪🇸', pattern: /^\d{9}$/, placeholder: '612 34 56 78', minLength: 9, maxLength: 9 },
+  { code: '+81', name: 'Japan', flag: '🇯🇵', pattern: /^\d{10,11}$/, placeholder: '90 1234 5678', minLength: 10, maxLength: 11 },
+  { code: '+82', name: 'South Korea', flag: '🇰🇷', pattern: /^\d{9,11}$/, placeholder: '10 1234 5678', minLength: 9, maxLength: 11 },
+  { code: '+61', name: 'Australia', flag: '🇦🇺', pattern: /^\d{9}$/, placeholder: '412 345 678', minLength: 9, maxLength: 9 },
+  { code: '+55', name: 'Brazil', flag: '🇧🇷', pattern: /^\d{10,11}$/, placeholder: '11 91234-5678', minLength: 10, maxLength: 11 },
+  { code: '+52', name: 'Mexico', flag: '🇲🇽', pattern: /^\d{10}$/, placeholder: '55 1234 5678', minLength: 10, maxLength: 10 },
+  { code: '+7', name: 'Russia', flag: '🇷🇺', pattern: /^\d{10}$/, placeholder: '912 345-67-89', minLength: 10, maxLength: 10 },
+  { code: '+90', name: 'Turkey', flag: '🇹🇷', pattern: /^\d{10}$/, placeholder: '532 123 45 67', minLength: 10, maxLength: 10 },
+  { code: '+971', name: 'UAE', flag: '🇦🇪', pattern: /^\d{8,9}$/, placeholder: '50 123 4567', minLength: 8, maxLength: 9 },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦', pattern: /^\d{8,9}$/, placeholder: '50 123 4567', minLength: 8, maxLength: 9 },
+  { code: '+27', name: 'South Africa', flag: '🇿🇦', pattern: /^\d{9}$/, placeholder: '82 123 4567', minLength: 9, maxLength: 9 },
+  { code: '+234', name: 'Nigeria', flag: '🇳🇬', pattern: /^\d{7,10}$/, placeholder: '803 123 4567', minLength: 7, maxLength: 10 },
+];
 
 const SignUp = () => {
   const [formData, setFormData] = useState({
@@ -25,6 +50,8 @@ const SignUp = () => {
     email: '',
     password: ''
   });
+  const [selectedCountry, setSelectedCountry] = useState(countries[0]); // Default to US
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -38,6 +65,20 @@ const SignUp = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.country-dropdown')) {
+        setShowCountryDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setErrors({ ...errors, [e.target.name]: '' });
@@ -47,11 +88,29 @@ const SignUp = () => {
     setErrors({ ...errors, [e.target.name]: '' });
   };
 
+  const handleCountrySelect = (country) => {
+    setSelectedCountry(country);
+    setShowCountryDropdown(false);
+    setFormData({ ...formData, phone: '' }); // Clear phone input when country changes
+    setErrors({ ...errors, phone: '' }); // Clear phone error when country changes
+  };
+
+  const handlePhoneChange = (e) => {
+    const value = e.target.value;
+    // Only allow digits and spaces, and enforce max length
+    const cleanValue = value.replace(/[^\d\s]/g, '');
+    const digitsOnly = cleanValue.replace(/\s+/g, '');
+    
+    if (digitsOnly.length <= selectedCountry.maxLength) {
+      setFormData({ ...formData, phone: cleanValue });
+      setErrors({ ...errors, phone: '' });
+    }
+  };
+
   const validateForm = () => {
     let newErrors = {};
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^\d{10}$/;
     const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
     if (!nameRegex.test(formData.firstname)) {
@@ -60,9 +119,13 @@ const SignUp = () => {
     if (!nameRegex.test(formData.lastname)) {
       newErrors.lastname = 'Enter a valid last name (only letters, min 2 characters)';
     }
-    if (!phoneRegex.test(formData.phone)) {
-      newErrors.phone = 'Enter a valid 10-digit phone number';
+    
+    // Phone validation based on selected country
+    const cleanPhone = formData.phone.replace(/\s+/g, ''); // Remove spaces
+    if (!selectedCountry.pattern.test(cleanPhone)) {
+      newErrors.phone = `Enter a valid phone number for ${selectedCountry.name} (${selectedCountry.minLength}${selectedCountry.minLength !== selectedCountry.maxLength ? `-${selectedCountry.maxLength}` : ''} digits)`;
     }
+    
     if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Enter a valid email address';
     }
@@ -83,6 +146,7 @@ const SignUp = () => {
     try {
       const formDataWithTerms = {
         ...formData,
+        phone: `${selectedCountry.code} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
@@ -242,24 +306,69 @@ const SignUp = () => {
                 </div>
               </div>
 
-              {/* Phone Field */}
+              {/* Phone Field with Country Code */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Phone Number
                 </label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleChange}
-                    onFocus={handleFocus}
-                    className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                      errors.phone ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    placeholder="Enter your phone number"
-                  />
+                <div className="flex">
+                  {/* Country Code Dropdown */}
+                  <div className="relative country-dropdown">
+                    <button
+                      type="button"
+                      onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                      className={`flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white hover:bg-gray-50 focus:outline-none transition-all duration-300 ${
+                        errors.phone ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      <span className="text-lg">{selectedCountry.flag}</span>
+                      <span className="text-sm font-medium text-gray-700">{selectedCountry.code}</span>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCountryDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    {/* Dropdown Menu */}
+                    <AnimatePresence>
+                      {showCountryDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          transition={{ duration: 0.2 }}
+                          className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto w-80 min-w-max"
+                        >
+                          {countries.map((country, index) => (
+                            <button
+                              key={index}
+                              type="button"
+                              onClick={() => handleCountrySelect(country)}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-100 last:border-b-0"
+                            >
+                              <span className="text-lg flex-shrink-0">{country.flag}</span>
+                              <span className="text-sm font-semibold text-gray-800 flex-shrink-0 min-w-[3rem]">{country.code}</span>
+                              <span className="text-sm text-gray-600 truncate">{country.name}</span>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  
+                  {/* Phone Number Input */}
+                  <div className="relative flex-1">
+                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      name="phone"
+                      value={formData.phone}
+                      onChange={handlePhoneChange}
+                      onFocus={handleFocus}
+                      className={`w-full pl-10 pr-4 py-2.5 h-11 border-t border-r border-b rounded-r-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
+                        errors.phone ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                      placeholder={selectedCountry.placeholder}
+                      maxLength={selectedCountry.maxLength + Math.floor(selectedCountry.maxLength / 3)} // Extra space for formatting
+                    />
+                  </div>
                 </div>
                 {errors.phone && (
                   <motion.p
@@ -270,6 +379,9 @@ const SignUp = () => {
                     {errors.phone}
                   </motion.p>
                 )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter {selectedCountry.minLength}{selectedCountry.minLength !== selectedCountry.maxLength ? `-${selectedCountry.maxLength}` : ''} digits for {selectedCountry.name}
+                </p>
               </div>
 
               {/* Email Field */}
