@@ -135,6 +135,7 @@ const ConnectAccounts = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [marketplaceConfig, setMarketplaceConfig] = useState(null);
+  const [isSellerCentralConnected, setIsSellerCentralConnected] = useState(false);
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -159,6 +160,32 @@ const ConnectAccounts = () => {
       // Default to US if no parameters provided
       setMarketplaceConfig(MARKETPLACE_CONFIG['US']);
     }
+
+    // Check if Seller Central connection was successful
+    const checkConnectionStatus = () => {
+      // Check if we have seller ID from successful token generation
+      const sellerId = sessionStorage.getItem('sp_seller_id');
+      
+      // Check if we were just redirected from successful token generation
+      const wasSellerCentralLoading = localStorage.getItem('sellerCentralLoading') === 'true';
+      
+      if (sellerId && wasSellerCentralLoading) {
+        setIsSellerCentralConnected(true);
+        setSuccessMessage('Amazon Seller Central connected successfully!');
+        // Clear the loading state from localStorage
+        localStorage.removeItem('sellerCentralLoading');
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          setSuccessMessage('');
+        }, 5000);
+      } else if (sellerId) {
+        // Already connected from previous session
+        setIsSellerCentralConnected(true);
+      }
+    };
+
+    checkConnectionStatus();
   }, [countryCode, region]);
 
   const getDefaultMarketplaceForRegion = (region) => {
@@ -365,14 +392,21 @@ const ConnectAccounts = () => {
                 </div>
                 <button
                   onClick={handleConnectSellerCentral}
-                  disabled={sellerCentralLoading || !marketplaceConfig}
+                  disabled={sellerCentralLoading || !marketplaceConfig || isSellerCentralConnected}
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    sellerCentralLoading || !marketplaceConfig
+                    isSellerCentralConnected
+                      ? 'bg-green-600 text-white cursor-not-allowed'
+                      : sellerCentralLoading || !marketplaceConfig
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
                   }`}
                 >
-                  {sellerCentralLoading ? (
+                  {isSellerCentralConnected ? (
+                    <>
+                      <CheckCircle className="w-5 h-5" />
+                      Connected
+                    </>
+                  ) : sellerCentralLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <>

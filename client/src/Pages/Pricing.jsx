@@ -353,21 +353,10 @@ export default function PricingPage() {
                   </li>
                 </ul>
                 
-                <button
-                  onClick={() => handleSubscribe('PRO')}
-                  disabled={isButtonDisabled('PRO')}
-                  className={`w-full py-4 px-6 rounded-lg font-bold transition-all duration-300 text-lg ${
-                    isButtonDisabled('PRO')
-                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                      : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg hover:shadow-xl'
-                  }`}
-                >
-                  {getButtonText('PRO')}
-                </button>
+
                 
                 {/* Free Trial Button - Only for PRO plan */}
                 <div className="mt-4 text-center">
-                  <p className="text-white/80 text-sm mb-3">or</p>
                   <button
                     onClick={handleFreeTrial}
                     disabled={loading.freeTrial}
@@ -380,7 +369,7 @@ export default function PricingPage() {
                     {loading.freeTrial ? (
                       <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                     ) : (
-                      'Start 7-Day Free Trial'
+                      'Start 7 Day Trial'
                     )}
                   </button>
                   <p className="text-white/60 text-xs mt-2">No credit card required</p>

@@ -50,7 +50,7 @@ const OtpVerification = () => {
       },{withCredentials:true});
       if (response.status === 200) {
         setLoading(false);
-        localStorage.setItem("isAuth", true);
+        localStorage.setItem("isAuth", true);d
         
         // After email verification, always redirect to pricing page for plan selection
         navigate("/pricing");
@@ -63,7 +63,10 @@ const OtpVerification = () => {
   return (
     <section className="flex flex-col items-center justify-center w-full min-h-screen bg-white text-black">
       <div className="container rounded-lg bg-white w-[90%] max-w-[500px] p-12 text-center">
-        <h1 className="title text-2xl mb-8">Enter OTP</h1>
+        <h1 className="title text-2xl mb-4">Enter OTP</h1>
+        <p className="text-gray-600 mb-8">
+          OTP has been sent to your registered email address: <span className="font-medium">{email}</span>
+        </p>
         <form id="otp-form" className="w-full flex gap-5 items-center justify-center">
           {[one, two, three, four, five].map((ref, index) => (
             <input

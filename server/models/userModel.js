@@ -20,12 +20,12 @@ const userSchema = new mongoose.Schema(
         type: String,
         required: [true, "Phone number is required"],
         unique: true,
-        match: [/^\d{10}$/, "Phone number must be a valid 10-digit number"],
+      
       },
       whatsapp: {
         type: String,
         required: [true, "WhatsApp number is required"],
-        match: [/^\d{10}$/, "WhatsApp number must be a valid 10-digit number"],
+     
       },
       email: {
         type: String,
