@@ -4,7 +4,8 @@
   "description": "A scalable production ready seller central analysing application ",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node api/index.js",
+    "start": "nodemon api/index.js"
   },
   "author": "",
   "license": "ISC",
