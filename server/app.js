@@ -1,7 +1,8 @@
 require('dotenv').config()
 const express=require('express')
 const app=express();
-
+const path=require('path')
+const _dirname=path.resolve()
 
 const cors = require('cors')
 const cookieParser=require('cookie-parser')
@@ -48,8 +49,10 @@ app.use('/app/profile',profileRoute)
 app.use('/app/stripe',stripeRoute)
 app.use('/app/support',supportTicketRoute)
 
-app.get('/',(req,res)=>{
-    res.send("Hello world");
+app.use(express.static(path.join(_dirname,'/client/dist')))
+
+app.get('*',(req,res)=>{
+    res.sendFile(path.resolve(_dirname,'client/dist/index.html'))
 })
 
 
