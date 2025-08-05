@@ -83,7 +83,12 @@ const ProtectedRouteWrapper = ({ children }) => {
         } else {
           // Clear any stale auth data
           localStorage.removeItem("isAuth");
-          navigate("/");
+          // Add delay to prevent immediate redirect loops
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              navigate("/", { replace: true });
+            }
+          }, 200);
         }
       } catch (error) {
         console.error("❌ Auth check failed:", error);
@@ -94,9 +99,20 @@ const ProtectedRouteWrapper = ({ children }) => {
         // Clear any stale auth data
         localStorage.removeItem("isAuth");
         
-        // Only navigate if we haven't already
-        if (isMountedRef.current) {
-          navigate("/");
+        // Only navigate for critical auth errors, not general errors
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          // Add delay to prevent immediate redirect loops
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              navigate("/", { replace: true });
+            }
+          }, 200);
+        } else {
+          // For non-auth errors, provide default data and continue
+          console.log("⚠️ Non-auth error - providing default data structure");
+          const defaultData = createDefaultDashboardData();
+          dispatch(setDashboardInfo(defaultData));
+          setAuthChecked(true);
         }
       } finally {
         if (isMountedRef.current) {

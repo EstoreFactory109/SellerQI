@@ -85,15 +85,19 @@ export const useAuth = () => {
   useEffect(() => {
     // Quick check for existing auth status in localStorage
     const storedAuth = localStorage.getItem("isAuth");
-    if (!storedAuth) {
+    if (!storedAuth || storedAuth === "false") {
       setIsAuthenticated(false);
       setIsLoading(false);
       return;
     }
 
-    // Perform actual auth check
-    checkAuth();
-  }, [checkAuth]);
+    // Perform actual auth check with small delay to prevent rapid calls
+    const timer = setTimeout(() => {
+      checkAuth().catch(console.error);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, []); // Remove checkAuth dependency to prevent infinite loops
 
   return {
     isLoading,
