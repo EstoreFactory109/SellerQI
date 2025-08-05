@@ -18,6 +18,7 @@ const { v4: uuidv4 } = require('uuid');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 const IPTrackingModel = require('../models/IPTrackingModel.js');
 const { OAuth2Client } = require('google-auth-library');
+const { getHttpCookieOptions } = require('../utils/cookieConfig.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
@@ -148,11 +149,7 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
-        const options = {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None"
-        };
+        const options = getHttpCookieOptions();
 
         // Set cookies to switch to client context
         res.status(201)
@@ -216,11 +213,7 @@ const verifyUser = asyncHandler(async (req, res) => {
         // Don't fail the verification process if scheduling fails
     }
 
-    const options = {
-        httpOnly: true,
-        secure: true,
-        sameSite: "None"
-    }
+    const options = getHttpCookieOptions();
 
     res.status(200)
         .cookie("IBEXAccessToken", AccessToken, options)
@@ -378,11 +371,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
 
-    const option = {
-        httpOnly: true,
-        secure: true,
-        sameSite: "None"
-    }
+    const option = getHttpCookieOptions();
 
     console.log(AccessToken,RefreshToken,LocationToken);
     
@@ -441,11 +430,7 @@ const logoutUser = asyncHandler(async (req, res) => {
     }
 
     // Define the SAME options used when setting cookies
-    const option = {
-        httpOnly: true,
-        secure: true,
-        sameSite: "None"
-    }
+    const option = getHttpCookieOptions();
 
     // Clear cookies with the same options
     res.clearCookie("AdminToken", option);
@@ -530,11 +515,7 @@ const switchAccount = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        const option = {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None"
-        }
+        const option = getHttpCookieOptions();
 
         return res.status(200)
             .cookie("IBEXAccessToken", AccessToken, option)
@@ -545,11 +526,7 @@ const switchAccount = asyncHandler(async (req, res) => {
 
     // Verify that the admin is actually a superAdmin
     let LocationToken = await createLocationToken(country, region);
-    const option = {
-        httpOnly: true,
-        secure: true,
-        sameSite: "None"
-    }
+    const option = getHttpCookieOptions();
 
     return res.status(200)
         .cookie("IBEXLocationToken", LocationToken, option)
@@ -853,11 +830,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        const option = {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None"
-        };
+        const option = getHttpCookieOptions();;
 
         // Prepare response data
         const responseData = {
@@ -981,11 +954,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
                 return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
             }
 
-            const option = {
-                httpOnly: true,
-                secure: true,
-                sameSite: "None"
-            };
+                    const option = getHttpCookieOptions();
 
             // Prepare response data
             const responseData = {
@@ -1074,11 +1043,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
-        const options = {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None"
-        };
+        const options = getHttpCookieOptions();
 
         // Prepare response data
         const responseData = {

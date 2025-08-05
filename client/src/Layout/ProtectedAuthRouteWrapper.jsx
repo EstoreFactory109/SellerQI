@@ -1,84 +1,53 @@
-import React, { useEffect, useState, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import axios from "axios";
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Loader from '../Components/Loader/Loader.jsx';
+import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
 
 const ProtectedAuthRouteWrapper = ({ children }) => {
   const [isAuth, setIsAuth] = useState(null); // null = loading, true or false = known
-  const [hasRedirected, setHasRedirected] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
-  const hasCheckedRef = useRef(false);
 
   useEffect(() => {
-    // Prevent multiple auth checks
-    if (hasCheckedRef.current || hasRedirected) {
-      return;
-    }
-    
-    hasCheckedRef.current = true;
-
     // read from localStorage first
     const localAuth = localStorage.getItem("isAuth");
 
     if (localAuth === "true") {
       setIsAuth(true);
-      // Add small delay and check if we're not already on dashboard route
-      if (!location.pathname.includes("/seller-central-checker/dashboard")) {
-        setHasRedirected(true);
-        setTimeout(() => {
-          navigate("/seller-central-checker/dashboard", { replace: true });
-        }, 100);
-      }
+      navigate("/seller-central-checker/dashboard");
       return;
     } else if (localAuth === "false") {
       setIsAuth(false);
       return;
     }
 
-    // If no info in localStorage, validate backend
+    // If no info in localStorage, validate backend using coordinated auth check
     async function validate() {
       try {
-        const response = await axios.get(
-          `${import.meta.env.VITE_BASE_URI}/app/profile`,
-          { withCredentials: true }
-        );
-        if (response && response.status === 200) {
+        const result = await coordinatedAuthCheck();
+        if (result.isAuthenticated) {
           localStorage.setItem("isAuth", "true");
           setIsAuth(true);
-          // Check if we're not already on dashboard route to prevent loops
-          if (!location.pathname.includes("/seller-central-checker/dashboard")) {
-            setHasRedirected(true);
-            setTimeout(() => {
-              navigate("/seller-central-checker/dashboard", { replace: true });
-            }, 100);
-          }
+          navigate("/seller-central-checker/dashboard");
         } else {
           localStorage.setItem("isAuth", "false");
           setIsAuth(false);
         }
       } catch (error) {
-        console.error("Auth validation error:", error);
         localStorage.setItem("isAuth", "false");
         setIsAuth(false);
       }
     }
     validate();
-  }, []); // Remove navigate dependency to prevent re-runs
+  }, [navigate]);
 
-  // Show loader while auth status is unknown or during redirect
-  if (isAuth === null || hasRedirected) {
+  // Show loader while auth status is unknown
+  if (isAuth === null) {
     return <Loader />;
   }
 
-  // If user is authenticated and already on dashboard route, don't redirect again
-  if (isAuth === true && location.pathname.includes("/seller-central-checker/dashboard")) {
-    return null;
-  }
-
-  // If user is authenticated but not yet redirected, show loader
+  // If user is authenticated, don't show this page (redirect done)
   if (isAuth === true) {
-    return <Loader />;
+    return null;
   }
 
   // Otherwise show the protected children (login/signup pages)

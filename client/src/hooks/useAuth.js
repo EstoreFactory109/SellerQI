@@ -3,9 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import axiosInstance from '../config/axios.config.js';
 import { clearCogsData } from '../redux/slices/cogsSlice.js';
-
-// Global auth state to prevent multiple simultaneous checks
-let authCheckPromise = null;
+import { coordinatedAuthCheck, clearAuthCache } from '../utils/authCoordinator.js';
 
 export const useAuth = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -15,47 +13,8 @@ export const useAuth = () => {
   const dispatch = useDispatch();
 
   const checkAuth = useCallback(async () => {
-    // If there's already an auth check in progress, wait for it
-    if (authCheckPromise) {
-      try {
-        const result = await authCheckPromise;
-        setIsAuthenticated(result.isAuthenticated);
-        setUser(result.user);
-        setIsLoading(false);
-        return result;
-      } catch (error) {
-        setIsAuthenticated(false);
-        setUser(null);
-        setIsLoading(false);
-        throw error;
-      }
-    }
-
-    // Create a new auth check promise
-    authCheckPromise = (async () => {
-      try {
-        const response = await axiosInstance.get('/app/profile');
-        
-        if (response?.status === 200 && response.data?.data) {
-          const userData = response.data.data;
-          localStorage.setItem("isAuth", "true");
-          return { isAuthenticated: true, user: userData };
-        } else {
-          localStorage.removeItem("isAuth");
-          return { isAuthenticated: false, user: null };
-        }
-      } catch (error) {
-        console.error("❌ Auth check failed:", error);
-        localStorage.removeItem("isAuth");
-        return { isAuthenticated: false, user: null };
-      } finally {
-        // Clear the promise after completion
-        authCheckPromise = null;
-      }
-    })();
-
     try {
-      const result = await authCheckPromise;
+      const result = await coordinatedAuthCheck();
       setIsAuthenticated(result.isAuthenticated);
       setUser(result.user);
       setIsLoading(false);
@@ -75,6 +34,7 @@ export const useAuth = () => {
       console.error('Logout error:', error);
     } finally {
       localStorage.removeItem("isAuth");
+      clearAuthCache(); // Clear the coordinated auth cache
       dispatch(clearCogsData());
       setIsAuthenticated(false);
       setUser(null);
@@ -85,19 +45,15 @@ export const useAuth = () => {
   useEffect(() => {
     // Quick check for existing auth status in localStorage
     const storedAuth = localStorage.getItem("isAuth");
-    if (!storedAuth || storedAuth === "false") {
+    if (!storedAuth) {
       setIsAuthenticated(false);
       setIsLoading(false);
       return;
     }
 
-    // Perform actual auth check with small delay to prevent rapid calls
-    const timer = setTimeout(() => {
-      checkAuth().catch(console.error);
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, []); // Remove checkAuth dependency to prevent infinite loops
+    // Perform actual auth check
+    checkAuth();
+  }, []); // Fixed: Remove checkAuth from dependency array to prevent infinite loops
 
   return {
     isLoading,

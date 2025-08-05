@@ -4,6 +4,7 @@ import { CheckCircle, Shield, Database, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { loginSuccess } from "../redux/slices/authSlice.js";
+import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from "../services/googleAuthService.js";
 
 const GoogleInfoPage = () => {
@@ -182,6 +183,8 @@ const GoogleInfoPage = () => {
       
       if (response.status === 200) {
         // Existing user login
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         
@@ -219,6 +222,8 @@ const GoogleInfoPage = () => {
         
       } else if (response.status === 201) {
         // New user registration
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         

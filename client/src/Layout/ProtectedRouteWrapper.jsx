@@ -11,6 +11,7 @@ import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../re
 import analyseData from '../operations/analyse.js';
 import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js';
 import axiosInstance from '../config/axios.config.js';
+import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
 
 const ProtectedRouteWrapper = ({ children }) => {
@@ -44,13 +45,13 @@ const ProtectedRouteWrapper = ({ children }) => {
       setIsAuthenticating(true);
 
       try {
-        const response = await axiosInstance.get('/app/profile');
+        const result = await coordinatedAuthCheck();
 
         // Check if component is still mounted before proceeding
         if (!isMountedRef.current) return;
 
-        if (response?.status === 200 && response.data?.data) {
-          const userData = response.data.data;
+        if (result.isAuthenticated && result.user) {
+          const userData = result.user;
 
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
@@ -83,12 +84,7 @@ const ProtectedRouteWrapper = ({ children }) => {
         } else {
           // Clear any stale auth data
           localStorage.removeItem("isAuth");
-          // Add delay to prevent immediate redirect loops
-          setTimeout(() => {
-            if (isMountedRef.current) {
-              navigate("/", { replace: true });
-            }
-          }, 200);
+          navigate("/");
         }
       } catch (error) {
         console.error("❌ Auth check failed:", error);
@@ -99,20 +95,9 @@ const ProtectedRouteWrapper = ({ children }) => {
         // Clear any stale auth data
         localStorage.removeItem("isAuth");
         
-        // Only navigate for critical auth errors, not general errors
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          // Add delay to prevent immediate redirect loops
-          setTimeout(() => {
-            if (isMountedRef.current) {
-              navigate("/", { replace: true });
-            }
-          }, 200);
-        } else {
-          // For non-auth errors, provide default data and continue
-          console.log("⚠️ Non-auth error - providing default data structure");
-          const defaultData = createDefaultDashboardData();
-          dispatch(setDashboardInfo(defaultData));
-          setAuthChecked(true);
+        // Only navigate if we haven't already
+        if (isMountedRef.current) {
+          navigate("/");
         }
       } finally {
         if (isMountedRef.current) {

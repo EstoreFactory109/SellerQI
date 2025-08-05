@@ -16,6 +16,7 @@ import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice';
+import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
 
 // Countries data with phone validation patterns
@@ -175,6 +176,8 @@ const SignUp = () => {
         const response = await googleAuthService.handleGoogleSignUp();
         
         if (response.status === 200) {
+          // Clear any cached auth state to force fresh checks
+          clearAuthCache();
           // Store auth information
           localStorage.setItem("isAuth", true);
           dispatch(loginSuccess(response.data.data));
@@ -183,6 +186,8 @@ const SignUp = () => {
           navigate('/pricing');
           
         } else {
+            // Clear any cached auth state to force fresh checks
+            clearAuthCache();
             dispatch(loginSuccess(response.data));
             localStorage.setItem("isAuth", true);
             navigate("/connect-to-amazon");

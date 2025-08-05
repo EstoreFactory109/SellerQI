@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
+import { clearAuthCache } from '../utils/authCoordinator.js';
 
 
 const OtpVerification = () => {
@@ -50,7 +51,9 @@ const OtpVerification = () => {
       },{withCredentials:true});
       if (response.status === 200) {
         setLoading(false);
-        localStorage.setItem("isAuth", true);d
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
+        localStorage.setItem("isAuth", true);
         
         // After email verification, always redirect to pricing page for plan selection
         navigate("/pricing");

@@ -4,6 +4,7 @@ const User = require('../models/userModel');
 const asyncHandler = require('../utils/AsyncHandler');
 const { ApiResponse } = require('../utils/ApiResponse');
 const logger = require('../utils/Logger');
+const { getHttpCookieOptions } = require('../utils/cookieConfig.js');
 
 /**
  * Create checkout session for subscription
@@ -81,11 +82,7 @@ const handlePaymentSuccess = asyncHandler(async (req, res) => {
 
         // If admin token was created for AGENCY user, set it as cookie
         if (result.adminToken) {
-            const cookieOptions = {
-                httpOnly: true,
-                secure: true,
-                sameSite: "None"
-            };
+            const cookieOptions = getHttpCookieOptions();
             
             res.cookie("AdminToken", result.adminToken, cookieOptions);
             logger.info(`Admin token cookie set for AGENCY user: ${result.userId}`);

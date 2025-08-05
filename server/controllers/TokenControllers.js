@@ -8,6 +8,7 @@ const { createLocationToken } = require('../utils/Tokens.js');
 const logger = require('../utils/Logger.js');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 const { v4: uuidv4 } = require('uuid');
+const { getHttpCookieOptions } = require('../utils/cookieConfig.js');
 
 const SaveAllDetails = asyncHandler(async (req, res) => {
     const { region, country } = req.body;
@@ -53,7 +54,7 @@ const SaveAllDetails = asyncHandler(async (req, res) => {
     }
 
     return res.status(201)
-        .cookie("IBEXLocationToken", locationToken, { httpOnly: true, secure: true })
+        .cookie("IBEXLocationToken", locationToken, getHttpCookieOptions())
         .json(new ApiResponse(201, "", "All the seller central information has been stored successfully"));
 })
 
@@ -77,7 +78,7 @@ const saveDetailsOfOtherAccounts = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiError(500, "Error in creating location token"));
         }
         return res.status(201)
-            .cookie("IBEXLocationToken", locationToken, { httpOnly: true, secure: true })
+            .cookie("IBEXLocationToken", locationToken, getHttpCookieOptions())
             .json(new ApiResponse(201, "", "New account added successfully"));
     }
     sellerCentral.sellerAccount.push({ country: country, region: region });
@@ -98,7 +99,7 @@ const saveDetailsOfOtherAccounts = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiError(500, "Error in creating location token"));
     }
     return res.status(201)
-        .cookie("IBEXLocationToken", locationToken, { httpOnly: true, secure: true })
+        .cookie("IBEXLocationToken", locationToken, getHttpCookieOptions())
         .json(new ApiResponse(201, "", "New account added successfully"));
 })
 
@@ -131,7 +132,7 @@ const addNewSellerCentralAccount = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiError(500, "Error in creating location token"));
     }
     return res.status(201)
-        .cookie("IBEXLocationToken", locationToken, { httpOnly: true, secure: true })
+        .cookie("IBEXLocationToken", locationToken, getHttpCookieOptions())
         .json(new ApiResponse(201, "", "New account added successfully"));
 })
 

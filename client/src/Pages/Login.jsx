@@ -5,6 +5,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import axiosInstance from '../config/axios.config.js';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice.js';
+import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
 
 export default function Login() {
@@ -83,6 +84,9 @@ export default function Login() {
       });
 
       if (response.status === 200) {
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
+        
         // Store auth data
         localStorage.setItem('isAuth', 'true');
         
@@ -131,6 +135,9 @@ export default function Login() {
       const response = await googleAuthService.handleGoogleSignUp();
       
       if (response.status === 200) {
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
+        
         // Store auth information
         localStorage.setItem("isAuth", true);
         dispatch(loginSuccess(response.data.data));
@@ -149,6 +156,9 @@ export default function Login() {
         }
         
       } else {
+        // Clear any cached auth state to force fresh checks
+        clearAuthCache();
+        
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         // For new user registration, redirect to pricing
