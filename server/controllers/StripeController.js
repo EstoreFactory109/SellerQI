@@ -30,7 +30,7 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
 
         // Create success and cancel URLs
         const baseUrl = process.env.NODE_ENV === 'production' 
-            ? process.env.FRONTEND_URL 
+            ? process.env.CORS_ORIGIN_SUBDOMAIN 
             : 'http://localhost:3000';
 
         const successUrl = `${baseUrl}/subscription-success?session_id={CHECKOUT_SESSION_ID}`;
