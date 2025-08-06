@@ -18,7 +18,7 @@ const { v4: uuidv4 } = require('uuid');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 const IPTrackingModel = require('../models/IPTrackingModel.js');
 const { OAuth2Client } = require('google-auth-library');
-const { getHttpCookieOptions } = require('../utils/cookieConfig.js');
+const { getHttpsCookieOptions } = require('../utils/cookieConfig.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
@@ -149,7 +149,7 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
-        const options = getHttpCookieOptions();
+        const options = getHttpsCookieOptions();
 
         // Set cookies to switch to client context
         res.status(201)
@@ -213,7 +213,7 @@ const verifyUser = asyncHandler(async (req, res) => {
         // Don't fail the verification process if scheduling fails
     }
 
-    const options = getHttpCookieOptions();
+    const options = getHttpsCookieOptions();
 
     res.status(200)
         .cookie("IBEXAccessToken", AccessToken, options)
@@ -371,7 +371,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
 
-    const option = getHttpCookieOptions();
+    const option = getHttpsCookieOptions();
 
     console.log(AccessToken,RefreshToken,LocationToken);
     
