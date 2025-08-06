@@ -14,6 +14,7 @@ const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js'
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
+const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
 
 const testReport = async (req, res) => {
     const { accessToken, marketplaceIds } = req.body;
@@ -214,8 +215,19 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     })
   }
 
+
+  const testSendEmailOnRegistered = async (req, res) => {
+    const { userId, firstName, lastName, userPhone, userEmail,sellerId } = req.body;
+
+    console.log(userId, firstName, lastName, userPhone, userEmail,sellerId);
+    const result = await sendRegisteredEmail(userId, firstName, lastName, userPhone, userEmail,sellerId);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
 module.exports = { testReport, getTotalSales, 
   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered
    }

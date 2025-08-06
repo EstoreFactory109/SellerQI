@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>User Registration Details</title>
+  <style>
+    /* Base resets */
+    body, html { margin: 0; padding: 0; }
+    a { color: #3182ce; text-decoration: none; }
+    /* Container styles */
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 2.5rem 0;
+    }
+    .email-container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 0.5rem;
+      padding: 3rem;
+      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    }
+    .text-center { text-align: center; }
+    .text-left { text-align: left; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .mb-10 { margin-bottom: 2.5rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .my-4 { margin: 1rem 0; }
+    .my-6 { margin: 1.5rem 0; }
+    .my-8 { margin: 2rem 0; }
+    .text-gray-800 { color: #2d3748; }
+    .text-gray-700 { color: #4a5568; }
+    .text-gray-600 { color: #718096; }
+    .text-gray-500 { color: #a0aec0; }
+    .text-white { color: #ffffff; }
+    .text-blue-700 { color: #2b6cb0; }
+    .text-green-700 { color: #2f855a; }
+    .bg-blue-600 { background-color: #3182ce; }
+    .bg-gray-50 { background-color: #f7fafc; }
+    .bg-blue-50 { background-color: #ebf8ff; }
+    .bg-green-50 { background-color: #f0fff4; }
+    .padding-4 { padding: 1rem; }
+    .padding-6 { padding: 1.5rem; }
+    .padding-8 { padding: 2rem; }
+    .px-8 { padding-left: 2rem; padding-right: 2rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-md { border-radius: 0.375rem; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .border { border: 1px solid #e2e8f0; }
+    h1 { margin: 0; font-size: 1.875rem; font-weight: bold; line-height: 1.2; }
+    h2 { margin: 0; font-size: 1.5rem; font-weight: bold; }
+    h3 { margin: 0; font-size: 1.125rem; font-weight: 600; }
+    p { margin: 0; line-height: 1.6; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    
+    .user-info-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 2rem 0;
+    }
+    .user-info-table td {
+      padding: 1rem;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    .user-info-table .label {
+      font-weight: 600;
+      color: #4a5568;
+      width: 30%;
+      background-color: #f7fafc;
+    }
+    .user-info-table .value {
+      color: #2d3748;
+      background-color: #ffffff;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      background-color: #48bb78;
+      color: #ffffff;
+      font-size: 0.875rem;
+      font-weight: 600;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="text-center mb-10">
+      <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI Logo" width="120" class="mb-6" loading="eager"/>
+      <h1 class="text-gray-800">User Registration Details</h1>
+    </div>
+
+    <!-- Registration Status -->
+    <div class="bg-green-50 padding-6 rounded-lg text-center mb-8">
+      <h3 class="text-green-700 mb-2">✅ Registration Successful</h3>
+      <p class="text-gray-600">A new user has been successfully registered in the system.</p>
+    </div>
+
+    <!-- User Information Table -->
+    <div class="bg-gray-50 padding-6 rounded-lg">
+      <h3 class="text-gray-800 mb-4 text-center">User Information</h3>
+      
+      <table class="user-info-table">
+        <tr>
+          <td class="label">Database ID:</td>
+          <td class="value font-semibold">{{userId}}</td>
+        </tr>
+        <tr>
+          <td class="label">Seller ID:</td>
+          <td class="value font-semibold">{{sellerId}}</td>
+        </tr>
+        <tr>
+          <td class="label">Full Name:</td>
+          <td class="value font-semibold">{{userName}}</td>
+        </tr>
+        <tr>
+          <td class="label">Email Address:</td>
+          <td class="value">
+            <a href="mailto:{{userEmail}}" class="text-blue-700 font-semibold">{{userEmail}}</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="label">Phone Number:</td>
+          <td class="value">
+            <a href="tel:{{userPhone}}" class="text-blue-700 font-semibold">{{userPhone}}</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="label">Registration Date:</td>
+          <td class="value">{{registrationDate}}</td>
+        </tr>
+        <tr>
+          <td class="label">Account Status:</td>
+          <td class="value">
+            <span class="status-badge">Active</span>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Additional Information -->
+    <div class="bg-blue-50 padding-6 rounded-lg my-8">
+      <h3 class="text-gray-800 mb-4">📋 Next Steps</h3>
+      <ul style="margin: 0; padding-left: 1.5rem; color: #4a5568;">
+        <li style="margin: 0.5rem 0;">Email verification (if required)</li>
+        <li style="margin: 0.5rem 0;">Account setup and onboarding</li>
+        <li style="margin: 0.5rem 0;">Welcome email delivery</li>
+        <li style="margin: 0.5rem 0;">Initial system permissions configuration</li>
+      </ul>
+    </div>
+
+    <hr />
+
+    <!-- Footer -->
+    <div class="text-center">
+      <p class="text-gray-600 mb-4">
+        This is an automated system notification for user registration.
+      </p>
+      
+      <p class="text-gray-500" style="font-size: 0.875rem;">
+        Generated automatically by SellerQI System<br>
+        For technical support: <a href="mailto:support@sellerqi.com" class="text-blue-700">support@sellerqi.com</a>
+      </p>
+      
+      <p class="text-gray-500 mt-6" style="font-size: 0.875rem;">
+        © 2025 SellerQI. All rights reserved.<br>
+        This email contains confidential user information.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

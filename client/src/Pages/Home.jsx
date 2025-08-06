@@ -140,10 +140,10 @@ export default function SellerQIHomepage() {
             
             {/* Main Headline */}
             <h1 className="text-5xl lg:text-7xl font-bold leading-tight text-gray-900 mb-6">
-              The Ultimate <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B4A6B] to-emerald-600">Amazon Seller</span> Growth Platform
+            The Only <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B4A6B] to-emerald-600">Amazon Tool</span> That Gives You Actual Solutions
             </h1>
             <p className="text-xl lg:text-2xl text-gray-600 max-w-4xl mx-auto mb-8 leading-relaxed">
-              Instantly analyze, optimize, and scale your Amazon business with AI-powered insights. Join 10,000+ sellers who've increased their revenue by an average of <span className="font-semibold text-emerald-600">32%</span> in 90 days.
+            Others alert you to issues. SellerQI goes further — <span className="font-semibold text-emerald-600">prioritizing problems and recommending actions</span> that directly improve your bottom line.
             </p>
 
             {/* CTA Buttons */}

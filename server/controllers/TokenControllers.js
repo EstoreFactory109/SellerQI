@@ -9,6 +9,7 @@ const logger = require('../utils/Logger.js');
 const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedulingService.js');
 const { v4: uuidv4 } = require('uuid');
 const { getHttpCookieOptions } = require('../utils/cookieConfig.js');
+const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
 
 const SaveAllDetails = asyncHandler(async (req, res) => {
     const { region, country } = req.body;
@@ -181,6 +182,18 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
         sellerAccount.spiRefreshToken = refreshToken;
 
         await sellerCentral.save();
+
+        const getUser = await User.findById(userId).select("firstName lastName phone email");
+
+        if(!getUser){
+            logger.error(new ApiError(404,"User not found"));
+        }
+
+        const sendEmail = await sendRegisteredEmail(userId,getUser.firstName,getUser.lastName,getUser.phone,getUser.email,sellingPartnerId);
+        if(!sendEmail){
+            logger.error(new ApiError(500, "Internal server error in sending email"));
+           // return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+        }
         return res.status(200).json(new ApiResponse(200, sellerCentral, "Tokens generated successfully"));
 
     } catch (error) {

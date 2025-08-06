@@ -70,19 +70,6 @@ const getNumberOfProductReviews = async (asin, country) => {
   }
 };
 
-const CalculateNumberOfElementsPerRequest=(totalElements)=>{
-  let root=Math.floor(Math.sqrt(totalElements));
-  let numDiv=0;
-
-  for(let i=root;i>0;i--){
-    if(totalElements%i===0){
-      numDiv=i;
-      break;
-    }
-  }
-  return totalElements/numDiv;
-}
-
 const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
           // console.log("asinArray: ", asinArray);
   
@@ -91,34 +78,49 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
     return false;
   }
 
-  const limitNum=CalculateNumberOfElementsPerRequest(asinArray.length);
-
-  const limit = promiseLimit(limitNum); // ✅ Limit concurrency to 3
+  // ✅ Divide ASINs into 3 equal parts
+  const chunkSize = Math.ceil(asinArray.length / 3);
+  const chunks = [];
+  for (let i = 0; i < asinArray.length; i += chunkSize) {
+    chunks.push(asinArray.slice(i, i + chunkSize));
+  }
 
   try {
-    const tasks = asinArray.map((asin, index) =>
-      limit(async () => {
-        await delay(index * 500); // ✅ Staggered delay (0ms, 200ms, 400ms...)
+    let allProducts = [];
 
-        const data = await getNumberOfProductReviews(asin, country);
-        if (!data || !data.data) return null;
+    // ✅ Process each chunk sequentially
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      
+      const tasks = chunk.map((asin, index) =>
+        (async () => {
+          await delay(index * 500); // ✅ Staggered delay (0ms, 500ms, 1000ms...)
 
+          const data = await getNumberOfProductReviews(asin, country);
+          if (!data || !data.data) return null;
 
-        return {
-          asin: asin,
-          product_title: data.data.product_title || "",
-          about_product: data.data.about_product || "",
-          product_description: data.data.product_description || "",
-          product_photos: data.data.product_photos || [],
-          video_url: data.data.product_videos?.map(video => video.video_url) || [],
-          product_num_ratings: data.data.product_num_ratings || "",
-          product_star_ratings: data.data.product_star_rating || "",
-          aplus:data.data.has_aplus || false
-        };
-      })
-    );
+          return {
+            asin: asin,
+            product_title: data.data.product_title || "",
+            about_product: data.data.about_product || "",
+            product_description: data.data.product_description || "",
+            product_photos: data.data.product_photos || [],
+            video_url: data.data.product_videos?.map(video => video.video_url) || [],
+            product_num_ratings: data.data.product_num_ratings || "",
+            product_star_ratings: data.data.product_star_rating || "",
+            aplus:data.data.has_aplus || false
+          };
+        })()
+      );
 
-    const products = await Promise.all(tasks);
+      // ✅ Process current chunk with Promise.all
+      const chunkProducts = await Promise.all(tasks);
+      allProducts.push(...chunkProducts);
+      
+      logger.info(`✅ Completed batch ${chunkIndex + 1} of ${chunks.length}`);
+    }
+
+    const products = allProducts;
     const aplusProducts = products
       .filter(product => product !== null) // First filter out null products
       .map(product => ({
