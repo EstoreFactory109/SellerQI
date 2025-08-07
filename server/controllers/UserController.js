@@ -430,7 +430,7 @@ const logoutUser = asyncHandler(async (req, res) => {
     }
 
     // Define the SAME options used when setting cookies
-    const option = getHttpCookieOptions();
+    const option = getHttpsCookieOptions();
 
     // Clear cookies with the same options
     res.clearCookie("AdminToken", option);

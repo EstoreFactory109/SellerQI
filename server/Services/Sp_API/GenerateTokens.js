@@ -21,7 +21,7 @@ const axios=require('axios');
     const clientSecret = credentials.clientSecret;
     
     // Use environment variable for redirect URI, fallback to production URL
-    const redirectUri = 'https://www.sellerqi.com/auth/callback';
+    const redirectUri = 'https://members.sellerqi.com/auth/callback';
 
     try {
         logger.info(`Exchanging auth code for tokens using redirect URI: ${redirectUri}`);
@@ -127,7 +127,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
     const clientSecret = process.env.AMAZON_ADS_CLIENT_SECRET;
     
     // Use environment variable for redirect URI, fallback to production URL
-    const redirectUri = process.env.AMAZON_REDIRECT_URI || 'https://www.sellerqi.com/auth/callback';
+    const redirectUri = process.env.AMAZON_REDIRECT_URI || 'https://members.sellerqi.com/auth/callback';
 
     try {
         logger.info(`Exchanging ads auth code for tokens using redirect URI: ${redirectUri}`);

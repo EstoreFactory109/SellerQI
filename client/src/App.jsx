@@ -58,9 +58,9 @@ const App = () => {
             <Outlet />
           </ProtectedAuthRouteWrapper>
         }>
-          <Route path='/' element={<Home />} />
+         {/* <Route path='/' element={<Home />} /> */}
           <Route path='/sign-up' element={<Signup />} />
-          <Route path='/log-in' element={<Login />} />
+          <Route path='/' element={<Login />} />
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
@@ -70,23 +70,23 @@ const App = () => {
         <Route path='/auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />
-        <Route path='/pricing' element={<Pricing />} />
-        <Route path='/privacy-policy' element={<PrivacyPolicy />} />
-        <Route path='/terms-of-use' element={<Terms />} />
-        <Route path='/contact-us' element={<ContactUs />} />
-        <Route path='/refund-policy' element={<RefundPolicy />} />
-        <Route path='/loading' element={<LoadingPage />} />
+       {/* <Route path='/pricing' element={<Pricing />} /> */}
+        {/* <Route path='/privacy-policy' element={<PrivacyPolicy />} /> */}
+        {/* <Route path='/terms-of-use' element={<Terms />} /> */}
+        {/* <Route path='/contact-us' element={<ContactUs />} /> */}
+        {/* <Route path='/refund-policy' element={<RefundPolicy />} /> */}
+        {/* <Route path='/loading' element={<LoadingPage />} /> */}
         <Route path='/results' element={<ResultsPage />} />
         <Route path='/subscription-success' element={<SubscriptionSuccess />} />
         <Route path='/payment-cancel' element={<PaymentCancel />} />
         <Route path='/payment-failed' element={<PaymentFailed />} />
-        <Route path='/about-us' element={<AboutUs />} />
-        <Route path='/how-it-works' element={<HowItWorks />} />
-        <Route path='/promotions' element={<PromotionsPage />} />
-        <Route path='/advertisement' element={<Advertisement />} />
-        <Route path='/features' element={<Features />} />
-        <Route path='/inventory-management' element={<InventoryManagement />} />
-        <Route path='/auth/info' element={<GoogleInfoPage />} />
+        {/* <Route path='/about-us' element={<AboutUs />} /> */}
+        {/* <Route path='/how-it-works' element={<HowItWorks />} /> */}
+        {/* <Route path='/promotions' element={<PromotionsPage />} /> */}
+        {/* <Route path='/advertisement' element={<Advertisement />} /> */}
+        {/* <Route path='/features' element={<Features />} /> */}
+        {/* <Route path='/inventory-management' element={<InventoryManagement />} /> */}
+        {/* <Route path='/auth/info' element={<GoogleInfoPage />} /> */}
         <Route
           element={
             <ProtectedRouteWrapper>
