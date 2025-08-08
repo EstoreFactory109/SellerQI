@@ -44,6 +44,7 @@ const countries = [
 ];
 
 const SignUp = () => {
+  const [plans, setPlans] = useState("PRO-Trial");
   const [formData, setFormData] = useState({
     firstname: '',
     lastname: '',
@@ -78,6 +79,15 @@ const SignUp = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
+  }, []);
+
+  // Handle URL parameters for plan selection
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const plan = params.get("intended_package");
+    if(plan){
+      setPlans(plan);
+    }
   }, []);
 
   const handleChange = (e) => {
@@ -148,7 +158,11 @@ const SignUp = () => {
       const formDataWithTerms = {
         ...formData,
         phone: `${selectedCountry.code} ${formData.phone}`, // Include country code
-        allTermsAndConditionsAgreed: termsAccepted
+        allTermsAndConditionsAgreed: termsAccepted,
+        packageType: plans=="PRO-Trial" ? "PRO" : plans=="LITE",
+        isInTrialPeriod: plans=="PRO-Trial" ? true : false,
+        subscriptionStatus: plans=="PRO-Trial" ? "active" : "inactive",
+        trialEndsDate: plans=="PRO-Trial" ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
       if (response.status === 201) {
@@ -162,7 +176,7 @@ const SignUp = () => {
   };
 
   const navigateToLogin = () => {
-    navigate('/log-in');
+    navigate('/');
   };
 
   const handleGoogleSignUp = async () => {

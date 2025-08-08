@@ -21,10 +21,10 @@ const { OAuth2Client } = require('google-auth-library');
 const { getHttpsCookieOptions } = require('../utils/cookieConfig.js');
 
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } = req.body;
     // console.log(firstname)
 
-    if (!firstname || !lastname || !phone || !email || !password) {
+    if (!firstname || !lastname || !phone || !email || !password || !packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
     }
@@ -55,7 +55,7 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
     }
 
-    let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed);
+    let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
     // console.log(data);
 
     if (!data) {

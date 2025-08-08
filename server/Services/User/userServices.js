@@ -4,9 +4,9 @@ const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
 
 
-const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed) => {
+const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate) => {
 
-    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp){
+    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp || !packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate){
         logger.error(new ApiError(404,"Details and credentials are missing"));
         return false;
     }
@@ -26,7 +26,11 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
             email: email,
             password: password,
             OTP: otp,
-            allTermsAndConditionsAgreed: allTermsAndConditionsAgreed
+            allTermsAndConditionsAgreed: allTermsAndConditionsAgreed,
+            packageType: packageType,
+            isInTrialPeriod: isInTrialPeriod,
+            subscriptionStatus: subscriptionStatus,
+            trialEndsDate: trialEndsDate
         });
         return await user.save();
     } catch (error) {

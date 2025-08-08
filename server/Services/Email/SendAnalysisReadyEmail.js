@@ -6,7 +6,7 @@ const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
-let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'AmazonAnalyseReadyEmailTemplate.html'), 'utf8');
+let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(_dirname, '..', '..', 'Emails', 'AmazonAnalyseReadyEmailTemplate.html'), 'utf8');
 
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

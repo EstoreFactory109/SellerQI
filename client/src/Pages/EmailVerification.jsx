@@ -56,7 +56,7 @@ const OtpVerification = () => {
         localStorage.setItem("isAuth", true);
         
         // After email verification, always redirect to pricing page for plan selection
-        navigate("/pricing");
+        navigate("/connect-to-amazon");
       }
     } catch (error) {
       console.error("Verification failed", error);
