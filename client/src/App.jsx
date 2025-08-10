@@ -46,6 +46,8 @@ import ProfileIDSelection from './Pages/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/PaymentCancel.jsx';
 import PaymentFailed from './Pages/PaymentFailed.jsx';
 import AgencyClientRegistration from './Pages/AgencyClientRegistration.jsx';
+import AdminLogin from './Pages/AdminLogin.jsx';
+import ManageAccounts from './Pages/ManageAccounts.jsx';
 
 const App = () => {
 
@@ -61,8 +63,11 @@ const App = () => {
          {/* <Route path='/' element={<Home />} /> */}
           <Route path='/sign-up' element={<Signup />} />
           <Route path='/' element={<Login />} />
+          
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
+        <Route path='/admin-login' element={<AdminLogin />} />
+          <Route path='/manage-accounts' element={<ManageAccounts />} />
         <Route path='/verify-email' element={<EmailVerification />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/connect-accounts' element={<ConnectAccounts />} />

@@ -167,8 +167,7 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
             return res.status(404).json(new ApiResponse(404, "", "SellerCentral not found"));
         }
 
-        sellerCentral.selling_partner_id = sellingPartnerId;
-
+        
         // Find the seller account that matches the current region and country
         const sellerAccount = sellerCentral.sellerAccount.find(account =>
             account.country === country && account.region === region
@@ -180,6 +179,7 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
 
         // Store the refresh token in the seller account
         sellerAccount.spiRefreshToken = refreshToken;
+        sellerAccount.selling_partner_id = sellingPartnerId;
 
         await sellerCentral.save();
 

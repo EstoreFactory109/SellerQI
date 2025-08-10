@@ -8,9 +8,7 @@ const auth=asyncHandler(async(req,res,next)=>{
     const accesstoken=req.cookies.IBEXAccessToken;
     const adminToken=req.cookies.AdminToken;
     
-    if(adminToken) {
-        // console.log("adminToken: ",adminToken.length)
-    }
+    
     
     if(!accesstoken){
         logger.error(new ApiError(401,"Unauthorized"));

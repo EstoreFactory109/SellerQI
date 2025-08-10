@@ -8,7 +8,7 @@ import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
-import { Building, Plus, ChevronRight, Bell, User, Menu } from 'lucide-react'
+import { Building, Plus, ChevronRight, Bell, User, Menu, ArrowLeftRight } from 'lucide-react'
 import axios from 'axios'
 
 const TopNav = () => {
@@ -54,6 +54,12 @@ const TopNav = () => {
     const [openNotifications, setOpenNotifications] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const dispatch = useDispatch();
+    
+    // Check if super admin is logged in
+    const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
+    const adminAccessType = localStorage.getItem('adminAccessType');
+    const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
+    const loggedInAsUser = localStorage.getItem('loggedInAsUser');
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
@@ -74,6 +80,32 @@ const TopNav = () => {
             }
         }catch(error){
             console.log(error)
+            setIsLoading(false);
+        }
+    }
+
+    const handleSwitchToAdmin = async () => {
+        try {
+            setIsLoading(true);
+            
+            // First logout the current logged-in user
+            await axios.post(`${import.meta.env.VITE_BASE_URI}/app/logout`, {}, {
+                withCredentials: true
+            });
+            
+            // Clear the logged in as user data
+            localStorage.removeItem('loggedInAsUser');
+            localStorage.removeItem('isAuth');
+            
+            // Navigate back to manage accounts page
+            window.location.href = '/manage-accounts';
+        } catch (error) {
+            console.error('Error during admin switch:', error);
+            // Even if logout fails, clear local data and navigate
+            localStorage.removeItem('loggedInAsUser');
+            localStorage.removeItem('isAuth');
+            window.location.href = '/manage-accounts';
+        } finally {
             setIsLoading(false);
         }
     }
@@ -258,6 +290,21 @@ const TopNav = () => {
                     </AnimatePresence>
 
                 </div>
+                
+                {/* Switch Account Button - Only visible for Super Admin */}
+                {isSuperAdmin && loggedInAsUser && (
+                    <div className="relative mr-3">
+                        <button
+                            onClick={handleSwitchToAdmin}
+                            className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl hover:from-orange-600 hover:to-red-700 transition-all duration-300 shadow-sm hover:shadow-md text-sm font-medium"
+                            title="Switch back to admin account"
+                        >
+                            <ArrowLeftRight className="w-4 h-4" />
+                            <span className="hidden lg:block">Switch Account</span>
+                        </button>
+                    </div>
+                )}
+                
                 <div className="relative mr-3" ref={notificationRef}>
                     <div 
                         className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl flex items-center justify-center cursor-pointer transition-all duration-300 ${

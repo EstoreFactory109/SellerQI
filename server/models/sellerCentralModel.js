@@ -31,6 +31,10 @@ const Products=new mongoose.Schema({
 },{timestamps:true})
 
 const sellerCentral=new mongoose.Schema({
+  selling_partner_id: {
+    type: String,
+    unique: true,
+  },
   spiRefreshToken: {
     type: String,
     required: false,
@@ -68,10 +72,6 @@ const SellerSchema = new mongoose.Schema(
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
         require:true
-    },
-    selling_partner_id: {
-      type: String,
-      unique: true,
     },
     brand:{
       type:String,

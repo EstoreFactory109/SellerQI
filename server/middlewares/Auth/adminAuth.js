@@ -18,7 +18,7 @@ const adminAuth = asyncHandler(async (req, res, next) => {
             throw new ApiError(401, "User not found");
         }
 
-        if (!['superAdmin', 'enterpriseAdmin'].includes(user.accessType)) {
+        if (!['enterpriseAdmin'].includes(user.accessType)) {
             logger.warn(`User ${userId} attempted to access admin endpoint without proper permissions`);
             throw new ApiError(403, "Admin access required");
         }

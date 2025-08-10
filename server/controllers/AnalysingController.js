@@ -108,7 +108,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
             getAllSellerAccounts = await Seller.find({})
         }
 
-        console.log("getAllSellerAccounts: ",getAllSellerAccounts);
+       
      
 
         if (!getAllSellerAccounts) {

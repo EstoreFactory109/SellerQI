@@ -6,7 +6,7 @@ const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
-let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(_dirname, '..', '..', 'Emails', 'AmazonAnalyseReadyEmailTemplate.html'), 'utf8');
+let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'AmazonAnalyseReadyEmailTemplate.html'), 'utf8');
 
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,7 +54,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
             return false;
         }
 
-        const transporter = nodemailer.createTransporter({
+        const transporter = nodemailer.createTransportt({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
             secure: false, // Set to false for STARTTLS

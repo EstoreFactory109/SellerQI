@@ -365,7 +365,7 @@ export default function Login() {
               </div>
 
               {/* Sign Up Link */}
-              <div className="text-center pt-2">
+              <div className="text-center pt-2 space-y-2">
                 <p className="text-gray-600 text-sm">
                   Don't have an account?{' '}
                   <button
@@ -375,6 +375,15 @@ export default function Login() {
                   >
                     Sign up
                   </button>
+                </p>
+                <p className="text-gray-600 text-sm">
+                  Admin?{' '}
+                  <Link
+                    to="/admin-login"
+                    className="text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors"
+                  >
+                    Admin Login
+                  </Link>
                 </p>
               </div>
 

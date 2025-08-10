@@ -297,7 +297,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // Initialize tokens in TokenManager for automatic refresh
     tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-    const sellerId = getSellerData.selling_partner_id;
+    const sellerId = getSellerAccount.selling_partner_id;
     
     if (!sellerId) {
         logger.error("Seller ID not found in seller data", { userId });
