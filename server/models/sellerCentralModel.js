@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { v4: uuidv4 } = require('uuid');
 
 const TotatProductsBasedOnDate=new mongoose.Schema({
   NumberOfProducts:{
@@ -34,6 +35,7 @@ const sellerCentral=new mongoose.Schema({
   selling_partner_id: {
     type: String,
     unique: true,
+    default: uuidv4,
   },
   spiRefreshToken: {
     type: String,
@@ -76,6 +78,10 @@ const SellerSchema = new mongoose.Schema(
     brand:{
       type:String,
       required:false
+    },
+    selling_partner_id:{
+      type:String,
+      required:true,
     },
     sellerAccount:[sellerCentral]
     

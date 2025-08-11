@@ -24,13 +24,17 @@ const SaveAllDetails = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
-
-    const sellerCentral = {
+    console.log(region,country);
+    const sellerCentral = [{
+        selling_partner_id: uuidv4(),
         country: country,
         region: region,
+    }]
 
-    }
-    const createSellerCentral = await Seller.create({ User: userId, selling_partner_id: uuidv4(), sellerAccount: sellerCentral });
+    
+
+    const createSellerCentral = await Seller.create({ User: userId,selling_partner_id:uuidv4(), sellerAccount: sellerCentral });
+    console.log(createSellerCentral);
     if (!createSellerCentral) {
         logger.error(new ApiError(500, "Error in creating sellercentral"));
         return res.status(500).json(new ApiResponse(500, "", "Error in creating sellercentral"));
