@@ -4,7 +4,7 @@ const logger=require('../utils/Logger.js');
 
 const dbConnect=async()=>{
     try {
-        const connect=await mongoose.connect(`mongodb+srv://estorefactory2025:mlqIhjMOC7bABAIz@cluster0.jxql8.mongodb.net/IBEX`,{
+        const connect=await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`,{
             connectTimeoutMS: 60000,  // Connection timeout (in milliseconds)
             socketTimeoutMS: 120000,   // Socket timeout (in milliseconds)
         })
