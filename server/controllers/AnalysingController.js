@@ -55,6 +55,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
             message: "User id is missing"
         }
     }
+
+    console.log("userId: ",userId);
     if (!country || !region) {
         logger.error(new ApiError(400, "Country or Region is missing"));
         return {
@@ -161,17 +163,24 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }
 
         sellerCentral.sellerAccount.forEach(item => {
+            console.log("Hello")
+            console.log("item: ",item.country,item.region);
+            if(item.country && item.region ){
+                console.log("item: ",item.country,item.region);
+            
             allSellerAccounts.push({
                 brand: sellerCentral.brand,
                 country: item.country,
                 region: item.region,
                 NoOfProducts: item.products.length
-            })
+            })}
             if (item.country === country && item.region === region) {
                 SellerAccount = item;
             }
         })
 
+        console.log("SellerAccount: ",allSellerAccounts);
+        
         if (!SellerAccount) {
             logger.error(new ApiError(404, "Seller account not found"));
             return {

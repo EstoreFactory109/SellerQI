@@ -112,9 +112,11 @@ export default function Login() {
       }
     } catch (error) {
       console.error('Login error:', error);
-      
+      console.log("error.response?.data?.message: ",error.response?.data?.message);
       if (error.response?.status === 401) {
-        setErrorMessage('Invalid email or password');
+        if(error.response?.data?.message === "User not verified"){
+          navigate('/verify-email', { state: { email: formData.email } });
+        }
       } else if (error.response?.status === 403) {
         setErrorMessage('Account is disabled. Please contact support.');
       } else {
@@ -132,9 +134,9 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     try {
-      const response = await googleAuthService.handleGoogleSignUp();
-      
-      if (response.status === 200) {
+      const response = await googleAuthService.handleGoogleSignIn();
+      console.log("response: ",response.statusCode);
+      if (response.statusCode === 200) {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
         
@@ -144,18 +146,18 @@ export default function Login() {
         
         // Check subscription status and redirect accordingly
         const user = response.data.data;
-        const hasSelectedPlan = user.packageType;
-        
-        if (!hasSelectedPlan) {
+       // const hasSelectedPlan = user.packageType;
+        navigate('/seller-central-checker/dashboard');
+        /*if (!hasSelectedPlan) {
           // User hasn't selected any plan, redirect to pricing
           navigate('/pricing');
         } else {
           // All users with plans (LITE, PRO, AGENCY) go to dashboard
           // Dashboard will handle feature restrictions based on plan type
           navigate('/seller-central-checker/dashboard');
-        }
+        }*/
         
-      } else {
+      } /*else {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
         
@@ -163,7 +165,7 @@ export default function Login() {
         localStorage.setItem("isAuth", true);
         // For new user registration, redirect to pricing
         navigate("/pricing");
-      }
+      }*/
     } catch (error) {
       console.error('Google login failed:', error);
       setErrorMessage(error.response?.data?.message || 'Google login failed. Please try again.');
@@ -349,7 +351,7 @@ export default function Login() {
                   )}
                 </button>
 
-                <button
+                {/*<button
                   type="button"
                   onClick={handleAmazonLogin}
                   className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-300 font-medium text-sm"
@@ -361,7 +363,7 @@ export default function Login() {
                     <path d="M23.855 12c0-.855-.855-1.595-2.565-2.22l-.348-.131v4.702l.348-.131c1.71-.625 2.565-1.365 2.565-2.22z"/>
                   </svg>
                   Continue with Amazon
-                </button>
+                </button>*/}
               </div>
 
               {/* Sign Up Link */}

@@ -18,7 +18,11 @@ import {
   MoreVertical,
   Trash2,
   Edit3,
-  Eye
+  Eye,
+  CalendarDays,
+  X,
+  Download,
+  FileText
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 
@@ -111,6 +115,8 @@ const ManageAccounts = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -118,6 +124,7 @@ const ManageAccounts = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   // Filter and search users
   const filteredUsers = useMemo(() => {
@@ -147,8 +154,35 @@ const ManageAccounts = () => {
       filtered = filtered.filter(user => user.packageType === filterType);
     }
 
+    // Apply date range filter
+    if (startDate || endDate) {
+      filtered = filtered.filter(user => {
+        const userDate = new Date(user.createdAt);
+        const start = startDate ? new Date(startDate) : null;
+        const end = endDate ? new Date(endDate) : null;
+        
+        // Set time to start/end of day for proper comparison
+        if (start) {
+          start.setHours(0, 0, 0, 0);
+        }
+        if (end) {
+          end.setHours(23, 59, 59, 999);
+        }
+        
+        if (start && end) {
+          return userDate >= start && userDate <= end;
+        } else if (start) {
+          return userDate >= start;
+        } else if (end) {
+          return userDate <= end;
+        }
+        
+        return true;
+      });
+    }
+
     return filtered;
-  }, [users, searchQuery, filterType, loading]);
+  }, [users, searchQuery, filterType, startDate, endDate, loading]);
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / ITEMS_PER_PAGE));
 
@@ -190,6 +224,8 @@ const ManageAccounts = () => {
   useEffect(() => {
     fetchAccounts();
   }, []);
+
+
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -257,6 +293,72 @@ const ManageAccounts = () => {
       month: 'short',
       year: 'numeric'
     });
+  };
+
+  const clearDateFilters = () => {
+    setStartDate('');
+    setEndDate('');
+  };
+
+  // Export functions
+  const convertToCSV = (data) => {
+    if (!data || data.length === 0) return '';
+    
+    const headers = [
+      'Name',
+      'Email', 
+      'Phone',
+      'Package Type',
+      'Access Type',
+      'Subscription Status',
+      'Trial Period',
+      'Verified',
+      'Registration Date'
+    ];
+    
+    const csvContent = [
+      headers.join(','),
+      ...data.map(user => [
+        `"${user.firstName} ${user.lastName}"`,
+        `"${user.email}"`,
+        `"${user.phone || 'N/A'}"`,
+        `"${user.packageType}"`,
+        `"${user.accessType || 'user'}"`,
+        `"${user.subscriptionStatus}"`,
+        `"${user.isInTrialPeriod ? 'Yes' : 'No'}"`,
+        `"${user.isVerified ? 'Yes' : 'No'}"`,
+        `"${formatDate(user.createdAt)}"`
+      ].join(','))
+    ].join('\n');
+    
+    return csvContent;
+  };
+
+  const downloadFile = (content, filename, type) => {
+    const blob = new Blob([content], { type });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const exportToCSV = async () => {
+    try {
+      setIsExporting(true);
+      const csvContent = convertToCSV(filteredUsers);
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `users-export-${timestamp}.csv`;
+      downloadFile(csvContent, filename, 'text/csv;charset=utf-8;');
+    } catch (error) {
+      console.error('Error exporting to CSV:', error);
+      alert('Error exporting to CSV. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleLoginAsUser = async (user) => {
@@ -373,19 +475,38 @@ const ManageAccounts = () => {
               </div>
             </div>
             
-            {/* Logout Button */}
-            <button
-              onClick={handleLogout}
-              disabled={isLoggingOut}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-                isLoggingOut
-                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                  : 'bg-red-600 text-white hover:bg-red-700 shadow-lg hover:shadow-xl transform hover:scale-105'
-              }`}
-            >
-              <LogOut className="w-4 h-4" />
-              {isLoggingOut ? 'Logging out...' : 'Logout'}
-            </button>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              {/* Export CSV Button */}
+              {!loading && !error && filteredUsers.length > 0 && (
+                <button
+                  onClick={exportToCSV}
+                  disabled={isExporting}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                    isExporting
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-green-600 text-white hover:bg-green-700 shadow-lg hover:shadow-xl transform hover:scale-105'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  {isExporting ? 'Exporting...' : 'Export CSV'}
+                </button>
+              )}
+              
+              {/* Logout Button */}
+              <button
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                  isLoggingOut
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-red-600 text-white hover:bg-red-700 shadow-lg hover:shadow-xl transform hover:scale-105'
+                }`}
+              >
+                <LogOut className="w-4 h-4" />
+                {isLoggingOut ? 'Logging out...' : 'Logout'}
+              </button>
+            </div>
           </div>
         </motion.div>
 
@@ -432,63 +553,145 @@ const ManageAccounts = () => {
           transition={{ duration: 0.6, delay: 0.1 }}
           className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6"
         >
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  placeholder="Search users by name or email..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300"
-                />
+          <div className="flex flex-col gap-4">
+            {/* First Row: Search and Package Filter */}
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search */}
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    placeholder="Search users by name or email..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300"
+                  />
+                </div>
+              </div>
+
+              {/* Package Type Filter */}
+              <div className="lg:w-64">
+                <div className="relative">
+                  <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 appearance-none bg-white"
+                  >
+                    <option value="all">All User Types</option>
+                    <option value="LITE">Lite Users</option>
+                    <option value="PRO">Pro Users</option>
+                    <option value="AGENCY">Agency Users</option>
+                  </select>
+                </div>
               </div>
             </div>
 
-            {/* Filter */}
-            <div className="lg:w-64">
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <select
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 appearance-none bg-white"
-                >
-                  <option value="all">All User Types</option>
-                  <option value="LITE">Lite Users</option>
-                  <option value="PRO">Pro Users</option>
-                  <option value="AGENCY">Agency Users</option>
-                </select>
+            {/* Second Row: Date Filters */}
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              {/* Date Filter Label */}
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-700 sm:w-24">
+                <CalendarDays className="w-4 h-4" />
+                Date Range:
+              </div>
+              
+              {/* Date Inputs */}
+              <div className="flex flex-col sm:flex-row gap-3 flex-1">
+                <div className="relative flex-1">
+                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <input
+                    type="date"
+                    placeholder="Start Date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
+                  />
+                </div>
+                
+                <div className="flex items-center justify-center text-gray-400 px-2">
+                  <span className="text-sm">to</span>
+                </div>
+                
+                <div className="relative flex-1">
+                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <input
+                    type="date"
+                    placeholder="End Date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
+                  />
+                </div>
+                
+                {/* Clear Date Filter Button */}
+                {(startDate || endDate) && (
+                  <button
+                    onClick={clearDateFilters}
+                    className="flex items-center gap-1 px-3 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                    title="Clear date filters"
+                  >
+                    <X className="w-4 h-4" />
+                    Clear
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-100">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-indigo-600">{filteredUsers.length}</p>
-              <p className="text-sm text-gray-600">Total Users</p>
+          {/* Stats and Export Summary */}
+          <div className="mt-6 pt-6 border-t border-gray-100">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-indigo-600">{filteredUsers.length}</p>
+                <p className="text-sm text-gray-600">Total Users</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-green-600">
+                  {filteredUsers.filter(u => u.subscriptionStatus === 'active').length}
+                </p>
+                <p className="text-sm text-gray-600">Active</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-blue-600">
+                  {filteredUsers.filter(u => u.packageType === 'PRO').length}
+                </p>
+                <p className="text-sm text-gray-600">Pro Users</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-emerald-600">
+                  {filteredUsers.filter(u => u.packageType === 'AGENCY').length}
+                </p>
+                <p className="text-sm text-gray-600">Agency Users</p>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold text-green-600">
-                {filteredUsers.filter(u => u.subscriptionStatus === 'active').length}
-              </p>
-              <p className="text-sm text-gray-600">Active</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold text-blue-600">
-                {filteredUsers.filter(u => u.packageType === 'PRO').length}
-              </p>
-              <p className="text-sm text-gray-600">Pro Users</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold text-emerald-600">
-                {filteredUsers.filter(u => u.packageType === 'AGENCY').length}
-              </p>
-              <p className="text-sm text-gray-600">Agency Users</p>
-            </div>
+            
+            {/* Export Summary */}
+            {filteredUsers.length > 0 && (
+              <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                <div className="text-sm text-gray-600">
+                  {searchQuery || filterType !== 'all' || startDate || endDate ? (
+                    <span>
+                      <span className="font-medium">{filteredUsers.length}</span> users match your filters
+                    </span>
+                  ) : (
+                    <span>
+                      Showing all <span className="font-medium">{filteredUsers.length}</span> registered users
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">Quick Export:</span>
+                  <button
+                    onClick={exportToCSV}
+                    disabled={isExporting}
+                    className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors duration-200 disabled:opacity-50"
+                  >
+                    CSV
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </motion.div>
 

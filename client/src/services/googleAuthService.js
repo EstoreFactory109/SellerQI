@@ -171,14 +171,14 @@ class GoogleAuthService {
     });
   }
 
-  async authenticateWithBackend(idToken, isSignUp = false) {
+  async authenticateWithBackend(idToken, isSignUp = false,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
     try {
       const endpoint = isSignUp ? '/app/google-register' : '/app/google-login';
       console.log(`📤 Sending to backend: ${endpoint}`);
       
       const response = await axios.post(
         `${import.meta.env.VITE_BASE_URI}${endpoint}`,
-        { idToken },
+        { idToken,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate },
         { withCredentials: true }
       );
       
@@ -206,12 +206,12 @@ class GoogleAuthService {
   }
 
   // Method to handle complete Google sign-up flow
-  async handleGoogleSignUp() {
+  async handleGoogleSignUp(packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
     try {
       console.log('📝 Starting Google Sign-Up flow...');
       const idToken = await this.signIn();
       console.log('🎟️ Got ID token, registering with backend...');
-      const result = await this.authenticateWithBackend(idToken, true);
+      const result = await this.authenticateWithBackend(idToken, true,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate);
       console.log('✅ Google Sign-Up completed successfully');
       return result;
     } catch (error) {

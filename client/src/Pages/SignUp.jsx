@@ -187,7 +187,11 @@ const SignUp = () => {
 
     setGoogleLoading(true);
     try {
-        const response = await googleAuthService.handleGoogleSignUp();
+      const packageType = plans=="PRO-Trial" ? "PRO" : plans=="LITE";
+      const isInTrialPeriod = plans=="PRO-Trial" ? true : false;
+      const subscriptionStatus = plans=="PRO-Trial" ? "active" : "inactive";
+      const trialEndsDate = plans=="PRO-Trial" ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null;
+        const response = await googleAuthService.handleGoogleSignUp(packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate);
         
         if (response.status === 200) {
           // Clear any cached auth state to force fresh checks
@@ -564,7 +568,7 @@ const SignUp = () => {
                    )}
                  </button>
 
-                 <button
+               { /* <button
                    type="button"
                    onClick={handleAmazonSignUp}
                    className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-300 font-medium text-sm"
@@ -576,7 +580,7 @@ const SignUp = () => {
                      <path d="M23.855 12c0-.855-.855-1.595-2.565-2.22l-.348-.131v4.702l.348-.131c1.71-.625 2.565-1.365 2.565-2.22z"/>
                    </svg>
                    Continue with Amazon
-                 </button>
+                 </button>*/}
                </div>
 
                              {/* Login Link */}

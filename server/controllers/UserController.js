@@ -172,6 +172,9 @@ const verifyUser = asyncHandler(async (req, res) => {
 
     const { email, otp } = req.body;
 
+    console.log("email: ",email);
+    console.log("otp: ",otp);
+
     if (!email || !otp) {
         logger.error(new ApiError(400, "Email or OTP is missing"));
         return res.status(400).json(new ApiError(400, "Email or OTP is missing"));
@@ -225,6 +228,8 @@ const verifyUser = asyncHandler(async (req, res) => {
 
 
 
+
+
 const profileUser = asyncHandler(async (req, res) => {
     const userId = req.userId;
 
@@ -257,17 +262,42 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
     }
 
-    console.log(email,password);
     const checkUserIfExists = await getUserByEmail(email);
 
-    
+    console.log("checkUserIfExists: ", checkUserIfExists);
+
+
+
 
     if (!checkUserIfExists) {
         logger.error(new ApiError(404, "User not found"));
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
- //  const checkPassword = await verifyPassword(password, checkUserIfExists.password);
+    if (checkUserIfExists.isVerified === false) {
+
+        let otp = generateOTP();
+
+        if (!otp) {
+            logger.error(new ApiError(500, "Internal server error in generating OTP"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
+        }
+
+        let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
+
+        if (!emailSent) {
+            logger.error(new ApiError(500, "Internal server error in sending email"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+        }
+
+        checkUserIfExists.OTP = otp;
+        await checkUserIfExists.save();
+
+        logger.error(new ApiError(401, "User not verified"));
+        return res.status(401).json(new ApiResponse(401, "", "User not verified"));
+    }
+
+    //  const checkPassword = await verifyPassword(password, checkUserIfExists.password);
     //console.log(checkPassword);
 
     const checkPassword = checkUserIfExists.password === password;
@@ -281,7 +311,7 @@ const loginUser = asyncHandler(async (req, res) => {
     if (checkUserIfExists.isInTrialPeriod && checkUserIfExists.trialEndsDate) {
         const currentDate = new Date();
         const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
-        
+
         // If trial has expired, update user status
         if (currentDate > trialEndDate) {
             await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
@@ -289,12 +319,12 @@ const loginUser = asyncHandler(async (req, res) => {
                 packageType: 'LITE',
                 subscriptionStatus: 'inactive'
             });
-            
+
             // Update the local user object for the response
             checkUserIfExists.isInTrialPeriod = false;
             checkUserIfExists.packageType = 'LITE';
             checkUserIfExists.subscriptionStatus = 'inactive';
-            
+
             logger.info(`User ${checkUserIfExists._id} trial expired. Downgraded to LITE plan.`);
         }
     }
@@ -323,32 +353,32 @@ const loginUser = asyncHandler(async (req, res) => {
         LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
         // Prepare all accounts data to send in response
 
-    }else if(checkUserIfExists.accessType === 'enterpriseAdmin'){
+    } else if (checkUserIfExists.accessType === 'enterpriseAdmin') {
         adminToken = await createAccessToken(checkUserIfExists._id);
-    
+
         const sellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
-        if(!sellerCentral){
-            const getClient = await UserModel.findOne({adminId:checkUserIfExists._id}).sort({createdAt:-1});
-            if(!getClient){
+        if (!sellerCentral) {
+            const getClient = await UserModel.findOne({ adminId: checkUserIfExists._id }).sort({ createdAt: -1 });
+            if (!getClient) {
                 AccessToken = await createAccessToken(checkUserIfExists._id);
                 RefreshToken = await createRefreshToken(checkUserIfExists._id);
-                LocationToken = await createLocationToken("US","NA");
-            }else{
+                LocationToken = await createLocationToken("US", "NA");
+            } else {
                 AccessToken = await createAccessToken(getClient._id);
                 RefreshToken = await createRefreshToken(getClient._id);
                 const getClientSellerCentral = await SellerCentralModel.findOne({ User: getClient._id });
-                if(!getClientSellerCentral){
-                    LocationToken = await createLocationToken("US","NA");
-                }else{
+                if (!getClientSellerCentral) {
+                    LocationToken = await createLocationToken("US", "NA");
+                } else {
                     LocationToken = await createLocationToken(getClientSellerCentral.sellerAccount[0].country, getClientSellerCentral.sellerAccount[0].region);
                 }
             }
-        }else{
+        } else {
             AccessToken = await createAccessToken(checkUserIfExists._id);
             RefreshToken = await createRefreshToken(checkUserIfExists._id);
             LocationToken = await createLocationToken(sellerCentral.sellerAccount[0].country, sellerCentral.sellerAccount[0].region);
         }
-        
+
     }
     else {
         getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
@@ -373,8 +403,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const option = getHttpsCookieOptions();
 
-    console.log(AccessToken,RefreshToken,LocationToken);
-    
+    console.log(AccessToken, RefreshToken, LocationToken);
+
 
     // Prepare response data
     const responseData = {
@@ -437,7 +467,7 @@ const logoutUser = asyncHandler(async (req, res) => {
     res.clearCookie("IBEXAccessToken", option);
     res.clearCookie("IBEXRefreshToken", option);
     res.clearCookie("IBEXLocationToken", option);
-    
+
     res.status(200).json(new ApiResponse(200, "", "User logged out successfully"));
 })
 
@@ -515,7 +545,7 @@ const switchAccount = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        const option = getHttpCookieOptions();
+        const option = getHttpsCookieOptions();
 
         return res.status(200)
             .cookie("IBEXAccessToken", AccessToken, option)
@@ -526,7 +556,7 @@ const switchAccount = asyncHandler(async (req, res) => {
 
     // Verify that the admin is actually a superAdmin
     let LocationToken = await createLocationToken(country, region);
-    const option = getHttpCookieOptions();
+    const option = getHttpsCookieOptions();
 
     return res.status(200)
         .cookie("IBEXLocationToken", LocationToken, option)
@@ -551,11 +581,11 @@ const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
-    const code = jwt.sign({ email:email,code:uuidv4() }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    const code = jwt.sign({ email: email, code: uuidv4() }, process.env.JWT_SECRET, { expiresIn: '30m' });
     user.resetPasswordCode = code;
     await user.save();
 
-    const link=`${process.env.RESET_LINK_BASE_URI}/${code}`
+    const link = `${process.env.RESET_LINK_BASE_URI}/${code}`
 
     // console.log(link, email, user.firstName);
 
@@ -600,7 +630,7 @@ const verifyResetPasswordCode = asyncHandler(async (req, res) => {
 
         // If we reach here, the token is valid and not expired
         return res.status(200).json(new ApiResponse(200, "", "Code verified successfully"));
-        
+
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
             logger.error(new ApiError(401, "Reset link has expired"));
@@ -672,60 +702,60 @@ const resetPassword = asyncHandler(async (req, res) => {
 })
 
 const getIPTracking = asyncHandler(async (req, res) => {
-  
+
     const ip = req.ip;
     // console.log(ip);
-    if(!ip){
+    if (!ip) {
         logger.error(new ApiError(400, "IP is missing"));
         return res.status(400).json(new ApiResponse(400, "", "IP is missing"));
     }
     const checkIp = await IPTrackingModel.findOne({ ip });
-    if(!checkIp){
+    if (!checkIp) {
         const newIp = await IPTrackingModel.create({ ip });
-        return res.status(200).json(new ApiResponse(200, {searchesLeft:newIp.searchesLeft}, "IP tracking created successfully"));
-    }else{
-        return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "IP tracking fetched successfully"));
+        return res.status(200).json(new ApiResponse(200, { searchesLeft: newIp.searchesLeft }, "IP tracking created successfully"));
+    } else {
+        return res.status(200).json(new ApiResponse(200, { searchesLeft: checkIp.searchesLeft }, "IP tracking fetched successfully"));
     }
 })
 
 const TrackIP = asyncHandler(async (req, res) => {
     const ip = req.ip;
-    if(!ip){
+    if (!ip) {
         logger.error(new ApiError(400, "IP is missing"));
         return res.status(400).json(new ApiResponse(400, "", "IP is missing"));
     }
 
-   try {
+    try {
         const checkIp = await IPTrackingModel.findOne({ ip });
-       
-        if(!checkIp){
+
+        if (!checkIp) {
             const newIp = await IPTrackingModel.create({ ip });
-            return res.status(200).json(new ApiResponse(200,{searchesLeft:newIp.searchesLeft} , "IP tracking created successfully"));
-        }else{
-            if(checkIp.searchesLeft === 0){
-                if(checkIp.renewalDate < new Date()){
+            return res.status(200).json(new ApiResponse(200, { searchesLeft: newIp.searchesLeft }, "IP tracking created successfully"));
+        } else {
+            if (checkIp.searchesLeft === 0) {
+                if (checkIp.renewalDate < new Date()) {
                     checkIp.searchesLeft = 3;
                     checkIp.renewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
                     await checkIp.save();
-                    return res.status(200).json(new ApiResponse(200,{searchesLeft:checkIp.searchesLeft}, "Number of searches renewed successfully"));
-                }else{
-                    return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "Number of searches expired"));
+                    return res.status(200).json(new ApiResponse(200, { searchesLeft: checkIp.searchesLeft }, "Number of searches renewed successfully"));
+                } else {
+                    return res.status(200).json(new ApiResponse(200, { searchesLeft: checkIp.searchesLeft }, "Number of searches expired"));
                 }
-            }else{
+            } else {
                 checkIp.searchesLeft--;
                 // console.log("searchesLeft",checkIp.searchesLeft);
                 await checkIp.save();
-                return res.status(200).json(new ApiResponse(200, {searchesLeft:checkIp.searchesLeft}, "Number of searches updated successfully"));
+                return res.status(200).json(new ApiResponse(200, { searchesLeft: checkIp.searchesLeft }, "Number of searches updated successfully"));
             }
         }
-        
-        
-   } catch (error) {
+
+
+    } catch (error) {
         logger.error(new ApiError(500, "Internal server error in getting IP tracking"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in getting IP tracking"));
-   }
+    }
 
-    
+
 })
 
 
@@ -744,7 +774,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         // Verify the Google ID token using environment variable
         console.log('🔍 Verifying Google ID token...');
         console.log('🔑 Expected audience (Client ID):', process.env.GOOGLE_CLIENT_ID);
-        
+
         const ticket = await googleClient.verifyIdToken({
             idToken: idToken,
             audience: process.env.GOOGLE_CLIENT_ID
@@ -754,7 +784,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         console.log('✅ Token verified successfully');
         console.log('🎯 Token audience:', payload.aud);
         console.log('📧 User email:', payload.email);
-        
+
         const { email, name, given_name, family_name, picture } = payload;
 
         if (!email) {
@@ -774,7 +804,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         if (checkUserIfExists.isInTrialPeriod && checkUserIfExists.trialEndsDate) {
             const currentDate = new Date();
             const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
-            
+
             // If trial has expired, update user status
             if (currentDate > trialEndDate) {
                 await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
@@ -782,12 +812,12 @@ const googleLoginUser = asyncHandler(async (req, res) => {
                     packageType: 'LITE',
                     subscriptionStatus: 'inactive'
                 });
-                
+
                 // Update the local user object for the response
                 checkUserIfExists.isInTrialPeriod = false;
                 checkUserIfExists.packageType = 'LITE';
                 checkUserIfExists.subscriptionStatus = 'inactive';
-                
+
                 logger.info(`User ${checkUserIfExists._id} trial expired during Google login. Downgraded to LITE plan.`);
             }
         }
@@ -830,7 +860,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        const option = getHttpCookieOptions();;
+        const option = getHttpsCookieOptions();;
 
         // Prepare response data
         const responseData = {
@@ -872,7 +902,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             logger.error(`💡 Check your Google Cloud Console OAuth configuration`);
             return res.status(400).json(new ApiResponse(400, "", "Google authentication failed: Invalid audience"));
         }
-        
+
         logger.error(`Google login error: ${error.message}`);
         return res.status(500).json(new ApiResponse(500, "", "Google authentication failed"));
     }
@@ -880,18 +910,25 @@ const googleLoginUser = asyncHandler(async (req, res) => {
 
 // Google OAuth Register Handler
 const googleRegisterUser = asyncHandler(async (req, res) => {
-    const { idToken } = req.body;
+    const { idToken,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate } = req.body;
+
+    
 
     if (!idToken) {
         logger.error(new ApiError(400, "Google ID token is missing"));
         return res.status(400).json(new ApiResponse(400, "", "Google ID token is missing"));
     }
 
+    if(!packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate){
+        logger.error(new ApiError(400, "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+    }
+
     try {
         // Verify the Google ID token using environment variable
         console.log('🔍 Verifying Google ID token for registration...');
         console.log('🔑 Expected audience (Client ID):', process.env.GOOGLE_CLIENT_ID);
-        
+
         const ticket = await googleClient.verifyIdToken({
             idToken: idToken,
             audience: process.env.GOOGLE_CLIENT_ID
@@ -901,7 +938,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         console.log('✅ Token verified successfully for registration');
         console.log('🎯 Token audience:', payload.aud);
         console.log('📧 User email:', payload.email);
-        
+
         const { email, name, given_name, family_name, picture } = payload;
 
         if (!email) {
@@ -915,7 +952,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         if (checkUserIfExists) {
             // User exists, perform login instead
             logger.info("User already exists, redirecting to login flow");
-            
+
             let getSellerCentral;
             let allSellerAccounts = null;
             let AccessToken, RefreshToken, LocationToken, adminToken = "";
@@ -954,7 +991,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
                 return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
             }
 
-                    const option = getHttpCookieOptions();
+            const option = getHttpsCookieOptions();
 
             // Prepare response data
             const responseData = {
@@ -987,7 +1024,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         // Create new user
         const firstName = given_name || name?.split(' ')[0] || 'User';
         const lastName = family_name || name?.split(' ').slice(1).join(' ') || '';
-        
+
         // For Google OAuth users, we'll use unique placeholder values for required fields
         // Generate unique placeholder phone numbers to avoid unique constraint conflicts
         const timestamp = Date.now().toString().slice(-10); // Last 10 digits of timestamp
@@ -1008,7 +1045,11 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             profilePic: picture || "",
             isVerified: true, // Google accounts are pre-verified
             allTermsAndConditionsAgreed: true, // Assuming Google signup implies agreement
-            OTP: null
+            OTP: null,
+            packageType: packageType,
+            isInTrialPeriod: isInTrialPeriod,
+            subscriptionStatus: subscriptionStatus,
+            trialEndsDate: trialEndsDate
         });
 
         const savedUser = await newUser.save();
@@ -1043,7 +1084,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
-        const options = getHttpCookieOptions();
+        const options = getHttpsCookieOptions();
 
         // Prepare response data
         const responseData = {
@@ -1070,7 +1111,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             logger.error(`💡 Check your Google Cloud Console OAuth configuration`);
             return res.status(400).json(new ApiResponse(400, "", "Google registration failed: Invalid audience"));
         }
-        
+
         logger.error(`Google registration error: ${error.message}`);
         return res.status(500).json(new ApiResponse(500, "", "Google registration failed"));
     }
@@ -1179,7 +1220,7 @@ const activateFreeTrial = asyncHandler(async (req, res) => {
 // Admin endpoints
 const getAdminProfile = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
-    
+
     if (!adminId) {
         logger.error(new ApiError(401, "Admin token required"));
         return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
@@ -1188,7 +1229,7 @@ const getAdminProfile = asyncHandler(async (req, res) => {
     try {
         const adminUser = await UserModel.findById(adminId).select('-password');
         console.log(adminUser);
-        
+
         if (!adminUser) {
             logger.error(new ApiError(404, "Admin user not found"));
             return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
@@ -1237,7 +1278,7 @@ const getAdminProfile = asyncHandler(async (req, res) => {
 
 const getAdminClients = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
-    
+
     if (!adminId) {
         logger.error(new ApiError(401, "Admin token required"));
         return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
@@ -1252,10 +1293,10 @@ const getAdminClients = asyncHandler(async (req, res) => {
         const clientsWithConnectionStatus = await Promise.all(
             clients.map(async (client) => {
                 const clientObj = client.toObject();
-                
+
                 // Find seller central document for this client
                 const sellerDocument = await SellerCentralModel.findOne({ User: client._id });
-                
+
                 if (!sellerDocument || !sellerDocument.sellerAccount || sellerDocument.sellerAccount.length === 0) {
                     // No seller document or no seller account
                     return {
@@ -1309,7 +1350,7 @@ const getAdminClients = asyncHandler(async (req, res) => {
 const removeAdminClient = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
     const { clientId } = req.params;
-    
+
     if (!adminId) {
         logger.error(new ApiError(401, "Admin token required"));
         return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
@@ -1318,7 +1359,7 @@ const removeAdminClient = asyncHandler(async (req, res) => {
     try {
         // Verify the client belongs to this admin
         const client = await UserModel.findOne({ _id: clientId, adminId: adminId });
-        
+
         if (!client) {
             logger.error(new ApiError(404, "Client not found or doesn't belong to this admin"));
             return res.status(404).json(new ApiResponse(404, "", "Client not found"));
@@ -1336,7 +1377,7 @@ const removeAdminClient = asyncHandler(async (req, res) => {
 
 const getAdminBillingInfo = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
-    
+
     if (!adminId) {
         logger.error(new ApiError(401, "Admin token required"));
         return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
@@ -1344,7 +1385,7 @@ const getAdminBillingInfo = asyncHandler(async (req, res) => {
 
     try {
         const adminUser = await UserModel.findById(adminId).select('packageType subscriptionStatus createdAt');
-        
+
         if (!adminUser) {
             logger.error(new ApiError(404, "Admin user not found"));
             return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));

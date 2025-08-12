@@ -93,6 +93,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const Base_URI = URIs[Region];
     // Try direct match first, then case-insensitive match
     let Marketplace_Id = marketplaceConfig[Country];
+    console.log("Marketplace_Id: ",Marketplace_Id);
     if (!Marketplace_Id && Country) {
         // Try uppercase version
         const upperCountry = Country.toUpperCase();
@@ -214,14 +215,18 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const AdsRefreshToken = getSellerAccount.adsRefreshToken;
     
     // ===== TOKEN VALIDATION =====
+    // Check if at least one refresh token is available
+    if (!RefreshToken && !AdsRefreshToken) {
+        logger.error("Both SP-API and Amazon Ads refresh tokens are missing", { userId, Region, Country });
+        return res.status(400).json(new ApiError(400, "Both SP-API and Amazon Ads refresh tokens are missing. At least one is required for analysis."));
+    }
+
     if (!RefreshToken) {
-        logger.error("SP-API refresh token is missing", { userId, Region, Country });
-        return res.status(400).json(new ApiError(400, "SP-API refresh token not found for this account"));
+        logger.warn("SP-API refresh token is missing - SP-API functions will be skipped", { userId, Region, Country });
     }
 
     if (!AdsRefreshToken) {
-        logger.error("Amazon Ads refresh token is missing", { userId, Region, Country });
-        return res.status(400).json(new ApiError(400, "Amazon Ads refresh token not found for this account"));
+        logger.warn("Amazon Ads refresh token is missing - Ads functions will be skipped", { userId, Region, Country });
     }
 
     // ===== AWS CREDENTIALS GENERATION WITH VALIDATION =====
@@ -256,32 +261,67 @@ const getSpApiData = asyncHandler(async (req, res) => {
     try {
         console.log("🔄 Generating access tokens...");
         
-        const tokenResults = await Promise.allSettled([
-            generateAccessToken(userId, RefreshToken),
-            generateAdsAccessToken(AdsRefreshToken)
-        ]);
+        // Generate tokens only for available refresh tokens
+        const tokenPromises = [];
+        const tokenTypes = [];
 
-        // Check SP-API token result
-        if (tokenResults[0].status === 'rejected') {
-            throw new Error(`SP-API token generation failed: ${tokenResults[0].reason}`);
+        console.log("RefreshToken: ",RefreshToken);
+        
+        if (RefreshToken) {
+            tokenPromises.push(generateAccessToken(userId, RefreshToken));
+            tokenTypes.push('SP-API');
         }
-        AccessToken = tokenResults[0].value;
-        if (!AccessToken) {
-            throw new Error("SP-API token generation returned false/null");
+        
+        if (AdsRefreshToken) {
+            tokenPromises.push(generateAdsAccessToken(AdsRefreshToken));
+            tokenTypes.push('Ads');
+        }
+        
+        const tokenResults = await Promise.allSettled(tokenPromises);
+        
+        let tokenIndex = 0;
+        
+        // Handle SP-API token result if refresh token was available
+        if (RefreshToken) {
+            if (tokenResults[tokenIndex].status === 'rejected') {
+                logger.warn(`SP-API token generation failed: ${tokenResults[tokenIndex].reason}`);
+                AccessToken = null;
+            } else {
+                AccessToken = tokenResults[tokenIndex].value;
+                if (!AccessToken) {
+                    logger.warn("SP-API token generation returned false/null");
+                    AccessToken = null;
+                }
+            }
+            tokenIndex++;
+        } else {
+            AccessToken = null;
         }
 
-        // Check Ads token result
-        if (tokenResults[1].status === 'rejected') {
-            throw new Error(`Amazon Ads token generation failed: ${tokenResults[1].reason}`);
-        }
-        AdsAccessToken = tokenResults[1].value;
-        if (!AdsAccessToken) {
-            throw new Error("Amazon Ads token generation returned false/null");
+        // Handle Ads token result if refresh token was available
+        if (AdsRefreshToken) {
+            if (tokenResults[tokenIndex].status === 'rejected') {
+                logger.warn(`Amazon Ads token generation failed: ${tokenResults[tokenIndex].reason}`);
+                AdsAccessToken = null;
+            } else {
+                AdsAccessToken = tokenResults[tokenIndex].value;
+                if (!AdsAccessToken) {
+                    logger.warn("Amazon Ads token generation returned false/null");
+                    AdsAccessToken = null;
+                }
+            }
+        } else {
+            AdsAccessToken = null;
         }
 
-        console.log("✅ Access tokens generated successfully");
+        // Check if at least one token was generated successfully
+        if (!AccessToken && !AdsAccessToken) {
+            throw new Error("Failed to generate both SP-API and Amazon Ads access tokens");
+        }
+
+        console.log(`✅ Access tokens generated successfully - SP-API: ${!!AccessToken}, Ads: ${!!AdsAccessToken}`);
     } catch (tokenError) {
-        logger.error("Failed to generate access tokens", { 
+        logger.error("Failed to generate any access tokens", { 
             error: tokenError.message, 
             userId, 
             hasRefreshToken: !!RefreshToken, 
@@ -294,7 +334,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     let ProfileId=getSellerAccount.ProfileId;
     
 
-    // Initialize tokens in TokenManager for automatic refresh
+    // Initialize tokens in TokenManager for automatic refresh (only available tokens)
     tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
     const sellerId = getSellerAccount.selling_partner_id;
@@ -305,24 +345,32 @@ const getSpApiData = asyncHandler(async (req, res) => {
     }
 
     // ===== MERCHANT LISTINGS DATA WITH ERROR HANDLING =====
-    let merchantListingsData;
-    try {
-        merchantListingsData = await tokenManager.wrapSpApiFunction(
-            GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Country, Region, Base_URI);
+    let merchantListingsData = null;
+    
+    if (AccessToken) {
+        try {
+            merchantListingsData = await tokenManager.wrapSpApiFunction(
+                GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Country, Region, Base_URI);
 
-        if (!merchantListingsData) {
-            throw new Error("Merchant listings API returned null/false");
+            if (!merchantListingsData) {
+                throw new Error("Merchant listings API returned null/false");
+            }
+
+            console.log("✅ Merchant listings data fetched successfully");
+        } catch (merchantError) {
+            logger.error("Failed to fetch merchant listings data", { 
+                error: merchantError.message, 
+                userId, 
+                marketplaceIds 
+            });
+            // Don't return error here, continue with null merchantListingsData
+            logger.warn("Continuing without merchant listings data due to SP-API error");
+            merchantListingsData = null;
         }
-
-        console.log("✅ Merchant listings data fetched successfully");
-    } catch (merchantError) {
-        logger.error("Failed to fetch merchant listings data", { 
-            error: merchantError.message, 
-            userId, 
-            marketplaceIds 
-        });
-        return res.status(500).json(new ApiError(500, `Failed to fetch merchant listings: ${merchantError.message}`));
+    } else {
+        console.log("⚠️ Skipping merchant listings - AccessToken not available");
+        merchantListingsData = null;
     }
 
     // HARDCODED FOR KEYWORDS TESTING - REPLACE WITH ACTUAL DATA WHEN NEEDED
@@ -471,8 +519,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
     };
 
     // ===== VALIDATE dataToSend OBJECT =====
-    const requiredDataFields = ['marketplaceId', 'AccessToken', 'AccessKey', 'SecretKey', 'SessionToken', 'SellerId'];
+    // Note: AccessToken is now optional since it might not be available
+    const requiredDataFields = ['marketplaceId', 'AccessKey', 'SecretKey', 'SessionToken', 'SellerId'];
     const missingDataFields = requiredDataFields.filter(field => !dataToSend[field]);
+    
+    // Check for AccessToken separately and log its availability
+    if (!dataToSend.AccessToken) {
+        console.log("⚠️ AccessToken not available in dataToSend - SP-API functions will be skipped");
+    }
     
     if (missingDataFields.length > 0) {
         logger.error("Missing required fields in dataToSend object", { 
@@ -501,28 +555,58 @@ const getSpApiData = asyncHandler(async (req, res) => {
     console.log("🔄 Starting first batch of API calls...");
     console.log("🔍 Debug - marketplaceIds being passed:", marketplaceIds);
     console.log("🔍 Debug - dataToSend.marketplaceId:", dataToSend.marketplaceId);
+    console.log(`🔍 Debug - Available tokens - SP-API: ${!!AccessToken}, Ads: ${!!AdsAccessToken}`);
     
-    const firstBatchResults = await Promise.allSettled([
-        tokenManager.wrapSpApiFunction(
-            GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+    // Create batch arrays based on available tokens
+    const firstBatchPromises = [];
+    const firstBatchServiceNames = [];
+    
+    // SP-API functions (require AccessToken)
+    if (AccessToken) {
+        firstBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        firstBatchServiceNames.push("V2 Seller Performance Report");
         
-        tokenManager.wrapSpApiFunction(
-            GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+        firstBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        firstBatchServiceNames.push("V1 Seller Performance Report");
+    } else {
+        console.log("⚠️ Skipping SP-API functions - AccessToken not available");
+    }
+    
+    // Ads functions (require AdsAccessToken)
+    if (AdsAccessToken) {
+        firstBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region)
+        );
+        firstBatchServiceNames.push("PPC Spends by SKU");
         
-        tokenManager.wrapAdsFunction(
-            getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region),
+        firstBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region)
+        );
+        firstBatchServiceNames.push("Ads Keywords Performance");
         
-        tokenManager.wrapAdsFunction(
-            getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region),
-        
-        tokenManager.wrapAdsFunction(
-            getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region)
-    ]);
+        firstBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region)
+        );
+        firstBatchServiceNames.push("PPC Spends Date Wise");
+    } else {
+        console.log("⚠️ Skipping Ads functions - AdsAccessToken not available");
+    }
+    
+    const firstBatchResults = await Promise.allSettled(firstBatchPromises);
 
     // Process results with detailed error tracking
     const processApiResult = (result, serviceName) => {
@@ -577,53 +661,131 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
     };
 
-    const v2data = processApiResult(firstBatchResults[0], "V2 Seller Performance Report");
-    const v1data = processApiResult(firstBatchResults[1], "V1 Seller Performance Report");
-    const ppcSpendsBySKU = processApiResult(firstBatchResults[2], "PPC Spends by SKU");
-    const adsKeywordsPerformanceData = processApiResult(firstBatchResults[3], "Ads Keywords Performance");
-    const ppcSpendsDateWise = processApiResult(firstBatchResults[4], "PPC Spends Date Wise");
+    // Process first batch results dynamically based on executed functions
+    let v2data = { success: false, data: null, error: "SP-API token not available" };
+    let v1data = { success: false, data: null, error: "SP-API token not available" };
+    let ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
+    let adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
+    let ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
+    
+    let resultIndex = 0;
+    
+    // Process SP-API results if token was available
+    if (AccessToken) {
+        v2data = processApiResult(firstBatchResults[resultIndex], firstBatchServiceNames[resultIndex]);
+        resultIndex++;
+        v1data = processApiResult(firstBatchResults[resultIndex], firstBatchServiceNames[resultIndex]);
+        resultIndex++;
+    }
+    
+    // Process Ads results if token was available
+    if (AdsAccessToken) {
+        ppcSpendsBySKU = processApiResult(firstBatchResults[resultIndex], firstBatchServiceNames[resultIndex]);
+        resultIndex++;
+        adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex], firstBatchServiceNames[resultIndex]);
+        resultIndex++;
+        ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex], firstBatchServiceNames[resultIndex]);
+        resultIndex++;
+    }
 
     // ===== SECOND BATCH OF API CALLS WITH STRUCTURED ERROR HANDLING =====
     console.log("🔄 Starting second batch of API calls...");
     
-    const secondBatchResults = await Promise.allSettled([
-        tokenManager.wrapSpApiFunction(
-            GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+    const secondBatchPromises = [];
+    const secondBatchServiceNames = [];
+    
+    // SP-API functions (require AccessToken)
+    if (AccessToken) {
+        secondBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        secondBatchServiceNames.push("Restock Inventory Recommendations");
         
+        secondBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        secondBatchServiceNames.push("FBA Inventory Planning");
+        
+        secondBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        secondBatchServiceNames.push("Stranded Inventory");
+        
+        secondBatchPromises.push(
+            tokenManager.wrapSpApiFunction(
+                GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken
+            )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+        );
+        secondBatchServiceNames.push("Inbound Non-Compliance");
+    }
+    
+    // Functions that don't require tokens (independent)
+    secondBatchPromises.push(
         addReviewDataTODatabase(
             Array.isArray(asinArray) ? asinArray : [], Country, userId, Region
-        ),
+        )
+    );
+    secondBatchServiceNames.push("Product Reviews");
+    
+    // Ads functions (require AdsAccessToken)
+    if (AdsAccessToken) {
+        secondBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getKeywords, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region)
+        );
+        secondBatchServiceNames.push("Ads Keywords");
         
-        tokenManager.wrapAdsFunction(
-            getKeywords, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region),
-        
-        tokenManager.wrapAdsFunction(
-            getCampaign, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, Region, userId, Country),
-        
-        tokenManager.wrapSpApiFunction(
-            GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        
-        tokenManager.wrapSpApiFunction(
-            GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        
-        tokenManager.wrapSpApiFunction(
-            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken
-        )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
-    ]);
+        secondBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getCampaign, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, Region, userId, Country)
+        );
+        secondBatchServiceNames.push("Campaign Data");
+    }
+    
+    const secondBatchResults = await Promise.allSettled(secondBatchPromises);
 
-    // Process second batch results
-    const RestockinventoryData = processApiResult(secondBatchResults[0], "Restock Inventory Recommendations");
-    const productReview = processApiResult(secondBatchResults[1], "Product Reviews");
-    const adsKeywords = processApiResult(secondBatchResults[2], "Ads Keywords");
-    const campaignData = processApiResult(secondBatchResults[3], "Campaign Data");
-    const fbaInventoryPlanningData = processApiResult(secondBatchResults[4], "FBA Inventory Planning");
-    const strandedInventoryData = processApiResult(secondBatchResults[5], "Stranded Inventory");
-    const inboundNonComplianceData = processApiResult(secondBatchResults[6], "Inbound Non-Compliance");
+    // Process second batch results dynamically
+    let RestockinventoryData = { success: false, data: null, error: "SP-API token not available" };
+    let fbaInventoryPlanningData = { success: false, data: null, error: "SP-API token not available" };
+    let strandedInventoryData = { success: false, data: null, error: "SP-API token not available" };
+    let inboundNonComplianceData = { success: false, data: null, error: "SP-API token not available" };
+    let productReview = { success: false, data: null, error: "Function failed" };
+    let adsKeywords = { success: false, data: null, error: "Ads token not available" };
+    let campaignData = { success: false, data: null, error: "Ads token not available" };
+    
+    let secondResultIndex = 0;
+    
+    // Process SP-API results if token was available
+    if (AccessToken) {
+        RestockinventoryData = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+        fbaInventoryPlanningData = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+        strandedInventoryData = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+        inboundNonComplianceData = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+    }
+    
+    // Process independent function (Product Reviews)
+    productReview = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+    secondResultIndex++;
+    
+    // Process Ads results if token was available
+    if (AdsAccessToken) {
+        adsKeywords = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+        campaignData = processApiResult(secondBatchResults[secondResultIndex], secondBatchServiceNames[secondResultIndex]);
+        secondResultIndex++;
+    }
 
     // ===== VALIDATE SPONSORED ADS DATA WITH FALLBACK =====
     let sponsoredAdsData = [];
@@ -695,7 +857,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // ===== COMPETITIVE PRICING WITH CHUNKING AND ERROR HANDLING =====
     let competitivePriceData = [];
 
-    if (Array.isArray(asinArray) && asinArray.length > 0) {
+    if (AccessToken && Array.isArray(asinArray) && asinArray.length > 0) {
         console.log(`🔄 Processing competitive pricing for ${asinArray.length} ASINs...`);
         
         try {
@@ -774,64 +936,103 @@ const getSpApiData = asyncHandler(async (req, res) => {
         // Continue without saving rather than failing
     }
 
-    // ===== EXTRACT CAMPAIGN IDS WITH VALIDATION =====
-    let campaignids = [];
-    if (campaignData.success && campaignData.data && campaignData.data.campaignData) {
-        if (Array.isArray(campaignData.data.campaignData)) {
-            campaignids = campaignData.data.campaignData
-                .filter(item => item && item.campaignId)
-                .map(item => item.campaignId);
-            console.log(`✅ Extracted ${campaignids.length} campaign IDs from campaign data`);
-        } else {
-            logger.warn("Campaign data is not an array", { 
-                campaignDataType: typeof campaignData.data.campaignData,
-                userId 
-            });
-        }
-    } else {
-        logger.warn("Campaign data not available or invalid", { 
-            success: campaignData.success,
-            hasData: !!campaignData.data,
-            error: campaignData.error
-        });
-    }
+
 
     // ===== THIRD BATCH OF API CALLS =====
     console.log("🔄 Starting third batch of API calls...");
     
-    const thirdBatchResults = await Promise.allSettled([
-        tokenManager.wrapDataToSendFunction(
-            TotalSales, userId, RefreshToken, AdsRefreshToken
-        )(dataToSend, userId, Base_URI, Country, Region),
+    const thirdBatchPromises = [];
+    const thirdBatchServiceNames = [];
+    
+    // SP-API functions (require AccessToken in dataToSend)
+    if (AccessToken) {
+        thirdBatchPromises.push(
+            tokenManager.wrapDataToSendFunction(
+                TotalSales, userId, RefreshToken, AdsRefreshToken
+            )(dataToSend, userId, Base_URI, Country, Region)
+        );
+        thirdBatchServiceNames.push("Weekly Sales");
         
-        tokenManager.wrapDataToSendFunction(
-            getshipment, userId, RefreshToken, AdsRefreshToken
-        )(dataToSend, userId, Base_URI, Country, Region),
+        thirdBatchPromises.push(
+            tokenManager.wrapDataToSendFunction(
+                getshipment, userId, RefreshToken, AdsRefreshToken
+            )(dataToSend, userId, Base_URI, Country, Region)
+        );
+        thirdBatchServiceNames.push("Shipment Data");
         
-        tokenManager.wrapDataToSendFunction(
-            getBrand, userId, RefreshToken, AdsRefreshToken
-        )(dataToSend, userId, Base_URI),
+        thirdBatchPromises.push(
+            tokenManager.wrapDataToSendFunction(
+                getBrand, userId, RefreshToken, AdsRefreshToken
+            )(dataToSend, userId, Base_URI)
+        );
+        thirdBatchServiceNames.push("Brand Data");
         
-        tokenManager.wrapDataToSendFunction(
-            getAmazonFees, userId, RefreshToken, AdsRefreshToken
-        )(dataToSend, userId, Base_URI, Country, Region, ProductDetails),
+        thirdBatchPromises.push(
+            tokenManager.wrapDataToSendFunction(
+                getAmazonFees, userId, RefreshToken, AdsRefreshToken
+            )(dataToSend, userId, Base_URI, Country, Region, ProductDetails)
+        );
+        thirdBatchServiceNames.push("Amazon Fees");
         
-        tokenManager.wrapDataToSendFunction(
-            listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
-        )(dataToSend, userId, Base_URI, Country, Region),
+        thirdBatchPromises.push(
+            tokenManager.wrapDataToSendFunction(
+                listFinancialEventsMethod, userId, RefreshToken, AdsRefreshToken
+            )(dataToSend, userId, Base_URI, Country, Region)
+        );
+        thirdBatchServiceNames.push("Financial Events");
+    }
+    
+    // Ads functions (require AdsAccessToken)
+    if (AdsAccessToken) {
+        // Extract campaign IDs with validation
+        let campaignids = [];
+        if (campaignData.success && campaignData.data && campaignData.data.campaignData) {
+            if (Array.isArray(campaignData.data.campaignData)) {
+                campaignids = campaignData.data.campaignData
+                    .filter(item => item && item.campaignId)
+                    .map(item => item.campaignId);
+            }
+        }
         
-        tokenManager.wrapAdsFunction(
-            getAdGroups, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, Region, userId, Country, campaignids)
-    ]);
+        thirdBatchPromises.push(
+            tokenManager.wrapAdsFunction(
+                getAdGroups, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, Region, userId, Country, campaignids)
+        );
+        thirdBatchServiceNames.push("Ad Groups Data");
+    }
+    
+    const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
 
-    // Process third batch results
-    const WeeklySales = processApiResult(thirdBatchResults[0], "Weekly Sales");
-    const shipment = processApiResult(thirdBatchResults[1], "Shipment Data");
-    const brandData = processApiResult(thirdBatchResults[2], "Brand Data");
-    const feesResult = processApiResult(thirdBatchResults[3], "Amazon Fees");
-    const financeDataFromAPI = processApiResult(thirdBatchResults[4], "Financial Events");
-    const adGroupsData = processApiResult(thirdBatchResults[5], "Ad Groups Data");
+    // Process third batch results dynamically
+    let WeeklySales = { success: false, data: null, error: "SP-API token not available" };
+    let shipment = { success: false, data: null, error: "SP-API token not available" };
+    let brandData = { success: false, data: null, error: "SP-API token not available" };
+    let feesResult = { success: false, data: null, error: "SP-API token not available" };
+    let financeDataFromAPI = { success: false, data: null, error: "SP-API token not available" };
+    let adGroupsData = { success: false, data: null, error: "Ads token not available" };
+    
+    let thirdResultIndex = 0;
+    
+    // Process SP-API results if token was available
+    if (AccessToken) {
+        WeeklySales = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+        shipment = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+        brandData = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+        feesResult = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+        financeDataFromAPI = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+    }
+    
+    // Process Ads results if token was available
+    if (AdsAccessToken) {
+        adGroupsData = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+        thirdResultIndex++;
+    }
 
     // ===== VALIDATE AND TRANSFORM FINANCE DATA =====
     let financeData = [];
@@ -879,22 +1080,30 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // ===== FOURTH BATCH: NEGATIVE KEYWORDS AND SEARCH KEYWORDS =====
     console.log("🔄 Starting fourth batch of API calls...");
     
-    const fourthBatchResults = await Promise.allSettled([
-        tokenManager.wrapAdsFunction(
-            getNegativeKeywords, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region, 
-            Array.isArray(campaignIdArray) ? campaignIdArray : [], 
-            Array.isArray(adGroupIdArray) ? adGroupIdArray : []
-        ),
-        
-        tokenManager.wrapAdsFunction(
-            getSearchKeywords, userId, RefreshToken, AdsRefreshToken
-        )(AdsAccessToken, ProfileId, userId, Country, Region)
-    ]);
+    let negativeKeywords = { success: false, data: null, error: "Ads token not available" };
+    let searchKeywords = { success: false, data: null, error: "Ads token not available" };
+    
+    // Only proceed if Ads token is available
+    if (AdsAccessToken) {
+        const fourthBatchResults = await Promise.allSettled([
+            tokenManager.wrapAdsFunction(
+                getNegativeKeywords, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region, 
+                Array.isArray(campaignIdArray) ? campaignIdArray : [], 
+                Array.isArray(adGroupIdArray) ? adGroupIdArray : []
+            ),
+            
+            tokenManager.wrapAdsFunction(
+                getSearchKeywords, userId, RefreshToken, AdsRefreshToken
+            )(AdsAccessToken, ProfileId, userId, Country, Region)
+        ]);
 
-    // Process fourth batch results
-    const negativeKeywords = processApiResult(fourthBatchResults[0], "Negative Keywords");
-    const searchKeywords = processApiResult(fourthBatchResults[1], "Search Keywords");
+        // Process fourth batch results
+        negativeKeywords = processApiResult(fourthBatchResults[0], "Negative Keywords");
+        searchKeywords = processApiResult(fourthBatchResults[1], "Search Keywords");
+    } else {
+        console.log("⚠️ Skipping fourth batch - AdsAccessToken not available");
+    }
 
     // ===== LISTING ITEMS PROCESSING WITH MEMORY SAFETY =====
     console.log("🔄 Starting listing items processing...");
@@ -905,8 +1114,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     let genericKeyWordArray = [];
     
-    // Ensure both arrays exist and are actually arrays before processing
-    if (Array.isArray(skuArray) && Array.isArray(asinArray) && skuArray.length > 0) {
+    // Ensure both arrays exist and are actually arrays before processing, and AccessToken is available
+    if (AccessToken && Array.isArray(skuArray) && Array.isArray(asinArray) && skuArray.length > 0) {
         // Memory safety check
         const MAX_CONCURRENT_ITEMS = 50; // Prevent memory exhaustion
         if (skuArray.length > MAX_CONCURRENT_ITEMS) {
@@ -1005,7 +1214,11 @@ const getSpApiData = asyncHandler(async (req, res) => {
             // Continue with whatever data we have
         }
     } else {
-        console.log("ℹ️ No SKUs available for listing items processing");
+        if (!AccessToken) {
+            console.log("ℹ️ Skipping listing items processing - AccessToken not available");
+        } else {
+            console.log("ℹ️ No SKUs available for listing items processing");
+        }
     }
 
     // Save generic keywords if any were found
