@@ -117,6 +117,9 @@ export default function Login() {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
         }
+        if(error.response?.data?.message === "Seller central not found"){
+          navigate('/connect-to-amazon');
+        }
       } else if (error.response?.status === 403) {
         setErrorMessage('Account is disabled. Please contact support.');
       } else {

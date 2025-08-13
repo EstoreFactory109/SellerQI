@@ -383,8 +383,13 @@ const loginUser = asyncHandler(async (req, res) => {
     else {
         getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
         if (!getSellerCentral) {
+            AccessToken = await createAccessToken(checkUserIfExists._id);
+            RefreshToken = await createRefreshToken(checkUserIfExists._id);
             logger.error(new ApiError(404, "Seller central not found"));
-            return res.status(404).json(new ApiResponse(404, "", "Seller central not found"));
+            return res.status(404)
+            .cookie("IBEXAccessToken", AccessToken, option)
+            .cookie("IBEXRefreshToken", RefreshToken, option)
+            .json(new ApiResponse(404, "", "Seller central not found"));
         }
         // For regular users and enterpriseAdmin, get their own seller central
         AccessToken = await createAccessToken(checkUserIfExists._id);
@@ -403,7 +408,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const option = getHttpsCookieOptions();
 
-    console.log(AccessToken, RefreshToken, LocationToken);
+    
 
 
     // Prepare response data

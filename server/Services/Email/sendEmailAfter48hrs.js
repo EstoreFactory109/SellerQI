@@ -6,7 +6,7 @@ const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
-let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'AmazonAnalyseReadyEmailTemplate.html'), 'utf8');
+let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'connectionOfAccountRemainingTemplate.html'), 'utf8');
 
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,17 +23,10 @@ const checkEmailDomain = async (email) => {
     }
 };
 
-const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
+const sendAnalysisReadyEmail = async (email, firstName, loginUrl) => {
     let template = AnalysisReadyEmailTemplate
         .replace('{{userName}}', firstName)
-        .replace('{{dashboardUrl}}', dashboardUrl)
-        .replace('{{facebookUrl}}', process.env.FACEBOOK_URL || '#')
-        .replace('{{twitterUrl}}', process.env.TWITTER_URL || '#')
-        .replace('{{linkedinUrl}}', process.env.LINKEDIN_URL || '#')
-        .replace('{{youtubeUrl}}', process.env.YOUTUBE_URL || '#')
-        .replace('{{privacyUrl}}', process.env.PRIVACY_POLICY_URL || '#')
-        .replace('{{termsUrl}}', process.env.TERMS_OF_SERVICE_URL || '#')
-        .replace('{{unsubscribeUrl}}', process.env.UNSUBSCRIBE_URL || '#');
+        .replace('{{loginUrl}}', loginUrl)
 
     try {
         // Check if required environment variables are set
@@ -64,19 +57,11 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
             },
         });
 
-        const subject = "Your SellerQI Account is Ready! 🎉";
+        const subject = "Connect Your Amazon Account - SellerQI";
         const text = `
             Dear ${firstName},
 
-            Great news! Your SellerQI account analysis is complete and your dashboard is ready with all your Amazon data.
-
-            You can now access:
-            • Sales & profit analytics
-            • Inventory & restock suggestions  
-            • PPC & keyword performance
-            • Competitor tracking & product rankings
-
-            Access your dashboard: ${dashboardUrl}
+            We noticed you haven't connected your Amazon account yet. Connect now to start getting insights for your business.
 
             Need help? Contact us:
             📧 Email: support@sellerqi.com

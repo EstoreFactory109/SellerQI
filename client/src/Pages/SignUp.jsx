@@ -8,8 +8,7 @@ import {
   Phone, 
   Lock, 
   ArrowRight,
-  Loader2,
-  ChevronDown
+  Loader2
 } from 'lucide-react';
 
 import axios from 'axios';
@@ -18,30 +17,23 @@ import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
+import { countryCodesData } from '../utils/countryCodesData.js';
 
-// Countries data with phone validation patterns
-const countries = [
-  { code: '+1', name: 'United States', flag: '🇺🇸', pattern: /^\d{10}$/, placeholder: '(123) 456-7890', minLength: 10, maxLength: 10 },
-  { code: '+1', name: 'Canada', flag: '🇨🇦', pattern: /^\d{10}$/, placeholder: '(123) 456-7890', minLength: 10, maxLength: 10 },
-  { code: '+44', name: 'United Kingdom', flag: '🇬🇧', pattern: /^\d{10,11}$/, placeholder: '7123 456789', minLength: 10, maxLength: 11 },
-  { code: '+91', name: 'India', flag: '🇮🇳', pattern: /^\d{10}$/, placeholder: '98765 43210', minLength: 10, maxLength: 10 },
-  { code: '+86', name: 'China', flag: '🇨🇳', pattern: /^\d{11}$/, placeholder: '138 0013 8000', minLength: 11, maxLength: 11 },
-  { code: '+49', name: 'Germany', flag: '🇩🇪', pattern: /^\d{10,12}$/, placeholder: '30 12345678', minLength: 10, maxLength: 12 },
-  { code: '+33', name: 'France', flag: '🇫🇷', pattern: /^\d{9,10}$/, placeholder: '6 12 34 56 78', minLength: 9, maxLength: 10 },
-  { code: '+39', name: 'Italy', flag: '🇮🇹', pattern: /^\d{9,10}$/, placeholder: '312 345 6789', minLength: 9, maxLength: 10 },
-  { code: '+34', name: 'Spain', flag: '🇪🇸', pattern: /^\d{9}$/, placeholder: '612 34 56 78', minLength: 9, maxLength: 9 },
-  { code: '+81', name: 'Japan', flag: '🇯🇵', pattern: /^\d{10,11}$/, placeholder: '90 1234 5678', minLength: 10, maxLength: 11 },
-  { code: '+82', name: 'South Korea', flag: '🇰🇷', pattern: /^\d{9,11}$/, placeholder: '10 1234 5678', minLength: 9, maxLength: 11 },
-  { code: '+61', name: 'Australia', flag: '🇦🇺', pattern: /^\d{9}$/, placeholder: '412 345 678', minLength: 9, maxLength: 9 },
-  { code: '+55', name: 'Brazil', flag: '🇧🇷', pattern: /^\d{10,11}$/, placeholder: '11 91234-5678', minLength: 10, maxLength: 11 },
-  { code: '+52', name: 'Mexico', flag: '🇲🇽', pattern: /^\d{10}$/, placeholder: '55 1234 5678', minLength: 10, maxLength: 10 },
-  { code: '+7', name: 'Russia', flag: '🇷🇺', pattern: /^\d{10}$/, placeholder: '912 345-67-89', minLength: 10, maxLength: 10 },
-  { code: '+90', name: 'Turkey', flag: '🇹🇷', pattern: /^\d{10}$/, placeholder: '532 123 45 67', minLength: 10, maxLength: 10 },
-  { code: '+971', name: 'UAE', flag: '🇦🇪', pattern: /^\d{8,9}$/, placeholder: '50 123 4567', minLength: 8, maxLength: 9 },
-  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦', pattern: /^\d{8,9}$/, placeholder: '50 123 4567', minLength: 8, maxLength: 9 },
-  { code: '+27', name: 'South Africa', flag: '🇿🇦', pattern: /^\d{9}$/, placeholder: '82 123 4567', minLength: 9, maxLength: 9 },
-  { code: '+234', name: 'Nigeria', flag: '🇳🇬', pattern: /^\d{7,10}$/, placeholder: '803 123 4567', minLength: 7, maxLength: 10 },
-];
+// Helper function to get country flag from ISO code
+const getCountryFlag = (isoCode) => {
+  if (!isoCode || isoCode === 'XX') return '🏳️'; // Default flag for unknown countries
+  return `https://flagsapi.com/${isoCode}/flat/32.png`;
+};
+
+// Default fallback country data for unknown codes
+const defaultCountryData = {
+  iso: 'XX',
+  name: 'Unknown Country',
+  pattern: /^\d{7,15}$/,
+  placeholder: 'Enter phone number',
+  minLength: 7,
+  maxLength: 15
+};
 
 const SignUp = () => {
   const [plans, setPlans] = useState("PRO-Trial");
@@ -52,8 +44,9 @@ const SignUp = () => {
     email: '',
     password: ''
   });
-  const [selectedCountry, setSelectedCountry] = useState(countries[0]); // Default to US
-  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [countryCode, setCountryCode] = useState('+1'); // Default country code
+  const [selectedCountry, setSelectedCountry] = useState(countryCodesData['+1'] || defaultCountryData); // Default to US
+  const [countryFlag, setCountryFlag] = useState('🇺🇸'); // Default flag
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -67,19 +60,20 @@ const SignUp = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Close dropdown when clicking outside
+  // Update selected country when country code changes
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (!event.target.closest('.country-dropdown')) {
-        setShowCountryDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
+    const foundCountry = countryCodesData[countryCode];
+    if (foundCountry) {
+      setSelectedCountry(foundCountry);
+      // Try to get flag from API, fallback to emoji
+      const flagUrl = getCountryFlag(foundCountry.iso);
+      setCountryFlag(flagUrl);
+    } else {
+      // If no country found, use default country data but keep the entered code
+      setSelectedCountry({...defaultCountryData, code: countryCode});
+      setCountryFlag('🏳️'); // Default flag for unknown countries
+    }
+  }, [countryCode]);
 
   // Handle URL parameters for plan selection
   useEffect(() => {
@@ -99,11 +93,15 @@ const SignUp = () => {
     setErrors({ ...errors, [e.target.name]: '' });
   };
 
-  const handleCountrySelect = (country) => {
-    setSelectedCountry(country);
-    setShowCountryDropdown(false);
-    setFormData({ ...formData, phone: '' }); // Clear phone input when country changes
-    setErrors({ ...errors, phone: '' }); // Clear phone error when country changes
+  const handleCountryCodeChange = (e) => {
+    const value = e.target.value;
+    // Only allow + and digits, max 4 characters (+XXX)
+    if (value.match(/^\+?\d{0,3}$/) || value === '+') {
+      const formattedValue = value.startsWith('+') ? value : '+' + value.replace(/[^\d]/g, '');
+      setCountryCode(formattedValue);
+      setFormData({ ...formData, phone: '' }); // Clear phone input when country changes
+      setErrors({ ...errors, phone: '' }); // Clear phone error when country changes
+    }
   };
 
   const handlePhoneChange = (e) => {
@@ -157,7 +155,7 @@ const SignUp = () => {
     try {
       const formDataWithTerms = {
         ...formData,
-        phone: `${selectedCountry.code} ${formData.phone}`, // Include country code
+        phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
         packageType: plans=="PRO-Trial" ? "PRO" : plans=="LITE",
         isInTrialPeriod: plans=="PRO-Trial" ? true : false,
@@ -335,45 +333,35 @@ const SignUp = () => {
                   Phone Number
                 </label>
                 <div className="flex">
-                  {/* Country Code Dropdown */}
-                  <div className="relative country-dropdown">
-                    <button
-                      type="button"
-                      onClick={() => setShowCountryDropdown(!showCountryDropdown)}
-                      className={`flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white hover:bg-gray-50 focus:outline-none transition-all duration-300 ${
-                        errors.phone ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
-                      }`}
-                    >
-                      <span className="text-lg">{selectedCountry.flag}</span>
-                      <span className="text-sm font-medium text-gray-700">{selectedCountry.code}</span>
-                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCountryDropdown ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    {/* Dropdown Menu */}
-                    <AnimatePresence>
-                      {showCountryDropdown && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          transition={{ duration: 0.2 }}
-                          className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto w-80 min-w-max"
-                        >
-                          {countries.map((country, index) => (
-                            <button
-                              key={index}
-                              type="button"
-                              onClick={() => handleCountrySelect(country)}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-100 last:border-b-0"
-                            >
-                              <span className="text-lg flex-shrink-0">{country.flag}</span>
-                              <span className="text-sm font-semibold text-gray-800 flex-shrink-0 min-w-[3rem]">{country.code}</span>
-                              <span className="text-sm text-gray-600 truncate">{country.name}</span>
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                  {/* Country Code Input */}
+                  <div className="relative">
+                    <div className="flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white">
+                      <div className="w-5 h-4 flex items-center justify-center">
+                        {countryFlag.startsWith('http') ? (
+                          <img 
+                            src={countryFlag} 
+                            alt={`${selectedCountry.name} flag`} 
+                            className="w-5 h-4 object-cover rounded-sm"
+                            onError={(e) => {
+                              // Fallback to emoji if image fails to load
+                              e.target.outerHTML = '<span class="text-sm">🏳️</span>';
+                            }}
+                          />
+                        ) : (
+                          <span className="text-sm">{countryFlag}</span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={countryCode}
+                        onChange={handleCountryCodeChange}
+                        className={`w-16 text-sm font-medium text-gray-700 bg-transparent border-none outline-none focus:ring-0 ${
+                          errors.phone ? 'text-red-600' : ''
+                        }`}
+                        placeholder="+1"
+                        maxLength={4}
+                      />
+                    </div>
                   </div>
                   
                   {/* Phone Number Input */}
