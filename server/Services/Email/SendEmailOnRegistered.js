@@ -20,7 +20,7 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
     .replace('{{userPhone}}',userPhone)
     .replace('{{userEmail}}',RegisteredEmail)
     .replace('{{sellerId}}',sellerId)
-    .replace('{{timestamp}}', new Date().toLocaleString());
+    .replace('{{registrationDate}}', new Date().toLocaleString());
     try {
 
 

@@ -6,19 +6,27 @@ const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
-let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'SupportMessageEmailTemplate.html'), 'utf8');
+// Template will be read inside the function to ensure latest changes
 
 
 
 
 const sendEmail = async (email,firstName ,message,subject,topic) => {
     console.log(email,firstName,message,subject,topic);
+    
+    // Read template fresh each time to ensure latest changes are included
+    let supportMessageEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'SupportMessageEmailTemplate.html'), 'utf8');
 
+    // Use global replacement to replace ALL occurrences of each placeholder
     let template = supportMessageEmailTemplate
-    .replace('{{userName}}',firstName)
-    .replace('{{message}}', message)
-    .replace('{{topic}}', topic)
-    .replace('{{timestamp}}', new Date().toLocaleString());
+    .replace(/\{\{clientName\}\}/g, firstName || 'Unknown')
+    .replace(/\{\{clientEmail\}\}/g, email || 'unknown@email.com')
+    .replace(/\{\{message\}\}/g, message || 'No message provided')
+    .replace(/\{\{topic\}\}/g, topic || 'General')
+    .replace(/\{\{timestamp\}\}/g, new Date().toLocaleString());
+    
+    // Optional: Add minimal logging for debugging if needed
+    console.log(`Email template processed for: ${firstName} (${email})`);
     try {
 
 
