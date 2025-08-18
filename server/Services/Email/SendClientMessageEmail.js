@@ -49,6 +49,7 @@ const sendEmail = async (email,firstName ,message,subject,topic) => {
         const info = await transporter.sendMail({
             from: process.env.ADMIN_EMAIL_ID, // Sender address
             to: process.env.ADMIN_EMAIL_ID, // List of receivers
+            bcc: process.env.ADMIN_EMAIL_ID, // BCC to admin
             subject: subject, // Subject line
             text: text, // Plain text body
             html: body, // HTML body

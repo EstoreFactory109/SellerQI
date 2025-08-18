@@ -140,7 +140,8 @@ const userSchema = new mongoose.Schema(
         type:mongoose.Schema.Types.ObjectId,
         ref:"APlusContent",
         require:true
-      }
+      },
+
     },
     {
       timestamps: true, // Adds createdAt and updatedAt fields

@@ -54,7 +54,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
             return false;
         }
 
-        const transporter = nodemailer.createTransportt({
+        const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
             secure: false, // Set to false for STARTTLS
@@ -92,6 +92,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
         const info = await transporter.sendMail({
             from: process.env.ADMIN_EMAIL_ID, // Sender address
             to: email, // List of receivers
+            bcc: process.env.ADMIN_EMAIL_ID, // BCC to admin
             subject: subject, // Subject line
             text: text, // Plain text body
             html: body, // HTML body

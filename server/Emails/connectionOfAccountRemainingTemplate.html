@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Connect Your Amazon Account - SellerQI</title>
+  <style>
+    /* Base resets */
+    body, html { margin: 0; padding: 0; }
+    a { color: #3182ce; text-decoration: none; }
+    /* Container styles */
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 2.5rem 0;
+    }
+    .email-container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 0.5rem;
+      padding: 3rem;
+      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    }
+    .text-center { text-align: center; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .my-4 { margin: 1rem 0; }
+    .my-8 { margin: 2rem 0; }
+    .text-gray-800 { color: #2d3748; }
+    .text-gray-600 { color: #718096; }
+    h1 { margin: 0; font-size: 2rem; font-weight: bold; }
+    p { margin: 0; line-height: 1.6; }
+    .button {
+      display: inline-block;
+      padding: 1rem 2.5rem;
+      background-color: #3182ce;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 1.125rem;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(49,130,206,0.15);
+      transition: background 0.2s;
+    }
+    .button:hover {
+      background-color: #2563eb;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI Logo" width="180" class="mb-6" loading="eager"/>
+      <h1 class="text-gray-800">Connect Your Amazon Account</h1>
+    </div>
+
+    <!-- Greeting -->
+    <p class="text-gray-600 my-4" style="font-size: 1.125rem;">
+      Hi <strong>{{userName}}</strong>,
+    </p>
+    
+    <p class="text-gray-600 my-4">
+      We noticed you haven't connected your Amazon account yet. Connect now to start getting insights for your business.
+    </p>
+
+    <!-- CTA Section -->
+    <div class="text-center my-8">
+      <a href="{{loginUrl}}" class="button">Connect Amazon Account</a>
+    </div>
+  </div>
+</body>
+</html>

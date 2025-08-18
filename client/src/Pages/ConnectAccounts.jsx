@@ -481,7 +481,7 @@ const ConnectAccounts = () => {
               </button>
               <button
                 type="button"
-                onClick={navigateToDashboard}
+                onClick={()=>navigate('/analyse-account')}
                 className="text-sm text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors flex items-center gap-1"
               >
                 Skip for Now

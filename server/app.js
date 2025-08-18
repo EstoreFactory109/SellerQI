@@ -24,6 +24,7 @@ const dbConnect=require('./config/dbConn.js')
 const logger=require('./utils/Logger.js')
 const {connectRedis} = require('./config/redisConn.js')
 const { jobScheduler } = require('./Services/BackgroundJobs/JobScheduler.js')
+const { initializeEmailReminderJob } = require('./Services/BackgroundJobs/sendEmailAfter48Hrs.js')
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
@@ -84,6 +85,14 @@ const initializeBackgroundJobs = async () => {
         // Initialize background job scheduler
         await jobScheduler.initialize();
         logger.info('Background job scheduler initialized successfully');
+        
+        // Initialize email reminder cron job
+        const emailJobInitialized = initializeEmailReminderJob();
+        if (emailJobInitialized) {
+            logger.info('Email reminder job initialized successfully');
+        } else {
+            logger.error('Failed to initialize email reminder job');
+        }
         
     } catch (error) {
         logger.error('Failed to initialize background job scheduler:', error);
