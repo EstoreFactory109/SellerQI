@@ -191,7 +191,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
     //Getting all the required credentials
     let getSellerData;
     try {
-        getSellerData = await Seller.findOne({ User: userId }).sort({createdAt: -1});
+        getSellerData = await Seller.findOne({ User: userId });
     } catch (dbError) {
         logger.error("Database error while fetching seller data", { error: dbError.message, userId });
         return res.status(500).json(new ApiError(500, "Database error while fetching seller data"));

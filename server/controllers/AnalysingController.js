@@ -163,7 +163,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         }
 
         sellerCentral.sellerAccount.forEach(item => {
-            console.log("Hello")
+          
             console.log("item: ",item.country,item.region);
             if(item.country && item.region ){
                 console.log("item: ",item.country,item.region);
@@ -172,7 +172,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
                 brand: sellerCentral.brand,
                 country: item.country,
                 region: item.region,
-                NoOfProducts: item.products.length
+                NoOfProducts: item.products.length,
+                SpAPIrefreshTokenStatus:item.spiRefreshToken?true:false,
+                AdsAPIrefreshTokenStatus:item.adsRefreshToken?true:false,
+                
             })}
             if (item.country === country && item.region === region) {
                 SellerAccount = item;
