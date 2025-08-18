@@ -10,10 +10,12 @@ const MainPagesLayout = () => {
     <div className='flex min-h-screen'>
         <LeftNavSection  />
         <LeftNavSectionForTablet/>
-        <section className='w-full h-[100vh] overflow-hidden'>
+        <section className='w-full h-[100vh] flex flex-col'>
             <TopNav/>
             <TrialBanner/>
-            <Outlet/>
+            <div className="flex-1 overflow-y-auto">
+                <Outlet/>
+            </div>
         </section>
     </div>
   )

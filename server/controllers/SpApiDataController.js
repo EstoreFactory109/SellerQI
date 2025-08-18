@@ -10,6 +10,7 @@ const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js')
 const tokenManager = require('../utils/TokenManager.js');
 const { sendAnalysisReadyEmail } = require('../Services/Email/SendAnalysisReadyEmail.js');
 const { getUserById } = require('../Services/User/userServices.js');
+const LoggingHelper = require('../utils/LoggingHelper.js');
 
 const ListingItemsModel = require('../models/GetListingItemsModel.js');
 
@@ -51,14 +52,38 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const Region = req.region;
     const Country = req.country;
 
+    // ===== INITIALIZE LOGGING SESSION =====
+    let loggingHelper = null;
+    try {
+        loggingHelper = new LoggingHelper(userId, Region, Country);
+        await loggingHelper.initSession();
+        loggingHelper.logFunctionStart('getSpApiData', {
+            userId: userId,
+            region: Region,
+            country: Country,
+            requestOrigin: req.headers.origin || 'unknown'
+        });
+    } catch (loggingError) {
+        logger.warn('Failed to initialize logging session', { error: loggingError.message, userId });
+        // Continue without logging rather than failing the entire request
+    }
+
+    try {
+
     // ===== COMPREHENSIVE INPUT VALIDATION =====
     if (!userId) {
         logger.error("User ID is missing from request");
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('validation', new Error("User ID is missing from request"));
+        }
         return res.status(400).json(new ApiError(400, "User id is missing"));
     }
 
     if (!Region || !Country) {
         logger.error("Region and country are missing from request", { Region, Country });
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('validation', new Error("Region and country are required"));
+        }
         return res.status(400).json(new ApiError(400, "Region and country are required"));
     }
 
@@ -66,6 +91,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const validRegions = ["NA", "EU", "FE"];
     if (!validRegions.includes(Region)) {
         logger.error("Invalid region provided", { Region, validRegions });
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('validation', new Error(`Invalid region: ${Region}`));
+        }
         return res.status(400).json(new ApiError(400, `Invalid region. Must be one of: ${validRegions.join(', ')}`));
     }
 
@@ -231,6 +259,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     // ===== AWS CREDENTIALS GENERATION WITH VALIDATION =====
     let credentials;
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('generateTemporaryCredentials', { region: Region });
+    }
     try {
         credentials = await getTemporaryCredentials(regionConfig);
         
@@ -247,17 +278,32 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
 
         console.log("✅ AWS credentials generated successfully");
+        if (loggingHelper) {
+            loggingHelper.logFunctionSuccess('generateTemporaryCredentials', null, {
+                recordsProcessed: 1,
+                recordsSuccessful: 1
+            });
+        }
     } catch (credError) {
         logger.error("Failed to generate AWS temporary credentials", { 
             error: credError.message, 
             Region, 
             regionConfig: regionConfig ? "present" : "missing" 
         });
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('generateTemporaryCredentials', credError);
+        }
         return res.status(500).json(new ApiError(500, "Failed to generate AWS credentials"));
     }
 
     // ===== TOKEN GENERATION WITH PROPER ERROR HANDLING =====
     let AccessToken, AdsAccessToken;
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('generateAccessTokens', {
+            hasRefreshToken: !!RefreshToken,
+            hasAdsRefreshToken: !!AdsRefreshToken
+        });
+    }
     try {
         console.log("🔄 Generating access tokens...");
         
@@ -320,6 +366,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
         }
 
         console.log(`✅ Access tokens generated successfully - SP-API: ${!!AccessToken}, Ads: ${!!AdsAccessToken}`);
+        if (loggingHelper) {
+            loggingHelper.logFunctionSuccess('generateAccessTokens', null, {
+                recordsProcessed: tokenPromises.length,
+                recordsSuccessful: (AccessToken ? 1 : 0) + (AdsAccessToken ? 1 : 0),
+                recordsFailed: tokenPromises.length - ((AccessToken ? 1 : 0) + (AdsAccessToken ? 1 : 0))
+            });
+        }
     } catch (tokenError) {
         logger.error("Failed to generate any access tokens", { 
             error: tokenError.message, 
@@ -327,6 +380,9 @@ const getSpApiData = asyncHandler(async (req, res) => {
             hasRefreshToken: !!RefreshToken, 
             hasAdsRefreshToken: !!AdsRefreshToken 
         });
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('generateAccessTokens', tokenError);
+        }
         return res.status(500).json(new ApiError(500, `Token generation failed: ${tokenError.message}`));
     }
 
@@ -348,6 +404,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
     let merchantListingsData = null;
     
     if (AccessToken) {
+        if (loggingHelper) {
+            loggingHelper.logFunctionStart('GET_MERCHANT_LISTINGS_ALL_DATA', {
+                hasAccessToken: true,
+                marketplaceIds: marketplaceIds
+            });
+        }
         try {
             merchantListingsData = await tokenManager.wrapSpApiFunction(
                 GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
@@ -358,18 +420,31 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
 
             console.log("✅ Merchant listings data fetched successfully");
+            if (loggingHelper) {
+                const recordCount = merchantListingsData?.sellerAccount?.length || 0;
+                loggingHelper.logFunctionSuccess('GET_MERCHANT_LISTINGS_ALL_DATA', merchantListingsData, {
+                    recordsProcessed: recordCount,
+                    recordsSuccessful: recordCount
+                });
+            }
         } catch (merchantError) {
             logger.error("Failed to fetch merchant listings data", { 
                 error: merchantError.message, 
                 userId, 
                 marketplaceIds 
             });
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('GET_MERCHANT_LISTINGS_ALL_DATA', merchantError);
+            }
             // Don't return error here, continue with null merchantListingsData
             logger.warn("Continuing without merchant listings data due to SP-API error");
             merchantListingsData = null;
         }
     } else {
         console.log("⚠️ Skipping merchant listings - AccessToken not available");
+        if (loggingHelper) {
+            loggingHelper.logFunctionSkipped('GET_MERCHANT_LISTINGS_ALL_DATA', 'AccessToken not available');
+        }
         merchantListingsData = null;
     }
 
@@ -557,6 +632,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
     console.log("🔍 Debug - dataToSend.marketplaceId:", dataToSend.marketplaceId);
     console.log(`🔍 Debug - Available tokens - SP-API: ${!!AccessToken}, Ads: ${!!AdsAccessToken}`);
     
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('firstBatch_ApiCalls', {
+            hasAccessToken: !!AccessToken,
+            hasAdsToken: !!AdsAccessToken,
+            marketplaceIds: marketplaceIds
+        });
+    }
+    
     // Create batch arrays based on available tokens
     const firstBatchPromises = [];
     const firstBatchServiceNames = [];
@@ -612,6 +695,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const processApiResult = (result, serviceName) => {
         if (result.status === 'fulfilled') {
             console.log(`✅ ${serviceName} completed successfully`);
+            if (loggingHelper) {
+                const recordCount = Array.isArray(result.value) ? result.value.length : (result.value ? 1 : 0);
+                loggingHelper.logFunctionSuccess(serviceName, result.value, {
+                    recordsProcessed: recordCount,
+                    recordsSuccessful: recordCount
+                });
+            }
             return { success: true, data: result.value, error: null };
         } else {
             const errorMsg = result.reason?.message || 'Unknown error';
@@ -657,6 +747,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 logger.error(`❌ ${serviceName} failed`, { error: errorMsg, userId });
             }
             
+            if (loggingHelper) {
+                loggingHelper.logFunctionError(serviceName, result.reason);
+            }
+            
             return { success: false, data: null, error: errorMsg };
         }
     };
@@ -690,6 +784,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     // ===== SECOND BATCH OF API CALLS WITH STRUCTURED ERROR HANDLING =====
     console.log("🔄 Starting second batch of API calls...");
+    
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('secondBatch_ApiCalls', {
+            hasAccessToken: !!AccessToken,
+            hasAdsToken: !!AdsAccessToken
+        });
+    }
     
     const secondBatchPromises = [];
     const secondBatchServiceNames = [];
@@ -860,6 +961,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (AccessToken && Array.isArray(asinArray) && asinArray.length > 0) {
         console.log(`🔄 Processing competitive pricing for ${asinArray.length} ASINs...`);
         
+        if (loggingHelper) {
+            loggingHelper.logFunctionStart('getCompetitivePricing_chunked', {
+                totalAsins: asinArray.length,
+                chunkSize: 20
+            });
+        }
+        
         try {
             const CHUNK_SIZE = 20;
             let start = 0;
@@ -902,15 +1010,29 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
             
             console.log(`✅ Competitive pricing completed: ${competitivePriceData.length} total records`);
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('getCompetitivePricing_chunked', competitivePriceData, {
+                    recordsProcessed: asinArray.length,
+                    recordsSuccessful: competitivePriceData.length,
+                    totalChunks: Math.ceil(asinArray.length / CHUNK_SIZE)
+                });
+            }
         } catch (overallError) {
             logger.error("Overall competitive pricing processing failed", { 
                 error: overallError.message,
                 totalASINs: asinArray.length 
             });
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('getCompetitivePricing_chunked', overallError);
+            }
             // Continue with empty competitive data rather than failing
         }
     } else {
         console.log("ℹ️ No ASINs available for competitive pricing");
+        if (loggingHelper) {
+            loggingHelper.logFunctionSkipped('getCompetitivePricing_chunked', 
+                !AccessToken ? 'AccessToken not available' : 'No ASINs available');
+        }
     }
     
     // ===== SAVE COMPETITIVE PRICING WITH ERROR HANDLING =====
@@ -940,6 +1062,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
     // ===== THIRD BATCH OF API CALLS =====
     console.log("🔄 Starting third batch of API calls...");
+    
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('thirdBatch_ApiCalls', {
+            hasAccessToken: !!AccessToken,
+            hasAdsToken: !!AdsAccessToken
+        });
+    }
     
     const thirdBatchPromises = [];
     const thirdBatchServiceNames = [];
@@ -1080,6 +1209,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
     // ===== FOURTH BATCH: NEGATIVE KEYWORDS AND SEARCH KEYWORDS =====
     console.log("🔄 Starting fourth batch of API calls...");
     
+    if (loggingHelper) {
+        loggingHelper.logFunctionStart('fourthBatch_Keywords', {
+            hasAdsToken: !!AdsAccessToken,
+            campaignIdCount: campaignIdArray.length,
+            adGroupIdCount: adGroupIdArray.length
+        });
+    }
+    
     let negativeKeywords = { success: false, data: null, error: "Ads token not available" };
     let searchKeywords = { success: false, data: null, error: "Ads token not available" };
     
@@ -1116,6 +1253,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
     
     // Ensure both arrays exist and are actually arrays before processing, and AccessToken is available
     if (AccessToken && Array.isArray(skuArray) && Array.isArray(asinArray) && skuArray.length > 0) {
+        if (loggingHelper) {
+            loggingHelper.logFunctionStart('listingItems_processing', {
+                totalSkus: skuArray.length,
+                maxConcurrent: 50
+            });
+        }
         // Memory safety check
         const MAX_CONCURRENT_ITEMS = 50; // Prevent memory exhaustion
         if (skuArray.length > MAX_CONCURRENT_ITEMS) {
@@ -1204,6 +1347,13 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
             
             console.log(`✅ Listing items processing completed: ${genericKeyWordArray.length} total items`);
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('listingItems_processing', genericKeyWordArray, {
+                    recordsProcessed: skuArray.length,
+                    recordsSuccessful: genericKeyWordArray.length,
+                    totalBatches: Math.ceil(skuArray.length / BATCH_SIZE)
+                });
+            }
         } catch (listingError) {
             logger.error("Error during listing items processing", { 
                 error: listingError.message,
@@ -1211,13 +1361,22 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 totalSKUs: skuArray.length,
                 userId 
             });
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('listingItems_processing', listingError);
+            }
             // Continue with whatever data we have
         }
     } else {
         if (!AccessToken) {
             console.log("ℹ️ Skipping listing items processing - AccessToken not available");
+            if (loggingHelper) {
+                loggingHelper.logFunctionSkipped('listingItems_processing', 'AccessToken not available');
+            }
         } else {
             console.log("ℹ️ No SKUs available for listing items processing");
+            if (loggingHelper) {
+                loggingHelper.logFunctionSkipped('listingItems_processing', 'No SKUs available');
+            }
         }
     }
 
@@ -1361,6 +1520,16 @@ const getSpApiData = asyncHandler(async (req, res) => {
     if (overallSuccess) {
         console.log("🎉 SP-API data processing completed successfully!");
 
+        // Log successful completion
+        if (loggingHelper) {
+            loggingHelper.logFunctionSuccess('getSpApiData', result, {
+                recordsProcessed: serviceSummary.successful.length + serviceSummary.failed.length,
+                recordsSuccessful: serviceSummary.successful.length,
+                recordsFailed: serviceSummary.failed.length
+            });
+            await loggingHelper.endSession('completed');
+        }
+
         // ===== SEND ANALYSIS READY EMAIL =====
         try {
             console.log("📧 Sending analysis ready email...");
@@ -1415,6 +1584,16 @@ const getSpApiData = asyncHandler(async (req, res) => {
             criticalFailures: criticalFailures.map(f => f.service),
             userId 
         });
+        
+        // Log partial success
+        if (loggingHelper) {
+            loggingHelper.logFunctionWarning('getSpApiData', 'Critical services failed', {
+                criticalFailures: criticalFailures.map(f => f.service),
+                successRate: successPercentage
+            });
+            await loggingHelper.endSession('partial');
+        }
+        
         return res.status(207).json(new ApiResponse(207, {
             data: result,
             summary: {
@@ -1428,6 +1607,22 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 processingTime: Date.now() - Date.parse(new Date().toISOString())
             }
         }, "Partial success - some critical services failed"));
+    }
+
+    } catch (unexpectedError) {
+        logger.error("Unexpected error in getSpApiData", { 
+            error: unexpectedError.message, 
+            stack: unexpectedError.stack,
+            userId 
+        });
+        
+        // Log the unexpected error
+        if (loggingHelper) {
+            loggingHelper.logFunctionError('getSpApiData', unexpectedError);
+            await loggingHelper.endSession('failed');
+        }
+        
+        return res.status(500).json(new ApiError(500, `Unexpected error: ${unexpectedError.message}`));
     }
 
 })

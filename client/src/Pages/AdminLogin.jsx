@@ -81,6 +81,15 @@ export default function AdminLogin() {
         localStorage.setItem('isAdminAuth', 'true');
         localStorage.setItem('adminAccessType', response.data.data.accessType);
         localStorage.setItem('adminId', response.data.data.adminId);
+        
+        // Debug: Log what we're storing
+        console.log('🔍 Admin Login Debug - Storing:', {
+          isAdminAuth: 'true',
+          adminAccessType: response.data.data.accessType,
+          adminId: response.data.data.adminId,
+          fullResponse: response.data.data
+        });
+        
         navigate('/manage-accounts');
       }
     } catch (error) {

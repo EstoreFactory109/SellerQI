@@ -48,6 +48,7 @@ import PaymentFailed from './Pages/PaymentFailed.jsx';
 import AgencyClientRegistration from './Pages/AgencyClientRegistration.jsx';
 import AdminLogin from './Pages/AdminLogin.jsx';
 import ManageAccounts from './Pages/ManageAccounts.jsx';
+import UserLogging from './Pages/UserLogging.jsx';
 
 const App = () => {
 
@@ -116,6 +117,7 @@ const App = () => {
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />
+            <Route path='user-logging' element={<UserLogging />} />
             
             
           </Route>

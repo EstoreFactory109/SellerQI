@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, Activity} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -24,6 +24,23 @@ const LeftNavSection = () => {
     const userPlan = user?.packageType || 'LITE';
     const isLiteUser = userPlan === 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
+    
+    // Check for super admin access - using same logic as TopNav switch account button
+    const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
+    const adminAccessType = localStorage.getItem('adminAccessType');
+    const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
+    
+    // Debug logging for super admin access
+    console.log('🔍 Debug - User data:', {
+        user: user,
+        accessType: user?.accessType,
+        packageType: user?.packageType,
+        isAdminLoggedIn: isAdminLoggedIn,
+        adminAccessType: adminAccessType,
+        isSuperAdmin: isSuperAdmin,
+        isLiteUser: isLiteUser,
+        isAgencyUser: isAgencyUser
+    });
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
@@ -365,6 +382,38 @@ const LeftNavSection = () => {
                                             }`}/>
                                         </div>
                                         <span className="font-medium">Accounts History</span>
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
+
+                        {/* User Logging - Only for Super Admins */}
+                        {isSuperAdmin && (
+                            <NavLink
+                                to="/seller-central-checker/user-logging"
+                                className={({ isActive }) =>
+                                    `group flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-300 ${
+                                        isActive
+                                            ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg shadow-red-500/25 transform scale-[1.02]'
+                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-red-600 hover:scale-[1.01]'
+                                    }`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <div className={`p-1.5 rounded-lg transition-colors duration-300 ${
+                                            isActive ? 'bg-white/20' : 'bg-red-50 group-hover:bg-red-100'
+                                        }`}>
+                                            <Activity className={`w-4 h-4 transition-colors duration-300 ${
+                                                isActive ? 'text-white' : 'text-red-600'
+                                            }`}/>
+                                        </div>
+                                        <span className="font-medium">User Logging</span>
+                                        <div className="ml-auto">
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                                                ADMIN
+                                            </span>
+                                        </div>
                                     </>
                                 )}
                             </NavLink>
