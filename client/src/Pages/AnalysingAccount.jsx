@@ -171,7 +171,7 @@ const AnalysingAccount = () => {
                     if (response && response.status === 200) {
                         // Process dashboard data - analyseData will handle empty data gracefully
                         try {
-                            dashboardData = analyseData(response.data?.data || {}).dashboardData;
+                            dashboardData = (await analyseData(response.data?.data || {})).dashboardData;
                             console.log("Dashboard data processed:", dashboardData);
                             
                             // Check if we got empty data or actual data

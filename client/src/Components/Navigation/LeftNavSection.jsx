@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, Activity} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, Activity, Calendar} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -423,6 +423,20 @@ const LeftNavSection = () => {
 
                 {/* Divider */}
                 <div className="h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent my-8"></div>
+
+                {/* Book Consultation Button */}
+                <div className="mb-6">
+                    <NavLink
+                        to="/seller-central-checker/consultation"
+                        className="group flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm cursor-pointer transition-all duration-300 bg-gradient-to-r from-orange-400 to-amber-500 text-white shadow-lg shadow-orange-500/25 hover:shadow-xl hover:shadow-orange-500/40 hover:scale-[1.02] hover:from-orange-500 hover:to-amber-600 transform"
+                    >
+                        <div className="p-1.5 rounded-lg transition-colors duration-300 bg-white/20 group-hover:bg-white/30">
+                            <Calendar className="w-4 h-4 transition-colors duration-300 text-white"/>
+                        </div>
+                        <span className="font-semibold flex-1">Book Consultation</span>
+                        <div className="w-2 h-2 bg-yellow-300 rounded-full animate-pulse"></div>
+                    </NavLink>
+                </div>
 
                 {/* Settings Section */}
                 <div className="mb-8">

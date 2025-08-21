@@ -1,4 +1,4 @@
-import Profitiblity from "./Profitiblity";
+/*import Profitiblity from "./Profitiblity";
 import calculateSponsoredAdsMetrics from "./sponserdAds";
 import {calculateNegativeKeywordsMetrics} from "./sponserdAds";
 import { createDefaultDashboardData, mergeWithDefaults } from "../utils/defaultDataStructure";
@@ -605,5 +605,16 @@ console.log("ProductWiseSponsoredAdsGraphData: ", data.ProductWiseSponsoredAdsGr
     console.log("✅ Dashboard data processed successfully with", activeProducts.length, "active products");
     return { dashboardData };
 };
+
+export default analyseData;*/
+
+import axios from "axios";
+
+const analyseData = async (data) => {
+    console.log("data: ",data)
+    const response = await axios.post(`${import.meta.env.VITE_CALCULATION_API_URI}/calculation-api/calculate`, data, {withCredentials: true})
+    console.log("response in analyseData: ",response)
+    return response.data.data;
+}
 
 export default analyseData;

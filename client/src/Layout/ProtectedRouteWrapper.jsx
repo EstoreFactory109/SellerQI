@@ -133,7 +133,8 @@ const ProtectedRouteWrapper = ({ children }) => {
           
           // Process dashboard data - analyseData will now handle empty data gracefully
           try {
-            dashboardData = analyseData(response.data?.data || {}).dashboardData;
+            dashboardData = (await analyseData(response.data?.data || {})).dashboardData;
+            console.log("dashboardData: ",dashboardData)
             
             // Check if we got empty data or actual data
             if (isEmptyDashboardData(dashboardData)) {

@@ -253,7 +253,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
 
       // Process the data the same way as in ProtectedRouteWrapper.jsx and AnalysingAccount.jsx
       const analyseData = (await import('../../operations/analyse.js')).default;
-      const dashboardData = analyseData(response.data.data).dashboardData;
+      const dashboardData = (await analyseData(response.data.data)).dashboardData;
 
       // Update Redux store with the complete default dashboard data
       dispatch(setDashboardInfo(dashboardData));

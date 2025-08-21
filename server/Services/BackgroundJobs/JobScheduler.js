@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { DataUpdateService } = require('./DataUpdateService.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
+const { sendMail } = require('./sendEmailWeekly.js');
 const logger = require('../../utils/Logger.js');
 
 class JobScheduler {
@@ -29,10 +30,11 @@ class JobScheduler {
                 // Don't fail entire initialization if schedule setup fails
             }
 
-            // Setup scheduled jobs (only daily comprehensive updates now)
+            // Setup scheduled jobs
             this.setupDailyUpdateJob();
             this.setupCacheCleanupJob();
             this.setupHealthCheckJob();
+            this.setupWeeklyEmailJob();
 
             this.isInitialized = true;
             logger.info('Background job scheduler initialized successfully');
@@ -109,6 +111,29 @@ class JobScheduler {
         this.jobs.set('healthCheck', healthJob);
         healthJob.start();
         logger.info('Health check job scheduled (runs every 30 minutes)');
+    }
+
+    /**
+     * Setup weekly email job - runs every Saturday at 9:00 AM
+     */
+    setupWeeklyEmailJob() {
+        // Run every Saturday at 9:00 AM (0 9 * * 6)
+        const weeklyEmailJob = cron.schedule('0 9 * * 6', async () => {
+            try {
+                logger.info('Running weekly email job (every Saturday at 9:00 AM)');
+                await sendMail();
+                logger.info('Weekly email job completed successfully');
+            } catch (error) {
+                logger.error('Error in weekly email job:', error);
+            }
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || "UTC"
+        });
+
+        this.jobs.set('weeklyEmail', weeklyEmailJob);
+        weeklyEmailJob.start();
+        logger.info('Weekly email job scheduled (runs every Saturday at 9:00 AM)');
     }
 
     /**
@@ -189,6 +214,9 @@ class JobScheduler {
                     return await DataUpdateService.cleanupOldCache();
                 case 'healthCheck':
                     return await DataUpdateService.getUpdateStats();
+                case 'weeklyEmail':
+                    await sendMail();
+                    return { message: 'Weekly email job executed successfully' };
                 default:
                     throw new Error(`Unknown job: ${jobName}`);
             }

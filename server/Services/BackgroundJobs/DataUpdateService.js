@@ -7,12 +7,36 @@ const logger = require('../../utils/Logger.js');
 // Import all the data fetching controllers that need to be updated
 const SpApiDataController = require('../../controllers/SpApiDataController.js');
 
+// Import LoggingHelper for database logging
+const LoggingHelper = require('../../utils/LoggingHelper.js');
+
 class DataUpdateService {
 
     /**
      * Update daily data (all comprehensive data including profitability, sponsored ads, and all API data) for a specific user
      */
     static async updateDailyDataForUser(userId, country, region) {
+        // Initialize logging session for database tracking
+        let loggingHelper = null;
+        try {
+            loggingHelper = new LoggingHelper(userId, region, country);
+            await loggingHelper.initSession();
+            loggingHelper.logFunctionStart('updateDailyDataForUser', {
+                userId: userId,
+                region: region,
+                country: country,
+                requestOrigin: 'background_job'
+            });
+        } catch (loggingError) {
+            logger.warn('Failed to initialize logging session for background job', { 
+                error: loggingError.message, 
+                userId,
+                region,
+                country
+            });
+            // Continue without logging rather than failing the entire request
+        }
+
         try {
             logger.info(`Starting daily data update for user ${userId}, ${country}-${region}`);
 
@@ -35,6 +59,15 @@ class DataUpdateService {
             };
 
             try {
+                // Log the start of main SpApiDataController call
+                if (loggingHelper) {
+                    loggingHelper.logFunctionStart('SpApiDataController.getSpApiData', {
+                        userId: userId,
+                        region: region,
+                        country: country
+                    });
+                }
+
                 // Fetch fresh data from all APIs including:
                 // - Merchant listings data (GET_MERCHANT_LISTINGS_ALL_DATA)
                 // - V1/V2 seller performance reports
@@ -60,33 +93,106 @@ class DataUpdateService {
                 
                 if (spApiResult && spApiResult.statusCode === 200) {
                     logger.info(`Fresh comprehensive API data fetched successfully for user ${userId}, ${country}-${region}`);
+                    if (loggingHelper) {
+                        loggingHelper.logFunctionSuccess('SpApiDataController.getSpApiData', spApiResult.data, {
+                            recordsProcessed: 1,
+                            recordsSuccessful: 1
+                        });
+                    }
                 } else {
                     logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}`);
+                    if (loggingHelper) {
+                        loggingHelper.logFunctionError('SpApiDataController.getSpApiData', new Error(`Non-200 status: ${spApiResult?.statusCode}`));
+                    }
                 }
             } catch (apiError) {
                 logger.error(`Error fetching fresh API data for user ${userId}, ${country}-${region}:`, apiError);
+                if (loggingHelper) {
+                    loggingHelper.logFunctionError('SpApiDataController.getSpApiData', apiError);
+                }
                 // Continue with analysis using existing data if API fetch fails
             }
 
             // Run the analysis to get processed data (this will use the fresh comprehensive data we just fetched)
+            if (loggingHelper) {
+                loggingHelper.logFunctionStart('Analyse', {
+                    userId: userId,
+                    region: region,
+                    country: country
+                });
+            }
+            
             const analysisResult = await Analyse(userId, country, region);
             
             if (analysisResult.status !== 200) {
                 logger.error(`Analysis failed for user ${userId}: ${analysisResult.message}`);
+                if (loggingHelper) {
+                    loggingHelper.logFunctionError('Analyse', new Error(analysisResult.message));
+                }
                 return false;
             }
 
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('Analyse', analysisResult.message, {
+                    recordsProcessed: 1,
+                    recordsSuccessful: 1
+                });
+            }
+
             // Store the processed data in Redis cache
+            if (loggingHelper) {
+                loggingHelper.logFunctionStart('updateRedisCache', {
+                    userId: userId,
+                    region: region,
+                    country: country
+                });
+            }
+            
             await this.updateRedisCache(userId, country, region, analysisResult.message);
 
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('updateRedisCache', null, {
+                    recordsProcessed: 1,
+                    recordsSuccessful: 1
+                });
+            }
+
             // Mark the update as complete
+            if (loggingHelper) {
+                loggingHelper.logFunctionStart('markDailyUpdateComplete', {
+                    userId: userId,
+                    region: region,
+                    country: country
+                });
+            }
+            
             await UserSchedulingService.markDailyUpdateComplete(userId, country, region);
 
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('markDailyUpdateComplete', null, {
+                    recordsProcessed: 1,
+                    recordsSuccessful: 1
+                });
+            }
+
             logger.info(`Daily comprehensive data update completed for user ${userId}, ${country}-${region}`);
+            
+            // End the logging session successfully
+            if (loggingHelper) {
+                loggingHelper.endSession('completed');
+            }
+            
             return true;
 
         } catch (error) {
             logger.error(`Error updating daily data for user ${userId}, ${country}-${region}:`, error);
+            
+            // Log the error and end session
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('updateDailyDataForUser', error);
+                loggingHelper.endSession('failed');
+            }
+            
             return false;
         }
     }

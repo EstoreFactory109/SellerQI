@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Your Week in SellerQI</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; background-color: #f8fafc; color: #334155;">
+  
+  <!-- Wrapper Table -->
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8fafc; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        
+        <!-- Main Container -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; border-bottom: 1px solid #e2e8f0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr>
+                  <td>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;">
+                      <tr>
+                        <td align="left">
+                          <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI" style="height: 32px; width: auto; display: block;" />
+                        </td>
+                        <td align="right">
+                          <span style="background-color: #f1f5f9; color: #64748b; padding: 6px 12px; border-radius: 16px; font-size: 13px; font-weight: 500; display: inline-block;">{{weekDate}}</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <h1 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #0f172a;">Your week in SellerQI</h1>
+                    <p style="margin: 0; font-size: 16px; color: #64748b; font-weight: 400;">{{storeName}} • {{totalProducts}} products monitored</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 32px 40px;">
+              
+              <!-- Executive Summary -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 32px;">
+                <tr>
+                  <td style="background-color: #f8fafc; border-radius: 8px; padding: 24px; border-left: 4px solid #3b82f6;">
+                    <h2 style="font-size: 18px; font-weight: 600; color: #0f172a; margin: 0 0 12px 0;">📊 Weekly Summary</h2>
+                    <p style="font-size: 15px; color: #475569; margin: 0 0 16px 0;">
+                      Your account health score is <strong>{{healthScore}}</strong> this week. We've identified <strong>{{totalIssues}} issues</strong> that need your attention across {{marketplaces}} marketplaces.
+                    </p>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                      <tr>
+                        <td width="33%" style="padding-right: 12px;">
+                          <div style="font-size: 13px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">HEALTH SCORE</div>
+                          <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{{healthScore}}</div>
+                        </td>
+                        <td width="33%" style="padding: 0 12px;">
+                          <div style="font-size: 13px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">TOTAL ISSUES</div>
+                          <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{{totalIssues}}</div>
+                        </td>
+                        <td width="33%" style="padding-left: 12px;">
+                          <div style="font-size: 13px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">PRODUCTS MONITORED</div>
+                          <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{{totalProducts}}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Issues Dashboard -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; margin-bottom: 32px;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <h2 style="font-size: 18px; font-weight: 600; color: #0f172a; margin: 0 0 20px 0;">📊 Issues Overview</h2>
+                    
+                    <!-- Category Items -->
+                    <!-- Rankings -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 12px;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #fbbf24;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Rankings</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{rankingsCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{rankingsCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{rankingsProgressWidth}}%; background-color: #fbbf24; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Conversion -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 12px;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #dc2626;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Conversion</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{conversionCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{conversionCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{conversionProgressWidth}}%; background-color: #dc2626; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Inventory -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 12px;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ea580c;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Inventory</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{inventoryCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{inventoryCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{inventoryProgressWidth}}%; background-color: #ea580c; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Account Health -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 12px;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #94a3b8;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Account Health</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{accountHealthCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{accountHealthCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{accountHealthProgressWidth}}%; background-color: #94a3b8; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Profitability -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 12px;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #059669;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Profitability</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{profitabilityCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{profitabilityCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{profitabilityProgressWidth}}%; background-color: #059669; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Sponsored Ads -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 0;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                            <tr>
+                              <td width="12" style="vertical-align: top; padding-right: 12px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #374151;"></div>
+                              </td>
+                              <td style="vertical-align: top;">
+                                <div style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Sponsored Ads</div>
+                                <div style="font-size: 13px; color: #64748b; margin: 0;">{{sponsoredAdsCount}} issues detected</div>
+                              </td>
+                              <td align="right" style="vertical-align: top;">
+                                <div style="background-color: #f8fafc; color: #374151; font-size: 16px; font-weight: 700; padding: 8px 16px; border-radius: 20px; border: 1px solid #e2e8f0; display: inline-block;">{{sponsoredAdsCount}}</div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td colspan="3" style="padding-top: 12px;">
+                                <div style="width: 100%; height: 6px; background-color: #f1f5f9; border-radius: 3px; overflow: hidden;">
+                                  <div style="height: 100%; width: {{sponsoredAdsProgressWidth}}%; background-color: #374151; border-radius: 3px;"></div>
+                                </div>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Key Insights -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #fffbeb; border: 1px solid #fbbf24; border-radius: 8px; padding: 24px; margin-bottom: 32px;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <h2 style="font-size: 18px; font-weight: 600; color: #0f172a; margin: 0 0 20px 0;">💡 This Week's Key Insights</h2>
+                    
+                    <!-- Insight 1 -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 16px;">
+                      <tr>
+                        <td width="20" style="vertical-align: top; padding-right: 12px;">
+                          <div style="width: 20px; height: 20px; background-color: #fbbf24; border-radius: 50%; color: #ffffff; font-size: 12px; font-weight: 600; text-align: center; line-height: 20px;">1</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <div style="font-size: 15px; font-weight: 600; color: #92400e; margin: 0 0 4px 0;">Inventory Alert</div>
+                          <p style="font-size: 14px; color: #a16207; margin: 0; line-height: 1.5;">{{inventoryCount}} products are running low on stock. Restock now to avoid lost sales.</p>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Insight 2 -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 16px;">
+                      <tr>
+                        <td width="20" style="vertical-align: top; padding-right: 12px;">
+                          <div style="width: 20px; height: 20px; background-color: #fbbf24; border-radius: 50%; color: #ffffff; font-size: 12px; font-weight: 600; text-align: center; line-height: 20px;">2</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <div style="font-size: 15px; font-weight: 600; color: #92400e; margin: 0 0 4px 0;">Ranking Opportunities</div>
+                          <p style="font-size: 14px; color: #a16207; margin: 0; line-height: 1.5;">{{rankingsCount}} products have ranking improvement opportunities. Optimize your listings.</p>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Insight 3 -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 0;">
+                      <tr>
+                        <td width="20" style="vertical-align: top; padding-right: 12px;">
+                          <div style="width: 20px; height: 20px; background-color: #fbbf24; border-radius: 50%; color: #ffffff; font-size: 12px; font-weight: 600; text-align: center; line-height: 20px;">3</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <div style="font-size: 15px; font-weight: 600; color: #92400e; margin: 0 0 4px 0;">PPC Performance</div>
+                          <p style="font-size: 14px; color: #a16207; margin: 0; line-height: 1.5;">{{sponsoredAdsCount}} campaigns need optimization to improve ACoS and increase profitability.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Call to Action -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 32px;">
+                <tr>
+                  <td align="center">
+                    <a href="https://members.sellerqi.com/seller-central-checker/dashboard" style="background-color: #3b82f6; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block;">View Full Report</a>
+                    <a href="https://members.sellerqi.com/seller-central-checker/issues?tab=overview" style="color: #3b82f6; text-decoration: none; padding: 14px 28px; font-weight: 600; font-size: 15px; display: inline-block;">Fix Issues Now →</a>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Help Section -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 8px; padding: 24px; margin-bottom: 32px;">
+                <tr>
+                  <td align="center" style="padding: 24px;">
+                    <h3 style="color: #2d3748; font-size: 20px; font-weight: bold; margin: 0 0 8px 0;">Need Help?</h3>
+                    <p style="color: #4a5568; font-size: 16px; margin: 0 0 16px 0;">Our support team is here to ensure your success.</p>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="text-align: left; display: inline-block;">
+                      <tr>
+                        <td style="color: #4a5568; font-size: 16px; padding-bottom: 8px;">
+                          <span style="font-size: 18px;">📧</span> Email: <a href="mailto:support@sellerqi.com" style="color: #1877F2; font-weight: bold; text-decoration: none;">support@sellerqi.com</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="color: #4a5568; font-size: 16px; padding-bottom: 8px;">
+                          <span style="font-size: 18px;">📚</span> Help Center: <a href="{{helpCenterUrl}}" style="color: #2b6cb0; font-weight: bold; text-decoration: none;">Visit our guides</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="color: #4a5568; font-size: 16px;">
+                          <span style="font-size: 18px;">💬</span> Live Chat: Available Mon-Fri, 9 AM - 6 PM EST
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 32px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="font-size: 14px; color: #64748b; margin: 0 0 16px 0;">Stay connected with us for updates, tips, and exclusive offers:</p>
+              <div style="margin-bottom: 16px;">
+                <a href="{{facebookUrl}}" style="color: #3b82f6; text-decoration: none; margin: 0 12px; font-size: 14px; font-weight: 500;">Facebook</a>
+                <a href="{{twitterUrl}}" style="color: #3b82f6; text-decoration: none; margin: 0 12px; font-size: 14px; font-weight: 500;">Twitter</a>
+                <a href="{{linkedinUrl}}" style="color: #3b82f6; text-decoration: none; margin: 0 12px; font-size: 14px; font-weight: 500;">LinkedIn</a>
+                <a href="{{youtubeUrl}}" style="color: #3b82f6; text-decoration: none; margin: 0 12px; font-size: 14px; font-weight: 500;">YouTube</a>
+              </div>
+              <div style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                © 2025 SellerQI. All rights reserved.<br>
+                <a href="https://www.sellerqi.com/privacy-policy" style="color: #64748b; text-decoration: none;">Privacy Policy</a> | 
+                <a href="https://www.sellerqi.com/terms-of-use" style="color: #64748b; text-decoration: none;">Terms of Service</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+        
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

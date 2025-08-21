@@ -70,6 +70,7 @@ The system runs scheduled jobs:
 - `dailyUpdates` - Process daily comprehensive updates for all eligible users
 - `cacheCleanup` - Clean up old cache entries
 - `healthCheck` - Get system statistics
+- `weeklyEmail` - Send weekly email reports to all users (runs every Saturday)
 
 ## Configuration
 
@@ -80,6 +81,7 @@ The system runs scheduled jobs:
 - **Daily Comprehensive Updates**: `0 * * * *` (every hour)
 - **Cache Cleanup**: `30 */6 * * *` (every 6 hours at :30)
 - **Health Check**: `*/30 * * * *` (every 30 minutes)
+- **Weekly Email Reports**: `0 9 * * 6` (every Saturday at 9:00 AM)
 
 ## Database Schema
 
@@ -116,6 +118,11 @@ GET /app/jobs/admin/system-stats
 ### Trigger Daily Updates Manually
 ```javascript
 POST /app/jobs/admin/trigger/dailyUpdates
+```
+
+### Trigger Weekly Email Reports Manually
+```javascript
+POST /app/jobs/admin/trigger/weeklyEmail
 ```
 
 ## Monitoring
