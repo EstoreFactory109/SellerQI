@@ -41,7 +41,7 @@ const TrialBanner = () => {
   }, [user?.trialEndsDate, user?.isInTrialPeriod]);
 
   const handleUpgrade = () => {
-    navigate('/pricing');
+    navigate('/seller-central-checker/settings?tab=plans-billing');
   };
 
   // Don't show banner if user is not in trial period, trial has expired, or banner is dismissed

@@ -32,6 +32,15 @@ const authSlice = createSlice({
         state.user.email = action.payload.email;
       }
     },
+    updateTrialStatus(state, action) {
+      if (state.user) {
+        // Update trial-related fields
+        state.user.packageType = action.payload.packageType;
+        state.user.subscriptionStatus = action.payload.subscriptionStatus;
+        state.user.isInTrialPeriod = action.payload.isInTrialPeriod;
+        state.user.trialEndsDate = action.payload.trialEndsDate;
+      }
+    },
     logout(state) {
       state.isAuthenticated = false;
       state.user = null;
@@ -39,5 +48,5 @@ const authSlice = createSlice({
   }
 });
 
-export const { loginSuccess, logout, addBrand, updatePackageType, updateProfileDetails } = authSlice.actions;
+export const { loginSuccess, logout, addBrand, updatePackageType, updateProfileDetails, updateTrialStatus } = authSlice.actions;
 export default authSlice.reducer;

@@ -1222,6 +1222,63 @@ const activateFreeTrial = asyncHandler(async (req, res) => {
     }
 });
 
+// Check and update trial status endpoint
+const checkTrialStatus = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    
+    if (!userId) {
+        logger.error(new ApiError(401, "User ID not found"));
+        return res.status(401).json(new ApiResponse(401, "", "User ID not found"));
+    }
+
+    try {
+        const user = await UserModel.findById(userId);
+        
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        // Check trial status
+        if (user.isInTrialPeriod && user.trialEndsDate) {
+            const currentDate = new Date();
+            const trialEndDate = new Date(user.trialEndsDate);
+
+            // If trial has expired, update user status
+            if (currentDate > trialEndDate) {
+                await UserModel.findByIdAndUpdate(userId, {
+                    isInTrialPeriod: false,
+                    packageType: 'LITE',
+                    subscriptionStatus: 'inactive'
+                });
+
+                logger.info(`User ${userId} trial expired. Downgraded to LITE plan.`);
+
+                return res.status(200).json(new ApiResponse(200, {
+                    isInTrialPeriod: false,
+                    packageType: 'LITE',
+                    subscriptionStatus: 'inactive',
+                    trialEndsDate: user.trialEndsDate,
+                    trialExpired: true
+                }, "Trial status updated"));
+            }
+        }
+
+        // Return current trial status
+        return res.status(200).json(new ApiResponse(200, {
+            isInTrialPeriod: user.isInTrialPeriod,
+            packageType: user.packageType,
+            subscriptionStatus: user.subscriptionStatus,
+            trialEndsDate: user.trialEndsDate,
+            trialExpired: false
+        }, "Trial status checked"));
+
+    } catch (error) {
+        logger.error('Error checking trial status:', error);
+        return res.status(500).json(new ApiResponse(500, "", "Error checking trial status"));
+    }
+});
+
 // Admin endpoints
 const getAdminProfile = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
@@ -1454,6 +1511,7 @@ module.exports = {
     googleRegisterUser,
     updateSubscriptionPlan,
     activateFreeTrial,
+    checkTrialStatus,
     // Admin endpoints
     getAdminProfile,
     getAdminClients,

@@ -1,26 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Crown, Clock, ArrowRight } from 'lucide-react';
+import { Crown, Clock, ArrowRight, X } from 'lucide-react';
 
-const TrialExpiredOverlay = () => {
+const RecurringTrialPopup = ({ isVisible, onClose }) => {
   const navigate = useNavigate();
 
   const handleUpgrade = () => {
+    // Close popup first
+    onClose();
+    // Then navigate to plans & billing page
     navigate('/seller-central-checker/settings?tab=plans-billing');
   };
 
+  const handleClose = () => {
+    onClose();
+  };
+
+  if (!isVisible) return null;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md mx-4 text-center">
+      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md mx-4 text-center relative">
+        <button
+          onClick={handleClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors duration-200"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        
         <div className="mb-6">
-          <div className="w-16 h-16 bg-gradient-to-br from-red-400 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Clock className="w-8 h-8 text-white" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Trial Period Ended
+            Upgrade to Pro
           </h2>
           <p className="text-gray-600 leading-relaxed">
-            Your 7-day free trial has expired. Upgrade to Pro to continue accessing all premium features.
+            Your trial has expired. Upgrade to Pro to unlock all premium features and continue your analysis.
           </p>
         </div>
 
@@ -53,4 +69,4 @@ const TrialExpiredOverlay = () => {
   );
 };
 
-export default TrialExpiredOverlay;
+export default RecurringTrialPopup;

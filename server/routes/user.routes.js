@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo }=require('../controllers/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo }=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -24,6 +24,7 @@ router.post('/track-ip', TrackIP);
 router.post('/get-ip-tracking', getIPTracking);
 router.put('/update-subscription-plan', auth, updateSubscriptionPlan); // New route
 router.post('/activate-free-trial', auth, activateFreeTrial); // New route for free trial
+router.get('/check-trial-status', auth, checkTrialStatus); // New route for checking trial status
 
 
 router.post('/google-login', googleLoginUser);
