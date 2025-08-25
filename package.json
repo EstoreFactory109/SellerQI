@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A scalable production ready seller central analysing application ",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "dev": "node server/api/index.js",
     "start": "nodemon server/api/index.js"

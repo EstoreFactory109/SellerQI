@@ -1,5 +1,5 @@
 const { getAnalysisData,sendMail } = require('./sendEmailWeekly.js');
-
+const {sendTrialReminderEmails} = require('../BackgroundJobs/ReminderEmailToUpgrade.js');
 const seller ={
     User:{
         _id:"689b9d9cfc29576b59e7f46c",
@@ -16,5 +16,7 @@ const seller ={
       
 }
 
-/getAnalysisData(seller);
+//getAnalysisData(seller);
 //sendMail();
+
+sendTrialReminderEmails()

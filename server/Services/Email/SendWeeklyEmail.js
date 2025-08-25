@@ -59,16 +59,13 @@ const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healt
     template = safeReplace(template, '{{youtubeUrl}}', 'https://www.youtube.com/@sellerqi');
 
     try {
-
-
-
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
             secure: false, // Set to false for STARTTLS
             auth: {
-                user: "AKIA2FN7DZKEYYDJEN77", // Your Gmail address
-                pass: "BIL6H/1cR769EdaTP20/T+Gohw+FqxFE5a6yjkEdE0+z", // Your Gmail password or App Password
+                user: process.env.ADMIN_USERNAME, // Your AWS SES access key
+                pass: process.env.APP_PASSWORD, // Your AWS SES secret key
             },
         });
 
@@ -86,7 +83,7 @@ const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healt
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: "support@sellerqi.com", // Sender address
+            from: process.env.ADMIN_EMAIL_ID, // Sender address
             to: Email, // List of receivers
             subject: "Weekly Report for "+brandName, // Subject line
             text: text, // Plain text body

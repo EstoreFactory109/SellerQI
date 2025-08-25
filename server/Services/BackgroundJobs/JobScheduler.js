@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { DataUpdateService } = require('./DataUpdateService.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
 const { sendMail } = require('./sendEmailWeekly.js');
+const { sendTrialReminderEmails } = require('./ReminderEmailToUpgrade.js');
 const logger = require('../../utils/Logger.js');
 
 class JobScheduler {
@@ -35,6 +36,7 @@ class JobScheduler {
             this.setupCacheCleanupJob();
             this.setupHealthCheckJob();
             this.setupWeeklyEmailJob();
+            this.setupTrialReminderJob();
 
             this.isInitialized = true;
             logger.info('Background job scheduler initialized successfully');
@@ -137,6 +139,29 @@ class JobScheduler {
     }
 
     /**
+     * Setup trial reminder email job - runs daily at 12:00 PM
+     */
+    setupTrialReminderJob() {
+        // Run daily at 12:00 PM (0 12 * * *)
+        const trialReminderJob = cron.schedule('0 12 * * *', async () => {
+            try {
+                logger.info('Running trial reminder email job (daily at 12:00 PM)');
+                await sendTrialReminderEmails();
+                logger.info('Trial reminder email job completed successfully');
+            } catch (error) {
+                logger.error('Error in trial reminder email job:', error);
+            }
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || "UTC"
+        });
+
+        this.jobs.set('trialReminder', trialReminderJob);
+        trialReminderJob.start();
+        logger.info('Trial reminder email job scheduled (runs daily at 12:00 PM)');
+    }
+
+    /**
      * Stop a specific job
      */
     stopJob(jobName) {
@@ -217,6 +242,9 @@ class JobScheduler {
                 case 'weeklyEmail':
                     await sendMail();
                     return { message: 'Weekly email job executed successfully' };
+                case 'trialReminder':
+                    await sendTrialReminderEmails();
+                    return { message: 'Trial reminder email job executed successfully' };
                 default:
                     throw new Error(`Unknown job: ${jobName}`);
             }

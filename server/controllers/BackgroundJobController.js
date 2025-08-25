@@ -44,7 +44,7 @@ const getJobStatus = asyncHandler(async (req, res) => {
 const triggerJob = asyncHandler(async (req, res) => {
     const { jobName } = req.params;
     
-    const validJobs = ['dailyUpdates', 'cacheCleanup', 'healthCheck', 'weeklyEmail'];
+    const validJobs = ['dailyUpdates', 'cacheCleanup', 'healthCheck', 'weeklyEmail', 'trialReminder'];
     if (!validJobs.includes(jobName)) {
         throw new ApiError(400, `Invalid job name. Valid jobs: ${validJobs.join(', ')}`);
     }

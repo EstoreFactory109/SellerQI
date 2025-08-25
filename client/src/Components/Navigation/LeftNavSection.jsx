@@ -433,7 +433,7 @@ const LeftNavSection = () => {
                         <div className="p-1.5 rounded-lg transition-colors duration-300 bg-white/20 group-hover:bg-white/30">
                             <Calendar className="w-4 h-4 transition-colors duration-300 text-white"/>
                         </div>
-                        <span className="font-semibold flex-1">Book Consultation</span>
+                        <span className="font-semibold flex-1">Book a Call</span>
                         <div className="w-2 h-2 bg-yellow-300 rounded-full animate-pulse"></div>
                     </NavLink>
                 </div>

@@ -94,6 +94,10 @@ const sendConnectionReminderEmails = async () => {
  */
 const initializeEmailReminderJob = () => {
     try {
+        // Email reminder job is currently disabled
+        logger.info('Email reminder cron job is currently disabled');
+        return false;
+        
         // Schedule the job to run every 48 hours (every 2 days at midnight)
         cron.schedule('0 0 */2 * *', async () => {
             logger.info('Running scheduled connection reminder email job (every 48 hours)');

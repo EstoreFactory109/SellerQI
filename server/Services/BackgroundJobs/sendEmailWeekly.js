@@ -3,6 +3,7 @@ const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/sellerCentralModel.js');
 const axios = require('axios');
 const { sendWeeklyEmailToUser } = require('../Email/SendWeeklyEmail.js');
+const dbConnect = require('../../config/dbConn.js');
 
 
 const analyzeUserData = async (userId, country, region) => {
@@ -31,7 +32,10 @@ const analyzeUserData = async (userId, country, region) => {
         
         if (analysisResult.status === 200) {
             logger.info(`Analysis completed successfully for user: ${userId}`);
-            return analysisResult.message;
+            return {
+                status: 200,
+                ...analysisResult.message
+            };
         } else {
             logger.error(`Analysis failed for user: ${userId}, status: ${analysisResult.status}, message: ${analysisResult.message}`);
             return analysisResult;
@@ -48,11 +52,17 @@ const analyzeUserData = async (userId, country, region) => {
 
 const sendMail = async()=>{
     try {
-
+        // Validate environment variables
+        if (!process.env.CALCULATION_API_URI) {
+            logger.error('CALCULATION_API_URI environment variable is not set');
+            return;
+        }
+        
+        await dbConnect();
         const getSellers = await Seller.find({}).populate('User','firstName email');
-        //const getSellers = await Seller.findOne({User:"689b9d9cfc29576b59e7f46c"}).populate('User','firstName email');
+     //   const getSellers = await Seller.find({User:"689b9d9cfc29576b59e7f46c"}).populate('User','firstName email');
 
-        if(!getSellers){
+        if(!getSellers || getSellers.length === 0){
             logger.error('No users found');
             return;
         }
@@ -134,18 +144,24 @@ const getAnalysisData = async(seller)=>{
             console.log("analyseResult: ",analyseResult);
             
             if(!analyseResult || analyseResult.status !== 200){
-                logger.error('Error in analyseResult:', analyseResult);
+                logger.error(`Analysis failed for user ${userId}:`, analyseResult?.message || 'Unknown error');
                 continue;
             }
             
             const healthScore = analyseResult.AccountData?.getAccountHealthPercentge?.Percentage || 0;
 
-            const getCalculationData = await axios.post(`${process.env.CALCULATION_API_URI}/calculation-api/calculate`,
-                analyseResult
-            );
-            
-            if(!getCalculationData || !getCalculationData.data || !getCalculationData.data.data || !getCalculationData.data.data.dashboardData){
-                logger.error('Error in getCalculationData:', getCalculationData);
+            let getCalculationData;
+            try {
+                getCalculationData = await axios.post(`${process.env.CALCULATION_API_URI}/calculation-api/calculate`,
+                    analyseResult
+                );
+                
+                if(!getCalculationData || !getCalculationData.data || !getCalculationData.data.data || !getCalculationData.data.data.dashboardData){
+                    logger.error(`Invalid calculation data response for user ${userId}:`, getCalculationData?.data || 'No data');
+                    continue;
+                }
+            } catch (error) {
+                logger.error(`Failed to get calculation data for user ${userId}:`, error.message);
                 continue;
             }
 
@@ -160,11 +176,13 @@ const getAnalysisData = async(seller)=>{
             const marketPlace = getCalculationData.data.data.dashboardData.Country || '';
             const totalIssues = rankingErrors + conversionErrors + accountErrors + profitabilityErrors + sponsoredAdsErrors + inventoryErrors;
            // const totalActiveProducts = getCalculationData.data.data.ActiveProducts.length();
-            const sendEmail = await sendWeeklyEmailToUser(firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,"59");
-
-            if(!sendEmail){
-                logger.error('Error in sendEmail:', sendEmail);
+            const sendEmailResult = await sendWeeklyEmailToUser(firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,"59");
+            console.log("sendEmail in getAnalysisData: ",sendEmailResult);
+            if(!sendEmailResult){
+                logger.error(`Failed to send email to ${Email}`);
                 continue;
+            } else {
+                logger.info(`Email sent successfully to ${Email} with messageId: ${sendEmailResult}`);
             }
             return getCalculationData.data.data.dashboardData;
         }
