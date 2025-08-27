@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent horizontal overflow globally */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 /* Custom animations for ASINAnalyzer */
 @keyframes shimmer {
   0% {
@@ -31,4 +37,94 @@
   width: 0px;
   background: transparent;
   display: none;
+}
+
+/* Line clamp utilities */
+.line-clamp-1 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.line-clamp-2 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.line-clamp-3 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Custom scrollbar styles */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 4px;
+}
+
+.scrollbar-track-gray-100::-webkit-scrollbar-track {
+  background-color: #f3f4f6;
+  border-radius: 4px;
+}
+
+/* Ensure table scrolling works properly */
+.overflow-x-auto {
+  overflow-x: auto !important;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+
+/* Force table to be wider than container */
+table {
+  min-width: 100%;
+  table-layout: auto;
+  width: max-content;
+}
+
+/* Remove any max-width constraints */
+.max-w-full {
+  max-width: none !important;
+}
+
+/* Ensure content can expand fully */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Ensure horizontal scrollbar is always visible */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 8px !important;
+  width: 8px !important;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: #f1f1f1 !important;
+  border-radius: 4px !important;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #c1c1c1 !important;
+  border-radius: 4px !important;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8 !important;
 }

@@ -205,83 +205,14 @@ const ProtectedRouteWrapper = ({ children }) => {
 
           if (historyResponse?.status === 200 && historyResponse.data?.data) {
             const historyList = historyResponse.data.data || [];
-            
-            // Handle empty history list gracefully
-            if (historyList.length === 0) {
-              dispatch(setHistoryInfo([]));
-            } else if (dashboardData) {
-              // Only update history if we have dashboard data
-              const currentDate = new Date();
-              const lastExpireDate = new Date(historyList[historyList.length - 1].expireDate);
-
-              if (currentDate > lastExpireDate) {
-                const expireDate = new Date();
-                expireDate.setDate(currentDate.getDate() + 7);
-
-                // Calculate total issues using EXACT SAME formula as Dashboard Total Issues box
-                // Source: Dashboard.jsx lines 143-149 - const totalIssues = (dashboardInfo?.totalProfitabilityErrors || 0) + ...
-                const profitabilityErrors = dashboardData.totalProfitabilityErrors || 0;
-                const sponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
-                const inventoryErrors = dashboardData.totalInventoryErrors || 0;
-                const rankingErrors = dashboardData.TotalRankingerrors || 0;
-                const conversionErrors = dashboardData.totalErrorInConversion || 0;
-                const accountErrors = dashboardData.totalErrorInAccount || 0;
-                
-                // IDENTICAL calculation to Dashboard's totalIssues
-                const totalCalculatedIssues = profitabilityErrors + sponsoredAdsErrors + inventoryErrors + 
-                                            rankingErrors + conversionErrors + accountErrors;
-
-                console.log("🔍 ACCOUNT HISTORY TOTAL ISSUES BREAKDOWN (DASHBOARD ORDER):");
-                console.log("  • Profitability Errors:", profitabilityErrors);
-                console.log("  • Sponsored Ads Errors:", sponsoredAdsErrors);
-                console.log("  • Inventory Errors:", inventoryErrors);
-                console.log("  • Ranking Errors:", rankingErrors);
-                console.log("  • Conversion Errors:", conversionErrors);
-                console.log("  • Account Errors:", accountErrors);
-                console.log("  • TOTAL ISSUES (MATCHES DASHBOARD):", totalCalculatedIssues);
-
-                const newHistory = {
-                  Date: currentDate,
-                  HealthScore: dashboardData.accountHealthPercentage?.Percentage || 0,
-                  TotalProducts: dashboardData.TotalProduct?.length || 0,
-                  ProductsWithIssues: dashboardData.productWiseError?.length || 0,
-                  TotalNumberOfIssues: totalCalculatedIssues,
-                  expireDate: expireDate
-                };
-
-                try {
-                  const updateRes = await axiosInstance.post(
-                    '/app/accountHistory/addAccountHistory',
-                    newHistory
-                  );
-
-                  console.log("🔍 ACCOUNT HISTORY UPDATE IN PROTECTEDROUTEWRAPPER:");
-                  console.log("New History Data Being Sent:", newHistory);
-                  console.log("Update Response:", updateRes);
-                  console.log("Updated Account History Data:", updateRes?.data?.data);
-
-                  if (isMountedRef.current && updateRes?.status === 200 && updateRes.data?.data) {
-                    dispatch(setHistoryInfo(updateRes.data.data));
-                  } else {
-                    // Use existing history if update fails
-                    dispatch(setHistoryInfo(historyList));
-                  }
-                } catch (historyUpdateError) {
-                  console.error("❌ History update failed:", historyUpdateError);
-                  // Use existing history if update fails
-                  dispatch(setHistoryInfo(historyList));
-                }
-              } else {
-                dispatch(setHistoryInfo(historyList));
-              }
-            } else {
-              // Use existing history even without dashboard data
-              dispatch(setHistoryInfo(historyList));
-            }
+            dispatch(setHistoryInfo(historyList));
+          } else {
+            dispatch(setHistoryInfo([]));
           }
         } catch (historyError) {
           console.error("❌ History fetch failed:", historyError);
           // Continue without history data
+          dispatch(setHistoryInfo([]));
         }
 
         // Don't redirect to error page for accounts with no data

@@ -50,6 +50,7 @@ import AdminLogin from './Pages/AdminLogin.jsx';
 import ManageAccounts from './Pages/ManageAccounts.jsx';
 import UserLogging from './Pages/UserLogging.jsx';
 import CalendlyWidget from './Pages/consultation.jsx';
+import Tasks from './Pages/Tasks.jsx';
 
 const App = () => {
 
@@ -118,6 +119,7 @@ const App = () => {
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />
+            <Route path='tasks' element={<Tasks />} />
             <Route path='user-logging' element={<UserLogging />} />
             <Route path='consultation' element={<CalendlyWidget />} />
             

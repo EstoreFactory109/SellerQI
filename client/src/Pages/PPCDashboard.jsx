@@ -592,8 +592,8 @@ const PPCDashboard = () => {
   if (info?.startDate && info?.endDate) {
     console.log('=== FINAL CHART DATA ===');
     console.log('chartData length:', chartData.length);
-    console.log('chartData first 3 items:', chartData.slice(0, 3));
-    console.log('chartData last 3 items:', chartData.slice(-3));
+    console.log('chartData first:', chartData);
+   
   }
   
   // Debug: Check all possible chart data sources

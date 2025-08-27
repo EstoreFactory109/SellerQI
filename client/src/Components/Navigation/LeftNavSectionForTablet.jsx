@@ -362,6 +362,31 @@ const LeftNavSection = () => {
                                 )}
                             </NavLink>
 
+                            {/* Tasks - Available for ALL users including LITE */}
+                            <NavLink
+                                to="/seller-central-checker/tasks"
+                                className={({ isActive }) =>
+                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                        isActive
+                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                    }`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                            isActive ? 'bg-white/20' : 'bg-indigo-50 group-hover:bg-indigo-100'
+                                        }`}>
+                                            <ClipboardPlus className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                isActive ? 'text-white' : 'text-indigo-600'
+                                            }`}/>
+                                        </div>
+                                        <span className="font-medium">Tasks</span>
+                                    </>
+                                )}
+                            </NavLink>
+
                             {/* Account History - Only for PRO/AGENCY users */}
                             {!isLiteUser && (
                                 <NavLink

@@ -48,7 +48,8 @@ const sendConnectionReminderEmails = async () => {
         
         // Find all verified users
         const users = await User.find({ 
-            isVerified: true // Only send to verified users
+            isVerified: true,
+            connectAccountReminder:{$gt:0}
         }).select('firstName lastName email sellerCentral');
 
         logger.info(`Found ${users.length} verified users to analyze`);
@@ -69,6 +70,18 @@ const sendConnectionReminderEmails = async () => {
                     
                     if (emailResult) {
                         emailsSent++;
+                        const updatedUser = await User.findOneAndUpdate(
+                            {_id:user._id},
+                            {
+                                $set:{
+                                    connectAccountReminder:user.connectAccountReminder-1
+                                }
+                            },
+                            {new:true}
+                        );
+                        if(!updatedUser){
+                            logger.error(`Failed to update user ${user.email}`);
+                        }
                         logger.info(`Connection reminder email sent to ${user.email}`);
                     } else {
                         logger.error(`Failed to send connection reminder email to ${user.email}`);
@@ -94,9 +107,6 @@ const sendConnectionReminderEmails = async () => {
  */
 const initializeEmailReminderJob = () => {
     try {
-        // Email reminder job is currently disabled
-        logger.info('Email reminder cron job is currently disabled');
-        return false;
         
         // Schedule the job to run every 48 hours (every 2 days at midnight)
         cron.schedule('0 0 */2 * *', async () => {

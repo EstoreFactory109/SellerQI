@@ -141,7 +141,14 @@ const userSchema = new mongoose.Schema(
         ref:"APlusContent",
         require:true
       },
-
+      connectAccountReminder:{
+        type:Number,
+        default:2
+      },
+      analyseAccountSuccess:{
+        type:Number,
+        default:1
+      }
     },
     {
       timestamps: true, // Adds createdAt and updatedAt fields

@@ -1,7 +1,9 @@
 const AccountHistory = require('../../models/AccountHistory.js')
-
+const dbConnect = require('../../config/dbConn.js')
 
 const addAccountHistory = async(userId,country,region,HealthScore,TotalProducts,ProductsWithIssues,TotalNumberOfIssues)=>{
+
+    await dbConnect();
 
     const getAccountHistory=await AccountHistory.findOne({User:userId,country:country,region:region});
     const today = new Date();

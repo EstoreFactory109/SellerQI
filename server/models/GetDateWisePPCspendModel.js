@@ -37,7 +37,11 @@ const getDateWiseSpendsKeywordsSchema = new mongoose.Schema({
         impressions:{
             type: Number,
             required: true,
-        }
+        },
+        sales7d:{
+            type: String,
+            required:true
+        },
     }]
 },{timestamps:true});
 

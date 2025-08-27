@@ -49,7 +49,7 @@ const getAmazonFees = require('../Services/Finance/AmazonFees.js');
 const { addAccountHistory } = require('../Services/History/addAccountHistory.js');
 const {Analyse} = require('./AnalysingController.js');
 const axios = require('axios');
-
+const userModel = require('../models/userModel.js');
 
 
 const addNewAccountHistory = async (userId, country, region) => {
@@ -1585,43 +1585,51 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 });
                 await loggingHelper.endSession('completed');
             }
+            
 
             // ===== SEND ANALYSIS READY EMAIL =====
-         /*   try {
+           try {
                 console.log("📧 Sending analysis ready email...");
-                const userInfo = await getUserById(userId);
+                const userInfo = await userModel.findById(userId).select("analyseAccountSuccess email firstName ");
+                //const userInfo = await getUserById(userId);
 
-                if (userInfo && userInfo.email && userInfo.firstName) {
-                    const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
-                    const emailSent = await sendAnalysisReadyEmail(
-                        userInfo.email,
-                        userInfo.firstName,
-                        dashboardUrl
-                    );
-
-                    if (emailSent) {
-                        console.log(`✅ Analysis ready email sent successfully to ${userInfo.email}`);
+                if(userInfo.analyseAccountSuccess==1){
+                    if (userInfo && userInfo.email && userInfo.firstName) {
+                        const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
+                        const emailSent = await sendAnalysisReadyEmail(
+                            userInfo.email,
+                            userInfo.firstName,
+                            dashboardUrl
+                        );
+    
+                        if (emailSent) {
+                            userInfo.analyseAccountSuccess=0;
+                            await userInfo.save();
+                            console.log(`✅ Analysis ready email sent successfully to ${userInfo.email}`);
+                        } else {
+                            logger.warn("Failed to send analysis ready email, but continuing with response", {
+                                userId,
+                                email: userInfo.email
+                            });
+                        }
                     } else {
-                        logger.warn("Failed to send analysis ready email, but continuing with response", {
+                        logger.warn("User information not found for email notification", {
                             userId,
-                            email: userInfo.email
+                            hasUserInfo: !!userInfo,
+                            hasEmail: !!(userInfo && userInfo.email),
+                            hasFirstName: !!(userInfo && userInfo.firstName)
                         });
                     }
-                } else {
-                    logger.warn("User information not found for email notification", {
-                        userId,
-                        hasUserInfo: !!userInfo,
-                        hasEmail: !!(userInfo && userInfo.email),
-                        hasFirstName: !!(userInfo && userInfo.firstName)
-                    });
                 }
+
+                
             } catch (emailError) {
                 logger.error("Error sending analysis ready email", {
                     error: emailError.message,
                     userId
                 });
                 // Don't fail the entire response because of email error
-            }*/
+            }
 
             try {
                 const addAccountHistoryData = await addNewAccountHistory(userId,Country,Region);
