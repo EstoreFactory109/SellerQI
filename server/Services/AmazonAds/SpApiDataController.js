@@ -63,7 +63,7 @@ const addNewAccountHistory = async (userId, country, region) => {
         throw new Error('Failed to get analyse data')
     }
 
-    const getCalculationData = await axios.post(`http://localhost:8080/calculation-api/calculate`,
+    const getCalculationData = await axios.post(`https://compute.sellerqi.com/calculation-api/calculate`,
         getAnalyseData.message
     );
 

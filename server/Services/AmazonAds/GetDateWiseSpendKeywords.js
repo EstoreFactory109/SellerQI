@@ -221,6 +221,7 @@ async function downloadReportData(location, accessToken, profileId) {
                 campaignName: item.campaignName,
                 clicks: item.clicks,
                 impressions: item.impressions,
+                sales7d:item.sales7d || 0,
             })
         })
         
@@ -241,6 +242,7 @@ async function downloadReportData(location, accessToken, profileId) {
 async function getPPCSpendsDateWise(accessToken, profileId, userId,country,region) {
             // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
+            console.log("Profile Id",profileId);
     try {
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));

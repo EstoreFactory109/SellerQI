@@ -135,9 +135,7 @@ const PPCDashboard = () => {
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
   
-  // Get ProductWiseSponsoredAdsGraphData from Redux store
-  const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || [];
-  console.log("productWiseSponsoredAdsGraphData: ", productWiseSponsoredAdsGraphData)
+
   
   // Get ProductWiseSponsoredAds for error calculation
   const productWiseSponsoredAds = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAds) || [];
@@ -271,7 +269,7 @@ const PPCDashboard = () => {
   // Filter search terms where clicks >= 10 and sales = 0
   const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
-  // Transform the data for the chart - prioritize actual dateWiseTotalCosts (filtered by date range)
+  // Transform the data for the chart - use only dateWiseTotalCosts for both spend and sales
   const chartData = useMemo(() => {
     // Use filtered dateWiseTotalCosts if available, otherwise fall back to original
     const costsDataToUse = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
@@ -283,310 +281,68 @@ const PPCDashboard = () => {
       console.log('Chart using filtered data points:', costsDataToUse.length);
       console.log('Chart data source:', costsDataToUse === filteredDateWiseTotalCosts ? 'Filtered Data' : 'Original Data');
       console.log('costsDataToUse sample:', costsDataToUse.slice(0, 3));
-      console.log('TotalSales data available:', info?.TotalSales?.length || 0);
     }
     
-    // First priority: Use actual dateWiseTotalCosts for spend and TotalSales for PPC sales
+    // Use dateWiseTotalCosts for both spend and sales data
     if (costsDataToUse && Array.isArray(costsDataToUse) && costsDataToUse.length > 0) {
-      console.log("🟢 CHART DATA: Using dateWiseTotalCosts (Priority 1)");
-      // console.log('=== Using dateWiseTotalCosts for chart data ===');
-      // console.log('dateWiseTotalCosts:', costsDataToUse);
+      console.log("🟢 CHART DATA: Using dateWiseTotalCosts for both spend and sales");
       
-      // Create a map for spend data by date - Convert dates to "Jun 18" format to match chart
-      const spendByDate = new Map();
-      costsDataToUse.forEach(item => {
-        if (item && item.date && typeof item.totalCost === 'number') {
-          // Convert from "2025-06-18" format to "Jun 18" format
-          const dateObj = new Date(item.date);
-          const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          spendByDate.set(formattedDate, item.totalCost);
-        }
-      });
-      
-      // Debug: Log spend data map
-      if (info?.startDate && info?.endDate) {
-        console.log('=== Spend By Date Map (converted to chart format) ===');
-        console.log('spendByDate map size:', spendByDate.size);
-        console.log('spendByDate entries:', Array.from(spendByDate.entries()).slice(0, 5));
-      }
-      
-      // If we have TotalSales data, combine it with actual spend data
-      const totalSalesData = info?.TotalSales;
-      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        // console.log('Combining dateWiseTotalCosts with TotalSales data');
+      const chartData = costsDataToUse.map((item, index) => {
+        if (!item || !item.date) return null;
         
-        return totalSalesData.map((item, index) => {
-          // Extract date from interval format: "2025-03-01T00:00:00Z--2025-03-01T23:59:59Z"
-          const startDate = new Date(item.interval.split('--')[0]);
-          const dateStr = startDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD format
-          const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          
-          // Get actual spend for this date using the formatted date (Jun 18 format)
-          const actualSpend = spendByDate.get(formattedDate) || 0;
-          
-          // Calculate daily PPC sales and spend by summing ALL products' data for this date
-          let dailyPPCSales = 0;
-          let dailyPPCSpend = 0;
-          
-          if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
-            // Iterate through all ASINs and their data arrays to find matching dates
-            const matchingRecords = [];
-            
-            Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
-              if (asinData.data && Array.isArray(asinData.data)) {
-                const dateMatches = asinData.data.filter(dateRecord => {
-                  const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                  return recordDate === formattedDate;
-                });
-                matchingRecords.push(...dateMatches);
-              }
-            });
-            
-            // Sum all salesIn7Days and spend values for this date
-            dailyPPCSales = matchingRecords.reduce((sum, record) => {
-              return sum + (parseFloat(record.salesIn7Days) || 0);
-            }, 0);
-            
-            dailyPPCSpend = matchingRecords.reduce((sum, record) => {
-              return sum + (parseFloat(record.spend) || 0);
-            }, 0);
-            
-            console.log(`📊 CHART SALES DATA - ${formattedDate}:`, {
-              source: 'productWiseSponsoredAdsGraphData (object aggregated)',
-              recordsFound: matchingRecords.length,
-              dailyPPCSales: dailyPPCSales,
-              dailyPPCSpend: dailyPPCSpend,
-              individualRecords: matchingRecords.map(r => ({
-                salesIn7Days: r.salesIn7Days,
-                spend: r.spend
-              }))
-            });
-          } else {
-            console.log(`📊 CHART SALES DATA - ${formattedDate}:`, {
-              source: 'no data available',
-              dailyPPCSales: 0,
-              dailyPPCSpend: 0
-            });
-          }
-          
-          // Debug: Log date matching for first few items
-          if ((info?.startDate && info?.endDate) && index < 5) {
-            console.log(`=== Chart Data Item ${index + 1} ===`);
-            console.log('TotalSales interval:', item.interval);
-            console.log('Extracted dateStr (YYYY-MM-DD):', dateStr);
-            console.log('formattedDate (Jun 18):', formattedDate);
-            console.log('totalSales:', parseFloat(item.TotalAmount) || 0);
-            console.log('dailyPPCSales:', dailyPPCSales);
-            console.log('actualSpend from map:', actualSpend);
-            console.log('spendByDate has this formattedDate?', spendByDate.has(formattedDate));
-            console.log('All available dates in spendByDate:', Array.from(spendByDate.keys()));
-          }
-          
-          return {
-            date: formattedDate,
-            ppcSales: dailyPPCSales,
-            spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
-          };
-        });
-      }
-      
-      // If no TotalSales data, use dateWiseTotalCosts alone with estimated sales
-      // console.log('Using dateWiseTotalCosts only (no TotalSales data)');
-      const fallbackData = costsDataToUse.map((item, index) => {
         const date = new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // Calculate daily PPC sales and spend by summing ALL products' data for this date
-        let dailyPPCSales = 0;
-        let dailyPPCSpend = 0;
+        // Get spend and sales from dateWiseTotalCosts
+        const spend = parseFloat(item.totalCost) || 0;
+        const sales = parseFloat(item.sales) || 0; // Assuming sales value is available in dateWiseTotalCosts
         
-        if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
-          // Iterate through all ASINs and their data arrays to find matching dates
-          const matchingRecords = [];
-          
-          Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
-            if (asinData.data && Array.isArray(asinData.data)) {
-              const dateMatches = asinData.data.filter(dateRecord => {
-                const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                return recordDate === formattedDate;
-              });
-              matchingRecords.push(...dateMatches);
-            }
-          });
-          
-          // Sum all salesIn7Days and spend values for this date
-          dailyPPCSales = matchingRecords.reduce((sum, record) => {
-            return sum + (parseFloat(record.salesIn7Days) || 0);
-          }, 0);
-          
-          dailyPPCSpend = matchingRecords.reduce((sum, record) => {
-            return sum + (parseFloat(record.spend) || 0);
-          }, 0);
-          
-          console.log(`📊 FALLBACK CHART SALES DATA - ${formattedDate}:`, {
-            source: 'productWiseSponsoredAdsGraphData (object aggregated)',
-            recordsFound: matchingRecords.length,
-            dailyPPCSales: dailyPPCSales,
-            dailyPPCSpend: dailyPPCSpend,
-            individualRecords: matchingRecords.map(r => ({
-              salesIn7Days: r.salesIn7Days,
-              spend: r.spend
-            }))
-          });
-        } else {
-          console.log(`📊 FALLBACK CHART SALES DATA - ${formattedDate}:`, {
-            source: 'no data available',
-            dailyPPCSales: 0,
-            dailyPPCSpend: 0
-          });
-        }
-        
-        // Debug: Log fallback data for first few items
-        if ((info?.startDate && info?.endDate) && index < 3) {
-          console.log(`=== Fallback Chart Data Item ${index + 1} ===`);
+        // Debug: Log data for first few items
+        if ((info?.startDate && info?.endDate) && index < 5) {
+          console.log(`=== Chart Data Item ${index + 1} ===`);
           console.log('item.date:', item.date);
           console.log('formattedDate:', formattedDate);
           console.log('item.totalCost:', item.totalCost);
-          console.log('dailyPPCSales:', dailyPPCSales);
+          console.log('item.sales:', item.sales);
+          console.log('Parsed spend:', spend);
+          console.log('Parsed sales:', sales);
         }
         
         return {
           date: formattedDate,
-          ppcSales: dailyPPCSales,
-          spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
+          ppcSales: sales,
+          spend: spend,
         };
-      });
+      }).filter(Boolean); // Remove any null entries
       
-      if (info?.startDate && info?.endDate) {
-        console.log('=== Using Fallback Data (costsDataToUse only) ===');
-        console.log('fallbackData length:', fallbackData.length);
-        console.log('fallbackData sample:', fallbackData.slice(0, 3));
-      }
-      
-      return fallbackData;
-    }
-    
-    // Second priority: Use date-filtered TotalSales data from Redux with zero spend
-    const totalSalesData = info?.TotalSales;
-    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-      console.log("🟡 CHART DATA: Using TotalSales with zero spend (Priority 2)");
-      // console.log('Using TotalSales data with estimated spend distribution');
-      
-      // Note: We now aggregate spend from productWiseSponsoredAdsGraphData instead of hardcoding zero
-      
-      // Transform date-filtered sales data for the chart
-      return totalSalesData.map(item => {
-        // Extract date from interval format: "2025-03-01T00:00:00Z--2025-03-01T23:59:59Z"
-        const startDate = new Date(item.interval.split('--')[0]);
-        const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        
-        // Calculate daily PPC sales and spend by summing ALL products' data for this date
-        let dailyPPCSales = 0;
-        let dailyPPCSpend = 0;
-        
-        if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
-          // Iterate through all ASINs and their data arrays to find matching dates
-          const matchingRecords = [];
-          
-          Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
-            if (asinData.data && Array.isArray(asinData.data)) {
-              const dateMatches = asinData.data.filter(dateRecord => {
-                const recordDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                return recordDate === formattedDate;
-              });
-              matchingRecords.push(...dateMatches);
-            }
-          });
-          
-          // Sum all salesIn7Days and spend values for this date
-          dailyPPCSales = matchingRecords.reduce((sum, record) => {
-            return sum + (parseFloat(record.salesIn7Days) || 0);
-          }, 0);
-          
-          dailyPPCSpend = matchingRecords.reduce((sum, record) => {
-            return sum + (parseFloat(record.spend) || 0);
-          }, 0);
-          
-          console.log(`📊 PRIORITY 2 CHART SALES DATA - ${formattedDate}:`, {
-            source: 'productWiseSponsoredAdsGraphData (object aggregated)',
-            recordsFound: matchingRecords.length,
-            dailyPPCSales: dailyPPCSales,
-            dailyPPCSpend: dailyPPCSpend,
-            individualRecords: matchingRecords.map(r => ({
-              salesIn7Days: r.salesIn7Days,
-              spend: r.spend
-            }))
-          });
-        } else {
-          console.log(`📊 PRIORITY 2 CHART SALES DATA - ${formattedDate}:`, {
-            source: 'no data available',
-            dailyPPCSales: 0,
-            dailyPPCSpend: 0
-          });
-        }
-        
-        return {
-          date: formattedDate,
-          ppcSales: dailyPPCSales,
-          spend: dailyPPCSpend, // Use aggregated daily spend from productWiseSponsoredAdsGraphData
-        };
-      });
-    }
-    
-    // Third priority: Fallback to aggregating productWiseSponsoredAdsGraphData by date
-    if (productWiseSponsoredAdsGraphData && Object.keys(productWiseSponsoredAdsGraphData).length > 0) {
-      console.log("🔵 CHART DATA: Using productWiseSponsoredAdsGraphData (Priority 3 - Direct Object Aggregation)");
-      
-      // Group data by date and aggregate salesIn7Days from all ASINs
-      const dateMap = new Map();
-      
-      Object.values(productWiseSponsoredAdsGraphData).forEach(asinData => {
-        if (asinData.data && Array.isArray(asinData.data)) {
-          asinData.data.forEach(dateRecord => {
-            const formattedDate = new Date(dateRecord.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            
-            if (!dateMap.has(formattedDate)) {
-              dateMap.set(formattedDate, {
-                date: formattedDate,
-                ppcSales: 0,
-                spend: 0,
-                recordCount: 0
-              });
-            }
-            
-            const dateEntry = dateMap.get(formattedDate);
-            dateEntry.ppcSales += parseFloat(dateRecord.salesIn7Days) || 0;
-            dateEntry.spend += parseFloat(dateRecord.spend) || 0;
-            dateEntry.recordCount += 1;
-          });
-        }
-      });
-      
-      const aggregatedData = Array.from(dateMap.values()).sort((a, b) => {
+      // Sort by date
+      chartData.sort((a, b) => {
         return new Date(a.date + " 2024") - new Date(b.date + " 2024");
       });
       
-      console.log("🔵 AGGREGATED CHART DATA:", {
-        totalDates: aggregatedData.length,
-        data: aggregatedData,
-        totalASINs: Object.keys(productWiseSponsoredAdsGraphData).length
-      });
+      if (info?.startDate && info?.endDate) {
+        console.log('=== Final Chart Data ===');
+        console.log('chartData length:', chartData.length);
+        console.log('chartData sample:', chartData.slice(0, 3));
+        console.log('Total spend:', chartData.reduce((sum, item) => sum + item.spend, 0));
+        console.log('Total sales:', chartData.reduce((sum, item) => sum + item.ppcSales, 0));
+      }
       
-      return aggregatedData;
+      return chartData;
     }
     
-    // Final fallback: Return empty data with zero values
-    console.log("🔴 CHART DATA: Using empty data fallback (Priority 4 - No data available)");
+    // Fallback: Return empty data with zero values
+    console.log("🔴 CHART DATA: Using empty data fallback (No dateWiseTotalCosts available)");
     const emptyData = createEmptyChartData();
     
     if (info?.startDate && info?.endDate) {
-      console.log('=== Using Empty Data Fallback (No Data Available) ===');
+      console.log('=== Using Empty Data Fallback ===');
       console.log('emptyData length:', emptyData.length);
       console.log('emptyData sample:', emptyData.slice(0, 3));
     }
     
     return emptyData;
-  }, [filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.TotalSales, info?.accountFinance, productWiseSponsoredAdsGraphData]);
+  }, [filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate]);
   
   // Final debug: Log the actual chart data being used
   if (info?.startDate && info?.endDate) {
@@ -602,12 +358,6 @@ const PPCDashboard = () => {
   console.log("2. filteredDateWiseTotalCosts length:", filteredDateWiseTotalCosts.length);
   console.log("3. info?.TotalSales length:", info?.TotalSales?.length || 0);
   console.log("4. info?.accountFinance?.ProductAdsPayment:", info?.accountFinance?.ProductAdsPayment || 0);
-  console.log("5. productWiseSponsoredAdsGraphData structure:", {
-    isObject: typeof productWiseSponsoredAdsGraphData === 'object',
-    isArray: Array.isArray(productWiseSponsoredAdsGraphData),
-    keys: Object.keys(productWiseSponsoredAdsGraphData || {}),
-    totalASINs: Object.keys(productWiseSponsoredAdsGraphData || {}).length
-  });
   console.log("Final chartData length:", chartData.length);
   console.log("Final chartData sample:", chartData);
   
@@ -1488,12 +1238,9 @@ const PPCDashboard = () => {
       csvData.push([]);
     }
     
-    // Add Chart Data (prioritizing actual dateWiseTotalCosts spend data)
+    // Add Chart Data (using dateWiseTotalCosts for both spend and sales)
     if (chartData.length > 0) {
-      const dataSource = dateWiseTotalCosts.length > 0 ? 
-        'Official Daily Spend from dateWiseTotalCosts' : 
-        'Estimated Spend Distribution';
-      csvData.push([`Daily Performance Chart Data (${dataSource})`]);
+      csvData.push([`Daily Performance Chart Data (from dateWiseTotalCosts)`]);
       csvData.push(['Date', 'PPC Sales', 'Spend']);
       chartData.forEach(day => {
         csvData.push([

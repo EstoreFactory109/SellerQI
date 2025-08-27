@@ -1,4 +1,4 @@
-const generateReport = require('../Services/Finance/GetOrdersAndRevenue.js');
+const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
@@ -8,7 +8,7 @@ const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js')
 const { getKeywordPerformanceReport } = require('../Services/AmazonAds/GetWastedSpendKeywords.js');
 const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 
-const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
+//const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
 const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
@@ -17,13 +17,13 @@ const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
 const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
 
 const testReport = async (req, res) => {
-    const { accessToken, marketplaceIds } = req.body;
+    
     // console.log(accessToken, marketplaceIds)
     if (!accessToken || !marketplaceIds) {
         return res.status(400).json({ message: "Credentials are missing" })
     }
 
-    const report = await generateReport(accessToken, marketplaceIds, "681b7e41525925e8abb7d3c6", "US","NA","sellingpartnerapi-na.amazon.com");
+    const report = await getPPCSpendsDateWise(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US","NA");
     if (!report) {
         return res.status(408).json({ message: "Report did not complete within 5 minutes" })
     }
@@ -152,7 +152,7 @@ const testAmazonAds = async (req, res) => {
 
 const testPPCSpendsSalesUnitsSold = async (req, res) => {
     const { accessToken } = req.body;
-    const result = await getPPCSpendsDateWise(accessToken, "738756868093004", "684dc0c4a18a59a57ba9164a", "US", "NA");
+    const result = await getPPCSpendsDateWise(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US", "NA");
     return res.status(200).json({
         data: result
     })
