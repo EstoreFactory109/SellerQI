@@ -63,7 +63,7 @@ const addNewAccountHistory = async (userId, country, region) => {
         throw new Error('Failed to get analyse data')
     }
 
-    const getCalculationData = await axios.post(`http://localhost:8080/calculation-api/calculate`,
+    const getCalculationData = await axios.post(`https://compute.sellerqi.com/calculation-api/calculate`,
         getAnalyseData.message
     );
 
@@ -82,13 +82,15 @@ const addNewAccountHistory = async (userId, country, region) => {
 
     const totalIssues = rankingErrors + conversionErrors + accountErrors + profitabilityErrors + sponsoredAdsErrors + inventoryErrors;
 
-    const healthScore = getAnalyseData.AccountData?.getAccountHealthPercentge?.Percentage || 0;
+    const healthScore = getAnalyseData.message.AccountData?.getAccountHealthPercentge?.Percentage || 0;
 
    // const totalActiveProducts = getCalculationData.data.data.ActiveProducts.length;
 
-   // const numberOfProductsWithIssues = getCalculationData.data.data.dashboardData.productWiseError.length;
+   //console.log("product_with_issues: ",getCalculationData.data.data.dashboardData.productWiseError.length)
 
-    const addAccountHistoryData = await addAccountHistory(userId,country,region,healthScore,"69","29",totalIssues);
+    const numberOfProductsWithIssues = getCalculationData.data.data.dashboardData.productWiseError.length;
+
+    const addAccountHistoryData = await addAccountHistory(userId,country,region,healthScore,"69",numberOfProductsWithIssues.toString(),totalIssues.toString());
 
     if(!addAccountHistoryData){
         throw new Error('Failed to add account history')
@@ -1725,4 +1727,4 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
 })
 
-module.exports = { getSpApiData };
+module.exports = { getSpApiData,addNewAccountHistory };

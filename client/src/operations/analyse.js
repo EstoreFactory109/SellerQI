@@ -612,7 +612,7 @@ import axios from "axios";
 
 const analyseData = async (data) => {
     console.log("data: ",data)
-    const response = await axios.post(`https://compute.sellerqi.com/calculation-api/calculate`, data, {withCredentials: true})
+    const response = await axios.post(`${import.meta.env.VITE_CALCULATION_API_URI}/calculation-api/calculate`, data, {withCredentials: true})
     console.log("response in analyseData: ",response)
     return response.data.data;
 }
