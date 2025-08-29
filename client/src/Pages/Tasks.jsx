@@ -26,6 +26,8 @@ export default function Tasks() {
   // Get user data from Redux store
   const userData = useSelector(state => state.Auth?.user);
 
+
+
   // Get severity based on error category
   const getSeverityFromCategory = (category) => {
     switch (category?.toLowerCase()) {
@@ -293,6 +295,26 @@ export default function Tasks() {
     }
   };
 
+  // Get category color for error category badges (same as Overview page)
+  const getCategoryColor = (category) => {
+    switch (category?.toLowerCase()) {
+      case 'ranking':
+        return 'text-yellow-700 bg-yellow-50 border-yellow-200';
+      case 'conversion':
+        return 'text-red-700 bg-red-50 border-red-200';
+      case 'inventory':
+        return 'text-orange-700 bg-orange-50 border-orange-200';
+      case 'account health':
+        return 'text-blue-700 bg-blue-50 border-blue-200';
+      case 'profitability':
+        return 'text-green-700 bg-green-50 border-green-200';
+      case 'sponsored ads':
+        return 'text-indigo-700 bg-indigo-50 border-indigo-200';
+      default:
+        return 'text-gray-700 bg-gray-50 border-gray-200';
+    }
+  };
+
   // Get unique categories from tasks
   const categories = useMemo(() => {
     const uniqueCategories = [...new Set(tasks.map(task => task.errorCategory))];
@@ -535,7 +557,7 @@ export default function Tasks() {
                         {item.asin}
                       </td>
                       <td className='px-4 py-4 whitespace-nowrap w-[110px]'>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getSeverityColor(item.severity)}`}>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getCategoryColor(item.errorCategory)}`}>
                           {item.errorCategory}
                         </span>
                       </td>

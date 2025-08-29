@@ -51,6 +51,7 @@ import ManageAccounts from './Pages/ManageAccounts.jsx';
 import UserLogging from './Pages/UserLogging.jsx';
 import CalendlyWidget from './Pages/consultation.jsx';
 import Tasks from './Pages/Tasks.jsx';
+import EcommerceHolidaysCalendar from './Pages/EventCalender.jsx';
 
 const App = () => {
 
@@ -120,6 +121,7 @@ const App = () => {
             <Route path='settings' element={<Settings />} />
             <Route path='asin-analyzer' element={<ASINAnalyzer />} />
             <Route path='tasks' element={<Tasks />} />
+            <Route path='ecommerce-calendar' element={<EcommerceHolidaysCalendar />} />
             <Route path='user-logging' element={<UserLogging />} />
             <Route path='consultation' element={<CalendlyWidget />} />
             
