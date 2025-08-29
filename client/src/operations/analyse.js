@@ -610,8 +610,9 @@ export default analyseData;*/
 
 import axios from "axios";
 
-const analyseData = async (data) => {
-    console.log("data: ",data)
+const analyseData = async (data,userId) => {
+    data.userId = userId;
+    console.log("userId in analyseData: ",userId)
     const response = await axios.post(`${import.meta.env.VITE_CALCULATION_API_URI}/calculation-api/calculate`, data, {withCredentials: true})
     console.log("response in analyseData: ",response)
     return response.data.data;

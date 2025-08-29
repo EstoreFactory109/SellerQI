@@ -62,6 +62,7 @@ const getUserById =async(id)=>{
     }
 
     const userData = {
+        userId:user._id,
         firstName : user.firstName,
         lastName : user.lastName ,
         phone:user.phone ,

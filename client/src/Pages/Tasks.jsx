@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useSelector } from 'react-redux';
 import { motion } from "framer-motion";
 import { 
@@ -10,284 +10,113 @@ import {
   TrendingUp,
   TrendingDown
 } from 'lucide-react';
+import axios from 'axios';
 
 export default function Tasks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [sortBy, setSortBy] = useState('slNo');
+  const [sortBy, setSortBy] = useState('taskId');
   const [sortOrder, setSortOrder] = useState('asc');
   const [completedTasks, setCompletedTasks] = useState(new Set());
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Get error data from Redux store
-  const profitabilityErrors = useSelector(state => state.errors.profitabilityErrors);
-  const sponsoredAdsErrors = useSelector(state => state.errors.sponsoredAdsErrors);
-  
-  // Get additional data from Dashboard store for product names and details
-  const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo);
-  const totalProducts = useSelector(state => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
-  const profitibilityData = useSelector(state => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
-  const productWiseSponsoredAds = useSelector(state => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAds) || [];
-  
-  // Get all error categories from Dashboard store
-  const rankingProductWiseErrors = useSelector(state => state.Dashboard.DashBoardInfo?.rankingProductWiseErrors) || [];
-  const conversionProductWiseErrors = useSelector(state => state.Dashboard.DashBoardInfo?.conversionProductWiseErrors) || [];
-  const inventoryProductWiseErrors = useSelector(state => state.Dashboard.DashBoardInfo?.inventoryProductWiseErrors) || [];
-  const accountErrors = useSelector(state => state.Dashboard.DashBoardInfo?.AccountErrors) || {};
-  const productWiseError = useSelector(state => state.Dashboard.DashBoardInfo?.productWiseError) || [];
+  // Get user data from Redux store
+  const userData = useSelector(state => state.Auth?.user);
 
-  // Create a map of ASIN to product details for quick lookup
-  const productDetailsMap = useMemo(() => {
-    const map = new Map();
-    totalProducts.forEach(product => {
-      map.set(product.asin, product);
-    });
-    return map;
-  }, [totalProducts]);
-
-  // Combine all error data
-  const allErrors = useMemo(() => {
-    const combined = [];
-    let slNo = 1;
-
-    // Add profitability errors
-    if (profitabilityErrors.errorDetails && profitabilityErrors.errorDetails.length > 0) {
-      profitabilityErrors.errorDetails.forEach(error => {
-        const productDetails = productDetailsMap.get(error.asin);
-        const productName = productDetails?.itemName || productDetails?.title || `Product ${error.asin}`;
-        
-        // Generate error message based on error type
-        let errorMessage = '';
-        let howToSolve = '';
-        let severity = 'medium';
-        
-        if (error.errorType === 'negative_profit') {
-          errorMessage = `Negative profit margin: $${error.netProfit?.toFixed(2) || 0} net profit on $${error.sales?.toFixed(2) || 0} sales`;
-          howToSolve = 'Review pricing strategy, reduce costs, or consider discontinuing the product';
-          severity = 'high';
-        } else if (error.errorType === 'low_margin') {
-          const margin = error.profitMargin?.toFixed(1) || 0;
-          errorMessage = `Low profit margin: ${margin}% margin on $${error.sales?.toFixed(2) || 0} sales`;
-          howToSolve = 'Optimize pricing, reduce ad spend, or negotiate better supplier costs';
-          severity = 'medium';
-        }
-        
-        combined.push({
-          slNo: slNo++,
-          product: productName,
-          asin: error.asin || 'N/A',
-          errorCategory: 'Profitability',
-          error: errorMessage,
-          howToSolve: howToSolve,
-          severity: severity,
-          status: 'pending',
-          sales: error.sales,
-          netProfit: error.netProfit,
-          profitMargin: error.profitMargin,
-          errorCount: 1
-        });
-      });
+  // Get severity based on error category
+  const getSeverityFromCategory = (category) => {
+    switch (category?.toLowerCase()) {
+      case 'ranking':
+        return 'medium';
+      case 'conversion':
+        return 'medium';
+      case 'inventory':
+        return 'high';
+      case 'profitability':
+        return 'high';
+      case 'sponsoredads':
+        return 'medium';
+      default:
+        return 'medium';
     }
+  };
 
-    // Add sponsored ads errors
-    if (sponsoredAdsErrors.errorDetails && sponsoredAdsErrors.errorDetails.length > 0) {
-      sponsoredAdsErrors.errorDetails.forEach(error => {
-        const productDetails = productDetailsMap.get(error.asin);
-        const productName = productDetails?.itemName || productDetails?.title || `Product ${error.asin}`;
-        
-        // Generate error message based on error type
-        let errorMessage = '';
-        let howToSolve = '';
-        let severity = 'medium';
-        
-        if (error.errorType === 'high_acos') {
-          const acos = error.acos?.toFixed(1) || 0;
-          errorMessage = `High ACoS: ${acos}% ($${error.spend?.toFixed(2) || 0} spend, $${error.sales?.toFixed(2) || 0} sales)`;
-          howToSolve = 'Reduce bid amounts, optimize keyword targeting, or pause underperforming campaigns';
-          severity = 'high';
-        } else if (error.errorType === 'no_sales_high_spend') {
-          errorMessage = `No sales with high spend: $${error.spend?.toFixed(2) || 0} spent with $${error.sales?.toFixed(2) || 0} sales`;
-          howToSolve = 'Review targeting, pause campaigns, or improve product listing quality';
-          severity = 'high';
-        } else if (error.errorType === 'marginal_profit') {
-          const acos = error.acos?.toFixed(1) || 0;
-          errorMessage = `Marginal profitability: ${acos}% ACoS with $${error.spend?.toFixed(2) || 0} spend`;
-          howToSolve = 'Optimize bids, improve conversion rate, or adjust targeting strategy';
-          severity = 'medium';
-        }
-        
-        combined.push({
-          slNo: slNo++,
-          product: productName,
-          asin: error.asin || 'N/A',
-          errorCategory: 'Sponsored Ads',
-          error: errorMessage,
-          howToSolve: howToSolve,
-          severity: severity,
-          status: 'pending',
-          spend: error.spend,
-          sales: error.sales,
-          acos: error.acos,
-          errorCount: 1
-        });
-      });
-    }
+  // Fetch tasks data from API
+  useEffect(() => {
+    const fetchTasks = async () => {
+      if (!userData?.userId) {
+        setError('User ID not available');
+        setLoading(false);
+        return;
+      }
 
-    // Add ranking errors
-    rankingProductWiseErrors.forEach(error => {
-      if (error && error.asin) {
-        const productDetails = productDetailsMap.get(error.asin);
-        const productName = productDetails?.itemName || productDetails?.title || error.data?.Title || `Product ${error.asin}`;
+      try {
+        setLoading(true);
+        setError(null);
         
-        // Check for specific ranking error types
-        const errorTypes = [];
-        if (error.data?.charLim?.status === "Error") {
-          errorTypes.push("Character limit exceeded");
+        const response = await axios.get(
+          `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/${userData.userId}`,
+          { withCredentials: true }
+        );
+
+        if (response.status === 200 && response.data?.data) {
+          setTasks(response.data.data);
+        } else {
+          setError('Failed to fetch tasks data');
         }
-        if (error.data?.dublicateWords === "Error") {
-          errorTypes.push("Duplicate words detected");
-        }
-        if (error.data?.TotalErrors > 0) {
-          errorTypes.push(`${error.data.TotalErrors} ranking issues`);
-        }
-        
-        if (errorTypes.length > 0) {
-          const errorMessage = `Ranking issues: ${errorTypes.join(', ')}`;
-          const howToSolve = 'Optimize product title, remove duplicate words, and ensure character limits are within guidelines';
-          
-          combined.push({
-            slNo: slNo++,
-            product: productName,
-            asin: error.asin,
-            errorCategory: 'Ranking',
-            error: errorMessage,
-            howToSolve: howToSolve,
-            severity: 'medium',
-            status: 'pending',
-            sales: 0,
-            errorCount: errorTypes.length
-          });
-        }
+      } catch (err) {
+        console.error('Error fetching tasks:', err);
+        setError(err.response?.data?.message || 'Failed to fetch tasks');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTasks();
+  }, [userData?.userId]);
+
+  // Transform API data to match table structure
+  const transformedTasks = useMemo(() => {
+    return tasks.map((task, index) => ({
+      slNo: index + 1,
+      taskId: task.taskId,
+      product: task.productName,
+      asin: task.asin,
+      errorCategory: task.errorCategory,
+      error: task.error,
+      howToSolve: task.solution,
+      severity: getSeverityFromCategory(task.errorCategory),
+      status: task.status,
+      sales: 0,
+      errorCount: 1
+    }));
+  }, [tasks]);
+
+  // Initialize completedTasks based on API data when tasks are loaded
+  useEffect(() => {
+    const completedTaskIds = new Set();
+    tasks.forEach(task => {
+      if (task.status === 'completed') {
+        completedTaskIds.add(task.taskId);
       }
     });
-
-    // Add conversion errors
-    conversionProductWiseErrors.forEach(error => {
-      if (error && error.asin) {
-        const productDetails = productDetailsMap.get(error.asin);
-        const productName = productDetails?.itemName || productDetails?.title || `Product ${error.asin}`;
-        
-        // Check for specific conversion error types
-        const errorTypes = [];
-        if (error.aplusErrorData?.status === "Error") {
-          errorTypes.push("A+ Content issues");
-        }
-        if (error.imageResultErrorData?.status === "Error") {
-          errorTypes.push("Image quality issues");
-        }
-        if (error.videoResultErrorData?.status === "Error") {
-          errorTypes.push("Video content issues");
-        }
-        if (error.productReviewResultErrorData?.status === "Error") {
-          errorTypes.push("Product review issues");
-        }
-        if (error.productStarRatingResultErrorData?.status === "Error") {
-          errorTypes.push("Star rating issues");
-        }
-        if (error.productsWithOutBuyboxErrorData?.status === "Error") {
-          errorTypes.push("Buy Box eligibility issues");
-        }
-        
-        if (errorTypes.length > 0) {
-          const errorMessage = `Conversion issues: ${errorTypes.join(', ')}`;
-          const howToSolve = 'Improve product images, add A+ content, optimize reviews, and ensure Buy Box eligibility';
-          
-          combined.push({
-            slNo: slNo++,
-            product: productName,
-            asin: error.asin,
-            errorCategory: 'Conversion',
-            error: errorMessage,
-            howToSolve: howToSolve,
-            severity: 'medium',
-            status: 'pending',
-            sales: 0,
-            errorCount: errorTypes.length
-          });
-        }
-      }
-    });
-
-    // Add inventory errors
-    inventoryProductWiseErrors.forEach(error => {
-      if (error && error.asin) {
-        const productDetails = productDetailsMap.get(error.asin);
-        const productName = productDetails?.itemName || productDetails?.title || `Product ${error.asin}`;
-        
-        // Check for specific inventory error types
-        const errorTypes = [];
-        if (error.inventoryPlanningErrorData) {
-          errorTypes.push("Inventory planning issues");
-        }
-        if (error.strandedInventoryErrorData) {
-          errorTypes.push("Stranded inventory");
-        }
-        if (error.inboundNonComplianceErrorData) {
-          errorTypes.push("Inbound compliance issues");
-        }
-        if (error.replenishmentErrorData?.status === "Error") {
-          errorTypes.push("Replenishment issues");
-        }
-        
-        if (errorTypes.length > 0) {
-          const errorMessage = `Inventory issues: ${errorTypes.join(', ')}`;
-          const howToSolve = 'Review inventory levels, resolve stranded inventory, and ensure compliance with Amazon policies';
-          
-          combined.push({
-            slNo: slNo++,
-            product: productName,
-            asin: error.asin,
-            errorCategory: 'Inventory',
-            error: errorMessage,
-            howToSolve: howToSolve,
-            severity: 'high',
-            status: 'pending',
-            sales: 0,
-            errorCount: errorTypes.length
-          });
-        }
-      }
-    });
-
-    // Add account-level errors
-    if (accountErrors && Object.keys(accountErrors).length > 0) {
-      Object.entries(accountErrors).forEach(([key, value]) => {
-        if (value && typeof value === 'object' && value.status === "Error") {
-          const errorMessage = `Account issue: ${key.replace(/([A-Z])/g, ' $1').toLowerCase()}`;
-          const howToSolve = 'Review account health metrics and address any policy violations or performance issues';
-          
-          combined.push({
-            slNo: slNo++,
-            product: 'Account Level',
-            asin: 'N/A',
-            errorCategory: 'Account Health',
-            error: errorMessage,
-            howToSolve: howToSolve,
-            severity: 'high',
-            status: 'pending',
-            sales: 0,
-            errorCount: 1
-          });
-        }
-      });
-    }
-
-    return combined;
-  }, [profitabilityErrors, sponsoredAdsErrors, rankingProductWiseErrors, conversionProductWiseErrors, inventoryProductWiseErrors, accountErrors, productDetailsMap]);
+    setCompletedTasks(completedTaskIds);
+  }, [tasks]);
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
-    let filtered = allErrors;
+    let filtered = transformedTasks;
+
+    // Apply status filter
+    if (filterStatus === 'pending') {
+      filtered = filtered.filter(item => !completedTasks.has(item.taskId));
+    } else if (filterStatus === 'completed') {
+      filtered = filtered.filter(item => completedTasks.has(item.taskId));
+    }
+    // If filterStatus is 'all', show all tasks
 
     // Apply search filter
     if (searchQuery) {
@@ -302,20 +131,9 @@ export default function Tasks() {
 
     // Apply category filter
     if (filterCategory !== 'all') {
-      filtered = filtered.filter(item => item.errorCategory === filterCategory);
-    }
-
-    // Apply status filter
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(item => {
-        const isCompleted = completedTasks.has(item.slNo);
-        if (filterStatus === 'completed') {
-          return isCompleted;
-        } else if (filterStatus === 'pending') {
-          return !isCompleted;
-        }
-        return true;
-      });
+      filtered = filtered.filter(item => 
+        item.errorCategory.toLowerCase() === filterCategory.toLowerCase()
+      );
     }
 
     // Apply sorting
@@ -338,8 +156,12 @@ export default function Tasks() {
       }
     });
 
-    return filtered;
-  }, [allErrors, searchQuery, filterCategory, filterStatus, completedTasks, sortBy, sortOrder]);
+    // Reassign serial numbers after filtering and sorting
+    return filtered.map((item, index) => ({
+      ...item,
+      slNo: index + 1
+    }));
+  }, [transformedTasks, searchQuery, filterCategory, filterStatus, completedTasks, sortBy, sortOrder]);
 
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -362,7 +184,7 @@ export default function Tasks() {
         item.errorCategory,
         `"${item.error.replace(/"/g, '""')}"`, // Escape quotes in error message
         `"${item.howToSolve.replace(/"/g, '""')}"`, // Escape quotes in how to solve
-        completedTasks.has(item.slNo) ? 'Completed' : 'Pending'
+        completedTasks.has(item.taskId) ? 'Completed' : 'Pending'
       ].join(','))
     ].join('\n');
 
@@ -378,19 +200,85 @@ export default function Tasks() {
     document.body.removeChild(link);
   };
 
-  const toggleTaskStatus = (slNo) => {
+  const toggleTaskStatus = async (taskId) => {
+    // Optimistically update the frontend state first for better UX
+    const isCurrentlyCompleted = completedTasks.has(taskId);
+    const newStatus = isCurrentlyCompleted ? 'pending' : 'completed';
+    
     setCompletedTasks(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(slNo)) {
-        newSet.delete(slNo);
+      if (isCurrentlyCompleted) {
+        newSet.delete(taskId);
       } else {
-        newSet.add(slNo);
+        newSet.add(taskId);
       }
       return newSet;
     });
+
+    // Send request to backend to persist the change
+    try {
+      const response = await axios.put(
+        `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/update-status`,
+        {
+          userId: userData?.userId,
+          taskId: taskId,
+          status: newStatus
+        },
+        { withCredentials: true }
+      );
+
+      if (response.status !== 200) {
+        // If the request fails, revert the frontend state
+        console.error('Failed to update task status');
+        setCompletedTasks(prev => {
+          const newSet = new Set(prev);
+          if (isCurrentlyCompleted) {
+            newSet.add(taskId);
+          } else {
+            newSet.delete(taskId);
+          }
+          return newSet;
+        });
+      }
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      // Revert the frontend state on error
+      setCompletedTasks(prev => {
+        const newSet = new Set(prev);
+        if (isCurrentlyCompleted) {
+          newSet.add(taskId);
+        } else {
+          newSet.delete(taskId);
+        }
+        return newSet;
+      });
+    }
   };
 
+  const refreshTasks = async () => {
+    if (!userData?.userId) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await axios.get(
+        `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/${userData.userId}`,
+        { withCredentials: true }
+      );
 
+      if (response.status === 200 && response.data?.data) {
+        setTasks(response.data.data);
+      } else {
+        setError('Failed to refresh tasks data');
+      }
+    } catch (err) {
+      console.error('Error refreshing tasks:', err);
+      setError(err.response?.data?.message || 'Failed to refresh tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getSeverityColor = (severity) => {
     switch (severity.toLowerCase()) {
@@ -405,34 +293,70 @@ export default function Tasks() {
     }
   };
 
+  // Get unique categories from tasks
+  const categories = useMemo(() => {
+    const uniqueCategories = [...new Set(tasks.map(task => task.errorCategory))];
+    return ['all', ...uniqueCategories];
+  }, [tasks]);
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <p className="text-gray-600">Loading tasks...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const categories = ['all', 'Profitability', 'Sponsored Ads', 'Ranking', 'Conversion', 'Inventory', 'Account Health'];
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <AlertTriangle className="w-12 h-12 text-red-500" />
+          <p className="text-red-600">{error}</p>
+          <button 
+            onClick={refreshTasks}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full">
       {/* Header Section */}
-              <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40 w-full'>
-                  <div className='px-4 lg:px-6 py-4 w-full'>
-            <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 w-full'>
-                        <div className='flex items-center gap-4 min-w-0'>
+      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40 w-full'>
+        <div className='px-4 lg:px-6 py-4 w-full'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 w-full'>
+            <div className='flex items-center gap-4 min-w-0'>
               <div className='min-w-0 flex-1'>
                 <h1 className='text-2xl font-bold text-gray-900'>Tasks</h1>
                 <p className='text-sm text-gray-600 mt-1'>Manage and track issues across your Amazon catalog</p>
               </div>
-                                                             <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium flex-shrink-0'>
-                   <AlertTriangle className='w-2 h-2' />
-                   {filteredAndSortedData.length} filtered issues
-                   <span className='ml-2 px-2 py-0.5 bg-red-100 text-red-700 rounded-full'>
-                     {filteredAndSortedData.reduce((sum, item) => sum + (item.errorCount || 1), 0)} errors
-                   </span>
-                   <span className='ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full'>
-                     {filteredAndSortedData.filter(item => completedTasks.has(item.slNo)).length} completed
-                   </span>
-                   <span className='ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full'>
-                     {filteredAndSortedData.filter(item => !completedTasks.has(item.slNo)).length} pending
-                   </span>
-                 </div>
+              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium flex-shrink-0'>
+                <AlertTriangle className='w-2 h-2' />
+                {filterStatus === 'all' ? 'All tasks' : filterStatus === 'completed' ? 'Completed tasks' : 'Pending tasks'}
+                                 {filterStatus === 'all' && (
+                   <>
+                     <span className='ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full'>
+                       {filteredAndSortedData.filter(item => completedTasks.has(item.taskId)).length} completed
+                     </span>
+                     <span className='ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full'>
+                       {filteredAndSortedData.filter(item => !completedTasks.has(item.taskId)).length} pending
+                     </span>
+                   </>
+                 )}
+                {filterStatus !== 'all' && (
+                  <span className='ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full'>
+                    {filteredAndSortedData.length} {filterStatus === 'completed' ? 'completed' : 'pending'}
+                  </span>
+                )}
+              </div>
             </div>
             
             <div className='flex items-center gap-3 flex-shrink-0'>
@@ -446,8 +370,12 @@ export default function Tasks() {
               </button>
               
               {/* Refresh Button */}
-              <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700">
-                <RefreshCw className="w-4 h-4" />
+              <button 
+                onClick={refreshTasks}
+                disabled={loading}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
             </div>
@@ -473,34 +401,33 @@ export default function Tasks() {
               </div>
             </div>
 
-                         {/* Category Filter */}
-             <div className='sm:w-48 flex-shrink-0'>
-               <select
-                 value={filterCategory}
-                 onChange={(e) => setFilterCategory(e.target.value)}
-                 className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-               >
-                 {categories.map(category => (
-                   <option key={category} value={category}>
-                     {category === 'all' ? 'All Categories' : category}
-                   </option>
-                 ))}
-               </select>
-             </div>
+            {/* Category Filter */}
+            <div className='sm:w-48 flex-shrink-0'>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              >
+                {categories.map(category => (
+                  <option key={category} value={category}>
+                    {category === 'all' ? 'All Categories' : category}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-             {/* Status Filter */}
-             <div className='sm:w-40 flex-shrink-0'>
-               <select
-                 value={filterStatus}
-                 onChange={(e) => setFilterStatus(e.target.value)}
-                 className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-               >
-                 <option value="all">All Status</option>
-                 <option value="pending">Pending</option>
-                 <option value="completed">Completed</option>
-               </select>
-             </div>
-
+            {/* Status Filter */}
+            <div className='sm:w-40 flex-shrink-0'>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              >
+                <option value="all">All Tasks</option>
+                <option value="pending">Pending Only</option>
+                <option value="completed">Completed Only</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -513,126 +440,131 @@ export default function Tasks() {
             <table className='w-full'>
               <thead className='bg-gray-50 border-b border-gray-200'>
                 <tr>
-                                     <th 
-                     className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[60px]'
-                     onClick={() => handleSort('slNo')}
-                   >
-                     <div className='flex items-center gap-2'>
-                       Sl No.
-                       {sortBy === 'slNo' && (
-                         sortOrder === 'asc' ? 
-                         <TrendingUp className='w-3 h-3' /> : 
-                         <TrendingDown className='w-3 h-3' />
-                       )}
-                     </div>
-                   </th>
-                                     <th 
-                     className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[150px]'
-                     onClick={() => handleSort('product')}
-                   >
-                     <div className='flex items-center gap-2'>
-                       Product
-                       {sortBy === 'product' && (
-                         sortOrder === 'asc' ? 
-                         <TrendingUp className='w-3 h-3' /> : 
-                         <TrendingDown className='w-3 h-3' />
-                       )}
-                     </div>
-                   </th>
-                                     <th 
-                     className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[90px]'
-                     onClick={() => handleSort('asin')}
-                   >
-                     <div className='flex items-center gap-2'>
-                       ASIN
-                       {sortBy === 'asin' && (
-                         sortOrder === 'asc' ? 
-                         <TrendingUp className='w-3 h-3' /> : 
-                         <TrendingDown className='w-3 h-3' />
-                       )}
-                     </div>
-                   </th>
-                                     <th 
-                     className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[110px]'
-                     onClick={() => handleSort('errorCategory')}
-                   >
-                     <div className='flex items-center gap-2'>
-                       Error Category
-                       {sortBy === 'errorCategory' && (
-                         sortOrder === 'asc' ? 
-                         <TrendingUp className='w-3 h-3' /> : 
-                         <TrendingDown className='w-3 h-3' />
-                       )}
-                     </div>
-                   </th>
-                                     <th 
-                     className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors'
-                     onClick={() => handleSort('error')}
-                   >
-                     <div className='flex items-center gap-2'>
-                       Error
-                       {sortBy === 'error' && (
-                         sortOrder === 'asc' ? 
-                         <TrendingUp className='w-3 h-3' /> : 
-                         <TrendingDown className='w-3 h-3' />
-                       )}
-                     </div>
-                   </th>
-                                     <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-                     How To Solve
-                   </th>
-                                     <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[100px]'>
-                     Status
-                   </th>
+                  <th 
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[60px]'
+                    onClick={() => handleSort('slNo')}
+                  >
+                    <div className='flex items-center gap-2'>
+                      Sl No.
+                      {sortBy === 'slNo' && (
+                        sortOrder === 'asc' ? 
+                        <TrendingUp className='w-3 h-3' /> : 
+                        <TrendingDown className='w-3 h-3' />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[150px]'
+                    onClick={() => handleSort('product')}
+                  >
+                    <div className='flex items-center gap-2'>
+                      Product
+                      {sortBy === 'product' && (
+                        sortOrder === 'asc' ? 
+                        <TrendingUp className='w-3 h-3' /> : 
+                        <TrendingDown className='w-3 h-3' />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[90px]'
+                    onClick={() => handleSort('asin')}
+                  >
+                    <div className='flex items-center gap-2'>
+                      ASIN
+                      {sortBy === 'asin' && (
+                        sortOrder === 'asc' ? 
+                        <TrendingUp className='w-3 h-3' /> : 
+                        <TrendingDown className='w-3 h-3' />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[110px]'
+                    onClick={() => handleSort('errorCategory')}
+                  >
+                    <div className='flex items-center gap-2'>
+                      Error Category
+                      {sortBy === 'errorCategory' && (
+                        sortOrder === 'asc' ? 
+                        <TrendingUp className='w-3 h-3' /> : 
+                        <TrendingDown className='w-3 h-3' />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors'
+                    onClick={() => handleSort('error')}
+                  >
+                    <div className='flex items-center gap-2'>
+                      Error
+                      {sortBy === 'error' && (
+                        sortOrder === 'asc' ? 
+                        <TrendingUp className='w-3 h-3' /> : 
+                        <TrendingDown className='w-3 h-3' />
+                      )}
+                    </div>
+                  </th>
+                  <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                    How To Solve
+                  </th>
+                  <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[100px]'>
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody className='bg-white divide-y divide-gray-200'>
                 {filteredAndSortedData.length > 0 ? (
                   filteredAndSortedData.map((item, index) => (
-                                         <motion.tr
-                       key={item.slNo}
-                       initial={{ opacity: 0, y: 20 }}
-                       animate={{ opacity: 1, y: 0 }}
-                       transition={{ delay: index * 0.05 }}
-                       className='hover:bg-gray-50 transition-colors'
-                     >
-                                             <td className='px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-[60px]'>
-                         {item.slNo}
-                       </td>
-                                             <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 w-[150px]'>
-                         <div className='truncate' title={item.product}>
-                           {item.product.length > 20 ? `${item.product.substring(0, 20)}...` : item.product}
-                         </div>
-                       </td>
-                                             <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 font-mono w-[90px]'>
-                         {item.asin}
-                       </td>
-                                             <td className='px-4 py-4 whitespace-nowrap w-[110px]'>
-                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getSeverityColor(item.severity)}`}>
-                           {item.errorCategory}
-                         </span>
-                       </td>
-                                             <td className='px-4 py-4 text-sm text-gray-900'>
-                         <div>
-                           <p className='whitespace-normal'>{item.error}</p>
-                         </div>
-                       </td>
-                                             <td className='px-4 py-4 text-sm text-gray-900'>
-                         <div>
-                           <p className='whitespace-normal'>{item.howToSolve}</p>
-                         </div>
-                       </td>
+                    <motion.tr
+                      key={item.taskId}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className='hover:bg-gray-50 transition-colors'
+                    >
+                      <td className='px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-[60px]'>
+                        {item.slNo}
+                      </td>
+                      <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 w-[150px]'>
+                        <div className='truncate' title={item.product}>
+                          {item.product.length > 20 ? `${item.product.substring(0, 20)}...` : item.product}
+                        </div>
+                      </td>
+                      <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 font-mono w-[90px]'>
+                        {item.asin}
+                      </td>
+                      <td className='px-4 py-4 whitespace-nowrap w-[110px]'>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getSeverityColor(item.severity)}`}>
+                          {item.errorCategory}
+                        </span>
+                      </td>
+                      <td className='px-4 py-4 text-sm text-gray-900'>
+                        <div>
+                          <p className='whitespace-normal'>{item.error}</p>
+                        </div>
+                      </td>
+                      <td className='px-4 py-4 text-sm text-gray-900'>
+                        <div>
+                          <p className='whitespace-normal'>{item.howToSolve}</p>
+                        </div>
+                      </td>
                                              <td className='px-4 py-4 whitespace-nowrap w-[100px]'>
-                         <button
-                           onClick={() => toggleTaskStatus(item.slNo)}
-                           className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-200 cursor-pointer ${
-                             completedTasks.has(item.slNo)
-                               ? 'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
-                               : 'bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-200'
-                           }`}
-                         >
-                           {completedTasks.has(item.slNo) ? 'Completed' : 'Pending'}
-                         </button>
+                         <div className='flex items-center gap-2'>
+                           <input
+                             type="checkbox"
+                             checked={completedTasks.has(item.taskId)}
+                             onChange={() => toggleTaskStatus(item.taskId)}
+                             className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                           />
+                           <span className={`text-xs font-medium ${
+                             completedTasks.has(item.taskId)
+                               ? 'text-green-600'
+                               : 'text-yellow-600'
+                           }`}>
+                             {completedTasks.has(item.taskId) ? 'Completed' : 'Pending'}
+                           </span>
+                         </div>
                        </td>
                     </motion.tr>
                   ))

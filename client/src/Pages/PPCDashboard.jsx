@@ -154,6 +154,9 @@ const PPCDashboard = () => {
   
   // Get dateWiseTotalCosts from Redux store - actual PPC spend data by date
   const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
+
+  const campaignWiseTotalSalesAndCost = useSelector((state) => state.Dashboard.DashBoardInfo?.campaignWiseTotalSalesAndCost) || [];
+  console.log("campaignWiseTotalSalesAndCost", campaignWiseTotalSalesAndCost);
   
   // Filter dateWiseTotalCosts based on selected date range from calendar
   const filteredDateWiseTotalCosts = useMemo(() => {
@@ -429,34 +432,8 @@ const PPCDashboard = () => {
   };
   
   // Process data for different tabs
-  // High ACOS Campaigns - First aggregate all products by campaign, then filter by ACOS > 40%
-  // Step 1: Aggregate all products by campaign
-  const campaignAggregates = productWiseSponsoredAds.reduce((acc, product) => {
-    const sales = parseFloat(product.salesIn30Days) || 0;
-    const spend = parseFloat(product.spend) || 0;
-    const campaignName = product.campaignName;
-    
-    if (!campaignName) return acc;
-    
-    if (!acc[campaignName]) {
-      acc[campaignName] = {
-        campaignName: campaignName,
-        campaignId: product.campaignId,
-        totalSpend: 0,
-        totalSales: 0,
-        products: new Set()
-      };
-    }
-    
-    acc[campaignName].totalSpend += spend;
-    acc[campaignName].totalSales += sales;
-    acc[campaignName].products.add(product.asin);
-    
-    return acc;
-  }, {});
-  
-  // Step 2: Convert to array, calculate ACOS, and filter
-  const highAcosCampaigns = Object.values(campaignAggregates)
+  // High ACOS Campaigns - Use campaignWiseTotalSalesAndCost data
+  const highAcosCampaigns = campaignWiseTotalSalesAndCost
     .map(campaign => {
       // Count keywords for this campaign
       const campaignKeywords = keywords.filter(k => k.campaignId === campaign.campaignId);
@@ -467,7 +444,7 @@ const PPCDashboard = () => {
         totalSpend: campaign.totalSpend,
         totalSales: campaign.totalSales,
         acos: campaign.totalSales > 0 ? (campaign.totalSpend / campaign.totalSales) * 100 : 0,
-        productCount: campaign.products.size,
+        productCount: 0, // Not available in new structure
         keywordCount: campaignKeywords.length
       };
     })
@@ -1120,7 +1097,7 @@ const PPCDashboard = () => {
     // Add High ACOS Campaigns - ALL DATA (not paginated)
     if (highAcosCampaigns.length > 0) {
       csvData.push([`High ACOS Campaigns (>40%) - Total: ${highAcosCampaigns.length} campaigns`]);
-      csvData.push(['Campaign Name', 'Campaign ID', 'Total Spend', 'Total Sales', 'ACOS %', 'Products', 'Keywords']);
+      csvData.push(['Campaign Name', 'Campaign ID', 'Total Spend', 'Total Sales', 'ACOS %', 'Keywords']);
       highAcosCampaigns.forEach(campaign => {
         csvData.push([
           campaign.campaignName,
@@ -1128,7 +1105,6 @@ const PPCDashboard = () => {
           `$${campaign.totalSpend.toFixed(2)}`,
           `$${campaign.totalSales.toFixed(2)}`,
           `${campaign.acos.toFixed(2)}%`,
-          campaign.productCount,
           campaign.keywordCount
         ]);
       });

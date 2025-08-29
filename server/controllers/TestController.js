@@ -1,4 +1,4 @@
-const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
+const {getAutoCampaignDetailsWithSales} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
@@ -17,13 +17,9 @@ const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
 const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
 
 const testReport = async (req, res) => {
-    
-    // console.log(accessToken, marketplaceIds)
-    if (!accessToken || !marketplaceIds) {
-        return res.status(400).json({ message: "Credentials are missing" })
-    }
+    const {accessToken}=req.body
 
-    const report = await getPPCSpendsDateWise(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US","NA");
+    const report = await getAutoCampaignDetailsWithSales(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US","NA");
     if (!report) {
         return res.status(408).json({ message: "Report did not complete within 5 minutes" })
     }

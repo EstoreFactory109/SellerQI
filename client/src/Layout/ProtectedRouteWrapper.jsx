@@ -23,6 +23,7 @@ const ProtectedRouteWrapper = ({ children }) => {
   const hasCheckedAuthRef = useRef(false);
 
   const info = useSelector(state => state.Dashboard?.DashBoardInfo);
+  const userData = useSelector(state => state.Auth?.user);
 
   const [showLoader, setShowLoader] = useState(true);
 
@@ -52,6 +53,7 @@ const ProtectedRouteWrapper = ({ children }) => {
 
         if (result.isAuthenticated && result.user) {
           const userData = result.user;
+         
 
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
@@ -78,7 +80,7 @@ const ProtectedRouteWrapper = ({ children }) => {
           
           setAuthChecked(true);
 
-          await fetchData();
+          await fetchData(userData);
 
           localStorage.setItem("isAuth", "true");
         } else {
@@ -106,7 +108,7 @@ const ProtectedRouteWrapper = ({ children }) => {
       }
     };
 
-    const fetchData = async () => {
+    const fetchData = async (freshUserData) => {
       let hasAnyData = false;
       let dashboardData = null;
 
@@ -133,7 +135,8 @@ const ProtectedRouteWrapper = ({ children }) => {
           
           // Process dashboard data - analyseData will now handle empty data gracefully
           try {
-            dashboardData = (await analyseData(response.data?.data || {})).dashboardData;
+            console.log("userData in ProtectedRouteWrapper: ", freshUserData)
+            dashboardData = (await analyseData(response.data?.data || {}, freshUserData?.userId)).dashboardData;
             console.log("dashboardData: ",dashboardData)
             
             // Check if we got empty data or actual data

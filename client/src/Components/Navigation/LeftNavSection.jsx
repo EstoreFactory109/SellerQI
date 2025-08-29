@@ -361,7 +361,7 @@ const LeftNavSection = () => {
                         </NavLink>
 
                         {/* Tasks - Available for ALL users including LITE */}
-                      {/*  <NavLink
+                      {  <NavLink
                             to="/seller-central-checker/tasks"
                             className={({ isActive }) =>
                                 `group flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-300 ${
@@ -383,7 +383,7 @@ const LeftNavSection = () => {
                                     <span className="font-medium">Tasks</span>
                                 </>
                             )}
-                        </NavLink>*/}
+                        </NavLink>}
 
                         {/* Account History - Only for PRO/AGENCY users */}
                         {!isLiteUser && (
