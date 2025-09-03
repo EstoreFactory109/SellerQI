@@ -1,4 +1,4 @@
-const {getAutoCampaignDetailsWithSales} = require('../Services/AmazonAds/GetAutoCampaignDetails.js');
+const getReport = require('../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const TotalSales = require('../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../Services/Sp_API/shipment.js');
@@ -19,7 +19,7 @@ const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered
 const testReport = async (req, res) => {
     const {accessToken}=req.body
 
-    const report = await getAutoCampaignDetailsWithSales(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US","NA");
+    const report = await getReport(accessToken, ["A1F83G8C2ARO7P"], "68b22cf2ca1778e39c966bc0", "UK","EU","sellingpartnerapi-eu.amazon.com");
     if (!report) {
         return res.status(408).json({ message: "Report did not complete within 5 minutes" })
     }
@@ -217,6 +217,14 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 
     console.log(userId, firstName, lastName, userPhone, userEmail,sellerId);
     const result = await sendRegisteredEmail(userId, firstName, lastName, userPhone, userEmail,sellerId);
+    return res.status(200).json({
+        data: result
+    })
+  }
+
+  const testNumberOfProductReviews = async (req, res) => {
+    const { asin, country, accessToken } = req.body;
+    const result = await getNumberOfProductReviews(asin, country, accessToken);
     return res.status(200).json({
         data: result
     })

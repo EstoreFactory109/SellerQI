@@ -2,6 +2,7 @@ const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const SellerModel = require('../../models/sellerCentralModel.js');
+const zlib = require('zlib');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
 
@@ -100,6 +101,7 @@ const getReportLink = async (accessToken, reportDocumentId, baseURI) => {
 
 const getReport = async (accessToken, marketplaceIds, userId, country, region, baseURI) => {
  
+    console.log("🔍 Debug - getReport function called with:", { accessToken, marketplaceIds, userId, country, region, baseURI });
   
     if (!accessToken || !marketplaceIds) {
         logger.error(new ApiError(400, "Credentials are missing"));
@@ -153,6 +155,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
         const refinedData = convertTSVToJson(fullReport.data);
+        console.log("🔍 Debug - refinedData:", refinedData);
 
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -179,6 +182,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             return false;
         }
         
+        console.log("🔍 Debug - getSellerDetails:", getSellerDetails);
         
 
         for (let i = 0; i < getSellerDetails.sellerAccount.length; i++) {
@@ -201,16 +205,36 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 };
 
 function convertTSVToJson(tsvBuffer) {
-    const tsv = tsvBuffer.toString("utf-8");
-    const rows = tsv.split("\n").filter(row => row.trim() !== "");
-    const headers = rows[0].split("\t");
-    return rows.slice(1).map(row => {
-        const values = row.split("\t");
-        return headers.reduce((obj, header, index) => {
-            obj[header] = values[index] || "";
-            return obj;
-        }, {});
-    });
+    try {
+        // First try to decompress if it's gzipped
+        let decompressedData;
+        try {
+            decompressedData = zlib.gunzipSync(tsvBuffer);
+        } catch (decompressError) {
+            // If decompression fails, assume it's already plain text
+            decompressedData = tsvBuffer;
+        }
+        
+        const tsv = decompressedData.toString("utf-8");
+        const rows = tsv.split("\n").filter(row => row.trim() !== "");
+        
+        if (rows.length === 0) {
+            logger.warn("No data rows found in TSV");
+            return [];
+        }
+        
+        const headers = rows[0].split("\t");
+        return rows.slice(1).map(row => {
+            const values = row.split("\t");
+            return headers.reduce((obj, header, index) => {
+                obj[header] = values[index] || "";
+                return obj;
+            }, {});
+        });
+    } catch (error) {
+        logger.error("Error converting TSV to JSON:", error);
+        return [];
+    }
 }
 
 module.exports = getReport;

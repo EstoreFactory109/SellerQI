@@ -33,6 +33,9 @@ const getNumberOfProductReviews = async (asin, country) => {
       return false;
     }
 
+    if(country === "UK"){
+      country = "GB";
+    }
     const options = {
       method: "GET",
       url: process.env.NUMBER_OF_REVIEWS_URI,
