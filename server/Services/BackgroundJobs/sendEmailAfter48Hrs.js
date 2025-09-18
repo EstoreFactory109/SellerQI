@@ -50,7 +50,7 @@ const sendConnectionReminderEmails = async () => {
         const users = await User.find({ 
             isVerified: true,
             connectAccountReminder:{$gt:0}
-        }).select('firstName lastName email sellerCentral');
+        }).select('firstName lastName email sellerCentral connectAccountReminder');
 
         logger.info(`Found ${users.length} verified users to analyze`);
 
@@ -59,6 +59,12 @@ const sendConnectionReminderEmails = async () => {
 
         for (const user of users) {
             try {
+                // Double check that user still has reminders left (safety check)
+                if (user.connectAccountReminder <= 0) {
+                    logger.debug(`User ${user.email} has no remaining reminders (${user.connectAccountReminder}), skipping`);
+                    continue;
+                }
+
                 const needsEmail = await checkUserNeedsEmail(user);
                 
                 if (needsEmail) {
@@ -70,11 +76,12 @@ const sendConnectionReminderEmails = async () => {
                     
                     if (emailResult) {
                         emailsSent++;
+                        const newReminderCount = user.connectAccountReminder - 1;
                         const updatedUser = await User.findOneAndUpdate(
                             {_id:user._id},
                             {
                                 $set:{
-                                    connectAccountReminder:user.connectAccountReminder-1
+                                    connectAccountReminder: newReminderCount
                                 }
                             },
                             {new:true}
@@ -82,7 +89,7 @@ const sendConnectionReminderEmails = async () => {
                         if(!updatedUser){
                             logger.error(`Failed to update user ${user.email}`);
                         }
-                        logger.info(`Connection reminder email sent to ${user.email}`);
+                        logger.info(`Connection reminder email sent to ${user.email}. Remaining reminders: ${newReminderCount}`);
                     } else {
                         logger.error(`Failed to send connection reminder email to ${user.email}`);
                     }
