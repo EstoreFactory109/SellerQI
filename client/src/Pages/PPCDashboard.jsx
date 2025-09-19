@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
+import { formatCurrencyWithLocale, formatYAxisCurrency } from '../utils/currencyUtils.js';
 
 // Create empty chart data with zero values when no data is available
 const createEmptyChartData = () => {
@@ -132,6 +133,9 @@ const PPCDashboard = () => {
   // Get sponsoredAdsMetrics from Redux store
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
   
@@ -771,11 +775,11 @@ const PPCDashboard = () => {
     return [
       { 
         label: 'PPC Sales', 
-        value: `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+        value: formatCurrencyWithLocale(ppcSales, currency) 
       },
       { 
         label: 'Spend', 
-        value: `$${spend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+        value: formatCurrencyWithLocale(spend, currency) 
       },
       { 
         label: 'ACOS', 
@@ -793,10 +797,7 @@ const PPCDashboard = () => {
   }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, sponsoredAdsMetrics, filteredDateWiseTotalCosts]);
 
   const formatYAxis = (value) => {
-    if (value >= 1000) {
-      return `$${(value / 1000).toFixed(1)}k`;
-    }
-    return `$${value}`;
+    return formatYAxisCurrency(value, currency);
   };
 
   // Function to analyze keywords and generate suggestions based on rules
@@ -827,7 +828,7 @@ const PPCDashboard = () => {
         type: 'keyword-wasted-spend',
         keyword: keyword.keyword,
         campaign: keyword.campaignName,
-        message: `"${keyword.keyword}" - Add as negative keyword. $${keyword.spend.toFixed(2)} spent with no sales.`,
+        message: `"${keyword.keyword}" - Add as negative keyword. ${currency}${keyword.spend.toFixed(2)} spent with no sales.`,
         priority: 'high',
         metrics: {
           spend: keyword.spend,
@@ -933,7 +934,7 @@ const PPCDashboard = () => {
           suggestions.push({
             type: 'product-high-acos',
             asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% ($${spend.toFixed(2)} spend, $${sales.toFixed(2)} sales). Consider reducing bids or pausing underperforming campaigns.`,
+            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% (${currency}${spend.toFixed(2)} spend, ${currency}${sales.toFixed(2)} sales). Consider reducing bids or pausing underperforming campaigns.`,
             priority: 'high'
           });
         } else if (spend > 5 && sales === 0) {
@@ -942,7 +943,7 @@ const PPCDashboard = () => {
           suggestions.push({
             type: 'product-no-sales',
             asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: $${spend.toFixed(2)} spent with no sales. Review targeting and consider pausing campaigns.`,
+            message: `ASIN ${aggregatedProduct.asin}: ${currency}${spend.toFixed(2)} spent with no sales. Review targeting and consider pausing campaigns.`,
             priority: 'high'
           });
         } else if (spend > 10 && acos > 30) {
@@ -951,7 +952,7 @@ const PPCDashboard = () => {
           suggestions.push({
             type: 'product-marginal',
             asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% with $${spend.toFixed(2)} spend. Optimize bids to improve profitability.`,
+            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% with ${currency}${spend.toFixed(2)} spend. Optimize bids to improve profitability.`,
             priority: 'medium'
           });
         }
@@ -976,7 +977,7 @@ const PPCDashboard = () => {
           type: 'high-spend-no-sales',
           keyword: keyword.keyword,
           campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - Consider adding as negative. $${keyword.spend.toFixed(2)} spent with no conversions.`,
+          message: `"${keyword.keyword}" - Consider adding as negative. ${currency}${keyword.spend.toFixed(2)} spent with no conversions.`,
           priority: 'high'
         });
       }
@@ -1010,7 +1011,7 @@ const PPCDashboard = () => {
           type: 'low-spend-poor-performance',
           keyword: keyword.keyword,
           campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - Low spend ($${keyword.spend.toFixed(2)}) with ${keyword.acos.toFixed(0)}% ACoS. Test with adjusted bids or consider pausing.`,
+          message: `"${keyword.keyword}" - Low spend (${currency}${keyword.spend.toFixed(2)}) with ${keyword.acos.toFixed(0)}% ACoS. Test with adjusted bids or consider pausing.`,
           priority: 'low'
         });
       }
@@ -1102,8 +1103,8 @@ const PPCDashboard = () => {
         csvData.push([
           campaign.campaignName,
           campaign.campaignId,
-          `$${campaign.totalSpend.toFixed(2)}`,
-          `$${campaign.totalSales.toFixed(2)}`,
+          `${currency}${campaign.totalSpend.toFixed(2)}`,
+          `${currency}${campaign.totalSales.toFixed(2)}`,
           `${campaign.acos.toFixed(2)}%`,
           campaign.keywordCount
         ]);

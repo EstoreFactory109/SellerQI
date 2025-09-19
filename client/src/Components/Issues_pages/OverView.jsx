@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
+import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, TrendingUp, Package, DollarSign, BarChart3, Search, ArrowRight, Eye, Filter, ChevronDown, Activity, Clock, Star, HelpCircle } from 'lucide-react';
@@ -8,6 +9,9 @@ import Chart from 'react-apexcharts';
 const OverView = () => {
   const navigate = useNavigate();
   const info = useSelector(state => state.Dashboard.DashBoardInfo);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPriority, setSelectedPriority] = useState('All');
   const [showDetails, setShowDetails] = useState(false);
@@ -794,7 +798,7 @@ const OverView = () => {
                             </p>
                             <div className="flex items-center gap-2 text-xs text-gray-500">
                               <span className="sm:hidden">{product.asin}</span>
-                              <span className="md:hidden">${(product.sales || 0).toFixed(2)}</span>
+                              <span className="md:hidden">{currency}{(product.sales || 0).toFixed(2)}</span>
                               <span className="lg:hidden">{(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()} units</span>
                             </div>
                           </div>
@@ -809,7 +813,7 @@ const OverView = () => {
                         </span>
                       </td>
                       <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden md:table-cell">
-                        ${(product.sales || 0).toFixed(2)}
+                        {currency}{(product.sales || 0).toFixed(2)}
                       </td>
                       <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden lg:table-cell">
                         {(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()}

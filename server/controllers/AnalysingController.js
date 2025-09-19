@@ -184,7 +184,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
             }
         })
 
-        console.log("SellerAccount: ",allSellerAccounts);
+        console.log("SellerAccount: ",SellerAccount);
         
         if (!SellerAccount) {
             logger.error(new ApiError(404, "Seller account not found"));

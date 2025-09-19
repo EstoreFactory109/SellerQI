@@ -12,6 +12,7 @@ import Calender from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
 import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
 import { useSelector } from 'react-redux'
+import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -25,6 +26,9 @@ const Dashboard = () => {
   
   // Get sponsored ads metrics from Redux (same as sponsored ads page)
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
   
   // Update selectedPeriod based on Redux state
   useEffect(() => {
@@ -112,7 +116,7 @@ const Dashboard = () => {
     const csvData = [
       ['Metric', 'Value', 'Change'],
       ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'N/A'],
+      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
       ['ACOS', `${acos}%`, 'N/A'],
       ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
@@ -139,7 +143,7 @@ const Dashboard = () => {
     const excelData = [
       ['Metric', 'Value', 'Change'],
       ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['PPC Sales', `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'N/A'],
+      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
       ['ACOS', `${acos}%`, 'N/A'],
       ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
@@ -191,19 +195,13 @@ const Dashboard = () => {
   const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
 
   // Format sales value
-  const formatCurrency = (value) => {
-    if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(1)}M`;
-    } else if (value >= 1000) {
-      return `$${(value / 1000).toFixed(1)}K`;
-    } else {
-      return `$${value.toFixed(0)}`;
-    }
+  const formatCurrencyLocal = (value) => {
+    return formatCurrency(value, currency);
   };
 
   const quickStats = [
-    { icon: BarChart3, label: 'Sales', value: `$${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: 'N/A', trend: 'neutral', color: 'emerald' },
-    { icon: Zap, label: 'PPC Sales', value: `$${ppcSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, change: 'N/A', trend: 'neutral', color: 'blue' },
+    { icon: BarChart3, label: 'Sales', value: formatCurrencyWithLocale(totalSales, currency), change: 'N/A', trend: 'neutral', color: 'emerald' },
+    { icon: Zap, label: 'PPC Sales', value: formatCurrencyWithLocale(ppcSales, currency), change: 'N/A', trend: 'neutral', color: 'blue' },
     { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple' },
     { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange' }
   ]

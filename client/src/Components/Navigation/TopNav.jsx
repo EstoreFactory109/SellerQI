@@ -4,12 +4,14 @@ import hamburger from '../../assets/Icons/hamburger.png'
 import { useSelector, useDispatch } from 'react-redux'
 import { setPosition } from '../../redux/slices/MobileMenuSlice.js'
 import { markAsRead, markAllAsRead } from '../../redux/slices/notificationsSlice.js'
+import { setCurrency } from '../../redux/slices/currencySlice.js'
 import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
 import { Building, Plus, ChevronRight, Bell, User, Menu, ArrowLeftRight } from 'lucide-react'
 import axios from 'axios'
+import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.js'
 
 const TopNav = () => {
     const navigate = useNavigate()
@@ -47,6 +49,8 @@ const TopNav = () => {
 
     const user = useSelector((state) => state.Auth?.user);
     const Country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country);
+    const Currency = amazonMarketplaceCurrencies[Country];
+   
     const sellerAccount = useSelector(state => state.AllAccounts?.AllAccounts) || []
     const notifications = useSelector(state => state.notifications?.notifications) || []
     const unreadCount = useSelector(state => state.notifications?.unreadCount) || 0
@@ -164,6 +168,16 @@ const TopNav = () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [])
+
+    // Dispatch currency to Redux whenever Country changes
+    useEffect(() => {
+        if (Country && Currency) {
+            dispatch(setCurrency({
+                currency: Currency,
+                country: Country
+            }));
+        }
+    }, [Country, Currency, dispatch])
 
     return (
         <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between lg:justify-end p-10 lg:gap-7 gap-2 shadow-md bg-white border-b-[1px] border-gray-200 fixed top-0 z-50 lg:static">

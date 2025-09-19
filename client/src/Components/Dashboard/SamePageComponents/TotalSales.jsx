@@ -4,7 +4,8 @@ import Chart from "react-apexcharts";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
-import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft'
+import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
+import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 
 // Function to format date with ordinal suffix (1st, 2nd, 3rd, etc.)
 const formatDateWithOrdinal = (dateString) => {
@@ -31,6 +32,9 @@ const TotalSales = () => {
   const navigate = useNavigate();
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
 
   const labelData = [
     "Gross Profit",
@@ -145,7 +149,7 @@ const TotalSales = () => {
         <div className="flex flex-col">
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-3xl font-bold text-gray-900">
-              ${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatCurrencyWithLocale(totalSales, currency)}
             </h2>
           </div>
           <p className="text-sm text-gray-500">
@@ -155,7 +159,7 @@ const TotalSales = () => {
         
         <div className="flex flex-col items-end">
           <h2 className={`text-2xl font-bold ${grossProfitRaw >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-            ${grossProfitRaw.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatCurrencyWithLocale(grossProfitRaw, currency)}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
             {grossProfitRaw >= 0 ? 'Profit' : 'Loss'}
@@ -198,7 +202,7 @@ const TotalSales = () => {
                 </div>
                 <div className="flex items-center gap-3">
                   <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-900 transition-colors">
-                    ${(index === 0 ? grossProfitRaw : value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrencyWithLocale((index === 0 ? grossProfitRaw : value), currency)}
                   </p>
                   <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs font-medium min-w-[2.5rem] text-center group-hover:bg-blue-100 transition-colors">
                     {percentage}%

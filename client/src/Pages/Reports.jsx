@@ -11,6 +11,7 @@ import Calender from '../Components/Calender/Calender.jsx'
 import { AnimatePresence, motion } from 'framer-motion';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { useSelector } from 'react-redux';
+import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 
 
 
@@ -19,6 +20,9 @@ const Reports = () => {
    const [openCalender, setOpenCalender] = useState(false)
     const CalenderRef = useRef(null);
     const info = useSelector(state => state.Dashboard.DashBoardInfo);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
 
    useEffect(() => {
      const handleClickOutside = (event) => {
@@ -42,14 +46,14 @@ const Reports = () => {
        exportData.push({
          Category: 'Financial Metrics',
          Metric: 'Gross Profit',
-         Value: `$${info.accountFinance?.Gross_Profit || 0}`,
+         Value: `${currency}${info.accountFinance?.Gross_Profit || 0}`,
          Details: 'Gross profit after deducting ad spend, storage fees, FBA fees, and product return refunds'
        });
        
        exportData.push({
          Category: 'Financial Metrics',
          Metric: 'Total Sales',
-         Value: `$${info.TotalWeeklySale || 0}`,
+         Value: `${currency}${info.TotalWeeklySale || 0}`,
          Details: 'Total revenue generated during the selected date range'
        });
        
@@ -143,7 +147,7 @@ const Reports = () => {
        exportData.push({
          Category: 'Issues Summary',
          Metric: 'Potential Reimbursements',
-         Value: `$${info.reimbustment?.totalReimbursement || 0}`,
+         Value: `${currency}${info.reimbustment?.totalReimbursement || 0}`,
          Details: 'Estimated amount eligible to recover from Amazon'
        });
        
@@ -159,7 +163,7 @@ const Reports = () => {
          exportData.push({
            Category: 'Sales Trend',
            Metric: 'Latest Period Sales',
-           Value: `$${info.TotalSales[info.TotalSales.length - 1]?.TotalAmount || 0}`,
+           Value: `${currency}${info.TotalSales[info.TotalSales.length - 1]?.TotalAmount || 0}`,
            Details: info.TotalSales[info.TotalSales.length - 1]?.interval || ''
          });
        }
@@ -171,7 +175,7 @@ const Reports = () => {
              Category: 'Product Details',
              Metric: `Product ${index + 1} - ${product.name}`,
              Value: product.asin,
-             Details: `SKU: ${product.sku}, Price: $${product.price}, Sales: $${product.sales}`
+             Details: `SKU: ${product.sku}, Price: ${currency}${product.price}, Sales: ${currency}${product.sales}`
            });
          });
        }

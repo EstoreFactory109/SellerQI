@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
+import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 
 // Create empty chart data with zero values when no data is available
 const createEmptyProfitabilityData = () => {
@@ -67,6 +68,9 @@ const ProfitabilityDashboard = () => {
   };
 
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
   
   // Get ProductWiseSponsoredAdsGraphData from Redux store
   const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || {};
@@ -240,10 +244,10 @@ const ProfitabilityDashboard = () => {
     const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
     
     return [
-      { label: 'Total Sales', value: `$${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `$${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Total Ad Spend', value: `$${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Total Amazon Fees', value: `$${amazonFees.toFixed(2)}`, icon: 'list' },
+      { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Gross Profit', value: `${currency}${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Total Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
   }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
 
@@ -390,7 +394,7 @@ const ProfitabilityDashboard = () => {
      console.log('Step 4 completed: COGS analysis processed');
     
     csvData.push(['COGS Analysis Summary']);
-    csvData.push(['Total COGS Deducted', `$${totalCOGS.toFixed(2)}`]);
+    csvData.push(['Total COGS Deducted', `${currency}${totalCOGS.toFixed(2)}`]);
     csvData.push(['Products with COGS entered', productsWithCOGS.toString()]);
     csvData.push(['Products missing COGS', productsWithoutCOGS.toString()]);
     csvData.push(['COGS Data Completeness', `${((productsWithCOGS / totalCOGSProducts) * 100).toFixed(1)}%`]);
@@ -410,8 +414,8 @@ const ProfitabilityDashboard = () => {
       chartData.forEach(day => {
         csvData.push([
           day.date || 'N/A',
-          `$${(day.spend || 0).toFixed(2)}`,
-          `$${(day.totalSales || 0).toFixed(2)}`
+          `${currency}${(day.spend || 0).toFixed(2)}`,
+          `${currency}${(day.totalSales || 0).toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -509,14 +513,14 @@ const ProfitabilityDashboard = () => {
           product.asin,
           productDetails.title || `Product ${product.asin}`,
           (product.quantity || 0).toString(),
-          `$${(product.sales || 0).toFixed(2)}`,
+          `${currency}${(product.sales || 0).toFixed(2)}`,
           `$${revenuePerUnit.toFixed(2)}`,
           `$${cogsPerUnit.toFixed(2)}`,
           `${cogsPercent.toFixed(1)}%`,
           `$${totalCogs.toFixed(2)}`,
-          `$${(product.ads || 0).toFixed(2)}`,
+          `${currency}${(product.ads || 0).toFixed(2)}`,
           `${adSpendPercent.toFixed(1)}%`,
-          `$${(product.amzFee || 0).toFixed(2)}`,
+          `${currency}${(product.amzFee || 0).toFixed(2)}`,
           `${feesPercent.toFixed(1)}%`,
           `$${grossProfit.toFixed(2)}`,
           `$${netProfit.toFixed(2)}`,
@@ -586,15 +590,15 @@ const ProfitabilityDashboard = () => {
       const adjustedGrossProfitSummary = originalGrossProfit - totalCOGSSummary;
       
       csvData.push(['Financial Summary (COGS-Adjusted for Profitability Dashboard)']);
-      csvData.push(['Total Sales', `$${info.TotalWeeklySale || 0}`]);
-      csvData.push(['Original Gross Profit (from Amazon)', `$${originalGrossProfit}`]);
-      csvData.push(['Total COGS Entered', `$${totalCOGSSummary.toFixed(2)}`]);
-      csvData.push(['Adjusted Gross Profit (Original - COGS)', `$${adjustedGrossProfitSummary.toFixed(2)}`]);
-      csvData.push(['FBA Fees', `$${info.accountFinance.FBA_Fees || 0}`]);
-      csvData.push(['Storage Fees', `$${info.accountFinance.Storage || 0}`]);
-      csvData.push(['Amazon Charges', `$${info.accountFinance.Amazon_Charges || 0}`]);
-      csvData.push(['Product Ads Payment', `$${info.accountFinance.ProductAdsPayment || 0}`]);
-      csvData.push(['Refunds', `$${info.accountFinance.Refunds || 0}`]);
+      csvData.push(['Total Sales', `${currency}${info.TotalWeeklySale || 0}`]);
+      csvData.push(['Original Gross Profit (from Amazon)', `${currency}${originalGrossProfit}`]);
+      csvData.push(['Total COGS Entered', `${currency}${totalCOGSSummary.toFixed(2)}`]);
+      csvData.push(['Adjusted Gross Profit (Original - COGS)', `${currency}${adjustedGrossProfitSummary.toFixed(2)}`]);
+      csvData.push(['FBA Fees', `${currency}${info.accountFinance.FBA_Fees || 0}`]);
+      csvData.push(['Storage Fees', `${currency}${info.accountFinance.Storage || 0}`]);
+      csvData.push(['Amazon Charges', `${currency}${info.accountFinance.Amazon_Charges || 0}`]);
+      csvData.push(['Product Ads Payment', `${currency}${info.accountFinance.ProductAdsPayment || 0}`]);
+      csvData.push(['Refunds', `${currency}${info.accountFinance.Refunds || 0}`]);
       csvData.push([]);
     }
     
@@ -626,8 +630,8 @@ const ProfitabilityDashboard = () => {
     const totalCosts = chartData.reduce((sum, item) => sum + item.spend, 0);
     const overallProfitMargin = totalRevenue > 0 ? ((totalRevenue - totalCosts) / totalRevenue) * 100 : 0;
     
-    csvData.push(['Total Revenue', `$${totalRevenue.toFixed(2)}`, totalRevenue > 0 ? 'Good' : 'Poor']);
-    csvData.push(['Total Costs', `$${totalCosts.toFixed(2)}`, '']);
+    csvData.push(['Total Revenue', `${currency}${totalRevenue.toFixed(2)}`, totalRevenue > 0 ? 'Good' : 'Poor']);
+    csvData.push(['Total Costs', `${currency}${totalCosts.toFixed(2)}`, '']);
     csvData.push(['Overall Profit Margin', `${overallProfitMargin.toFixed(2)}%`, overallProfitMargin > 15 ? 'Good' : overallProfitMargin > 5 ? 'Warning' : 'Poor']);
     csvData.push(['Number of Products', profitabilityTableData.length.toString(), profitabilityTableData.length > 10 ? 'Good' : 'Limited']);
     csvData.push([]);
@@ -655,8 +659,8 @@ const ProfitabilityDashboard = () => {
         csvData.push([
           category,
           data.count.toString(),
-          `$${data.totalSales.toFixed(2)}`,
-          `$${avgSales.toFixed(2)}`
+          `${currency}${data.totalSales.toFixed(2)}`,
+          `${currency}${avgSales.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -757,8 +761,8 @@ const ProfitabilityDashboard = () => {
           impressions.toString(),
           clicks.toString(),
           `${ctr.toFixed(2)}%`,
-          `$${spend.toFixed(2)}`,
-          `$${sales.toFixed(2)}`,
+            `${currency}${spend.toFixed(2)}`,
+            `${currency}${sales.toFixed(2)}`,
           `${acos.toFixed(2)}%`,
           `${roas.toFixed(2)}`
         ]);
@@ -800,8 +804,8 @@ const ProfitabilityDashboard = () => {
             if (day && day.date) {
               basicCsvData.push([
                 day.date || 'N/A',
-                `$${(day.spend || 0).toFixed(2)}`,
-                `$${(day.totalSales || 0).toFixed(2)}`
+                `${currency}${(day.spend || 0).toFixed(2)}`,
+                `${currency}${(day.totalSales || 0).toFixed(2)}`
               ]);
             }
           });
@@ -818,8 +822,8 @@ const ProfitabilityDashboard = () => {
               basicCsvData.push([
                 product.asin,
                 (product.quantity || 0).toString(),
-                `$${(product.sales || 0).toFixed(2)}`,
-                `$${(product.ads || 0).toFixed(2)}`,
+                `${currency}${(product.sales || 0).toFixed(2)}`,
+                `${currency}${(product.ads || 0).toFixed(2)}`,
                 `$${(product.amzFee || 0).toFixed(2)}`
               ]);
             }
@@ -1121,7 +1125,7 @@ const ProfitabilityDashboard = () => {
                         stroke="#e2e8f0"
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(value) => `$${value}`}
+                        tickFormatter={(value) => `${currency}${value}`}
                       />
                       <Tooltip
                         contentStyle={{
@@ -1132,7 +1136,7 @@ const ProfitabilityDashboard = () => {
                           boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
                           fontSize: '14px'
                         }}
-                        formatter={(value, name) => [`$${value}`, name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
+                        formatter={(value, name) => [`${currency}${value}`, name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
                         labelFormatter={(label) => `Date: ${label}`}
                       />
                       <Area
