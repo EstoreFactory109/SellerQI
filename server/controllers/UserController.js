@@ -523,8 +523,11 @@ const updateDetails = asyncHandler(async (req, res) => {
 })
 
 const switchAccount = asyncHandler(async (req, res) => {
-    const adminId = req.adminId; // Getting admin id from auth middleware
+    const userId = req.userId; // Getting admin id from auth middleware
+
     const { country, region } = req.body;
+
+    console.log("from switchAccount: ",userId, country, region);
 
     // Check if admin id exists
 
@@ -533,13 +536,7 @@ const switchAccount = asyncHandler(async (req, res) => {
         logger.error(new ApiError(400, "country, and region are required"));
         return res.status(400).json(new ApiResponse(400, "", "userId, country, and region are required"));
     }
-
-    if (adminId !== null) {
-        const { userId } = req.body;
-        if (!userId) {
-            logger.error(new ApiError(400, "userId is required"));
-            return res.status(400).json(new ApiResponse(400, "", "userId is required"));
-        }
+        
 
         let AccessToken = await createAccessToken(userId);
         let RefreshToken = await createRefreshToken(userId);
@@ -557,18 +554,7 @@ const switchAccount = asyncHandler(async (req, res) => {
             .cookie("IBEXRefreshToken", RefreshToken, option)
             .cookie("IBEXLocationToken", LocationToken, option)
             .json(new ApiResponse(200, "", "Account switched successfully"));
-    }
-
-    // Verify that the admin is actually a superAdmin
-    let LocationToken = await createLocationToken(country, region);
-    const option = getHttpsCookieOptions();
-
-    return res.status(200)
-        .cookie("IBEXLocationToken", LocationToken, option)
-        .json(new ApiResponse(200, "", "Account switched successfully"));
-
-    // Get seller details using the provided credentials
-
+    
 });
 
 const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {

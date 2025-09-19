@@ -69,15 +69,16 @@ const TopNav = () => {
     const notificationRef = useRef(null)
     console.log(sellerAccount)
 
-    const switchAccount = async (userId="",country,region) => {
+    const switchAccount = async (country,region) => {
         try{
             setIsLoading(true);
+            
             const data={
-                userId:userId,
+              
                 country:country,
                 region:region
             }
-           
+           console.log("switchAccount data: ",data)
             const response=await axios.post(`${import.meta.env.VITE_BASE_URI}/app/switch-account`,data,{withCredentials:true})
             if(response.status===200){
                 window.location.href = "/seller-central-checker/dashboard";
@@ -251,7 +252,7 @@ const TopNav = () => {
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ duration: 0.2, delay: key * 0.05 }}
                                         className="group min-w-[13rem] bg-white hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-transparent hover:border-blue-200 transition-all duration-200 hover:shadow-sm"
-                                        onClick={elm.userId ? () => switchAccount(elm.userId, elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
+                                        onClick={elm.userId ? () => switchAccount(elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                     >
                                         <div className="flex items-center gap-3">
                                             <div className="w-6 h-6 bg-gradient-to-br from-gray-400 to-gray-500 rounded-lg flex items-center justify-center flex-shrink-0">
