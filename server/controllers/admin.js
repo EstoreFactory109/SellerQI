@@ -99,6 +99,9 @@ const adminLogout = asyncHandler(async (req, res) => {
 
     // Clear superAdmin token cookie
     res.clearCookie("SuperAdminToken", cookieOptions);
+    res.clearCookie("IBEXAccessToken", cookieOptions);
+    res.clearCookie("IBEXRefreshToken", cookieOptions);
+    res.clearCookie("IBEXLocationToken", cookieOptions);
     
     res.status(200).json(new ApiResponse(200, "", "Admin logout successful"));
 });

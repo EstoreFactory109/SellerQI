@@ -25,7 +25,7 @@ const LeftNavSection = () => {
     const isLiteUser = userPlan === 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
     
-    // Check for super admin access - using same logic as TopNav switch account button
+    // Check for super admin access - server-side middleware will validate the actual token
     const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
     const adminAccessType = localStorage.getItem('adminAccessType');
     const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';

@@ -59,7 +59,7 @@ const TopNav = () => {
     const [isLoading, setIsLoading] = useState(false);
     const dispatch = useDispatch();
     
-    // Check if super admin is logged in
+    // Check if super admin is logged in - server-side middleware will validate the actual token
     const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
     const adminAccessType = localStorage.getItem('adminAccessType');
     const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';

@@ -29,7 +29,7 @@ const UserLogging = () => {
   // Authentication check - using same logic as TopNav switch account button
   const user = useSelector((state) => state.Auth?.user);
   
-  // Check for super admin access - same logic as TopNav
+  // Check for super admin access - server-side middleware will validate the actual token
   const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
   const adminAccessType = localStorage.getItem('adminAccessType');
   const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
