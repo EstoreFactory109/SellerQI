@@ -22,7 +22,9 @@ import {
   CalendarDays,
   X,
   Download,
-  FileText
+  FileText,
+  Link,
+  Zap
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 
@@ -234,31 +236,41 @@ const ManageAccounts = () => {
   }, [filteredUsers.length, totalPages, currentPage]);
 
   // Helper functions
-  const getPackageTypeInfo = (packageType) => {
+  const getPackageTypeInfo = (user) => {
+    // If user has expired trial or inactive subscription, show as downgraded
+    const isExpiredOrInactive = 
+      user.isTrialExpired || 
+      (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate)) ||
+      user.subscriptionStatus === 'inactive' ||
+      user.subscriptionStatus === 'cancelled';
+    
+    // Get the base package type, but show as inactive if expired
+    let packageType = user.packageType;
+    
     switch (packageType) {
       case 'LITE':
         return { 
           icon: Shield, 
-          color: 'text-blue-600', 
-          bg: 'bg-blue-50', 
-          border: 'border-blue-200',
-          label: 'Lite'
+          color: isExpiredOrInactive ? 'text-gray-500' : 'text-blue-600', 
+          bg: isExpiredOrInactive ? 'bg-gray-50' : 'bg-blue-50', 
+          border: isExpiredOrInactive ? 'border-gray-200' : 'border-blue-200',
+          label: isExpiredOrInactive ? 'Lite (Inactive)' : 'Lite'
         };
       case 'PRO':
         return { 
           icon: Crown, 
-          color: 'text-purple-600', 
-          bg: 'bg-purple-50', 
-          border: 'border-purple-200',
-          label: 'Pro'
+          color: isExpiredOrInactive ? 'text-gray-500' : 'text-purple-600', 
+          bg: isExpiredOrInactive ? 'bg-gray-50' : 'bg-purple-50', 
+          border: isExpiredOrInactive ? 'border-gray-200' : 'border-purple-200',
+          label: isExpiredOrInactive ? 'Pro (Inactive)' : 'Pro'
         };
       case 'AGENCY':
         return { 
           icon: Briefcase, 
-          color: 'text-emerald-600', 
-          bg: 'bg-emerald-50', 
-          border: 'border-emerald-200',
-          label: 'Agency'
+          color: isExpiredOrInactive ? 'text-gray-500' : 'text-emerald-600', 
+          bg: isExpiredOrInactive ? 'bg-gray-50' : 'bg-emerald-50', 
+          border: isExpiredOrInactive ? 'border-gray-200' : 'border-emerald-200',
+          label: isExpiredOrInactive ? 'Agency (Inactive)' : 'Agency'
         };
       default:
         return { 
@@ -271,8 +283,19 @@ const ManageAccounts = () => {
     }
   };
 
-  const getSubscriptionStatus = (status) => {
-    switch (status) {
+  const getSubscriptionStatus = (user) => {
+    // Check if trial is expired first
+    if (user.isTrialExpired || (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate))) {
+      return { color: 'text-red-600', bg: 'bg-red-50', label: 'Trial Expired' };
+    }
+    
+    // If user is in trial period and not expired
+    if (user.isInTrialPeriod) {
+      return { color: 'text-blue-600', bg: 'bg-blue-50', label: 'Trial Active' };
+    }
+    
+    // Handle regular subscription status
+    switch (user.subscriptionStatus) {
       case 'active':
         return { color: 'text-green-600', bg: 'bg-green-50', label: 'Active' };
       case 'inactive':
@@ -295,6 +318,35 @@ const ManageAccounts = () => {
     });
   };
 
+  // Helper functions to check API connection status
+  const getSpApiConnectionStatus = (user) => {
+    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
+      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+    }
+    
+    const hasSpApiToken = user.sellerCentral.sellerAccount.some(account => 
+      account.spiRefreshToken && account.spiRefreshToken.trim() !== ''
+    );
+    
+    return hasSpApiToken 
+      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
+      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+  };
+
+  const getAdsApiConnectionStatus = (user) => {
+    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
+      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+    }
+    
+    const hasAdsApiToken = user.sellerCentral.sellerAccount.some(account => 
+      account.adsRefreshToken && account.adsRefreshToken.trim() !== ''
+    );
+    
+    return hasAdsApiToken 
+      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
+      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+  };
+
   const clearDateFilters = () => {
     setStartDate('');
     setEndDate('');
@@ -312,23 +364,32 @@ const ManageAccounts = () => {
       'Access Type',
       'Subscription Status',
       'Trial Period',
+      'SpAPI Connected',
+      'Ads API Connected',
       'Verified',
       'Registration Date'
     ];
     
     const csvContent = [
       headers.join(','),
-      ...data.map(user => [
-        `"${user.firstName} ${user.lastName}"`,
-        `"${user.email}"`,
-        `"${user.phone || 'N/A'}"`,
-        `"${user.packageType}"`,
-        `"${user.accessType || 'user'}"`,
-        `"${user.subscriptionStatus}"`,
-        `"${user.isInTrialPeriod ? 'Yes' : 'No'}"`,
-        `"${user.isVerified ? 'Yes' : 'No'}"`,
-        `"${formatDate(user.createdAt)}"`
-      ].join(','))
+      ...data.map(user => {
+        const spApiStatus = getSpApiConnectionStatus(user);
+        const adsApiStatus = getAdsApiConnectionStatus(user);
+        
+        return [
+          `"${user.firstName} ${user.lastName}"`,
+          `"${user.email}"`,
+          `"${user.phone || 'N/A'}"`,
+          `"${user.packageType}"`,
+          `"${user.accessType || 'user'}"`,
+          `"${user.subscriptionStatus}"`,
+          `"${user.isInTrialPeriod ? 'Yes' : 'No'}"`,
+          `"${spApiStatus.connected ? 'Yes' : 'No'}"`,
+          `"${adsApiStatus.connected ? 'Yes' : 'No'}"`,
+          `"${user.isVerified ? 'Yes' : 'No'}"`,
+          `"${formatDate(user.createdAt)}"`
+        ].join(',');
+      })
     ].join('\n');
     
     return csvContent;
@@ -702,35 +763,47 @@ const ManageAccounts = () => {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden"
         >
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
+          <table className="w-full table-fixed">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4" />
-                      Name & Contact
+                  <th className="w-1/4 px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <div className="flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      <span className="hidden sm:inline">Name & Email</span>
+                      <span className="sm:hidden">User</span>
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    User Type
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <div className="flex items-center justify-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      <span className="hidden lg:inline text-xs">Phone</span>
+                    </div>
                   </th>
-                  <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Status
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Type</span>
                   </th>
-                  <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Created At
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Status</span>
                   </th>
-                  <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Actions
+                  <th className="w-1/12 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">SpAPI</span>
+                  </th>
+                  <th className="w-1/12 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Ads</span>
+                  </th>
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Created</span>
+                  </th>
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Actions</span>
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 <AnimatePresence>
                   {paginatedData.map((user, index) => {
-                    const packageInfo = getPackageTypeInfo(user.packageType);
-                    const statusInfo = getSubscriptionStatus(user.subscriptionStatus);
+                    const packageInfo = getPackageTypeInfo(user);
+                    const statusInfo = getSubscriptionStatus(user);
                     const PackageIcon = packageInfo.icon;
 
                     return (
@@ -742,109 +815,136 @@ const ManageAccounts = () => {
                         transition={{ duration: 0.3, delay: index * 0.05 }}
                         className="hover:bg-gray-50 transition-colors duration-200"
                       >
-                        {/* Name & Contact */}
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-sm">
-                              <span className="text-white font-semibold text-sm">
+                        {/* Name & Email */}
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
+                              <span className="text-white font-semibold text-xs">
                                 {user.firstName.charAt(0)}{user.lastName.charAt(0)}
                               </span>
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-gray-900 truncate">
                                 {user.firstName} {user.lastName}
                                 {user.isInTrialPeriod && (
-                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                                    Trial
+                                  <span className="ml-1 inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                    T
                                   </span>
                                 )}
                               </p>
-                              <div className="flex items-center gap-4 mt-1">
-                                <div className="flex items-center gap-1">
-                                  <Mail className="w-3 h-3 text-gray-400" />
-                                  <p className="text-xs text-gray-600">{user.email}</p>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Phone className="w-3 h-3 text-gray-400" />
-                                  <p className="text-xs text-gray-600">{user.phone}</p>
-                                </div>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <Mail className="w-2 h-2 text-gray-400 flex-shrink-0" />
+                                <p className="text-xs text-gray-600 truncate">{user.email}</p>
                               </div>
                             </div>
                           </div>
                         </td>
 
+                        {/* Phone Number */}
+                        <td className="px-2 py-3 text-center">
+                          <div className="flex flex-col items-center">
+                            <Phone className="w-3 h-3 text-gray-400 lg:hidden" />
+                            <span className="text-xs text-gray-700 font-medium truncate max-w-full">
+                              <span className="hidden lg:inline">{user.phone || 'N/A'}</span>
+                              <span className="lg:hidden">{user.phone ? '✓' : '✗'}</span>
+                            </span>
+                          </div>
+                        </td>
+
                         {/* User Type */}
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-2 py-3 text-center">
                           <div className="flex items-center justify-center">
-                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${packageInfo.bg} ${packageInfo.border}`}>
-                              <PackageIcon className={`w-4 h-4 ${packageInfo.color}`} />
-                              <span className={`text-sm font-medium ${packageInfo.color}`}>
-                                {packageInfo.label}
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded-full border ${packageInfo.bg} ${packageInfo.border}`}>
+                              <PackageIcon className={`w-3 h-3 ${packageInfo.color}`} />
+                              <span className={`text-xs font-medium ${packageInfo.color} hidden sm:inline`}>
+                                {packageInfo.label.split(' ')[0]}
                               </span>
                             </div>
                           </div>
                         </td>
 
                         {/* Status */}
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-2 py-3 text-center">
                           <div className="flex items-center justify-center">
                             <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${statusInfo.bg}`}>
                               <div className={`w-2 h-2 rounded-full ${statusInfo.color.replace('text-', 'bg-')}`}></div>
-                              <span className={`text-sm font-medium ${statusInfo.color}`}>
-                                {statusInfo.label}
+                              <span className={`text-xs font-medium ${statusInfo.color} hidden md:inline`}>
+                                {statusInfo.label.split(' ')[0]}
                               </span>
                             </div>
                           </div>
                         </td>
 
+                        {/* SpAPI Connection Status */}
+                        <td className="px-2 py-3 text-center">
+                          {(() => {
+                            const spApiStatus = getSpApiConnectionStatus(user);
+                            return (
+                              <span className={`text-xs font-medium ${spApiStatus.color}`}>
+                                {spApiStatus.connected ? 'Yes' : 'No'}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* Ads API Connection Status */}
+                        <td className="px-2 py-3 text-center">
+                          {(() => {
+                            const adsApiStatus = getAdsApiConnectionStatus(user);
+                            return (
+                              <span className={`text-xs font-medium ${adsApiStatus.color}`}>
+                                {adsApiStatus.connected ? 'Yes' : 'No'}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
                         {/* Created At */}
-                        <td className="px-6 py-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <Calendar className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-600">
-                              {formatDate(user.createdAt)}
+                        <td className="px-2 py-3 text-center">
+                          <div className="flex flex-col items-center">
+                            <Calendar className="w-3 h-3 text-gray-400 md:hidden" />
+                            <span className="text-xs text-gray-600">
+                              <span className="hidden md:inline">{formatDate(user.createdAt)}</span>
+                              <span className="md:hidden">{new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                             </span>
                           </div>
                         </td>
 
                         {/* Actions */}
-                        <td className="px-6 py-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
+                        <td className="px-2 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => handleLoginAsUser(user)}
                               disabled={loginLoadingUsers.has(user._id)}
-                              className={`flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md ${
+                              className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors duration-200 ${
                                 loginLoadingUsers.has(user._id)
                                   ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
                                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
                               }`}
                             >
                               {loginLoadingUsers.has(user._id) ? (
-                                <>
-                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                  Logging in...
-                                </>
+                                <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
                               ) : (
                                 <>
-                                  <LogIn className="w-4 h-4" />
-                                  Login
+                                  <LogIn className="w-3 h-3" />
+                                  <span className="hidden lg:inline">Login</span>
                                 </>
                               )}
                             </button>
                             <div className="relative group">
-                              <button className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors duration-200">
-                                <MoreVertical className="w-4 h-4" />
+                              <button className="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 transition-colors duration-200">
+                                <MoreVertical className="w-3 h-3" />
                               </button>
-                              <div className="absolute right-0 top-8 w-36 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
-                                <button className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                              <div className="absolute right-0 top-6 w-32 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
+                                <button className="w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1">
                                   <Eye className="w-3 h-3" />
-                                  View Details
+                                  View
                                 </button>
-                                <button className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                <button className="w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1">
                                   <Edit3 className="w-3 h-3" />
-                                  Edit User
+                                  Edit
                                 </button>
-                                <button className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                                <button className="w-full px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 flex items-center gap-1">
                                   <Trash2 className="w-3 h-3" />
                                   Delete
                                 </button>
@@ -858,7 +958,6 @@ const ManageAccounts = () => {
                 </AnimatePresence>
               </tbody>
             </table>
-          </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
