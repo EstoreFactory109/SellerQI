@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -25,7 +26,17 @@ const checkEmailDomain = async (email) => {
     }
 };
 
-const sendEmailResetLink = async (email,firstName ,link) => {
+const sendEmailResetLink = async (email, firstName, link, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'PASSWORD_RESET',
+        receiverEmail: email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: "Your Reset Password Link",
+        emailContent: `Password reset link: ${link}`,
+        emailProvider: 'AWS_SES'
+    });
 
           // console.log("Email file: ");
       // console.log(email,firstName,link);
@@ -33,6 +44,8 @@ const sendEmailResetLink = async (email,firstName ,link) => {
     .replace('{{userName}}',firstName)
     .replace('{{resetLink}}', link);
     try {
+        // Save initial log
+        await emailLog.save();
         // Check if required environment variables are set
         if (!process.env.ADMIN_USERNAME || !process.env.APP_PASSWORD || !process.env.ADMIN_EMAIL_ID) {
             logger.error('Missing required environment variables: ADMIN_USERNAME, APP_PASSWORD, or ADMIN_EMAIL_ID');
@@ -41,6 +54,7 @@ const sendEmailResetLink = async (email,firstName ,link) => {
 
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
+            await emailLog.markAsFailed('Invalid email address');
             return false
         }
 
@@ -48,6 +62,7 @@ const sendEmailResetLink = async (email,firstName ,link) => {
         const domainValid = await checkEmailDomain(email);
         if (!domainValid) {
             logger.error(`Invalid email domain for ${email}`);
+            await emailLog.markAsFailed('Invalid email domain');
             return false
         }
 
@@ -89,6 +104,8 @@ const sendEmailResetLink = async (email,firstName ,link) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
         logger.info(`Email sent successfully to ${email}. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
@@ -97,6 +114,7 @@ const sendEmailResetLink = async (email,firstName ,link) => {
         if (error.response) {
             logger.error(`SMTP Response: ${error.response}`);
         }
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

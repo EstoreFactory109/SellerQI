@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +12,18 @@ let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..'
 
 
 
-const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,totalActiveProducts) => {
+const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,totalActiveProducts, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'WEEKLY_REPORT',
+        receiverEmail: Email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: `Weekly Report for ${brandName}`,
+        emailContent: `Weekly report for ${brandName} - Health Score: ${healthScore}, Total Issues: ${totalIssues}`,
+        emailProvider: 'AWS_SES'
+    });
+
     //console.log(databaseId,firstName,lastName,userPhone,RegisteredEmail,sellerId);
     const todayDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     
@@ -59,6 +71,9 @@ const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healt
     template = safeReplace(template, '{{youtubeUrl}}', 'https://www.youtube.com/@sellerqi');
 
     try {
+        // Save initial log
+        await emailLog.save();
+        
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
@@ -90,9 +105,13 @@ const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healt
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
+        logger.info(`Weekly email sent successfully to ${Email}. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
         logger.error(`Failed to send email to ${Email}:`, error);
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

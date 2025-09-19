@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -25,16 +26,29 @@ const checkEmailDomain = async (email) => {
     }
 };
 
-const sendEmail = async (email,firstName ,otp) => {
+const sendEmail = async (email, firstName, otp, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'OTP',
+        receiverEmail: email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: "Your One-Time Password (OTP) for Verification",
+        emailContent: `OTP verification code: ${otp}`,
+        emailProvider: 'AWS_SES'
+    });
 
     let template = VerificationEmailTemplate
     .replace('{{userName}}',firstName)
     .replace('{{verificationCode}}', otp);
+    
     try {
-
+        // Save initial log
+        await emailLog.save();
 
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
+            await emailLog.markAsFailed('Invalid email address');
             return false
         }
 
@@ -42,6 +56,7 @@ const sendEmail = async (email,firstName ,otp) => {
         const domainValid = await checkEmailDomain(email);
         if (!domainValid) {
             logger.error(`Invalid email domain for ${email}`);
+            await emailLog.markAsFailed('Invalid email domain');
             return false
         }
 
@@ -80,9 +95,14 @@ const sendEmail = async (email,firstName ,otp) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
+        logger.info(`OTP email sent successfully to ${email}. Message ID: ${info.messageId}`);
+        
         return info.messageId; // Return the message ID on success
     } catch (error) {
         logger.error(`Failed to send email to ${email}:`, error);
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

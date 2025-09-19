@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +24,18 @@ const checkEmailDomain = async (email) => {
     }
 };
 
-const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
+const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'ANALYSIS_READY',
+        receiverEmail: email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: "Your SellerQI Account is Ready! 🎉",
+        emailContent: 'Your SellerQI account analysis is complete and your dashboard is ready.',
+        emailProvider: 'AWS_SES'
+    });
+
     let template = AnalysisReadyEmailTemplate
         .replace('{{userName}}', firstName)
         .replace('{{dashboardUrl}}', dashboardUrl)
@@ -36,6 +48,8 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
         .replace('{{unsubscribeUrl}}', process.env.UNSUBSCRIBE_URL || '#');
 
     try {
+        // Save initial log
+        await emailLog.save();
         // Check if required environment variables are set
         if (!process.env.ADMIN_USERNAME || !process.env.APP_PASSWORD || !process.env.ADMIN_EMAIL_ID) {
             logger.error('Missing required environment variables: ADMIN_USERNAME, APP_PASSWORD, or ADMIN_EMAIL_ID');
@@ -44,6 +58,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
 
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
+            await emailLog.markAsFailed('Invalid email address');
             return false;
         }
 
@@ -51,6 +66,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
         const domainValid = await checkEmailDomain(email);
         if (!domainValid) {
             logger.error(`Invalid email domain for ${email}`);
+            await emailLog.markAsFailed('Invalid email domain');
             return false;
         }
 
@@ -98,6 +114,8 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
         logger.info(`Analysis ready email sent successfully to ${email}. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
@@ -106,6 +124,7 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl) => {
         if (error.response) {
             logger.error(`SMTP Response: ${error.response}`);
         }
+        await emailLog.markAsFailed(error.message);
         return false;
     }
 };

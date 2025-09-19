@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +12,18 @@ let ReminderEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..', 'Ema
 
 
 
-const RemiderEmail = async (Email,days,userName,upgradeUrl) => {
+const RemiderEmail = async (Email, days, userName, upgradeUrl, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'UPGRADE_REMINDER',
+        receiverEmail: Email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: `Your Free Trial Ends in ${days}`,
+        emailContent: `Only ${days} left in your free trial. Upgrade now to continue optimizing your Amazon business.`,
+        emailProvider: 'AWS_SES'
+    });
+
     console.log(Email,days,userName,upgradeUrl);
  
     // Ensure all values are strings and handle undefined/null values
@@ -31,6 +43,9 @@ const RemiderEmail = async (Email,days,userName,upgradeUrl) => {
 
 
     try {
+        // Save initial log
+        await emailLog.save();
+        
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
@@ -62,9 +77,13 @@ const RemiderEmail = async (Email,days,userName,upgradeUrl) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
+        logger.info(`Upgrade reminder email sent successfully to ${Email}. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
         logger.error(`Failed to send email to ${Email}:`, error);
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

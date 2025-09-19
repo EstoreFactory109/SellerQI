@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +12,18 @@ const path = require('path');
 
 
 
-const sendEmail = async (email,firstName ,message,subject,topic) => {
+const sendEmail = async (email, firstName, message, subject, topic, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'SUPPORT_MESSAGE',
+        receiverEmail: process.env.ADMIN_EMAIL_ID, // This goes to admin
+        receiverId: userId,
+        status: 'PENDING',
+        subject: subject,
+        emailContent: `Support message from ${firstName} (${email}): ${message}`,
+        emailProvider: 'AWS_SES'
+    });
+
     console.log(email,firstName,message,subject,topic);
     
     // Read template fresh each time to ensure latest changes are included
@@ -28,8 +40,8 @@ const sendEmail = async (email,firstName ,message,subject,topic) => {
     // Optional: Add minimal logging for debugging if needed
     console.log(`Email template processed for: ${firstName} (${email})`);
     try {
-
-
+        // Save initial log
+        await emailLog.save();
 
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
@@ -63,9 +75,13 @@ const sendEmail = async (email,firstName ,message,subject,topic) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
+        logger.info(`Support message email sent successfully. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
         logger.error(`Failed to send email to ${email}:`, error);
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

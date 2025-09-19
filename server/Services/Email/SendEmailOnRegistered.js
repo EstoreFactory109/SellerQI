@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +12,18 @@ let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..'
 
 
 
-const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, RegisteredEmail,sellerId) => {
+const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, RegisteredEmail, sellerId, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'USER_REGISTERED',
+        receiverEmail: process.env.ADMIN_EMAIL_ID, // This goes to admin
+        receiverId: userId,
+        status: 'PENDING',
+        subject: "New User Registered",
+        emailContent: `New user registered: ${firstName} ${lastName} (${RegisteredEmail})`,
+        emailProvider: 'AWS_SES'
+    });
+
     console.log(databaseId,firstName,lastName,userPhone,RegisteredEmail,sellerId);
 
     let template = supportMessageEmailTemplate
@@ -22,8 +34,8 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
     .replace('{{sellerId}}',sellerId)
     .replace('{{registrationDate}}', new Date().toLocaleString());
     try {
-
-
+        // Save initial log
+        await emailLog.save();
 
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
@@ -56,9 +68,13 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
+        logger.info(`User registered email sent successfully. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
-        logger.error(`Failed to send email to ${email}:`, error);
+        logger.error(`Failed to send email to ${process.env.ADMIN_EMAIL_ID}:`, error);
+        await emailLog.markAsFailed(error.message);
         return false;
 
     }

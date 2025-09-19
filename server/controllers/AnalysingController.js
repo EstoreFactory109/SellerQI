@@ -1334,6 +1334,121 @@ const getUserErrorLogs = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get user email logs for the logged-in user
+ */
+const getUserEmailLogs = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const limit = parseInt(req.query?.limit) || 50;
+    const emailType = req.query?.type; // Optional filter by email type
+    const status = req.query?.status; // Optional filter by status
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    try {
+        // Import EmailLogs model
+        const EmailLogs = require('../models/EmailLogsModel.js');
+        
+        // Build query filters
+        const queryFilters = {};
+        
+        // Only show logs for this user (if receiverId is set) or logs without receiverId
+        queryFilters.$or = [
+            { receiverId: userId },
+            { receiverId: null, receiverEmail: { $exists: true } } // For emails without user context
+        ];
+        
+        // Add optional filters
+        if (emailType) {
+            queryFilters.emailType = emailType.toUpperCase();
+        }
+        
+        if (status) {
+            queryFilters.status = status.toUpperCase();
+        }
+
+        // Fetch email logs
+        const emailLogs = await EmailLogs.find(queryFilters)
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .populate('receiverId', 'firstName lastName email', 'User', { strictPopulate: false })
+            .select('emailType receiverEmail receiverId status sentDate sentTime errorMessage subject emailProvider retryCount createdAt updatedAt');
+
+        // Format the email logs for frontend
+        const formattedEmailLogs = emailLogs.map(log => ({
+            id: log._id,
+            emailType: log.emailType,
+            receiverEmail: log.receiverEmail,
+            receiverId: log.receiverId?._id || null,
+            receiverName: log.receiverId ? `${log.receiverId.firstName} ${log.receiverId.lastName}` : 'Unknown User',
+            status: log.status,
+            subject: log.subject,
+            emailProvider: log.emailProvider,
+            sentDate: log.sentDate,
+            sentTime: log.sentTime,
+            errorMessage: log.errorMessage,
+            retryCount: log.retryCount,
+            createdAt: log.createdAt,
+            updatedAt: log.updatedAt
+        }));
+
+        // Get email statistics
+        const stats = await EmailLogs.aggregate([
+            { 
+                $match: { 
+                    $or: [
+                        { receiverId: userId },
+                        { receiverId: null, receiverEmail: { $exists: true } }
+                    ]
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        emailType: '$emailType',
+                        status: '$status'
+                    },
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $group: {
+                    _id: '$_id.emailType',
+                    statuses: {
+                        $push: {
+                            status: '$_id.status',
+                            count: '$count'
+                        }
+                    },
+                    totalCount: { $sum: '$count' }
+                }
+            },
+            { $sort: { totalCount: -1 } }
+        ]);
+
+        return res.status(200).json(new ApiResponse(200, {
+            emailLogs: formattedEmailLogs,
+            stats: stats,
+            totalLogs: formattedEmailLogs.length,
+            filters: {
+                emailType,
+                status,
+                limit
+            }
+        }, "Email logs fetched successfully"));
+        
+    } catch (error) {
+        logger.error("Error fetching user email logs", { 
+            error: error.message, 
+            userId 
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch email logs"));
+    }
+});
+
 // Helper function to format duration
 function formatDuration(milliseconds) {
     if (!milliseconds) return 'N/A';
@@ -1355,5 +1470,6 @@ module.exports = {
     getLoggingSessionDetails,
     getUserLoggingStats,
     getUserErrorLogs,
+    getUserEmailLogs,
     createSampleLoggingData
 };

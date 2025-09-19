@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
+const EmailLogs = require('../../models/EmailLogsModel.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +24,18 @@ const checkEmailDomain = async (email) => {
     }
 };
 
-const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
+const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl, userId = null) => {
+    // Create email log entry
+    const emailLog = new EmailLogs({
+        emailType: 'WELCOME_LITE',
+        receiverEmail: email,
+        receiverId: userId,
+        status: 'PENDING',
+        subject: "Welcome to SellerQI Lite! 🎉",
+        emailContent: 'Welcome to SellerQI Lite! Get insights into your account by connecting it.',
+        emailProvider: 'AWS_SES'
+    });
+
     let template = WelcomeLiteEmailTemplate
         .replace('{{userName}}', firstName)
         .replace('{{connectAccountUrl}}', connectAccountUrl || process.env.CLIENT_URL + '/connect-accounts')
@@ -36,6 +48,8 @@ const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
         .replace('{{unsubscribeUrl}}', process.env.UNSUBSCRIBE_URL || '#');
 
     try {
+        // Save initial log
+        await emailLog.save();
         // Check if required environment variables are set
         if (!process.env.ADMIN_USERNAME || !process.env.APP_PASSWORD || !process.env.ADMIN_EMAIL_ID) {
             logger.error('Missing required environment variables: ADMIN_USERNAME, APP_PASSWORD, or ADMIN_EMAIL_ID');
@@ -44,6 +58,7 @@ const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
 
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
+            await emailLog.markAsFailed('Invalid email address');
             return false;
         }
 
@@ -51,10 +66,11 @@ const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
         const domainValid = await checkEmailDomain(email);
         if (!domainValid) {
             logger.error(`Invalid email domain for ${email}`);
+            await emailLog.markAsFailed('Invalid email domain');
             return false;
         }
 
-        const transporter = nodemailer.createTransporter({
+        const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587, // Use 587 for STARTTLS
             secure: false, // Set to false for STARTTLS
@@ -93,6 +109,8 @@ const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
             html: body, // HTML body
         });
 
+        // Mark email as sent
+        await emailLog.markAsSent();
         logger.info(`Welcome Lite email sent successfully to ${email}. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
@@ -101,6 +119,7 @@ const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl) => {
         if (error.response) {
             logger.error(`SMTP Response: ${error.response}`);
         }
+        await emailLog.markAsFailed(error.message);
         return false;
     }
 };

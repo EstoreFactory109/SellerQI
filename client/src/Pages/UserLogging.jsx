@@ -21,7 +21,10 @@ import {
   Timer,
   BarChart3,
   AlertTriangle,
-  Info
+  Info,
+  Mail,
+  Send,
+  XCircle
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 
@@ -61,6 +64,8 @@ const UserLogging = () => {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState(null);
   const [errorLogs, setErrorLogs] = useState([]);
+  const [emailLogs, setEmailLogs] = useState([]);
+  const [emailStats, setEmailStats] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionDetails, setSessionDetails] = useState(null);
   
@@ -68,6 +73,10 @@ const UserLogging = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('7');
+  
+  // Email filters
+  const [emailTypeFilter, setEmailTypeFilter] = useState('all');
+  const [emailStatusFilter, setEmailStatusFilter] = useState('all');
   const [expandedErrors, setExpandedErrors] = useState(new Set());
 
   // Success rate calculation functions
@@ -220,7 +229,7 @@ const UserLogging = () => {
   // Fetch data based on active tab
   useEffect(() => {
     fetchData();
-  }, [activeTab, dateFilter]);
+  }, [activeTab, dateFilter, emailTypeFilter, emailStatusFilter]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -246,6 +255,26 @@ const UserLogging = () => {
           const errorRes = await axiosInstance.get(`/app/analyse/logging/errors?limit=50`);
           console.log("errorRes: ",errorRes)
           setErrorLogs(errorRes?.data?.data?.errorLogs || []);
+        }
+        
+        if (activeTab === 'overview' || activeTab === 'emails') {
+          // Fetch email logs
+          const emailParams = new URLSearchParams({
+            limit: '50'
+          });
+          
+          if (emailTypeFilter !== 'all') {
+            emailParams.append('type', emailTypeFilter);
+          }
+          
+          if (emailStatusFilter !== 'all') {
+            emailParams.append('status', emailStatusFilter);
+          }
+          
+          const emailRes = await axiosInstance.get(`/app/analyse/logging/emails?${emailParams.toString()}`);
+          console.log("emailRes: ", emailRes);
+          setEmailLogs(emailRes?.data?.data?.emailLogs || []);
+          setEmailStats(emailRes?.data?.data?.stats || []);
         }
     } catch (err) {
       console.error('Error fetching logging data:', err);
@@ -417,7 +446,8 @@ const UserLogging = () => {
                 {[
                   { id: 'overview', label: 'Overview', icon: BarChart3 },
                   { id: 'sessions', label: 'Sessions', icon: Database },
-                  { id: 'errors', label: 'Error Logs', icon: AlertCircle }
+                  { id: 'errors', label: 'Error Logs', icon: AlertCircle },
+                  { id: 'emails', label: 'Email Logs', icon: Mail }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -854,6 +884,201 @@ const UserLogging = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Email Logs Tab */}
+        {activeTab === 'emails' && (
+          <div className="space-y-6">
+            {/* Email Statistics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {emailStats.map((stat, index) => (
+                <div key={stat._id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">{stat._id.replace('_', ' ')}</p>
+                      <p className="text-2xl font-bold text-gray-900">{stat.totalCount}</p>
+                    </div>
+                    <Mail className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <div className="mt-4 space-y-1">
+                    {stat.statuses.map(status => (
+                      <div key={status.status} className="flex items-center justify-between text-xs">
+                        <span className={`flex items-center gap-1 ${
+                          status.status === 'SENT' ? 'text-green-600' : 
+                          status.status === 'FAILED' ? 'text-red-600' : 'text-yellow-600'
+                        }`}>
+                          {status.status === 'SENT' ? <Send className="w-3 h-3" /> : 
+                           status.status === 'FAILED' ? <XCircle className="w-3 h-3" /> : 
+                           <Clock className="w-3 h-3" />}
+                          {status.status}
+                        </span>
+                        <span className="font-medium">{status.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Email Filters */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Type</label>
+                  <select
+                    value={emailTypeFilter}
+                    onChange={(e) => setEmailTypeFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="OTP">OTP</option>
+                    <option value="WELCOME_LITE">Welcome Lite</option>
+                    <option value="PASSWORD_RESET">Password Reset</option>
+                    <option value="ANALYSIS_READY">Analysis Ready</option>
+                    <option value="WEEKLY_REPORT">Weekly Report</option>
+                    <option value="UPGRADE_REMINDER">Upgrade Reminder</option>
+                    <option value="CONNECTION_REMINDER">Connection Reminder</option>
+                    <option value="SUPPORT_MESSAGE">Support Message</option>
+                    <option value="USER_REGISTERED">User Registered</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select
+                    value={emailStatusFilter}
+                    onChange={(e) => setEmailStatusFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="SENT">Sent</option>
+                    <option value="FAILED">Failed</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="DELIVERED">Delivered</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Email Logs Table */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Email Logs</h3>
+                <p className="text-gray-600 text-sm mt-1">Recent email delivery logs and status</p>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Type & Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Recipient
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Subject
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Sent Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Provider
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {emailLogs.map((email, index) => (
+                      <tr key={email.id || index} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-900">
+                              {email.emailType.replace('_', ' ')}
+                            </span>
+                            <div className="flex items-center gap-1 mt-1">
+                              {email.status === 'SENT' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  <Send className="w-3 h-3" />
+                                  Sent
+                                </span>
+                              ) : email.status === 'FAILED' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  <XCircle className="w-3 h-3" />
+                                  Failed
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  <Clock className="w-3 h-3" />
+                                  {email.status}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-sm text-gray-900">{email.receiverEmail}</span>
+                            {email.receiverName && email.receiverName !== 'Unknown User' && (
+                              <span className="text-xs text-gray-500">{email.receiverName}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-sm text-gray-900 line-clamp-2">
+                            {email.subject || 'No subject'}
+                          </span>
+                          {email.errorMessage && (
+                            <p className="text-xs text-red-600 mt-1 line-clamp-1">
+                              Error: {email.errorMessage}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            {email.sentDate ? (
+                              <>
+                                <span className="text-sm text-gray-900">
+                                  {new Date(email.sentDate).toLocaleDateString()}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {email.sentTime}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-sm text-gray-500">
+                                {new Date(email.createdAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-sm text-gray-900">{email.emailProvider}</span>
+                            {email.retryCount > 0 && (
+                              <span className="text-xs text-orange-600">
+                                Retries: {email.retryCount}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                
+                {emailLogs.length === 0 && (
+                  <div className="text-center py-12">
+                    <Mail className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No email logs found</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      No email logs match the current filters.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

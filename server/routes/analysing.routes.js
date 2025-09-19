@@ -8,6 +8,7 @@ const {
     getLoggingSessionDetails,
     getUserLoggingStats,
     getUserErrorLogs,
+    getUserEmailLogs,
     createSampleLoggingData
 } = require('../controllers/AnalysingController.js')
 const auth=require('../middlewares/Auth/auth.js')
@@ -22,6 +23,7 @@ router.get('/logging/sessions', auth, getUserLoggingSessions)
 router.get('/logging/session/:sessionId', auth, getLoggingSessionDetails)
 router.get('/logging/stats', auth, getUserLoggingStats)
 router.get('/logging/errors', auth, getUserErrorLogs)
+router.get('/logging/emails', auth, getUserEmailLogs)
 router.post('/logging/create-sample', auth, createSampleLoggingData)
 
 
