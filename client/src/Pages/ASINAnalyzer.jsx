@@ -888,6 +888,104 @@ const ASINAnalyzer = () => {
     </div>
   );
 
+  // CSV Download function
+  const downloadCSV = () => {
+    try {
+      const keyMetrics = getKeyMetrics();
+      const productAnalysis = getProductAnalysisData();
+      const issueCategories = getIssueCategories();
+      const rankingScore = calculateRankingScore(analysisResult.rankingResult);
+      const conversionScore = calculateConversionScore(analysisResult);
+
+      // Prepare CSV data
+      const csvData = [];
+      
+      // Header
+      csvData.push(['ASIN Analysis Report']);
+      csvData.push(['Generated on:', new Date().toLocaleDateString()]);
+      csvData.push(['']);
+      
+      // Basic Product Information
+      csvData.push(['Product Information']);
+      csvData.push(['ASIN:', asin]);
+      csvData.push(['Market:', market]);
+      csvData.push(['Title:', analysisResult?.Title || 'N/A']);
+      csvData.push(['Brand:', analysisResult?.Brand || 'N/A']);
+      csvData.push(['Category:', analysisResult?.category || 'N/A']);
+      csvData.push(['Price:', analysisResult?.price ? `$${analysisResult.price}` : 'N/A']);
+      csvData.push(['Star Rating:', analysisResult?.starRatting ? `${analysisResult.starRatting}/5` : 'N/A']);
+      csvData.push(['Reviews Count:', analysisResult?.ReviewsCount || 'N/A']);
+      csvData.push(['Health Score:', `${Math.round(analysisResult?.score || 0)}/100`]);
+      csvData.push(['']);
+      
+      // Key Metrics
+      csvData.push(['Key Metrics']);
+      csvData.push(['Metric', 'Value']);
+      keyMetrics.forEach(metric => {
+        csvData.push([metric.label, metric.value]);
+      });
+      csvData.push(['']);
+      
+      // Product Analysis Details
+      csvData.push(['Product Analysis Details']);
+      csvData.push(['Category', 'Current', 'Required', 'Score', 'Status']);
+      productAnalysis.forEach(item => {
+        csvData.push([
+          item.category,
+          item.current,
+          item.required,
+          `${item.score}%`,
+          item.score >= 80 ? 'Good' : item.score >= 60 ? 'Warning' : 'Poor'
+        ]);
+      });
+      csvData.push(['']);
+      
+      // Scores Summary
+      csvData.push(['Scores Summary']);
+      csvData.push(['Ranking Score:', `${rankingScore.score}/${rankingScore.maxScore} (${rankingScore.percentage}%)`]);
+      csvData.push(['Conversion Score:', `${conversionScore.score}/${conversionScore.maxScore} (${conversionScore.percentage}%)`]);
+      csvData.push(['']);
+      
+      // Issues Found
+      csvData.push(['Issues Found']);
+      csvData.push(['Category', 'Issue ID', 'Issue Description', 'Message']);
+      issueCategories.forEach(category => {
+        if (category.issues && category.issues.length > 0) {
+          category.issues.forEach(issue => {
+            csvData.push([category.title, issue.id, issue.label, issue.message]);
+          });
+        }
+      });
+      
+      // Convert to CSV string
+      const csvString = csvData.map(row => 
+        row.map(cell => {
+          // Escape quotes and wrap in quotes if contains comma or quotes
+          const cellString = String(cell || '');
+          if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) {
+            return `"${cellString.replace(/"/g, '""')}"`;
+          }
+          return cellString;
+        }).join(',')
+      ).join('\n');
+      
+      // Create and download file
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `ASIN_Analysis_${asin}_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (error) {
+      console.error('Error generating CSV:', error);
+      alert('Error generating CSV file. Please try again.');
+    }
+  };
+
   // Results Component
   const ResultsComponent = () => {
     const keyMetrics = getKeyMetrics();
@@ -957,11 +1055,12 @@ const ASINAnalyzer = () => {
                   onClick={(e) => { 
                     e.preventDefault(); 
                     e.stopPropagation(); 
-                    /* Add download logic here */ 
+                    downloadCSV(); 
                   }}
-                  className="flex items-center gap-2 bg-[#2a2d42] hover:bg-[#23253a] text-white px-6 py-2 rounded-md font-semibold shadow transition-all mt-2 md:mt-0"
+                  className="flex items-center justify-center gap-2 bg-[#2a2d42] hover:bg-[#23253a] text-white px-6 py-2 rounded-md font-semibold shadow transition-all mt-2 md:mt-0 whitespace-nowrap"
                 >
-                  Download PDF <Download size={18} />
+                  <span>Download CSV</span>
+                  <Download size={18} />
                 </button>
               </div>
               {/* Health Score */}

@@ -1,5 +1,5 @@
 import React,{useState} from 'react'
-import { AlertCircle, TrendingUp, BarChart3 } from 'lucide-react';
+import { AlertCircle, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
 import {useNavigate} from 'react-router-dom'
@@ -13,6 +13,7 @@ const navigatie = useNavigate()
 
   const healthPercentage = info?.accountHealthPercentage?.Percentage || 0;
   const healthStatus = info?.accountHealthPercentage?.status || 'POOR' ;
+  const differencePercentage = info?.DifferenceData || 0;
 
   const options = {
     chart: {
@@ -119,8 +120,18 @@ const navigatie = useNavigate()
         </div>
         
         <div className='mt-4 flex items-center gap-1 justify-center'>
-          <TrendingUp className='w-3 h-3 text-emerald-600' />
-          <span className='text-xs text-emerald-600 font-medium'>+2.00% from last month</span>
+          {differencePercentage > 0 && (
+            <TrendingUp className='w-3 h-3 text-emerald-600' />
+          )}
+          {differencePercentage < 0 && (
+            <TrendingDown className='w-3 h-3 text-red-600' />
+          )}
+          <span className={`text-xs font-medium ${
+            differencePercentage > 0 ? 'text-emerald-600' : 
+            differencePercentage < 0 ? 'text-red-600' : 'text-yellow-600'
+          }`}>
+            {Math.abs(differencePercentage)}% from last month
+          </span>
         </div>
       </div>
     </div>

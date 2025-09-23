@@ -19,6 +19,7 @@ const { UserSchedulingService } = require('../Services/BackgroundJobs/UserSchedu
 const IPTrackingModel = require('../models/IPTrackingModel.js');
 const { OAuth2Client } = require('google-auth-library');
 const { getHttpsCookieOptions } = require('../utils/cookieConfig.js');
+const sendVerificationCode = require('../Services/SMS/sendSMS.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } = req.body;
@@ -34,13 +35,13 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
 
-    const checkUserIfExists = await getUserByEmail(email);
+   /* const checkUserIfExists = await getUserByEmail(email);
 
 
     if (checkUserIfExists) {
         logger.error(new ApiError(409, "User already exists"));
         return res.status(409).json(new ApiResponse(409, "", "User already exists"));
-    }
+    }*/
     let otp = generateOTP();
 
     if (!otp) {
@@ -48,11 +49,18 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
     }
 
-    let emailSent = await sendEmail(email, firstname, otp);
+  /* let emailSent = await sendEmail(email, firstname, otp);
 
     if (!emailSent) {
         logger.error(new ApiError(500, "Internal server error in sending email"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+    }*/
+
+    let smsSent = await sendVerificationCode(otp,phone);
+   
+    if (!smsSent) {
+        logger.error(new ApiError(500, "Internal server error in sending SMS"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
     }
 
     let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
@@ -283,11 +291,17 @@ const loginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
         }
 
-        let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
+      /*  let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
 
         if (!emailSent) {
             logger.error(new ApiError(500, "Internal server error in sending email"));
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+        }*/
+
+        let smsSent = await sendVerificationCode(otp,checkUserIfExists.phone);
+        if (!smsSent) {
+            logger.error(new ApiError(500, "Internal server error in sending SMS"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
         }
 
         checkUserIfExists.OTP = otp;

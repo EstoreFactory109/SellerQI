@@ -1500,40 +1500,42 @@ const PPCDashboard = () => {
                       <div className="mb-4 text-sm text-gray-600">
                         Campaigns with high advertising cost of sales for last 30 days
                       </div>
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {highAcosCampaigns.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="text-center py-12 text-gray-400">
-                                No data available
-                              </td>
+                      <div className="overflow-x-auto">
+                        <table className="w-full table-fixed min-w-[600px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Spend</th>
+                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">ACOS</th>
                             </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (highAcosPage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{campaign.campaignName}</td>
-                                  <td className="py-4 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
-                                  <td className="py-4 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
-                                  <td className="py-4 text-sm text-center font-medium text-red-600">
-                                    {campaign.acos.toFixed(2)}%
-                                  </td>
-                                </tr>
-                              ));
-                            })()
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {highAcosCampaigns.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="text-center py-12 text-gray-400">
+                                  No data available
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (highAcosPage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="w-2/5 py-4 px-2 text-sm text-gray-900 truncate">{campaign.campaignName}</td>
+                                    <td className="w-1/5 py-4 px-2 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
+                                    <td className="w-1/5 py-4 px-2 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
+                                    <td className="w-1/5 py-4 px-2 text-sm text-center font-medium text-red-600">
+                                      {campaign.acos.toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                ));
+                              })()
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                       <TablePagination
                         currentPage={highAcosPage}
                         totalPages={Math.ceil(highAcosCampaigns.length / itemsPerPage)}
@@ -1555,15 +1557,16 @@ const PPCDashboard = () => {
                       <div className="mb-4 text-sm text-gray-600">
                         Keywords with high spend but low returns for last 30 days
                       </div>
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                          </tr>
-                        </thead>
+                      <div className="overflow-x-auto">
+                        <table className="w-full table-fixed min-w-[600px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Keyword</th>
+                              <th className="w-1/3 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-1/6 text-center py-3 px-2 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-1/6 text-center py-3 px-2 text-sm font-medium text-gray-700">Spend</th>
+                            </tr>
+                          </thead>
                                                 <tbody>
                           {wastedSpendKeywords.length === 0 ? (
                             <tr>
@@ -1609,6 +1612,7 @@ const PPCDashboard = () => {
                         totalItems={wastedSpendKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
+                      </div>
                       <OptimizationTip 
                         tip="Consider pausing or lowering bids for unprofitable keywords."
                         icon="⚠️"
@@ -1623,14 +1627,15 @@ const PPCDashboard = () => {
                       <div className="mb-4 text-sm text-gray-600">
                         Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
                       </div>
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">AdGroup</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Negatives</th>
-                          </tr>
-                        </thead>
+                      <div className="overflow-x-auto">
+                        <table className="w-full table-fixed min-w-[600px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">AdGroup</th>
+                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Negatives</th>
+                            </tr>
+                          </thead>
                         <tbody>
                           {campaignsWithoutNegativeKeywords.length === 0 ? (
                             <tr>
@@ -1656,7 +1661,8 @@ const PPCDashboard = () => {
                             })()
                           )}
                         </tbody>
-                      </table>
+                        </table>
+                      </div>
                       <TablePagination
                         currentPage={campaignsWithoutNegativePage}
                         totalPages={Math.ceil(campaignsWithoutNegativeKeywords.length / itemsPerPage)}

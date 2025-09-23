@@ -136,7 +136,6 @@ const AccountSnapshotTable = () => {
                   
                   const healthScore = item.HealthScore !== undefined && item.HealthScore !== null ? item.HealthScore : 0;
                   const healthInfo = getHealthStatus(healthScore);
-                  const HealthIcon = healthInfo.icon;
                   
                   return (
                     <motion.tr
@@ -165,8 +164,7 @@ const AccountSnapshotTable = () => {
                       
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${healthInfo.bg}`}>
-                            <HealthIcon className={`w-4 h-4 ${healthInfo.color}`} />
+                          <div className={`flex items-center justify-center px-3 py-1 rounded-full ${healthInfo.bg}`}>
                             <span className={`text-sm font-semibold ${healthInfo.color}`}>
                               {healthScore}%
                             </span>

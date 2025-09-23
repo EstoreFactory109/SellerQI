@@ -47,6 +47,7 @@ const userModel = require('../models/userModel.js');
 const GetDateWisePPCspendModel = require('../models/GetDateWisePPCspendModel.js');
 const AdsGroup = require('../models/adsgroupModel.js');
 const LoggingHelper = require('../utils/LoggingHelper.js');
+const differenceCalculation = require('../Services/Calculations/DifferenceCalcualtion.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     console.log("userId in the start: ",userId);
@@ -434,6 +435,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         sponsoredAdsGraphData = asinDataMap;
     }
 
+    const differenceData = await differenceCalculation(userId, country, region);
 
   
     const result = {
@@ -460,7 +462,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         adsKeywordsPerformanceData: safeAdsKeywordsPerformanceData.keywordsData,
         GetOrderData: safeGetOrderData.RevenueData,
         GetDateWisePPCspendData: safeGetDateWisePPCspendData.dateWisePPCSpends,
-        AdsGroupData: safeAdsGroupData.adsGroupData 
+        AdsGroupData: safeAdsGroupData.adsGroupData,
+        DifferenceData: differenceData.percentageDifference
     };
 
     const asinSet = new Set(SellerAccount.products.map(p => p.asin));

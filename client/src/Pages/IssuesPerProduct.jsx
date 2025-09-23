@@ -43,6 +43,7 @@ const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, t
 
 const Dashboard = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+    console.log("info: ",info)
     const dropdownRef = useRef(null);
     useEffect(() => {
         function handleClickOutside(e) {
@@ -57,7 +58,12 @@ const Dashboard = () => {
     }, [])
 
     const { asin } = useParams();
-    const product = info.productWiseError.find(item => item.asin === asin);
+    
+    // Find product from rankingProductWiseErrors array (same as Category.jsx)
+    const rankingProduct = info?.rankingProductWiseErrors?.find(item => item.asin === asin);
+    
+    // Also get the product from productWiseError for other data
+    const product = info?.productWiseError?.find(item => item.asin === asin);
     
     // Get GetOrderData array for calculating quantities and revenue
     const getOrderData = Array.isArray(info?.GetOrderData) ? info.GetOrderData : [];
@@ -121,20 +127,25 @@ const Dashboard = () => {
     console.log('IssuesPerProduct - Calculated ASIN quantities:', asinQuantities);
     console.log('IssuesPerProduct - Calculated ASIN revenue:', asinRevenue);
     
-    // Update product with calculated quantities and revenue from GetOrderData
+    // Update product with calculated quantities and revenue from GetOrderData, plus ranking data from rankingProduct
     const updatedProduct = product ? {
         ...product,
         quantity: asinQuantities[product.asin] || 0,
-        sales: asinRevenue[product.asin] || 0
+        sales: asinRevenue[product.asin] || 0,
+        // Add ranking data from rankingProductWiseErrors array (same source as Category.jsx)
+        rankingErrors: rankingProduct || undefined
     } : null;
     
     // Debug: Log when component renders with new ASIN
     useEffect(() => {
         console.log('Component rendered with ASIN:', asin);
         console.log('Product found:', !!product);
+        console.log('Ranking product found:', !!rankingProduct);
+        console.log('Ranking product data:', rankingProduct);
         console.log('Updated product units:', updatedProduct?.quantity);
         console.log('Updated product revenue:', updatedProduct?.sales);
-    }, [asin, product, updatedProduct]);
+        console.log('Updated product ranking errors:', updatedProduct?.rankingErrors);
+    }, [asin, product, rankingProduct, updatedProduct]);
 
     // Reset states when ASIN changes
     useEffect(() => {
@@ -164,17 +175,48 @@ const Dashboard = () => {
         window.scrollTo(0, 0);
     }, [asin]);
 
+    // Early return for loading or missing data
+    if (!info) {
+        return (
+            <div className="flex items-center justify-center h-screen">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading product data...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!info.productWiseError || info.productWiseError.length === 0) {
+        return (
+            <div className="flex items-center justify-center h-screen">
+                <div className="text-center p-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">No Product Data Available</h2>
+                    <p className="text-gray-600">No product analysis data has been loaded yet.</p>
+                </div>
+            </div>
+        );
+    }
+
     if (!updatedProduct) {
-        return <div className="p-6">No product data found for ASIN: {asin}</div>;
+        return (
+            <div className="flex items-center justify-center h-screen">
+                <div className="text-center p-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Product Not Found</h2>
+                    <p className="text-gray-600">No product data found for ASIN: {asin}</p>
+                    <p className="text-sm text-gray-500 mt-2">Please check the ASIN and try again.</p>
+                </div>
+            </div>
+        );
     }
 
     const hasAnyConversionError = [
-        updatedProduct.conversionErrors.imageResultErrorData?.status,
-        updatedProduct.conversionErrors.videoResultErrorData?.status,
-        updatedProduct.conversionErrors.productReviewResultErrorData?.status,
-        updatedProduct.conversionErrors.productStarRatingResultErrorData?.status,
-        updatedProduct.conversionErrors.productsWithOutBuyboxErrorData?.status,
-        updatedProduct.conversionErrors.aplusErrorData?.status
+        updatedProduct.conversionErrors?.imageResultErrorData?.status,
+        updatedProduct.conversionErrors?.videoResultErrorData?.status,
+        updatedProduct.conversionErrors?.productReviewResultErrorData?.status,
+        updatedProduct.conversionErrors?.productStarRatingResultErrorData?.status,
+        updatedProduct.conversionErrors?.productsWithOutBuyboxErrorData?.status,
+        updatedProduct.conversionErrors?.aplusErrorData?.status
     ].includes("Error");
 
     const hasAnyInventoryError = updatedProduct.inventoryErrors && (
@@ -313,162 +355,162 @@ const Dashboard = () => {
         });
 
         // Ranking Issues - Title
-        if (updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Character Limit',
-                Message: updatedProduct.rankingErrors.data.TitleResult.charLim.Message,
-                Solution: updatedProduct.rankingErrors.data.TitleResult.charLim.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.HowTOSolve
             });
         }
-        if (updatedProduct.rankingErrors.data.TitleResult.RestictedWords?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Restricted Words',
-                Message: updatedProduct.rankingErrors.data.TitleResult.RestictedWords.Message,
-                Solution: updatedProduct.rankingErrors.data.TitleResult.RestictedWords.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.HowTOSolve
             });
         }
-        if (updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Title',
                 Issue: 'Special Characters',
-                Message: updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.Message,
-                Solution: updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve
             });
         }
 
         // Ranking Issues - Bullet Points
-        if (product.rankingErrors.data.BulletPoints.charLim?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Bullet Points',
                 Issue: 'Character Limit',
-                Message: product.rankingErrors.data.BulletPoints.charLim.Message,
-                Solution: product.rankingErrors.data.BulletPoints.charLim.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.BulletPoints.RestictedWords?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Bullet Points',
                 Issue: 'Restricted Words',
-                Message: product.rankingErrors.data.BulletPoints.RestictedWords.Message,
-                Solution: product.rankingErrors.data.BulletPoints.RestictedWords.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Bullet Points',
                 Issue: 'Special Characters',
-                Message: product.rankingErrors.data.BulletPoints.checkSpecialCharacters.Message,
-                Solution: product.rankingErrors.data.BulletPoints.checkSpecialCharacters.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.HowTOSolve
             });
         }
 
         // Ranking Issues - Description
-        if (product.rankingErrors.data.Description.charLim?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Description',
                 Issue: 'Character Limit',
-                Message: product.rankingErrors.data.Description.charLim.Message,
-                Solution: product.rankingErrors.data.Description.charLim.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.Description?.charLim?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.Description?.charLim?.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.Description.RestictedWords?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Description',
                 Issue: 'Restricted Words',
-                Message: product.rankingErrors.data.Description.RestictedWords.Message,
-                Solution: product.rankingErrors.data.Description.RestictedWords.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.HowTOSolve
             });
         }
-        if (product.rankingErrors.data.Description.checkSpecialCharacters?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Description',
                 Issue: 'Special Characters',
-                Message: product.rankingErrors.data.Description.checkSpecialCharacters.Message,
-                Solution: product.rankingErrors.data.Description.checkSpecialCharacters.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.HowTOSolve
             });
         }
-
+        
         // Ranking Issues - Backend Keywords
-        if (product.rankingErrors.data.charLim?.status === "Error") {
+        if (updatedProduct.rankingErrors?.data?.charLim?.status === "Error") {
             exportData.push({
                 Category: 'Ranking Issues',
                 Type: 'Backend Keywords',
                 Issue: 'Character Limit',
-                Message: product.rankingErrors.data.charLim.Message,
-                Solution: product.rankingErrors.data.charLim.HowTOSolve
+                Message: updatedProduct.rankingErrors?.data?.charLim?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.charLim?.HowTOSolve
             });
         }
 
         // Conversion Issues
-        if (product.conversionErrors.imageResultErrorData?.status === "Error") {
+        if (product.conversionErrors?.imageResultErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'Images',
                 Issue: 'Images Issue',
-                Message: product.conversionErrors.imageResultErrorData.Message,
-                Solution: product.conversionErrors.imageResultErrorData.HowToSolve
+                Message: product.conversionErrors?.imageResultErrorData.Message,
+                Solution: product.conversionErrors?.imageResultErrorData.HowToSolve
             });
         }
-        if (product.conversionErrors.videoResultErrorData?.status === "Error") {
+        if (product.conversionErrors?.videoResultErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'Video',
                 Issue: 'Video Issue',
-                Message: product.conversionErrors.videoResultErrorData.Message,
-                Solution: product.conversionErrors.videoResultErrorData.HowToSolve
+                Message: product.conversionErrors?.videoResultErrorData.Message,
+                Solution: product.conversionErrors?.videoResultErrorData.HowToSolve
             });
         }
-        if (product.conversionErrors.productReviewResultErrorData?.status === "Error") {
+        if (product.conversionErrors?.productReviewResultErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'Product Review',
                 Issue: 'Product Review Issue',
-                Message: product.conversionErrors.productReviewResultErrorData.Message,
-                Solution: product.conversionErrors.productReviewResultErrorData.HowToSolve
+                Message: product.conversionErrors?.productReviewResultErrorData.Message,
+                Solution: product.conversionErrors?.productReviewResultErrorData.HowToSolve
             });
         }
-        if (product.conversionErrors.productStarRatingResultErrorData?.status === "Error") {
+        if (product.conversionErrors?.productStarRatingResultErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'Star Rating',
                 Issue: 'Star Rating Issue',
-                Message: product.conversionErrors.productStarRatingResultErrorData.Message,
-                Solution: product.conversionErrors.productStarRatingResultErrorData.HowToSolve
+                Message: product.conversionErrors?.productStarRatingResultErrorData.Message,
+                Solution: product.conversionErrors?.productStarRatingResultErrorData.HowToSolve
             });
         }
-        if (product.conversionErrors.productsWithOutBuyboxErrorData?.status === "Error") {
+        if (product.conversionErrors?.productsWithOutBuyboxErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'Buy Box',
                 Issue: 'Product without Buy Box',
-                Message: product.conversionErrors.productsWithOutBuyboxErrorData.Message,
-                Solution: product.conversionErrors.productsWithOutBuyboxErrorData.HowToSolve
+                Message: product.conversionErrors?.productsWithOutBuyboxErrorData.Message,
+                Solution: product.conversionErrors?.productsWithOutBuyboxErrorData.HowToSolve
             });
         }
-        if (product.conversionErrors.aplusErrorData?.status === "Error") {
+        if (product.conversionErrors?.aplusErrorData?.status === "Error") {
             exportData.push({
                 Category: 'Conversion Issues',
                 Type: 'A+ Content',
                 Issue: 'Aplus Issue',
-                Message: product.conversionErrors.aplusErrorData.Message,
-                Solution: product.conversionErrors.aplusErrorData.HowToSolve
+                Message: product.conversionErrors?.aplusErrorData.Message,
+                Solution: product.conversionErrors?.aplusErrorData.HowToSolve
             });
         }
 
         // Inventory Issues
         if (product.inventoryErrors?.inventoryPlanningErrorData) {
-            const planning = product.inventoryErrors.inventoryPlanningErrorData;
+            const planning = product.inventoryErrors?.inventoryPlanningErrorData;
             if (planning.longTermStorageFees?.status === "Error") {
                 exportData.push({
                     Category: 'Inventory Issues',
@@ -493,8 +535,8 @@ const Dashboard = () => {
                 Category: 'Inventory Issues',
                 Type: 'Stranded Inventory',
                 Issue: 'Product Not Listed',
-                Message: product.inventoryErrors.strandedInventoryErrorData.Message,
-                Solution: product.inventoryErrors.strandedInventoryErrorData.HowToSolve
+                Message: product.inventoryErrors?.strandedInventoryErrorData.Message,
+                Solution: product.inventoryErrors?.strandedInventoryErrorData.HowToSolve
             });
         }
         if (product.inventoryErrors?.inboundNonComplianceErrorData) {
@@ -502,8 +544,8 @@ const Dashboard = () => {
                 Category: 'Inventory Issues',
                 Type: 'Inbound Non-Compliance',
                 Issue: 'Shipment Issue',
-                Message: product.inventoryErrors.inboundNonComplianceErrorData.Message,
-                Solution: product.inventoryErrors.inboundNonComplianceErrorData.HowToSolve
+                Message: product.inventoryErrors?.inboundNonComplianceErrorData.Message,
+                Solution: product.inventoryErrors?.inboundNonComplianceErrorData.HowToSolve
             });
         }
         if (product.inventoryErrors?.replenishmentErrorData) {
@@ -511,8 +553,8 @@ const Dashboard = () => {
                 Category: 'Inventory Issues',
                 Type: 'Replenishment',
                 Issue: 'Low Inventory Risk',
-                Message: product.inventoryErrors.replenishmentErrorData.Message,
-                Solution: product.inventoryErrors.replenishmentErrorData.HowToSolve
+                Message: product.inventoryErrors?.replenishmentErrorData.Message,
+                Solution: product.inventoryErrors?.replenishmentErrorData.HowToSolve
             });
         }
 
@@ -745,7 +787,7 @@ const Dashboard = () => {
                                             className="absolute top-full right-0 mt-2 w-96 max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-50"
                                         >
                                             <div className="py-2">
-                                                {info.productWiseError.map((item, index) => (
+                                                {(info?.productWiseError || []).map((item, index) => (
                                                     <button
                                                         key={index}
                                                         className="w-full px-4 py-3 text-left text-sm hover:bg-blue-50 transition-all duration-150 text-gray-700 hover:text-blue-600 border-b border-gray-100 last:border-b-0"
@@ -831,14 +873,14 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div className="p-6 space-y-6">
-                        {(updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error" || updatedProduct.rankingErrors.data.TitleResult.RestictedWords.status === "Error" || updatedProduct.rankingErrors.data.TitleResult.checkSpecialCharacters.status === "Error") && (<div>
+                        {(updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error") && (<div>
                             <p className="font-semibold">Titles</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
                                 {
-                                    updatedProduct.rankingErrors.data.TitleResult.charLim?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors.data.TitleResult.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -847,15 +889,15 @@ const Dashboard = () => {
                                             <div className=' bg-gray-200 mt-2 flex justify-center items-center' style={TitleSolution === "charLim"
                                                 ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                                 : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
-                                            }>{updatedProduct.rankingErrors.data.TitleResult.charLim?.HowTOSolve}</div>
+                                            }>{updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.TitleResult.RestictedWords?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{product.rankingErrors.data.TitleResult.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestrictedWords", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -868,23 +910,23 @@ const Dashboard = () => {
                                                     : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
                                                 }
                                             >
-                                                {product.rankingErrors.data.TitleResult.RestictedWords?.HowTOSolve}
+                                                {updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.HowTOSolve}
                                             </div>
 
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.TitleResult.checkSpecialCharacters?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{product.rankingErrors.data.TitleResult.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center  transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.TitleResult.checkSpecialCharacters?.HowTOSolve}</div>
+                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center  transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
@@ -892,96 +934,96 @@ const Dashboard = () => {
 
                         </div>)}
 
-                        {(product.rankingErrors.data.BulletPoints.charLim?.status === "Error" || product.rankingErrors.data.BulletPoints.RestictedWords?.status === "Error" || product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.status === "Error") && (<div >
+                        {(updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error") && (<div >
                             <p className="font-semibold">Bullet Points</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
                                 {
-                                    product.rankingErrors.data.BulletPoints.charLim?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center mb-4'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{product.rankingErrors.data.BulletPoints.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.charLim?.HowTOSolve}</div>
+                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.BulletPoints.RestictedWords?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4' >
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{product.rankingErrors.data.BulletPoints.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestictedWords", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.RestictedWords?.HowTOSolve}</div>
+                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{product.rankingErrors.data.BulletPoints.checkSpecialCharacters?.HowTOSolve}</div>
+                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
                             </ul>
                         </div>)}
 
-                        {(product.rankingErrors.data.Description.charLim?.status === "Error" || product.rankingErrors.data.Description.RestictedWords?.status === "Error" || product.rankingErrors.data.Description.checkSpecialCharacters?.status === "Error") && (<div >
+                        {(updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error") && (<div >
                             <p className="font-semibold">Description</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
                                 {
-                                    product.rankingErrors.data.Description.charLim?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{product.rankingErrors.data.Description.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.Description?.charLim?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.charLim?.HowTOSolve}</p></div>
+                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.charLim?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.Description.RestictedWords?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{product.rankingErrors.data.Description.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2 " onClick={() => openCloseSol("RestictedWords", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.RestictedWords?.HowTOSolve}</p></div>
+                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
                                 {
-                                    product.rankingErrors.data.Description.checkSpecialCharacters?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{product.rankingErrors.data.Description.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.Description.checkSpecialCharacters?.HowTOSolve}</p></div>
+                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -989,20 +1031,20 @@ const Dashboard = () => {
                             </ul>
                         </div>)}
 
-                        {(product.rankingErrors.data.charLim?.status === "Error") && (<div>
+                        {(updatedProduct.rankingErrors?.data?.charLim?.status === "Error") && (<div>
                             <p className="font-semibold">Backend Keywords</p>
                             <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
                                 {
-                                    product.rankingErrors.data.charLim?.status === "Error" && (
+                                    updatedProduct.rankingErrors?.data?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{product.rankingErrors.data.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.charLim?.Message}</p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BackendKeyWords")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{product.rankingErrors.data.charLim?.HowTOSolve}</p></div>
+                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.charLim?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -1037,62 +1079,62 @@ const Dashboard = () => {
                             </div>
                             <div className="p-6">
                             <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
-                                {product.conversionErrors.imageResultErrorData?.status === "Error" && (
+                                {product.conversionErrors?.imageResultErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Images Issue"
-                                        message={product.conversionErrors.imageResultErrorData.Message}
+                                        message={product.conversionErrors?.imageResultErrorData.Message}
                                         solutionKey="Image"
-                                        solutionContent={product.conversionErrors.imageResultErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.imageResultErrorData.HowToSolve}
                                         stateValue={imageSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Image")}
                                     />
                                 )}
-                                {product.conversionErrors.videoResultErrorData?.status === "Error" && (
+                                {product.conversionErrors?.videoResultErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Video Issue"
-                                        message={product.conversionErrors.videoResultErrorData.Message}
+                                        message={product.conversionErrors?.videoResultErrorData.Message}
                                         solutionKey="Video"
-                                        solutionContent={product.conversionErrors.videoResultErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.videoResultErrorData.HowToSolve}
                                         stateValue={videoSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Video")}
                                     />
                                 )}
-                                {product.conversionErrors.productReviewResultErrorData?.status === "Error" && (
+                                {product.conversionErrors?.productReviewResultErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Product Review Issue"
-                                        message={product.conversionErrors.productReviewResultErrorData.Message}
+                                        message={product.conversionErrors?.productReviewResultErrorData.Message}
                                         solutionKey="ProductReview"
-                                        solutionContent={product.conversionErrors.productReviewResultErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.productReviewResultErrorData.HowToSolve}
                                         stateValue={productReviewSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "ProductReview")}
                                     />
                                 )}
-                                {product.conversionErrors.productStarRatingResultErrorData?.status === "Error" && (
+                                {product.conversionErrors?.productStarRatingResultErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Star Rating Issue"
-                                        message={product.conversionErrors.productStarRatingResultErrorData.Message}
+                                        message={product.conversionErrors?.productStarRatingResultErrorData.Message}
                                         solutionKey="ProductStarRating"
-                                        solutionContent={product.conversionErrors.productStarRatingResultErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.productStarRatingResultErrorData.HowToSolve}
                                         stateValue={productStarRatingSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "ProductStarRating")}
                                     />
                                 )}
-                                {product.conversionErrors.productsWithOutBuyboxErrorData?.status === "Error" && (
+                                {product.conversionErrors?.productsWithOutBuyboxErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Product without Buy Box"
-                                        message={product.conversionErrors.productsWithOutBuyboxErrorData.Message}
+                                        message={product.conversionErrors?.productsWithOutBuyboxErrorData.Message}
                                         solutionKey="ProductsWithOutBuybox"
-                                        solutionContent={product.conversionErrors.productsWithOutBuyboxErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.productsWithOutBuyboxErrorData.HowToSolve}
                                         stateValue={productsWithOutBuyboxSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "ProductsWithOutBuybox")}
                                     />
                                 )}
-                                {product.conversionErrors.aplusErrorData?.status === "Error" && (
+                                {product.conversionErrors?.aplusErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Aplus Issue"
-                                        message={product.conversionErrors.aplusErrorData.Message}
+                                        message={product.conversionErrors?.aplusErrorData.Message}
                                         solutionKey="Aplus"
-                                        solutionContent={product.conversionErrors.aplusErrorData.HowToSolve}
+                                        solutionContent={product.conversionErrors?.aplusErrorData.HowToSolve}
                                         stateValue={aplusSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Aplus")}
                                     />
@@ -1128,22 +1170,22 @@ const Dashboard = () => {
                                 {/* Inventory Planning Issues */}
                                 {product.inventoryErrors?.inventoryPlanningErrorData && (
                                     <>
-                                        {product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees?.status === "Error" && (
+                                        {product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees?.status === "Error" && (
                                             <IssueItem
                                                 label="Long-Term Storage Fees"
-                                                message={product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees.Message}
+                                                message={product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees.Message}
                                                 solutionKey="LongTermStorage"
-                                                solutionContent={product.inventoryErrors.inventoryPlanningErrorData.longTermStorageFees.HowToSolve}
+                                                solutionContent={product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees.HowToSolve}
                                                 stateValue={inventoryPlanningSolution}
                                                 toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
                                             />
                                         )}
-                                        {product.inventoryErrors.inventoryPlanningErrorData.unfulfillable?.status === "Error" && (
+                                        {product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable?.status === "Error" && (
                                             <IssueItem
                                                 label="Unfulfillable Inventory"
-                                                message={product.inventoryErrors.inventoryPlanningErrorData.unfulfillable.Message}
+                                                message={product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable.Message}
                                                 solutionKey="Unfulfillable"
-                                                solutionContent={product.inventoryErrors.inventoryPlanningErrorData.unfulfillable.HowToSolve}
+                                                solutionContent={product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable.HowToSolve}
                                                 stateValue={inventoryPlanningSolution}
                                                 toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
                                             />
@@ -1155,9 +1197,9 @@ const Dashboard = () => {
                                 {product.inventoryErrors?.strandedInventoryErrorData && (
                                     <IssueItem
                                         label="Stranded Inventory"
-                                        message={product.inventoryErrors.strandedInventoryErrorData.Message}
+                                        message={product.inventoryErrors?.strandedInventoryErrorData.Message}
                                         solutionKey="StrandedInventory"
-                                        solutionContent={product.inventoryErrors.strandedInventoryErrorData.HowToSolve}
+                                        solutionContent={product.inventoryErrors?.strandedInventoryErrorData.HowToSolve}
                                         stateValue={strandedInventorySolution}
                                         toggleFunc={(val) => openCloseSolutionInventory(val, "StrandedInventory")}
                                     />
@@ -1167,9 +1209,9 @@ const Dashboard = () => {
                                 {product.inventoryErrors?.inboundNonComplianceErrorData && (
                                     <IssueItem
                                         label="Inbound Non-Compliance"
-                                        message={product.inventoryErrors.inboundNonComplianceErrorData.Message}
+                                        message={product.inventoryErrors?.inboundNonComplianceErrorData.Message}
                                         solutionKey="InboundNonCompliance"
-                                        solutionContent={product.inventoryErrors.inboundNonComplianceErrorData.HowToSolve}
+                                        solutionContent={product.inventoryErrors?.inboundNonComplianceErrorData.HowToSolve}
                                         stateValue={inboundNonComplianceSolution}
                                         toggleFunc={(val) => openCloseSolutionInventory(val, "InboundNonCompliance")}
                                     />
@@ -1179,9 +1221,9 @@ const Dashboard = () => {
                                 {product.inventoryErrors?.replenishmentErrorData && (
                                     <IssueItem
                                         label="Low Inventory Risk"
-                                        message={product.inventoryErrors.replenishmentErrorData.Message}
+                                        message={product.inventoryErrors?.replenishmentErrorData.Message}
                                         solutionKey="Replenishment"
-                                        solutionContent={product.inventoryErrors.replenishmentErrorData.HowToSolve}
+                                        solutionContent={product.inventoryErrors?.replenishmentErrorData.HowToSolve}
                                         stateValue={replenishmentSolution}
                                         toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
                                     />

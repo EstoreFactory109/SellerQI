@@ -5,18 +5,19 @@ import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Search, Filter, ChevronDown, Package, Eye, Activity, Star, TrendingUp, BarChart3, ArrowRight, Download } from 'lucide-react';
-import DropDown from '../assets/Icons/drop-down.png';
 import noImage from '../assets/Icons/no-image.png';
 
 // Table component for ranking issues
-const RankingIssuesTable = ({ product }) => {
+const RankingIssuesTable = ({ product, info }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
     
     const extractRankingErrors = (product) => {
-        const rankingErrors = product.rankingErrors?.data;
-        if (!rankingErrors) return [];
+        // Find the corresponding ranking data from info.rankingProductWiseErrors
+        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
+        if (!rankingData?.data) return [];
         
+        const rankingErrors = rankingData.data;
         const errorRows = [];
         const sections = ['TitleResult', 'BulletPoints', 'Description'];
         const sectionLabels = {
@@ -77,21 +78,21 @@ const RankingIssuesTable = ({ product }) => {
     
     return (
         <div>
-            <div className="overflow-x-auto rounded-xl shadow-sm border border-gray-200">
-                <table className="min-w-full bg-white">
+            <div className="w-full rounded-xl shadow-sm border border-gray-200">
+                <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Type</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">How to Solve</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200">
-                                <td className="px-6 py-4 text-sm font-medium text-gray-900">{error.issueHeading}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.message}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
+                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -161,21 +162,21 @@ const ConversionIssuesTable = ({ product }) => {
     
     return (
         <div>
-            <div className="overflow-x-auto rounded-xl shadow-sm border border-gray-200">
-                <table className="min-w-full bg-white">
+            <div className="w-full rounded-xl shadow-sm border border-gray-200">
+                <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Type</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">How to Solve</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200">
-                                <td className="px-6 py-4 text-sm font-medium text-gray-900">{error.issueHeading}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.message}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
+                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -273,21 +274,21 @@ const InventoryIssuesTable = ({ product }) => {
     
     return (
         <div>
-            <div className="overflow-x-auto rounded-xl shadow-sm border border-gray-200">
-                <table className="min-w-full bg-white">
+            <div className="w-full rounded-xl shadow-sm border border-gray-200">
+                <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Type</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">How to Solve</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200">
-                                <td className="px-6 py-4 text-sm font-medium text-gray-900">{error.issueHeading}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.message}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
+                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
+                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -310,7 +311,7 @@ const InventoryIssuesTable = ({ product }) => {
 const IssuesByProduct = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const navigate = useNavigate();
-    
+    console.log("info: ",info)
     // Enhanced state management
     const [currentPage, setCurrentPage] = useState(0);
     const [productTabs, setProductTabs] = useState({});
@@ -325,9 +326,6 @@ const IssuesByProduct = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
     
-    // Product selector dropdown state
-    const [openSelector, setOpenSelector] = useState(false);
-    const dropdownRef = useRef(null);
     
     const ITEMS_PER_PAGE = 6; // Reduced for better layout
     
@@ -359,9 +357,10 @@ const IssuesByProduct = () => {
     
     // Check if product has any ranking issues
     const hasAnyRankingIssues = (product) => {
-        const rankingErrors = product.rankingErrors?.data;
-        if (!rankingErrors) return false;
+        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
+        if (!rankingData?.data) return false;
         
+        const rankingErrors = rankingData.data;
         return (
             rankingErrors.TitleResult?.charLim?.status === "Error" ||
             rankingErrors.TitleResult?.RestictedWords?.status === "Error" ||
@@ -556,9 +555,10 @@ const IssuesByProduct = () => {
     
     // Count issues for each category
     const countRankingIssues = (product) => {
-        const rankingErrors = product.rankingErrors?.data;
-        if (!rankingErrors) return 0;
+        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
+        if (!rankingData?.data) return 0;
         
+        const rankingErrors = rankingData.data;
         let count = 0;
         const sections = ['TitleResult', 'BulletPoints', 'Description'];
         const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
@@ -624,57 +624,30 @@ const IssuesByProduct = () => {
     }, [searchQuery, selectedPriority, sortBy]);
 
     // Handle clicks outside dropdown
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setOpenSelector(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, []);
 
     return (
-        <div className="bg-[#eeeeee] p-6 space-y-6 lg:h-[90vh] lg:mt-0 mt-[10vh] overflow-y-auto relative">
-            {/* Header with title and product selector */}
-            <div className="flex justify-between items-center">
-                <p className="text-sm font-medium">ISSUES</p>
-                
-                {/* Product Selector */}
-                <div className="w-fit" ref={dropdownRef}>
-                    <div
-                        className="w-[12rem] bg-white flex justify-center items-center px-2 py-1 border-[1px] border-gray-300 rounded-md text-sm text-gray-400 gap-3 cursor-pointer"
-                        onClick={() => setOpenSelector(!openSelector)}
-                    >
-                        <p>Select Your Product</p>
-                        <img src={DropDown} />
+        <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh]">
+            {/* Modern Header Section */}
+            <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
+                <div className='px-4 lg:px-6 py-4'>
+                    <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
+                        <div className='flex items-center gap-4'>
+                            <div>
+                                <h1 className='text-2xl font-bold text-gray-900'>Issues By Product</h1>
+                                <p className='text-sm text-gray-600 mt-1'>Detailed analysis of issues for individual products in your catalog</p>
+                            </div>
+                            <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-full text-xs font-medium'>
+                                <AlertTriangle className='w-3 h-3' />
+                                Product Analysis
+                            </div>
+                        </div>
                     </div>
-                    <AnimatePresence>
-                        {openSelector && (
-                            <motion.ul
-                                initial={{ opacity: 0, scaleY: 0 }}
-                                animate={{ opacity: 1, scaleY: 1 }}
-                                exit={{ opacity: 0, scaleY: 0 }}
-                                transition={{ duration: 0.3, ease: "easeInOut" }}
-                                style={{ transformOrigin: "top" }}
-                                className="w-[30rem] h-[30rem] overflow-x-hidden overflow-y-auto z-[99] bg-white absolute right-0 top-12 py-2 px-2 border-[1px] border-gray-300 shadow-md origin-top"
-                            >
-                                {info?.productWiseError?.map((item, index) => (
-                                    <li
-                                        className="flex justify-center items-center px-2 py-2 cursor-pointer hover:bg-[#333651] hover:text-white rounded-md text-sm text-justify"
-                                        key={index}
-                                        onClick={() => navigate(`/seller-central-checker/issues/${item.asin}`)}
-                                    >
-                                        {item.asin} | {item.name}...
-                                    </li>
-                                ))}
-                            </motion.ul>
-                        )}
-                    </AnimatePresence>
                 </div>
             </div>
+
+            {/* Main Content - Scrollable */}
+            <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
+                <div className='px-4 lg:px-6 py-6 pb-20 space-y-6'>
 
             {!info?.productWiseError || info.productWiseError.length === 0 ? (
                 <motion.div 
@@ -957,7 +930,7 @@ const IssuesByProduct = () => {
                                                     className="w-full"
                                                 >
                                                     {activeTab === 'ranking' && (
-                                                        <RankingIssuesTable product={product} />
+                                                        <RankingIssuesTable product={product} info={info} />
                                                     )}
                                                     {activeTab === 'conversion' && (
                                                         <ConversionIssuesTable product={product} />
@@ -1002,6 +975,8 @@ const IssuesByProduct = () => {
                     </div>
                 </div>
             )}
+                </div>
+            </div>
         </div>
     );
 };

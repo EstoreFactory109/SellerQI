@@ -455,73 +455,77 @@ export default function AccountHealthDashboard() {
                 )}
 
                 {/* Issues Table */}
-                <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                                                 <thead>
-                             <tr className="border-b-2 border-gray-200">
-                                 <th className="text-left py-4 px-4 font-semibold text-gray-900 bg-gray-50">Category</th>
-                                 <th className="text-left py-4 px-4 font-semibold text-gray-900 bg-gray-50">Status</th>
-                                 <th className="text-left py-4 px-4 font-semibold text-gray-900 bg-gray-50">Issue Details</th>
-                                 <th className="text-left py-4 px-4 font-semibold text-gray-900 bg-gray-50">Solution</th>
-                             </tr>
-                         </thead>
-                        <tbody className="divide-y divide-gray-200">
-                                                         {filteredMetrics.map((metric, index) => {
-                                 const Icon = metric.icon;
-                                 const isError = metric.data?.status === "Error";
-                                 
-                                 return (
-                                     <motion.tr
-                                         key={metric.key}
-                                         initial={{ opacity: 0, y: 10 }}
-                                         animate={{ opacity: 1, y: 0 }}
-                                         transition={{ duration: 0.3, delay: index * 0.05 }}
-                                         className="hover:bg-gray-50 transition-colors duration-200"
-                                     >
-                                         <td className="py-4 px-4">
-                                             <div className="flex items-center gap-3">
-                                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                                     isError ? 'bg-red-100' : 'bg-green-100'
-                                                 }`}>
-                                                     <Icon className={`w-4 h-4 ${
-                                                         isError ? 'text-red-600' : 'text-green-600'
-                                                     }`} />
-                                                 </div>
-                                                 <span className="font-medium text-gray-900">{metric.name}</span>
-                                             </div>
-                                         </td>
-                                         <td className="py-4 px-4">
-                                             <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-                                                 isError 
-                                                     ? 'bg-red-100 text-red-700' 
-                                                     : 'bg-green-100 text-green-700'
-                                             }`}>
-                                                 {isError ? (
-                                                     <XCircle className="w-3 h-3" />
-                                                 ) : (
-                                                     <CheckCircle className="w-3 h-3" />
-                                                 )}
-                                                 {isError ? 'Issue Found' : 'Healthy'}
-                                             </div>
-                                         </td>
-                                         <td className="py-4 px-4 max-w-xs">
-                                             <p className={`text-sm ${isError ? 'text-red-600 font-medium' : 'text-green-600'}`}>
-                                                 {metric.data?.Message || 'No issues detected'}
-                                             </p>
-                                         </td>
-                                         <td className="py-4 px-4 max-w-xs">
-                                             <p className="text-sm text-gray-600">
-                                                 {metric.data?.HowTOSolve?.length > 0 ? metric.data.HowTOSolve : (isError ? 'Contact support for assistance' : 'N/A')}
-                                             </p>
-                                         </td>
-                                     </motion.tr>
-                                 );
-                             })}
-                        </tbody>
-                    </table>
+                <div className="overflow-hidden rounded-xl border border-gray-200">
+                    <div className="overflow-x-auto">
+                        <table className="w-full table-fixed min-w-[768px]">
+                            <thead>
+                                <tr className="border-b-2 border-gray-200">
+                                    <th className="w-1/4 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Category</th>
+                                    <th className="w-1/6 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Status</th>
+                                    <th className="w-2/5 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Issue Details</th>
+                                    <th className="w-1/4 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Solution</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {filteredMetrics.map((metric, index) => {
+                                    const Icon = metric.icon;
+                                    const isError = metric.data?.status === "Error";
+                                    
+                                    return (
+                                        <motion.tr
+                                            key={metric.key}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ duration: 0.3, delay: index * 0.05 }}
+                                            className="hover:bg-gray-50 transition-colors duration-200"
+                                        >
+                                            <td className="w-1/4 py-4 px-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                                        isError ? 'bg-red-100' : 'bg-green-100'
+                                                    }`}>
+                                                        <Icon className={`w-3 h-3 ${
+                                                            isError ? 'text-red-600' : 'text-green-600'
+                                                        }`} />
+                                                    </div>
+                                                    <span className="font-medium text-gray-900 text-sm truncate">{metric.name}</span>
+                                                </div>
+                                            </td>
+                                            <td className="w-1/6 py-4 px-3">
+                                                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                                                    isError 
+                                                        ? 'bg-red-100 text-red-700' 
+                                                        : 'bg-green-100 text-green-700'
+                                                }`}>
+                                                    {isError ? (
+                                                        <XCircle className="w-3 h-3" />
+                                                    ) : (
+                                                        <CheckCircle className="w-3 h-3" />
+                                                    )}
+                                                    <span className="hidden sm:inline">
+                                                        {isError ? 'Issue' : 'Healthy'}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="w-2/5 py-4 px-3">
+                                                <p className={`text-sm leading-relaxed ${isError ? 'text-red-600 font-medium' : 'text-green-600'}`}>
+                                                    {metric.data?.Message || 'No issues detected'}
+                                                </p>
+                                            </td>
+                                            <td className="w-1/4 py-4 px-3">
+                                                <p className="text-sm text-gray-600 leading-relaxed">
+                                                    {metric.data?.HowTOSolve?.length > 0 ? metric.data.HowTOSolve : (isError ? 'Contact support for assistance' : 'N/A')}
+                                                </p>
+                                            </td>
+                                        </motion.tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                     
                     {filteredMetrics.length === 0 && (
-                        <div className="text-center py-12">
+                        <div className="text-center py-12 bg-white">
                             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <Search className="w-8 h-8 text-gray-400" />
                             </div>

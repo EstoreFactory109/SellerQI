@@ -4,6 +4,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { setCogsValue } from '../../redux/slices/cogsSlice';
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
 
 const ProfitTable = ({ setSuggestionsData }) => {
     const [currentPage, setCurrentPage] = useState(1);
@@ -19,6 +20,9 @@ const ProfitTable = ({ setSuggestionsData }) => {
     
     // Get COGs values from Redux store
     const cogsValues = useSelector((state) => state.cogs.cogsValues);
+    
+    // Get currency from Redux
+    const currency = useSelector(state => state.currency?.currency) || '$';
     
     // Handle COGS input change
     const handleCogsChange = (asin, value) => {
@@ -312,7 +316,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          <span className="text-sm font-semibold text-gray-900">{product.units.toLocaleString()}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.sales.toFixed(2)}</span>
+                         <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.sales, currency)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
                          <div className="flex items-center justify-center">
@@ -330,14 +334,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          </div>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.adSpend.toFixed(2)}</span>
+                         <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.adSpend, currency)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
-                         <span className="text-sm font-semibold text-gray-900">${product.fees.toFixed(2)}</span>
+                         <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.fees, currency)}</span>
                        </td>
                        <td className="px-2 py-4 text-center">
                          <span className={`text-sm font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                           ${product.grossProfit.toFixed(2)}
+                           {formatCurrencyWithLocale(product.grossProfit, currency)}
                          </span>
                        </td>
                        <td className="px-2 py-4 text-center relative">
@@ -351,7 +355,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                ? 'text-gray-400' 
                                : product.netProfit < 0 ? 'text-red-600' : 'text-emerald-600'
                            }`}>
-                             ${product.netProfit.toFixed(2)}
+                             {formatCurrencyWithLocale(product.netProfit, currency)}
                            </span>
                          </div>
                          {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
