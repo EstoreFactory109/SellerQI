@@ -1492,6 +1492,25 @@ const getAdminBillingInfo = asyncHandler(async (req, res) => {
     }
 });
 
+const resendOtp = asyncHandler(async (req, res) => {
+    const { email,phone } = req.body;
+    
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+        return res.status(404).json(new ApiResponse(404, "", "User not found"));
+    }
+    const otp =  generateOTP();
+
+    user.OTP = otp;
+    await user.save();
+   const smsSent = await sendVerificationCode(otp,phone);
+   if(!smsSent){
+    return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+   }
+
+    return res.status(200).json(new ApiResponse(200, { otp }, "OTP sent successfully"));
+});
+
 module.exports = {
     registerUser,
     registerAgencyClient,
@@ -1516,5 +1535,6 @@ module.exports = {
     getAdminProfile,
     getAdminClients,
     removeAdminClient,
-    getAdminBillingInfo
+    getAdminBillingInfo,
+    resendOtp
 };

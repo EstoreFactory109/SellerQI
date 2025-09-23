@@ -293,7 +293,7 @@ export default function Login() {
               {/* Forgot Password Link */}
               <div className="flex justify-end">
                 <Link 
-                  to="/forgot-password" 
+                  to="/verify-email-for-password-reset" 
                   className="text-sm text-[#3B4A6B] hover:text-[#2d3a52] font-medium hover:underline transition-colors"
                 >
                   Forgot your password?

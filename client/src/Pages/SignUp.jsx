@@ -165,7 +165,7 @@ const SignUp = () => {
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
       if (response.status === 201) {
         setLoading(false);
-        navigate('/verify-email', { state: { email: formData.email } });
+        navigate('/verify-email', { state: { email: formData.email, phone: `${countryCode} ${formData.phone}` } });
       }
     } catch (error) {
       setLoading(false);
@@ -482,11 +482,11 @@ const SignUp = () => {
                   />
                   <label htmlFor="termsCheckbox" className="text-sm text-gray-700 leading-relaxed">
                     I agree to the{' '}
-                    <Link to="/terms" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
+                    <Link to="https://www.sellerqi.com/terms-of-use" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
                       Terms of Use
                     </Link>
                     {' '}and{' '}
-                    <Link to="/privacy-policy" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
+                    <Link to="https://www.sellerqi.com/privacy-policy" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
                       Privacy Policy
                     </Link>
                   </label>

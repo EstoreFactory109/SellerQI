@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo }=require('../controllers/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp}=require('../controllers/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
@@ -36,5 +36,6 @@ router.get('/admin/profile', auth, getAdminProfile);
 router.get('/admin/clients', auth, getAdminClients);
 router.delete('/admin/clients/:clientId', auth, removeAdminClient);
 router.get('/admin/billing', auth, getAdminBillingInfo);
+router.post('/resend-otp', resendOtp);
 
 module.exports=router;
