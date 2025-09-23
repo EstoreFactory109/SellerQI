@@ -163,10 +163,10 @@ const updatePassword = async (email, newPassword) => {
         }
 
         // Hash the new password
-        const hashedPassword = await hashPassword(newPassword);
+       // const hashedPassword = await hashPassword(newPassword);
         
         // Update the password and clear the reset code
-        user.password = hashedPassword;
+        user.password = newPassword;
         user.resetPasswordCode = null;
         
         await user.save();
