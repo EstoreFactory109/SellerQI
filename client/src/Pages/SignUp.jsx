@@ -8,7 +8,9 @@ import {
   Phone, 
   Lock, 
   ArrowRight,
-  Loader2
+  Loader2,
+  AlertCircle,
+  X
 } from 'lucide-react';
 
 import axios from 'axios';
@@ -60,6 +62,16 @@ const SignUp = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // Auto-dismiss error messages after 5 seconds
+  useEffect(() => {
+    if (errorMessage) {
+      const timer = setTimeout(() => {
+        setErrorMessage('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
+
   // Update selected country when country code changes
   useEffect(() => {
     const foundCountry = countryCodesData[countryCode];
@@ -87,6 +99,10 @@ const SignUp = () => {
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setErrors({ ...errors, [e.target.name]: '' });
+    // Clear general error message when user starts typing
+    if (errorMessage) {
+      setErrorMessage('');
+    }
   };
 
   const handleFocus = (e) => {
@@ -100,7 +116,7 @@ const SignUp = () => {
       const formattedValue = value.startsWith('+') ? value : '+' + value.replace(/[^\d]/g, '');
       setCountryCode(formattedValue);
       setFormData({ ...formData, phone: '' }); // Clear phone input when country changes
-      setErrors({ ...errors, phone: '' }); // Clear phone error when country changes
+      setErrors({ ...errors, phone: '', countryCode: '' }); // Clear phone and country code errors when country changes
     }
   };
 
@@ -113,6 +129,10 @@ const SignUp = () => {
     if (digitsOnly.length <= selectedCountry.maxLength) {
       setFormData({ ...formData, phone: cleanValue });
       setErrors({ ...errors, phone: '' });
+      // Clear general error message when user starts typing
+      if (errorMessage) {
+        setErrorMessage('');
+      }
     }
   };
 
@@ -129,18 +149,31 @@ const SignUp = () => {
       newErrors.lastname = 'Enter a valid last name (only letters, min 2 characters)';
     }
     
+    // Country code validation
+    if (!countryCode || countryCode === '+' || countryCode.length < 2) {
+      newErrors.countryCode = 'Country code is required';
+    }
+    
     // Phone validation based on selected country
     const cleanPhone = formData.phone.replace(/\s+/g, ''); // Remove spaces
-    if (!selectedCountry.pattern.test(cleanPhone)) {
+    if (!cleanPhone) {
+      newErrors.phone = 'Phone number is required';
+    } else if (!selectedCountry.pattern.test(cleanPhone)) {
       newErrors.phone = `Enter a valid phone number for ${selectedCountry.name} (${selectedCountry.minLength}${selectedCountry.minLength !== selectedCountry.maxLength ? `-${selectedCountry.maxLength}` : ''} digits)`;
     }
     
-    if (!emailRegex.test(formData.email)) {
+    if (!formData.email) {
+      newErrors.email = 'Email is required';
+    } else if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Enter a valid email address';
     }
-    if (!passwordRegex.test(formData.password)) {
+    
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    } else if (!passwordRegex.test(formData.password)) {
       newErrors.password = 'Password must be at least 8 characters, with a letter, a number, and a special character';
     }
+    
     if (!termsAccepted) {
       newErrors.terms = 'You must agree to the Terms of Use and Privacy Policy';
     }
@@ -335,7 +368,9 @@ const SignUp = () => {
                 <div className="flex">
                   {/* Country Code Input */}
                   <div className="relative">
-                    <div className="flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white">
+                    <div className={`flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white ${
+                      errors.countryCode ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}>
                       <div className="w-5 h-4 flex items-center justify-center">
                         {countryFlag.startsWith('http') ? (
                           <img 
@@ -355,8 +390,9 @@ const SignUp = () => {
                         type="text"
                         value={countryCode}
                         onChange={handleCountryCodeChange}
+                        onFocus={() => setErrors({ ...errors, countryCode: '' })}
                         className={`w-16 text-sm font-medium text-gray-700 bg-transparent border-none outline-none focus:ring-0 ${
-                          errors.phone ? 'text-red-600' : ''
+                          errors.phone || errors.countryCode ? 'text-red-600' : ''
                         }`}
                         placeholder="+1"
                         maxLength={4}
@@ -381,6 +417,15 @@ const SignUp = () => {
                     />
                   </div>
                 </div>
+                {errors.countryCode && (
+                  <motion.p
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-red-500 text-xs mt-1"
+                  >
+                    {errors.countryCode}
+                  </motion.p>
+                )}
                 {errors.phone && (
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
@@ -592,9 +637,22 @@ const SignUp = () => {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 rounded-xl p-4 text-center"
+                    className="bg-red-50 border border-red-200 rounded-xl p-4 relative"
                   >
-                    <p className="text-red-600 text-sm">{errorMessage}</p>
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-red-800 font-medium text-sm">Registration Failed</p>
+                        <p className="text-red-600 text-sm mt-1">{errorMessage}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setErrorMessage('')}
+                        className="text-red-600 hover:text-red-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </motion.div>
                 )}
                              </AnimatePresence>

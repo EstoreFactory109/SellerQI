@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import axiosInstance from '../config/axios.config.js';
 import { useDispatch } from 'react-redux';
@@ -18,6 +18,7 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
@@ -31,6 +32,26 @@ export default function Login() {
     }
   }, [navigate]);
 
+  // Auto-dismiss error messages after 5 seconds
+  useEffect(() => {
+    if (errorMessage) {
+      const timer = setTimeout(() => {
+        setErrorMessage('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
+
+  // Auto-dismiss success messages after 3 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage('');
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -43,6 +64,10 @@ export default function Login() {
         ...prev,
         [name]: ''
       }));
+    }
+    // Also clear general error message when user starts typing
+    if (errorMessage) {
+      setErrorMessage('');
     }
   };
 
@@ -116,12 +141,16 @@ export default function Login() {
       if (error.response?.status === 401) {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
-        }
-        if(error.response?.data?.message === "Seller central not found"){
+        } else if(error.response?.data?.message === "Seller central not found"){
           navigate('/connect-to-amazon');
+        } else {
+          // Handle wrong password or invalid credentials
+          setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
         }
       } else if (error.response?.status === 403) {
         setErrorMessage('Account is disabled. Please contact support.');
+      } else if (error.response?.status === 404) {
+        setErrorMessage('User not found. Please check your email or sign up.');
       } else {
         setErrorMessage(error.response?.data?.message || 'Login failed. Please try again.');
       }
@@ -399,9 +428,39 @@ export default function Login() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 rounded-xl p-4 text-center"
+                    className="bg-red-50 border border-red-200 rounded-xl p-4 relative"
                   >
-                    <p className="text-red-600 text-sm">{errorMessage}</p>
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-red-800 font-medium text-sm">Login Failed</p>
+                        <p className="text-red-600 text-sm mt-1">{errorMessage}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setErrorMessage('')}
+                        className="text-red-600 hover:text-red-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Success Message */}
+              <AnimatePresence>
+                {successMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="bg-green-50 border border-green-200 rounded-xl p-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      <p className="text-green-700 text-sm font-medium">{successMessage}</p>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
