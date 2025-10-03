@@ -7,12 +7,12 @@ const authToken = process.env.AUTH_TOKEN;
 const client = require('twilio')(accountSid, authToken);
 
 const sendVerificationCode = async(otp,phoneNumber)=>{
-    console.log("otp: ",otp);
-    console.log("phoneNumber: ",phoneNumber);
+
     const message = `Your One Time Password (OTP) for verification for SellerQI is ${otp}`
     let messageOptions = {
-        from : process.env.OTP_VERIFICATION_PHONE_NUMBER,
+      //  from : process.env.OTP_VERIFICATION_PHONE_NUMBER,
         to: phoneNumber,
+        messagingServiceSid: process.env.MSID,
         body:message
     }
     try{
