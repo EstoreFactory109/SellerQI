@@ -322,7 +322,7 @@ export default function PricingPage() {
                     <Crown className="w-8 h-8 text-white" />
                   </div>
                   <h3 className="text-2xl font-bold mb-2">Pro Plan</h3>
-                  <div className="text-4xl font-bold mb-2">$99<span className="text-lg opacity-75 font-normal">/month</span></div>
+                  <div className="text-4xl font-bold mb-2">$49<span className="text-lg opacity-75 font-normal">/month</span></div>
                   <p className="opacity-90">Everything you need to scale</p>
                 </div>
                 

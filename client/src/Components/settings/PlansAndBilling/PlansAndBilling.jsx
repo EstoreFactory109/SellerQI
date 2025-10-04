@@ -69,7 +69,7 @@ export default function PlansAndBilling() {
     PRO: {
       name: 'PRO',
       displayName: 'Pro',
-      price: 99,
+      price: 49,
       currency: 'USD',
       icon: Crown,
       color: 'blue',

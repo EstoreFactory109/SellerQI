@@ -729,7 +729,7 @@ export default function SellerQIHomepage() {
                   Most Popular
                 </div>
                 <h3 className="text-2xl font-bold mb-4">Pro Plan</h3>
-                <div className="text-4xl font-bold mb-6">$99<span className="text-lg opacity-75">/month</span></div>
+                <div className="text-4xl font-bold mb-6">$49<span className="text-lg opacity-75">/month</span></div>
                 <ul className="space-y-3 mb-8">
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Product Audit Summary</li>
                   <li className="flex items-center gap-2"><Check className="w-5 h-5 text-emerald-300" /> Download Reports</li>
