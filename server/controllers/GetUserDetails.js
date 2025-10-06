@@ -1,141 +1,157 @@
-const User = require("../models/userModel");
-const Seller = require("../models/sellerCentralModel");
+const User = require('../models/userModel');
+const Seller = require('../models/sellerCentralModel');
 
-// Store user details in JSON format
-const storeUserDetails = async (req, res) => {
+/**
+ * Controller 1: Get All Users
+ * Fetches all user details from the database with their seller account details
+ */
+const getAllUsers = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      Phone,
-      Whatsapp,
-      email,
-      packageType,
-      sellerAccount
-    } = req.body;
+    // Fetch all users from the database
+    const users = await User.find({}).select('-password -OTP -resetPasswordCode');
 
-    // Validate required fields
-    if (!firstName || !lastName || !Phone || !Whatsapp || !email || !packageType) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields: firstName, lastName, Phone, Whatsapp, email, packageType"
+    if (!users || users.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No users found',
+        data: []
       });
     }
 
-    // Validate packageType
-    const validPackageTypes = ["LITE", "PRO", "AGENCY"];
-    if (!validPackageTypes.includes(packageType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid packageType. Must be one of: LITE, PRO, AGENCY"
-      });
-    }
+    // Process each user to include seller account details
+    const usersWithSellerAccounts = await Promise.all(
+      users.map(async (user) => {
+        const userData = {
+          firstName: user.firstName,
+          lastName: user.lastName,
+          Phone: user.phone,
+          Whatsapp: user.whatsapp,
+          email: user.email,
+          packageType: user.packageType,
+          sellerAccount: []
+        };
 
-    // Validate sellerAccount array if provided
-    if (sellerAccount && Array.isArray(sellerAccount)) {
-      for (const account of sellerAccount) {
-        if (!account.country || !account.region) {
-          return res.status(400).json({
-            success: false,
-            message: "Each sellerAccount must have country and region"
-          });
-        }
+        // Find seller accounts for this user
+        const sellerAccounts = await Seller.find({ User: user._id });
         
-        const validRegions = ["NA", "EU", "FE"];
-        if (!validRegions.includes(account.region)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid region in sellerAccount. Must be one of: NA, EU, FE"
+        if (sellerAccounts && sellerAccounts.length > 0) {
+          // Process seller accounts
+          sellerAccounts.forEach(seller => {
+            if (seller.sellerAccount && seller.sellerAccount.length > 0) {
+              seller.sellerAccount.forEach(account => {
+                userData.sellerAccount.push({
+                  country: account.country || '',
+                  region: account.region || '',
+                  spAPI: !!(account.spiRefreshToken && account.spiRefreshToken.trim() !== ''),
+                  Ads: !!(account.adsRefreshToken && account.adsRefreshToken.trim() !== '')
+                });
+              });
+            }
           });
         }
-      }
-    }
 
-    // Create user data object in the exact JSON format requested
-    const userData = {
-      firstName,
-      lastName,
-      Phone,
-      Whatsapp,
-      email,
-      packageType,
-      sellerAccount: sellerAccount || []
-    };
+        return userData;
+      })
+    );
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "User with this email already exists"
-      });
-    }
-
-    // Create new user
-    const newUser = new User({
-      firstName,
-      lastName,
-      phone: Phone,
-      whatsapp: Whatsapp,
-      email,
-      packageType,
-      allTermsAndConditionsAgreed: true, // Default to true for stored user details
-      accessType: "user",
-      subscriptionStatus: "active"
-    });
-
-    const savedUser = await newUser.save();
-
-    // If sellerAccount data is provided, create seller records
-    if (sellerAccount && sellerAccount.length > 0) {
-      const sellerAccounts = sellerAccount.map(account => ({
-        selling_partner_id: account.selling_partner_id || "",
-        spiRefreshToken: account.spAPI ? "connected" : "",
-        adsRefreshToken: account.Ads ? "connected" : "",
-        ProfileId: account.ProfileId || "",
-        countryCode: account.countryCode || "",
-        country: account.country,
-        region: account.region,
-        products: [],
-        TotatProducts: []
-      }));
-
-      const sellerRecord = new Seller({
-        User: savedUser._id,
-        selling_partner_id: savedUser._id.toString(),
-        sellerAccount: sellerAccounts
-      });
-
-      await sellerRecord.save();
-    }
-
-    // Return success response with stored data
-    res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: "User details stored successfully",
-      data: userData,
-      userId: savedUser._id
+      message: 'Users retrieved successfully',
+      data: usersWithSellerAccounts
     });
 
   } catch (error) {
-    console.error("Error storing user details:", error);
-    
-    // Handle specific MongoDB errors
-    if (error.code === 11000) {
-      return res.status(409).json({
+    console.error('Error fetching all users:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching users',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Controller 2: Get User by Email or Phone
+ * Retrieves user details based on email or phone number
+ */
+const getUserByEmailOrPhone = async (req, res) => {
+  try {
+    const { email, phone } = req.query;
+
+    // Validate that at least one parameter is provided
+    if (!email && !phone) {
+      return res.status(400).json({
         success: false,
-        message: "Email already exists"
+        message: 'Either email or phone parameter is required'
       });
     }
 
-    res.status(500).json({
+    // Build query object
+    const query = {};
+    if (email) {
+      query.email = email.toLowerCase().trim();
+    }
+    if (phone) {
+      query.phone = phone.trim();
+    }
+
+    // Find user by email or phone
+    const user = await User.findOne(query).select('-password -OTP -resetPasswordCode');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prepare user data
+    const userData = {
+      firstName: user.firstName,
+      lastName: user.lastName,
+      Phone: user.phone,
+      Whatsapp: user.whatsapp,
+      email: user.email,
+      packageType: user.packageType,
+      sellerAccount: []
+    };
+
+    // Find seller accounts for this user
+    const sellerAccounts = await Seller.find({ User: user._id });
+    
+    if (sellerAccounts && sellerAccounts.length > 0) {
+      // Process seller accounts
+      sellerAccounts.forEach(seller => {
+        if (seller.sellerAccount && seller.sellerAccount.length > 0) {
+          seller.sellerAccount.forEach(account => {
+            userData.sellerAccount.push({
+              country: account.country || '',
+              region: account.region || '',
+              spAPI: !!(account.spiRefreshToken && account.spiRefreshToken.trim() !== ''),
+              Ads: !!(account.adsRefreshToken && account.adsRefreshToken.trim() !== '')
+            });
+          });
+        }
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'User retrieved successfully',
+      data: userData
+    });
+
+  } catch (error) {
+    console.error('Error fetching user by email or phone:', error);
+    return res.status(500).json({
       success: false,
-      message: "Internal server error while storing user details",
+      message: 'Internal server error while fetching user',
       error: error.message
     });
   }
 };
 
 module.exports = {
-  storeUserDetails
+  getAllUsers,
+  getUserByEmailOrPhone
 };

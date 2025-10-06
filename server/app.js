@@ -3,7 +3,7 @@ const express=require('express')
 const app=express();
 const path=require('path')
 const _dirname=path.resolve()
-
+ 
 const cors = require('cors')
 const cookieParser=require('cookie-parser')
 
@@ -30,12 +30,12 @@ const { initializeEmailReminderJob } = require('./Services/BackgroundJobs/sendEm
 
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
 app.use(cookieParser());
-
-// Stripe webhook route MUST come before express.json() middleware
-// because Stripe requires raw body for signature verification
+ 
+// Stripe webhook route MUST come before express.json() middleware_
+// because Stripe requires raw body for signature verification_
 app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
-
-// Apply JSON parsing for all other routes
+ 
+// Apply JSON parsing for all other routes_
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
 
@@ -53,9 +53,9 @@ app.use('/app/stripe',stripeRoute)
 app.use('/app/support',supportTicketRoute)
 app.use('/app/auth',adminRoute)
 app.use('/app',userDetailsRoute)
-
+ 
 app.use(express.static(path.join(_dirname,'/client/dist')))
-
+ 
 app.get('*',(req,res)=>{
     res.sendFile(path.resolve(_dirname,'client/dist/index.html'))
 })
@@ -72,36 +72,36 @@ dbConnect()
 
 const redisConnection = async () => {
     try {
-        // Connect to Redis once when app starts
+        _// Connect to Redis once when app starts_
         await connectRedis();
         logger.info('Redis initialized successfully');
-        
+       
     } catch (error) {
         logger.error('Failed to initalize redis:', error);
         process.exit(1);
     }
 };
-
+ 
 const initializeBackgroundJobs = async () => {
     try {
-        // Initialize background job scheduler
+        _// Initialize background job scheduler_
         await jobScheduler.initialize();
         logger.info('Background job scheduler initialized successfully');
-        
-        // Initialize email reminder cron job
+       
+        _// Initialize email reminder cron job_
         const emailJobInitialized = initializeEmailReminderJob();
         if (emailJobInitialized) {
             logger.info('Email reminder job initialized successfully');
         } else {
             logger.error('Failed to initialize email reminder job');
         }
-        
+       
     } catch (error) {
         logger.error('Failed to initialize background job scheduler:', error);
-        // Don't exit process for job scheduler failure, just log it
+        _// Don't exit process for job scheduler failure, just log it_
     }
 };
-
+ 
 redisConnection();
 initializeBackgroundJobs();
 
