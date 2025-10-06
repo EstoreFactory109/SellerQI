@@ -31,11 +31,11 @@ const { initializeEmailReminderJob } = require('./Services/BackgroundJobs/sendEm
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
 app.use(cookieParser());
  
-// Stripe webhook route MUST come before express.json() middleware_
-// because Stripe requires raw body for signature verification_
+// Stripe webhook route MUST come before express.json() middleware
+// because Stripe requires raw body for signature verification
 app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
  
-// Apply JSON parsing for all other routes_
+// Apply JSON parsing for all other routes
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
 
@@ -52,7 +52,7 @@ app.use('/app/profile',profileRoute)
 app.use('/app/stripe',stripeRoute)
 app.use('/app/support',supportTicketRoute)
 app.use('/app/auth',adminRoute)
-app.use('/app',userDetailsRoute)
+app.use('/app/getUserDetails',userDetailsRoute)
  
 app.use(express.static(path.join(_dirname,'/client/dist')))
  
@@ -72,7 +72,7 @@ dbConnect()
 
 const redisConnection = async () => {
     try {
-        _// Connect to Redis once when app starts_
+        // Connect to Redis once when app starts
         await connectRedis();
         logger.info('Redis initialized successfully');
        
@@ -84,11 +84,11 @@ const redisConnection = async () => {
  
 const initializeBackgroundJobs = async () => {
     try {
-        _// Initialize background job scheduler_
+        // Initialize background job scheduler
         await jobScheduler.initialize();
         logger.info('Background job scheduler initialized successfully');
        
-        _// Initialize email reminder cron job_
+        // Initialize email reminder cron job
         const emailJobInitialized = initializeEmailReminderJob();
         if (emailJobInitialized) {
             logger.info('Email reminder job initialized successfully');
@@ -98,7 +98,7 @@ const initializeBackgroundJobs = async () => {
        
     } catch (error) {
         logger.error('Failed to initialize background job scheduler:', error);
-        _// Don't exit process for job scheduler failure, just log it_
+        // Don't exit process for job scheduler failure, just log it
     }
 };
  
