@@ -1,14 +1,14 @@
-const mongoose=require('mongoose');
-const dbConsts=require('./config.js');
-const logger=require('../utils/Logger.js');
+const mongoose = require('mongoose');
+const dbConsts = require('./config.js');
+const logger = require('../utils/Logger.js');
 
-const dbConnect=async()=>{
+const dbConnect = async () => {
     try {
-        const connect=await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`,{
+        const connect = await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`, {
             connectTimeoutMS: 60000,  // Connection timeout (in milliseconds)
             socketTimeoutMS: 120000,   // Socket timeout (in milliseconds)
         })
-        if(connect){
+        if (connect) {
             logger.info('Connected to DB');
         }
     } catch (error) {
@@ -16,4 +16,4 @@ const dbConnect=async()=>{
     }
 }
 
-module.exports=dbConnect;
+module.exports = dbConnect;

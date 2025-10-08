@@ -28,13 +28,10 @@ const getAllUsers = async (req, res) => {
           Whatsapp: user.whatsapp,
           email: user.email,
           packageType: user.packageType,
-<<<<<<< HEAD
           subscriptionStatus: user.subscriptionStatus,
           isInTrialPeriod: user.isInTrialPeriod,
           trialEndsDate: user.trialEndsDate,
           isVerified: user.isVerified,
-=======
->>>>>>> 2dc9dbdec24c73d41ba705df10c52c7f4e4cde38
           sellerAccount: []
         };
 
@@ -120,13 +117,10 @@ const getUserByEmailOrPhone = async (req, res) => {
       Whatsapp: user.whatsapp,
       email: user.email,
       packageType: user.packageType,
-<<<<<<< HEAD
       subscriptionStatus: user.subscriptionStatus,
       isInTrialPeriod: user.isInTrialPeriod,
       trialEndsDate: user.trialEndsDate,
       isVerified: user.isVerified,
-=======
->>>>>>> 2dc9dbdec24c73d41ba705df10c52c7f4e4cde38
       sellerAccount: []
     };
 
@@ -168,8 +162,4 @@ const getUserByEmailOrPhone = async (req, res) => {
 module.exports = {
   getAllUsers,
   getUserByEmailOrPhone
-<<<<<<< HEAD
 };
-=======
-};
->>>>>>> 2dc9dbdec24c73d41ba705df10c52c7f4e4cde38

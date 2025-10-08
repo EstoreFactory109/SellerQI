@@ -66,7 +66,7 @@ dbConnect()
     logger.info('Connection to database established');
 })
 .catch((err)=>{
-    logger.error(Error in connecting to database: ${err});
+    logger.error(`Error in connecting to database: ${err}`);
 })
 
 
