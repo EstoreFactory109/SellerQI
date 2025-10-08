@@ -16,4 +16,8 @@ router.get('/all-users', getAllUsers);
  */
 router.get('/user', getUserByEmailOrPhone);
 
+<<<<<<< HEAD
 module.exports = router;
+=======
+module.exports = router;
+>>>>>>> 2dc9dbdec24c73d41ba705df10c52c7f4e4cde38

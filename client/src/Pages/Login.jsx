@@ -410,15 +410,6 @@ export default function Login() {
                     Sign up
                   </button>
                 </p>
-                <p className="text-gray-600 text-sm">
-                  Admin?{' '}
-                  <Link
-                    to="/admin-login"
-                    className="text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors"
-                  >
-                    Admin Login
-                  </Link>
-                </p>
               </div>
 
               {/* Error Message */}
