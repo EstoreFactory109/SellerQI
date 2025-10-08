@@ -97,6 +97,9 @@ const getUserByEmailOrPhone = async (req, res) => {
     }
     if (phone) {
       query.phone = phone.trim();
+      const countryCode = phone.split(' ')[0]; //["20","1234567890"]
+      const phoneNumber = phone.split(' ')[1];
+      query.phone = "+" + countryCode + " " + phoneNumber;//"+20 1234567890"
     }
 
     // Find user by email or phone
