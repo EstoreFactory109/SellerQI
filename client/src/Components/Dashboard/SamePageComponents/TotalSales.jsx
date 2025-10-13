@@ -35,6 +35,9 @@ const TotalSales = () => {
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+  
+  // Get sponsoredAdsMetrics from Redux store - same as other dashboards
+  const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
 
   const labelData = [
     "Gross Profit",
@@ -48,9 +51,13 @@ const TotalSales = () => {
   const grossProfit = Math.abs(grossProfitRaw);
   const totalSales = Number(info?.TotalWeeklySale || 0);
 
+  // Calculate PPC Spent using same logic as other dashboards - prioritize ProductAdsPayment, fallback to sponsoredAds
+  const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
+  const ppcSpent = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+
   const saleValues = [
     grossProfit,
-    Number(info?.accountFinance?.ProductAdsPayment || 0),
+    ppcSpent,
     Number(info?.accountFinance?.FBA_Fees || 0),
     Number(info?.accountFinance?.Storage || 0),
     Number(info?.accountFinance?.Refunds || 0),

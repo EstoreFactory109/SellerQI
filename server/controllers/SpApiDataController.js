@@ -110,6 +110,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const Region = req.region;
     const Country = req.country;
 
+    console.log("userId: ", userId);
+    console.log("Region: ", Region);
+    console.log("Country: ", Country);
+
     // ===== INITIALIZE LOGGING SESSION =====
     let loggingHelper = null;
     try {
@@ -291,6 +295,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         // Safer access to configuration objects
         const sellerAccounts = Array.isArray(getSellerData.sellerAccount) ? getSellerData.sellerAccount : [];
         const getSellerAccount = sellerAccounts.find(item => item && item.country === Country && item.region === Region);
+    
 
         if (!getSellerAccount) {
             logger.error("No seller account found for the specified region and country", { userId, Region, Country, availableAccounts: sellerAccounts.length });
@@ -315,6 +320,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
             logger.warn("Amazon Ads refresh token is missing - Ads functions will be skipped", { userId, Region, Country });
         }
 
+       
+
         // ===== AWS CREDENTIALS GENERATION WITH VALIDATION =====
         let credentials;
         if (loggingHelper) {
@@ -327,6 +334,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
             if (!credentials || typeof credentials !== 'object') {
                 throw new Error("Invalid credentials object returned");
             }
+
+            console.log("credentials: ", credentials);
 
             const requiredFields = ['AccessKey', 'SecretKey', 'SessionToken'];
             const missingFields = requiredFields.filter(field => !credentials[field]);

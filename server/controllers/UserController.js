@@ -35,13 +35,13 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
 
-   /* const checkUserIfExists = await getUserByEmail(email);
-
-
-    if (checkUserIfExists) {
-        logger.error(new ApiError(409, "User already exists"));
-        return res.status(409).json(new ApiResponse(409, "", "User already exists"));
-    }*/
+    /* const checkUserIfExists = await getUserByEmail(email);
+ 
+ 
+     if (checkUserIfExists) {
+         logger.error(new ApiError(409, "User already exists"));
+         return res.status(409).json(new ApiResponse(409, "", "User already exists"));
+     }*/
     let otp = generateOTP();
 
     if (!otp) {
@@ -49,19 +49,19 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
     }
 
-  /* let emailSent = await sendEmail(email, firstname, otp);
+     let emailSent = await sendEmail(email, firstname, otp);
+  
+      if (!emailSent) {
+          logger.error(new ApiError(500, "Internal server error in sending email"));
+          return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+      }
 
-    if (!emailSent) {
-        logger.error(new ApiError(500, "Internal server error in sending email"));
-        return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
-    }*/
+   /* let smsSent = await sendVerificationCode(otp, phone);
 
-    let smsSent = await sendVerificationCode(otp,phone);
-   
     if (!smsSent) {
         logger.error(new ApiError(500, "Internal server error in sending SMS"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
-    }
+    }   */
 
     let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
     // console.log(data);
@@ -180,8 +180,8 @@ const verifyUser = asyncHandler(async (req, res) => {
 
     const { email, otp } = req.body;
 
-    console.log("email: ",email);
-    console.log("otp: ",otp);
+    console.log("email: ", email);
+    console.log("otp: ", otp);
 
     if (!email || !otp) {
         logger.error(new ApiError(400, "Email or OTP is missing"));
@@ -291,18 +291,18 @@ const loginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
         }
 
-      /*  let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
+          let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
+  
+          if (!emailSent) {
+              logger.error(new ApiError(500, "Internal server error in sending email"));
+              return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+          }
 
-        if (!emailSent) {
-            logger.error(new ApiError(500, "Internal server error in sending email"));
-            return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
-        }*/
-
-        let smsSent = await sendVerificationCode(otp,checkUserIfExists.phone);
+        /*let smsSent = await sendVerificationCode(otp, checkUserIfExists.phone);
         if (!smsSent) {
             logger.error(new ApiError(500, "Internal server error in sending SMS"));
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
-        }
+        }*/
 
         checkUserIfExists.OTP = otp;
         await checkUserIfExists.save();
@@ -399,16 +399,15 @@ const loginUser = asyncHandler(async (req, res) => {
         if (!getSellerCentral) {
             AccessToken = await createAccessToken(checkUserIfExists._id);
             RefreshToken = await createRefreshToken(checkUserIfExists._id);
+            LocationToken = await createLocationToken("US", "NA");
             logger.error(new ApiError(404, "Seller central not found"));
-            return res.status(404)
-            .cookie("IBEXAccessToken", AccessToken, option)
-            .cookie("IBEXRefreshToken", RefreshToken, option)
-            .json(new ApiResponse(404, "", "Seller central not found"));
+        } else {
+            AccessToken = await createAccessToken(checkUserIfExists._id);
+            RefreshToken = await createRefreshToken(checkUserIfExists._id);
+            LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
         }
         // For regular users and enterpriseAdmin, get their own seller central
-        AccessToken = await createAccessToken(checkUserIfExists._id);
-        RefreshToken = await createRefreshToken(checkUserIfExists._id);
-        LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
+
     }
 
 
@@ -422,7 +421,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const option = getHttpsCookieOptions();
 
-    
+
 
 
     // Prepare response data
@@ -541,7 +540,7 @@ const switchAccount = asyncHandler(async (req, res) => {
 
     const { country, region } = req.body;
 
-    console.log("from switchAccount: ",userId, country, region);
+    console.log("from switchAccount: ", userId, country, region);
 
     // Check if admin id exists
 
@@ -550,25 +549,25 @@ const switchAccount = asyncHandler(async (req, res) => {
         logger.error(new ApiError(400, "country, and region are required"));
         return res.status(400).json(new ApiResponse(400, "", "userId, country, and region are required"));
     }
-        
 
-        let AccessToken = await createAccessToken(userId);
-        let RefreshToken = await createRefreshToken(userId);
-        let LocationToken = await createLocationToken(country, region);
 
-        if (!AccessToken || !RefreshToken || !LocationToken) {
-            logger.error(new ApiError(500, "Internal server error in creating tokens"));
-            return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
-        }
+    let AccessToken = await createAccessToken(userId);
+    let RefreshToken = await createRefreshToken(userId);
+    let LocationToken = await createLocationToken(country, region);
 
-        const option = getHttpsCookieOptions();
+    if (!AccessToken || !RefreshToken || !LocationToken) {
+        logger.error(new ApiError(500, "Internal server error in creating tokens"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
+    }
 
-        return res.status(200)
-            .cookie("IBEXAccessToken", AccessToken, option)
-            .cookie("IBEXRefreshToken", RefreshToken, option)
-            .cookie("IBEXLocationToken", LocationToken, option)
-            .json(new ApiResponse(200, "", "Account switched successfully"));
-    
+    const option = getHttpsCookieOptions();
+
+    return res.status(200)
+        .cookie("IBEXAccessToken", AccessToken, option)
+        .cookie("IBEXRefreshToken", RefreshToken, option)
+        .cookie("IBEXLocationToken", LocationToken, option)
+        .json(new ApiResponse(200, "", "Account switched successfully"));
+
 });
 
 const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
@@ -915,16 +914,16 @@ const googleLoginUser = asyncHandler(async (req, res) => {
 
 // Google OAuth Register Handler
 const googleRegisterUser = asyncHandler(async (req, res) => {
-    const { idToken,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate } = req.body;
+    const { idToken, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } = req.body;
 
-    
+
 
     if (!idToken) {
         logger.error(new ApiError(400, "Google ID token is missing"));
         return res.status(400).json(new ApiResponse(400, "", "Google ID token is missing"));
     }
 
-    if(!packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate){
+    if (!packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate) {
         logger.error(new ApiError(400, "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
     }
@@ -1225,7 +1224,7 @@ const activateFreeTrial = asyncHandler(async (req, res) => {
 // Check and update trial status endpoint
 const checkTrialStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
-    
+
     if (!userId) {
         logger.error(new ApiError(401, "User ID not found"));
         return res.status(401).json(new ApiResponse(401, "", "User ID not found"));
@@ -1233,7 +1232,7 @@ const checkTrialStatus = asyncHandler(async (req, res) => {
 
     try {
         const user = await UserModel.findById(userId);
-        
+
         if (!user) {
             logger.error(new ApiError(404, "User not found"));
             return res.status(404).json(new ApiResponse(404, "", "User not found"));
@@ -1493,20 +1492,25 @@ const getAdminBillingInfo = asyncHandler(async (req, res) => {
 });
 
 const resendOtp = asyncHandler(async (req, res) => {
-    const { email,phone } = req.body;
-    
+    const { email, phone } = req.body;
+
     const user = await UserModel.findOne({ email });
     if (!user) {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
-    const otp =  generateOTP();
+    const otp = generateOTP();
 
     user.OTP = otp;
     await user.save();
-   const smsSent = await sendVerificationCode(otp,phone);
-   if(!smsSent){
-    return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
-   }
+   /* const smsSent = await sendVerificationCode(otp, phone);
+    if (!smsSent) {
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }*/
+
+    let emailSent = await sendEmail(email, user.firstName, otp);
+    if (!emailSent) {
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
+    }
 
     return res.status(200).json(new ApiResponse(200, { otp }, "OTP sent successfully"));
 });
