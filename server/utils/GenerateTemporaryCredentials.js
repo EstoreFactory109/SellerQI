@@ -26,8 +26,6 @@ const getTemporaryCredentials = async (Region) => {
     try {
         const response = await stsClient.send(command);
 
-       // console.log(response);
-
         const data = {
             AccessKey: response.Credentials.AccessKeyId,
             SecretKey: response.Credentials.SecretAccessKey,

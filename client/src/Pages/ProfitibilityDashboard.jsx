@@ -90,6 +90,9 @@ const ProfitabilityDashboard = () => {
   // Get dateWiseTotalCosts from Redux store - same as PPC Dashboard
   const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
   
+  // Get sponsoredAdsMetrics from Redux store - same as PPC Dashboard
+  const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  
   // Filter dateWiseTotalCosts based on selected date range - same logic as PPC Dashboard
   const filteredDateWiseTotalCosts = useMemo(() => {
     if (!dateWiseTotalCosts.length) return [];
@@ -219,10 +222,13 @@ const ProfitabilityDashboard = () => {
       console.log('=== Profitability Dashboard: Using filtered spend data ===');
       console.log('Filtered ad spend:', adSpend);
     } else {
-      // Use default spend calculation when no date range selected (same as PPC Dashboard)
-      adSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
-      console.log('=== Profitability Dashboard: Using default spend data ===');
-      console.log('Default ad spend:', adSpend);
+      // Use same logic as PPC Dashboard - prioritize ProductAdsPayment, fallback to sponsoredAds
+      const actualPPCSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
+      adSpend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+      console.log('=== Profitability Dashboard: Using default spend data (matching PPC Dashboard) ===');
+      console.log('ProductAdsPayment:', actualPPCSpend);
+      console.log('sponsoredAdsMetrics?.totalCost:', sponsoredAdsMetrics?.totalCost || 0);
+      console.log('Final ad spend used:', adSpend);
     }
     
     // Calculate total overall spend including all Amazon fees (using calculated adSpend)
@@ -249,7 +255,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {

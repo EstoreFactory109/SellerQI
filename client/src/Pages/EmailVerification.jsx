@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Clock, RotateCcw, ArrowRight, Loader2 } from 'lucide-react';
+import { Mail, Clock, RotateCcw, ArrowRight, Loader2 } from 'lucide-react';
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
 import { clearAuthCache } from '../utils/authCoordinator.js';
@@ -167,7 +167,7 @@ const OtpVerification = () => {
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
               className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4"
             >
-              <Phone className="w-8 h-8 text-white" />
+              <Mail className="w-8 h-8 text-white" />
             </motion.div>
             
             <motion.h1
@@ -176,7 +176,7 @@ const OtpVerification = () => {
               transition={{ delay: 0.3 }}
               className="text-2xl font-bold text-gray-900 mb-2"
             >
-              Verify Your Phone
+              Verify Your Email
             </motion.h1>
             
             <motion.p
@@ -185,9 +185,9 @@ const OtpVerification = () => {
               transition={{ delay: 0.4 }}
               className="text-gray-600 text-sm"
             >
-              OTP has been sent to your registered phone number:
+              OTP has been sent to your registered email:
               <br />
-              <span className="font-semibold text-gray-900">{phone || 'your phone'}</span>
+              <span className="font-semibold text-gray-900">{email || 'your email'}</span>
             </motion.p>
           </div>
 
