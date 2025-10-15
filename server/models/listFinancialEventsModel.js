@@ -7,15 +7,15 @@ const listFinancialEventsSchema = new mongoose.Schema(
     User:{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
-        require:true
+        required:true
     },
     region:{
         type:String,
-        require:true
+        required:true
     },
     country:{
         type:String,
-        require:true
+        required:true
     },
     Total_Sales:{
         type:String,

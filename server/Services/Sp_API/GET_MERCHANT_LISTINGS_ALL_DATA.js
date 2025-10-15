@@ -120,21 +120,18 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
         let reportDocumentId = null;
-        let retries = 30;
-
         
-        while (!reportDocumentId && retries > 0) {
-            logger.info(`⏳ Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000));
-            reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
-            if (reportDocumentId === false) {
-                return false;
-            }
-            retries--;
+        // Check report status once without retries
+        logger.info(`⏳ Checking report status...`);
+        reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
+        
+        if (reportDocumentId === false) {
+            logger.error("Report failed or was cancelled");
+            return false;
         }
-
+        
         if (!reportDocumentId) {
-            logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
+            logger.error("Report is still processing or has no data");
             return false;
         }
 

@@ -204,71 +204,62 @@ class TokenManager {
         };
     }
 
-    // Execute function with automatic token refresh on unauthorized errors
-    async executeWithTokenRefresh(fn, params, userId, spRefreshToken, adsRefreshToken, maxRetries = 2) {
-        let lastError;
+    // Execute function without retry logic
+    async executeWithTokenRefresh(fn, params, userId, spRefreshToken, adsRefreshToken) {
+        console.log(`🔄 TokenManager: Executing function for user ${userId} (no retries)`);
         
-        console.log(`🔄 TokenManager: Executing function for user ${userId} (maxRetries: ${maxRetries})`);
-        
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                console.log(`🔄 TokenManager: Attempt ${attempt + 1}/${maxRetries + 1} for user ${userId}`);
+        try {
+            console.log(`🔄 TokenManager: Getting valid tokens for user ${userId}`);
+            
+            // Get valid tokens (with proactive refresh if needed)
+            const validTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
+            
+            console.log(`✅ TokenManager: Got valid tokens for user ${userId}`);
+            
+            // Update params with fresh tokens if they contain token fields
+            const updatedParams = this.updateParamsWithTokens(params, validTokens);
+            
+            // Execute the function
+            const result = await fn(updatedParams);
+            console.log(`✅ TokenManager: Function executed successfully for user ${userId}`);
+            return result;
+            
+        } catch (error) {
+            console.log(`❌ TokenManager: Function failed for user ${userId}:`, error.message);
+            
+            // Check if this is an unauthorized error
+            const isUnauthorized = this.isUnauthorizedError(error);
+            console.log(`🔍 TokenManager: Is unauthorized error: ${isUnauthorized}`);
+            
+            // If it's an unauthorized error, try to refresh tokens once
+            if (isUnauthorized) {
+                console.log(`⚠️ TokenManager: Unauthorized error detected, refreshing tokens...`);
                 
-                // Get valid tokens (with proactive refresh if needed)
-                const validTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
-                
-                console.log(`✅ TokenManager: Got valid tokens for user ${userId} (attempt ${attempt + 1})`);
-                
-                // Update params with fresh tokens if they contain token fields
-                const updatedParams = this.updateParamsWithTokens(params, validTokens);
-                
-                // Execute the function
-                const result = await fn(updatedParams);
-                console.log(`✅ TokenManager: Function executed successfully for user ${userId} on attempt ${attempt + 1}`);
-                return result;
-                
-            } catch (error) {
-                lastError = error;
-                console.log(`❌ TokenManager: Function failed for user ${userId} on attempt ${attempt + 1}:`, error.message);
-                
-                // Check if this is an unauthorized error
-                const isUnauthorized = this.isUnauthorizedError(error);
-                console.log(`🔍 TokenManager: Is unauthorized error: ${isUnauthorized} (attempt ${attempt + 1})`);
-                
-                // If it's an unauthorized error and we haven't exceeded retries, refresh tokens and retry
-                if (isUnauthorized && attempt < maxRetries) {
-                    console.log(`⚠️ TokenManager: Unauthorized error detected on attempt ${attempt + 1}, refreshing tokens and retrying...`);
+                try {
+                    console.log(`🔄 TokenManager: Starting token refresh for user ${userId}...`);
+                    await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
+                    console.log(`✅ TokenManager: Token refresh completed for user ${userId}`);
                     
-                    try {
-                        console.log(`🔄 TokenManager: Starting token refresh for user ${userId}...`);
-                        await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
-                        console.log(`✅ TokenManager: Token refresh completed for user ${userId}`);
-                        
-                        // Add a small delay before retry to allow token propagation
-                        console.log(`⏳ TokenManager: Waiting 1 second before retry for user ${userId}...`);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        
-                        console.log(`🔄 TokenManager: Retrying function execution for user ${userId}...`);
-                        continue;
-                    } catch (refreshError) {
-                        console.error(`❌ TokenManager: Token refresh failed for user ${userId}:`, refreshError.message);
-                        logger.error(`Token refresh failed: ${refreshError.message}`);
-                        throw refreshError;
-                    }
-                } else {
-                    // Not an unauthorized error or max retries exceeded
-                    if (isUnauthorized) {
-                        console.log(`❌ TokenManager: Max retries exceeded for unauthorized error (user ${userId})`);
-                    } else {
-                        console.log(`❌ TokenManager: Non-unauthorized error, not retrying (user ${userId})`);
-                    }
-                    throw error;
+                    // Get updated tokens and try once more
+                    const updatedTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
+                    const updatedParams = this.updateParamsWithTokens(params, updatedTokens);
+                    
+                    console.log(`🔄 TokenManager: Retrying function execution with refreshed tokens for user ${userId}...`);
+                    const result = await fn(updatedParams);
+                    console.log(`✅ TokenManager: Function executed successfully after token refresh for user ${userId}`);
+                    return result;
+                    
+                } catch (refreshError) {
+                    console.error(`❌ TokenManager: Token refresh failed for user ${userId}:`, refreshError.message);
+                    logger.error(`Token refresh failed: ${refreshError.message}`);
+                    throw refreshError;
                 }
+            } else {
+                // Not an unauthorized error, throw the original error
+                console.log(`❌ TokenManager: Non-unauthorized error, not retrying (user ${userId})`);
+                throw error;
             }
         }
-        
-        console.log(`❌ TokenManager: All attempts failed for user ${userId}`);
-        throw lastError;
     }
 
     // Update function parameters with fresh tokens

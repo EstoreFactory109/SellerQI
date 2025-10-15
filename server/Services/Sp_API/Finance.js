@@ -1,3 +1,9 @@
+// ===== FINANCE FUNCTION WITH RETRY LOGIC DISABLED =====
+// The following sections have been commented out:
+// - Retry logic in API requests (makeAPIRequestWithRetry)
+// - Rate limiting delays and request counting
+// - Exponential backoff retry mechanisms
+
 const axios = require('axios');
 const aws4 = require('aws4');
 const listFinancialEvents = require('../../models/listFinancialEventsModel.js');
@@ -20,30 +26,14 @@ const RATE_LIMIT = {
 // Helper function for delays
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper function to make API request with retry logic
-async function makeAPIRequestWithRetry(url, headers, retryAttempt = 0) {
+// Helper function to make API request without retry logic
+async function makeAPIRequest(url, headers) {
     try {
         const response = await axios.get(url, { headers });
         return response;
     } catch (error) {
-        // Handle rate limit error (429)
-        if (error.response?.status === 429 && retryAttempt < RATE_LIMIT.MAX_RETRY_ATTEMPTS) {
-            const retryAfter = error.response.headers['retry-after'];
-            const baseDelay = retryAfter ? parseInt(retryAfter) * 1000 : RATE_LIMIT.MIN_REQUEST_INTERVAL;
-            
-            // Exponential backoff with jitter
-            const backoffDelay = Math.min(
-                baseDelay * Math.pow(2, retryAttempt) + Math.random() * 1000,
-                RATE_LIMIT.MAX_BACKOFF_DELAY
-            );
-            
-            logger.warn(`Rate limit hit. Retry attempt ${retryAttempt + 1}/${RATE_LIMIT.MAX_RETRY_ATTEMPTS}. Waiting ${backoffDelay/1000}s...`);
-            await delay(backoffDelay);
-            
-            return makeAPIRequestWithRetry(url, headers, retryAttempt + 1);
-        }
-        
-        // For other errors or max retries reached
+        // Log error and throw immediately without retries
+        logger.error(`API request failed: ${error.message}`);
         throw error;
     }
 }
@@ -76,10 +66,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
     
    
-    // Rate limiting state
-    let requestCount = 0;
-    let lastRequestTime = 0;
-    
     // Collect all transactions
     let allTransactions = [];
     let nextToken = null;
@@ -87,19 +73,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
     try {
         do {
-            requestCount++;
             totalPages++;
-            
-            // Rate limiting logic
-            if (requestCount > RATE_LIMIT.BURST_LIMIT) {
-                const timeSinceLastRequest = Date.now() - lastRequestTime;
-                const requiredDelay = RATE_LIMIT.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
-                
-                if (requiredDelay > 0) {
-                    logger.info(`Rate limiting: Waiting ${requiredDelay}ms before request #${requestCount}`);
-                    await delay(requiredDelay);
-                }
-            }
             
             // Build query parameters
             const queryParams = new URLSearchParams({
@@ -133,12 +107,9 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 region: 'us-east-1'
             });
 
-            // Record request time
-            lastRequestTime = Date.now();
-            
-            // Make API request with retry logic
-            logger.info(`Making API request #${requestCount} (Page ${totalPages})`);
-            const response = await makeAPIRequestWithRetry(
+            // Make API request without retry logic
+            logger.info(`Making API request (Page ${totalPages})`);
+            const response = await makeAPIRequest(
                 `https://${request.host}${request.path}`,
                 request.headers
             );
@@ -165,8 +136,9 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
             
         } while (nextToken);
 
+        console.log("🔍 Debug - All transactions:", allTransactions);
+
         logger.info(`Financial events fetch completed:`, {
-            totalRequests: requestCount,
             totalPages: totalPages,
             totalTransactions: allTransactions.length
         });
@@ -195,13 +167,38 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 productWiseSales: []
             });
 
+            // Update user record with empty finance data
+            try {
+                const getUser = await UserModel.findById(userId);
+                if (getUser) {
+                    getUser.listFinancialEvents = emptyFinanceData._id;
+                    await getUser.save();
+                    logger.info("User record updated with empty financial events ID");
+                }
+            } catch (userUpdateError) {
+                logger.error(`Failed to update user with empty financial events ID: ${userUpdateError.message}`);
+                // Continue - non-critical error
+            }
+
             return emptyFinanceData;
         }
 
         // Calculate fees
-        const dataObj = calculateAmazonFees(allTransactions,reportResult?.grossRevenue,reportResult?.productWiseSales);
-
+        console.log("🔍 Debug - Before calculateAmazonFees:", {
+            transactionCount: allTransactions.length,
+            hasReportResult: !!reportResult,
+            grossRevenue: reportResult?.grossRevenue,
+            hasProductWiseSales: !!reportResult?.productWiseSales
+        });
         
+        const dataObj = calculateAmazonFees(allTransactions, reportResult?.grossRevenue, reportResult?.productWiseSales);
+
+        console.log("🔍 Debug - After calculateAmazonFees:", {
+            dataObjKeys: Object.keys(dataObj),
+            totalSales: dataObj.Total_Sales,
+            grossProfit: dataObj.Gross_Profit,
+            productCount: dataObj.ProductWiseSales?.length || 0
+        });
       
         // Log summary
         logger.info("Amazon Fees Calculated:", {
@@ -215,6 +212,19 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         let addToDb, addToSalesDb;
         
         try {
+            console.log("🔍 Debug - Saving to listFinancialEvents with data:", {
+                User: userId,
+                region: region,
+                country: country,
+                Total_Sales: dataObj.Total_Sales,
+                Gross_Profit: dataObj.Gross_Profit,
+                ProductAdsPayment: dataObj.ProductAdsPayment,
+                FBA_Fees: dataObj.FBA_Fees,
+                Amazon_Charges: dataObj.Amazon_Charges,
+                Refunds: dataObj.Refunds,
+                Storage: dataObj.Storage,
+            });
+
             addToDb = await listFinancialEvents.create({
                 User: userId,
                 region: region,
@@ -228,6 +238,12 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 Storage: dataObj.Storage,
             });
 
+            console.log("🔍 Debug - listFinancialEvents saved successfully:", {
+                id: addToDb._id,
+                totalSales: addToDb.Total_Sales,
+                grossProfit: addToDb.Gross_Profit
+            });
+
             addToSalesDb = await ProductWiseSales.create({
                 User: userId,
                 region: region,
@@ -235,8 +251,14 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 productWiseSales: dataObj.ProductWiseSales
             });
             
+            console.log("🔍 Debug - ProductWiseSales saved successfully:", {
+                id: addToSalesDb._id,
+                productCount: addToSalesDb.productWiseSales?.length || 0
+            });
+            
             logger.info("Data saved to database successfully");
         } catch (dbError) {
+            console.error("🔍 Debug - Database save error:", dbError);
             logger.error(`Database operation failed: ${dbError.message}`);
             throw new ApiError(500, "Failed to save financial data to database");
         }
@@ -299,6 +321,7 @@ const calculateAmazonFees = (dataArray,Sales,ProductWiseSales) => {
     if (!Array.isArray(dataArray) || dataArray.length === 0) {
         logger.warn("No transactions to process");
         return {
+            Total_Sales: "0.00",
             Gross_Profit: "0.00",
             ProductAdsPayment: "0.00",
             FBA_Fees: "0.00",

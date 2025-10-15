@@ -53,9 +53,14 @@ const userModel = require('../models/userModel.js');
 
 
 const addNewAccountHistory = async (userId, country, region) => {
+    console.log("🔍 Debug - addNewAccountHistory received parameters:", { userId, country, region, types: { userId: typeof userId, country: typeof country, region: typeof region } });
+    
     if (!userId || !country || !region) {
+        console.error("🔍 Debug - Missing parameters:", { userId: !!userId, country: !!country, region: !!region });
         throw new Error('User id, country and region are required')
     }
+
+    console.log("🔍 Debug - Adding new account history for user:", userId, country, region);
 
     const getAnalyseData = await Analyse(userId, country, region)
 
@@ -506,6 +511,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
             merchantListingsData = null;
         }
 
+        // Debug: Log the final state of merchant listings data
+        console.log("🔍 Debug - Final merchant listings data state:", {
+            hasData: !!merchantListingsData,
+            dataType: typeof merchantListingsData,
+            isNull: merchantListingsData === null,
+            isUndefined: merchantListingsData === undefined
+        });
+
         // HARDCODED FOR KEYWORDS TESTING - REPLACE WITH ACTUAL DATA WHEN NEEDED
         const asinArray = [];
         const skuArray = [];
@@ -514,9 +527,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
         // ===== SAFE DATA EXTRACTION WITH VALIDATION =====
         try {
             // Safer access to merchant listings data with detailed validation
-            const merchantSellerAccounts = Array.isArray(merchantListingsData.sellerAccount) ? merchantListingsData.sellerAccount : [];
+            const merchantSellerAccounts = (merchantListingsData && Array.isArray(merchantListingsData.sellerAccount)) ? merchantListingsData.sellerAccount : [];
 
-            if (merchantSellerAccounts.length === 0) {
+            if (!merchantListingsData) {
+                logger.warn("Merchant listings data is null - merchant listings function likely failed or was skipped", { userId });
+                // Continue with empty arrays rather than failing
+            } else if (merchantSellerAccounts.length === 0) {
                 logger.warn("No seller accounts found in merchant listings data", { userId });
                 // Continue with empty arrays rather than failing
             } else {
@@ -1634,6 +1650,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
 
             try {
+                console.log("🔍 Debug - Calling addNewAccountHistory with:", { userId, Country, Region });
                 const addAccountHistoryData = await addNewAccountHistory(userId,Country,Region);
 
                 if(!addAccountHistoryData){
@@ -1678,6 +1695,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
             }
 
             try {
+                console.log("🔍 Debug - Calling addNewAccountHistory with:", { userId, Country, Region });
                 const addAccountHistoryData = await addNewAccountHistory(userId,Country,Region);
 
                 if(!addAccountHistoryData){
