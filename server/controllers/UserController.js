@@ -63,7 +63,7 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
     }   */
 
-    let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
+    let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, "PRO", false, "active", trialEndsDate);
     // console.log(data);
 
     if (!data) {
@@ -1050,9 +1050,9 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             isVerified: true, // Google accounts are pre-verified
             allTermsAndConditionsAgreed: true, // Assuming Google signup implies agreement
             OTP: null,
-            packageType: packageType,
-            isInTrialPeriod: isInTrialPeriod,
-            subscriptionStatus: subscriptionStatus,
+            packageType: "PRO",
+            isInTrialPeriod: false,
+            subscriptionStatus: "active",
             trialEndsDate: trialEndsDate
         });
 
