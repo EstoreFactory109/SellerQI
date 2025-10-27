@@ -12,6 +12,16 @@ const { sendAnalysisReadyEmail } = require('../Services/Email/SendAnalysisReadyE
 const { getUserById } = require('../Services/User/userServices.js');
 const LoggingHelper = require('../utils/LoggingHelper.js');
 
+// Helper function to add timeout to promises
+const withTimeout = (promise, timeoutMs, operationName) => {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+};
+
 const ListingItemsModel = require('../models/GetListingItemsModel.js');
 
 // RESTORED - ALL SP-API FUNCTIONS
@@ -50,6 +60,10 @@ const { addAccountHistory } = require('../Services/History/addAccountHistory.js'
 const {Analyse} = require('./AnalysingController.js');
 const axios = require('axios');
 const userModel = require('../models/userModel.js');
+
+// REIMBURSEMENT FUNCTIONS
+const GET_FBA_REIMBURSEMENT_DATA = require('../Services/Sp_API/GET_FBA_REIMBURSEMENT_DATA.js');
+const { mergeReimbursementData, calculateShipmentDiscrepancies } = require('../Services/Calculations/EnhancedReimbursement.js');
 
 
 const addNewAccountHistory = async (userId, country, region) => {
@@ -114,10 +128,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
-
-    console.log("userId: ", userId);
-    console.log("Region: ", Region);
-    console.log("Country: ", Country);
 
     // ===== INITIALIZE LOGGING SESSION =====
     let loggingHelper = null;
@@ -300,7 +310,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
         // Safer access to configuration objects
         const sellerAccounts = Array.isArray(getSellerData.sellerAccount) ? getSellerData.sellerAccount : [];
         const getSellerAccount = sellerAccounts.find(item => item && item.country === Country && item.region === Region);
-    
 
         if (!getSellerAccount) {
             logger.error("No seller account found for the specified region and country", { userId, Region, Country, availableAccounts: sellerAccounts.length });
@@ -325,8 +334,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
             logger.warn("Amazon Ads refresh token is missing - Ads functions will be skipped", { userId, Region, Country });
         }
 
-       
-
         // ===== AWS CREDENTIALS GENERATION WITH VALIDATION =====
         let credentials;
         if (loggingHelper) {
@@ -339,8 +346,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
             if (!credentials || typeof credentials !== 'object') {
                 throw new Error("Invalid credentials object returned");
             }
-
-            console.log("credentials: ", credentials);
 
             const requiredFields = ['AccessKey', 'SecretKey', 'SessionToken'];
             const missingFields = requiredFields.filter(field => !credentials[field]);
@@ -483,15 +488,25 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 });
             }
             try {
-                merchantListingsData = await tokenManager.wrapSpApiFunction(
-                    GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
-                )(AccessToken, marketplaceIds, userId, Country, Region, Base_URI);
+                // Add timeout protection for merchant listings (5 minutes max)
+                merchantListingsData = await withTimeout(
+                    tokenManager.wrapSpApiFunction(
+                        GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
+                    )(AccessToken, marketplaceIds, userId, Country, Region, Base_URI),
+                    300000, // 5 minutes
+                    'GET_MERCHANT_LISTINGS_ALL_DATA'
+                );
 
                 if (!merchantListingsData) {
                     throw new Error("Merchant listings API returned null/false");
                 }
 
                 console.log("✅ Merchant listings data fetched successfully");
+                console.log("🔍 Debug - Merchant listings data structure:", {
+                    hasSellerAccount: merchantListingsData?.sellerAccount !== undefined,
+                    sellerAccountType: Array.isArray(merchantListingsData?.sellerAccount) ? 'array' : typeof merchantListingsData?.sellerAccount,
+                    sellerAccountLength: merchantListingsData?.sellerAccount?.length || 0
+                });
                 if (loggingHelper) {
                     const recordCount = merchantListingsData?.sellerAccount?.length || 0;
                     loggingHelper.logFunctionSuccess('GET_MERCHANT_LISTINGS_ALL_DATA', merchantListingsData, {
@@ -533,18 +548,25 @@ const getSpApiData = asyncHandler(async (req, res) => {
         const skuArray = [];
         const ProductDetails = [];
 
+        console.log("🔄 Starting data extraction from merchant listings...");
+
         // ===== SAFE DATA EXTRACTION WITH VALIDATION =====
         try {
             // Safer access to merchant listings data with detailed validation
+            console.log("🔍 Debug - Checking merchant listings data structure...");
             const merchantSellerAccounts = (merchantListingsData && Array.isArray(merchantListingsData.sellerAccount)) ? merchantListingsData.sellerAccount : [];
+            console.log(`🔍 Debug - Found ${merchantSellerAccounts.length} seller accounts`);
 
             if (!merchantListingsData) {
                 logger.warn("Merchant listings data is null - merchant listings function likely failed or was skipped", { userId });
+                console.log("⚠️ Continuing with empty arrays due to null merchant data");
                 // Continue with empty arrays rather than failing
             } else if (merchantSellerAccounts.length === 0) {
                 logger.warn("No seller accounts found in merchant listings data", { userId });
+                console.log("⚠️ Continuing with empty arrays due to no seller accounts");
                 // Continue with empty arrays rather than failing
             } else {
+                console.log(`🔍 Debug - Looking for seller account with Country: ${Country}, Region: ${Region}`);
                 const SellerAccount = merchantSellerAccounts.find(item => item && item.country === Country && item.region === Region);
 
                 if (!SellerAccount) {
@@ -554,6 +576,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
                         Region,
                         availableAccounts: merchantSellerAccounts.map(acc => ({ country: acc?.country, region: acc?.region }))
                     });
+                    console.log("⚠️ No matching seller account found - continuing with empty arrays");
                     // Continue with empty arrays rather than failing
                 } else if (!Array.isArray(SellerAccount.products)) {
                     logger.warn("Products array is missing or invalid in seller account", {
@@ -561,8 +584,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
                         hasProducts: !!SellerAccount.products,
                         productsType: typeof SellerAccount.products
                     });
+                    console.log("⚠️ Products array is invalid - continuing with empty arrays");
                     // Continue with empty arrays rather than failing
                 } else {
+                    console.log(`🔍 Debug - Found seller account with ${SellerAccount.products.length} products`);
+                    console.log("🔄 Starting product filtering and validation...");
+                    
                     // Filter products and extract ASINs and SKUs safely with validation
                     const activeProducts = SellerAccount.products.filter(product => {
                         // Comprehensive product validation
@@ -590,8 +617,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
                     console.log(`✅ Found ${activeProducts.length} valid active products out of ${SellerAccount.products.length} total products`);
 
+                    console.log("🔄 Extracting ASINs, SKUs, and product details...");
                     // Extract data from validated products
-                    activeProducts.forEach(product => {
+                    activeProducts.forEach((product, index) => {
+                        if (index % 100 === 0 && index > 0) {
+                            console.log(`🔄 Processing product ${index + 1}/${activeProducts.length}...`);
+                        }
                         asinArray.push(product.asin.trim());
                         skuArray.push(product.sku.trim());
 
@@ -609,8 +640,15 @@ const getSpApiData = asyncHandler(async (req, res) => {
                             price: price
                         });
                     });
+                    console.log(`✅ Data extraction completed: ${asinArray.length} products processed`);
                 }
             }
+
+            console.log("🔍 Debug - Data extraction summary:", {
+                asinCount: asinArray.length,
+                skuCount: skuArray.length,
+                productDetailsCount: ProductDetails.length
+            });
 
             // ===== ARRAY CORRESPONDENCE VALIDATION =====
             if (asinArray.length !== skuArray.length) {
@@ -654,8 +692,12 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 stack: extractionError.stack,
                 userId
             });
+            console.log("❌ CRITICAL ERROR in data extraction:", extractionError.message);
+            console.log("Stack trace:", extractionError.stack);
             return res.status(500).json(new ApiError(500, `Data extraction failed: ${extractionError.message}`));
         }
+
+        console.log("✅ Data extraction phase completed successfully");
 
         // Calculate dynamic dates
         const now = new Date();
@@ -708,6 +750,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
             hasSellerId: !!dataToSend.SellerId,
             asinCount: asinArray.length
         });
+
+        console.log("✅ All pre-processing steps completed. Ready to start API calls.");
 
         // ===== FIRST BATCH OF API CALLS WITH STRUCTURED ERROR HANDLING =====
         console.log("🔄 Starting first batch of API calls...");
@@ -1192,6 +1236,14 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 )(dataToSend, userId, Base_URI, Country, Region)
             );
             thirdBatchServiceNames.push("Financial Events");
+
+            // REIMBURSEMENT: Fetch FBA reimbursement data from Amazon
+            thirdBatchPromises.push(
+                tokenManager.wrapDataToSendFunction(
+                    GET_FBA_REIMBURSEMENT_DATA, userId, RefreshToken, AdsRefreshToken
+                )(dataToSend, userId, Base_URI, Country, Region)
+            );
+            thirdBatchServiceNames.push("Reimbursement Data");
         }
 
         // Ads functions (require AdsAccessToken)
@@ -1222,6 +1274,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         let brandData = { success: false, data: null, error: "SP-API token not available" };
         let feesResult = { success: false, data: null, error: "SP-API token not available" };
         let financeDataFromAPI = { success: false, data: null, error: "SP-API token not available" };
+        let reimbursementDataFromAPI = { success: false, data: null, error: "SP-API token not available" };
         let adGroupsData = { success: false, data: null, error: "Ads token not available" };
 
         let thirdResultIndex = 0;
@@ -1238,12 +1291,47 @@ const getSpApiData = asyncHandler(async (req, res) => {
             thirdResultIndex++;
             financeDataFromAPI = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
             thirdResultIndex++;
+            reimbursementDataFromAPI = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+            thirdResultIndex++;
         }
 
         // Process Ads results if token was available
         if (AdsAccessToken) {
             adGroupsData = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
             thirdResultIndex++;
+        }
+
+        // ===== PROCESS REIMBURSEMENT DATA =====
+        console.log("🔄 Processing reimbursement data...");
+        
+        try {
+            // Calculate potential claims from shipment discrepancies
+            let potentialClaims = [];
+            if (shipment.success && shipment.data && shipment.data.shipmentData && Array.isArray(ProductDetails)) {
+                potentialClaims = calculateShipmentDiscrepancies(
+                    shipment.data.shipmentData,
+                    ProductDetails
+                );
+                console.log(`✅ Found ${potentialClaims.length} potential reimbursement claims from shipment discrepancies`);
+            }
+
+            // Merge reimbursement data from API and potential claims
+            if (reimbursementDataFromAPI.success || potentialClaims.length > 0) {
+                await mergeReimbursementData(
+                    userId,
+                    Country,
+                    Region,
+                    potentialClaims,
+                    reimbursementDataFromAPI.success ? reimbursementDataFromAPI.data : null
+                );
+                console.log(`✅ Reimbursement data merged and saved successfully`);
+            }
+        } catch (reimbursementError) {
+            logger.error("Error processing reimbursement data", {
+                error: reimbursementError.message,
+                userId
+            });
+            // Continue without failing the entire process
         }
 
         // ===== VALIDATE AND TRANSFORM FINANCE DATA =====
@@ -1552,6 +1640,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
             { name: "Brand Data", result: brandData },
             { name: "Amazon Fees", result: feesResult },
             { name: "Financial Events", result: financeDataFromAPI },
+            { name: "Reimbursement Data", result: reimbursementDataFromAPI },
             { name: "Ad Groups Data", result: adGroupsData },
             { name: "Negative Keywords", result: negativeKeywords },
             { name: "Search Keywords", result: searchKeywords }

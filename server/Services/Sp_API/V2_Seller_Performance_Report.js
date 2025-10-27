@@ -118,14 +118,18 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
     }
 
     try {
+        logger.info(`🚀 [V2_Seller_Performance_Report] Starting for user: ${userId}, country: ${country}, region: ${region}`);
+        logger.info(`📊 [V2_Seller_Performance_Report] Marketplace IDs: ${JSON.stringify(marketplaceIds)}`);
+        
         // 📝 Step 1: Generate the Report
-        logger.info("📄 Generating Report...");
+        logger.info("📄 [V2_Seller_Performance_Report] Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if(!reportId){
             logger.error(new ApiError(408,"Report did not complete within 5 minutes"));
             return false;
         }
-        await new Promise((resolve) => setTimeout(resolve, 180000));
+        logger.info("⏳ [V2_Seller_Performance_Report] Waiting 30 seconds before checking report status...");
+        await new Promise((resolve) => setTimeout(resolve, 30000)); // Reduced from 180000 (3 min) to 30000 (30 sec)
         // ⏳ Step 2: Check Report Status with Retry Logic
         let reportDocumentId = null;
         let retries = 15; // 30 retries (total 5 minutes)
@@ -156,7 +160,9 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
         // 📥 Step 3: get the link of Report
         logger.info("📥 Downloading Report...");
         const reportPath = await getReportLink(accessToken, reportDocumentId,baseuri);
+        logger.info(`📄 [V2_Seller_Performance_Report] Report URL obtained: ${reportPath ? 'Success' : 'Failed'}`);
 
+        logger.info("🔄 [V2_Seller_Performance_Report] Fetching report data...");
         const fullReport=await axios(
             {
                 method: "GET",
@@ -170,8 +176,10 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
         }
        // const ReportData= convertTSVToJson(fullReport.data);
 
+       logger.info("📦 [V2_Seller_Performance_Report] Decompressing report data...");
        const ReportData=zlib.gunzipSync(fullReport.data).toString("utf8");
        const refinedData=JSON.parse(ReportData);
+       logger.info("✅ [V2_Seller_Performance_Report] Report data parsed successfully");
 
 
        const User=userId;
@@ -183,16 +191,21 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
        const lateShipmentRateStatus=refinedData.performanceMetrics[0].lateShipmentRate.status;
        const CancellationRate=refinedData.performanceMetrics[0].preFulfillmentCancellationRate.status;
 
+       logger.info("💾 [V2_Seller_Performance_Report] Saving data to database...");
        const storeData=await GET_V2_SELLER_PERFORMANCE_REPORT.create({User,region,country,ahrScore,accountStatuses,listingPolicyViolations,validTrackingRateStatus,orderWithDefectsStatus,lateShipmentRateStatus,CancellationRate});
 
        if(!storeData){
+        logger.error("❌ [V2_Seller_Performance_Report] Failed to store report data");
         logger.error(new ApiError(500,"Internal seerror in storing the report"));
         return false;
        }
 
+       logger.info(`✅ [V2_Seller_Performance_Report] Report data saved successfully for user: ${userId}`);
        return storeData;
 
     } catch (error) {
+        logger.error(`❌ [V2_Seller_Performance_Report] Error: ${error.message}`);
+        logger.error(`❌ [V2_Seller_Performance_Report] Stack: ${error.stack}`);
         logger.error(new ApiError(500,"Internal server error in generating the report"));
         return false
     }

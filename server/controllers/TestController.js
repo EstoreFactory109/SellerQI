@@ -15,6 +15,7 @@ const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
 const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
+const getKeywordData = require('../Services/SellerApp/integrate.js');
 
 const testReport = async (req, res) => {
     const {accessToken}=req.body
@@ -222,6 +223,85 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     })
   }
 
+  const testKeywordDataIntegration = async (req, res) => {
+    try {
+      const { asinArray, country, region } = req.body;
+
+      // Validate required parameters
+      if (!asinArray || !Array.isArray(asinArray) || asinArray.length === 0) {
+        return res.status(400).json({
+          error: "asinArray is required and must be a non-empty array"
+        });
+      }
+
+      if (!country) {
+        return res.status(400).json({
+          error: "country is required"
+        });
+      }
+
+      if (!region) {
+        return res.status(400).json({
+          error: "region is required"
+        });
+      }
+
+      // Check if SellerApp credentials are configured
+      if (!process.env.SELLERAPPCLIENTID || !process.env.SELLERAPPTOKEN) {
+        return res.status(500).json({
+          error: "SellerApp API credentials not configured",
+          message: "Please set SELLERAPPCLIENTID and SELLERAPPTOKEN environment variables",
+          details: {
+            SELLERAPPCLIENTID: process.env.SELLERAPPCLIENTID ? "Set" : "Missing",
+            SELLERAPPTOKEN: process.env.SELLERAPPTOKEN ? "Set" : "Missing"
+          }
+        });
+      }
+
+      console.log(`Testing keyword data integration for ASINs: ${asinArray.join(', ')}, Country: ${country}, Region: ${region}`);
+      
+      const result = await getKeywordData(asinArray, country, region);
+      
+      return res.status(200).json({
+        message: "Keyword data integration test completed successfully",
+        data: result,
+        summary: {
+          totalKeywords: result.length,
+          uniqueAsins: [...new Set(result.map(item => item.asin))].length,
+          countries: [...new Set(result.map(item => item.country))],
+          regions: [...new Set(result.map(item => item.region))]
+        }
+      });
+    } catch (error) {
+      console.error("Keyword data integration test error:", error);
+      
+      // Handle specific API authentication errors
+      if (error.response && error.response.status === 401) {
+        return res.status(401).json({
+          error: "SellerApp API Authentication Failed",
+          message: "Invalid or expired SellerApp API credentials",
+          details: error.response.data || "Please check your SELLERAPPCLIENTID and SELLERAPPTOKEN",
+          solution: "Verify your SellerApp API credentials are correct and active"
+        });
+      }
+      
+      // Handle other API errors
+      if (error.response) {
+        return res.status(error.response.status).json({
+          error: "SellerApp API Error",
+          message: error.response.data?.error || error.message,
+          status: error.response.status,
+          statusText: error.response.statusText
+        });
+      }
+      
+      return res.status(500).json({
+        error: "Internal server error",
+        message: error.message
+      });
+    }
+  }
+
   const testNumberOfProductReviews = async (req, res) => {
     const { asin, country, accessToken } = req.body;
     const result = await getNumberOfProductReviews(asin, country, accessToken);
@@ -233,5 +313,5 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 module.exports = { testReport, getTotalSales, 
   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration
    }

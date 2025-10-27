@@ -5,13 +5,11 @@ const SellerModel = require('../../models/sellerCentralModel.js');
 const zlib = require('zlib');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
-
-    console.log("accessToken: ",accessToken);
-    console.log("marketplaceIds: ",marketplaceIds);
     try {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
         const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+            
         const response = await axios.post(
             `https://${baseURI}/reports/2021-06-30/reports`,
             {
@@ -37,7 +35,6 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
 };
 
 const checkReportStatus = async (accessToken, reportId, baseURI) => {
-
     try {
         const response = await axios.get(
             `https://${baseURI}/reports/2021-06-30/reports/${reportId}`,
@@ -63,6 +60,9 @@ const checkReportStatus = async (accessToken, reportId, baseURI) => {
                 return false;
             case "IN_PROGRESS":
                 logger.info("⏳ Report is still processing...");
+                return null;
+            case "IN_QUEUE":
+                logger.info("⏳ Report is in queue, waiting...");
                 return null;
             case "DONE_NO_DATA":
                 logger.warn("⚠️ Report completed but contains no data.");
@@ -100,9 +100,6 @@ const getReportLink = async (accessToken, reportDocumentId, baseURI) => {
 };
 
 const getReport = async (accessToken, marketplaceIds, userId, country, region, baseURI) => {
- 
-    console.log("🔍 Debug - getReport function called with:", { accessToken, marketplaceIds, userId, country, region, baseURI });
-  
     if (!accessToken || !marketplaceIds) {
         logger.error(new ApiError(400, "Credentials are missing"));
         return false;
@@ -121,17 +118,32 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
         let reportDocumentId = null;
         
-        // Check report status once without retries
+        // Check report status with retries for IN_QUEUE and IN_PROGRESS
         logger.info(`⏳ Checking report status...`);
-        reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
         
-        if (reportDocumentId === false) {
-            logger.error("Report failed or was cancelled");
-            return false;
+        const maxRetries = 30; // Maximum number of retries (5 minutes with 10-second intervals)
+        const retryInterval = 10000; // 10 seconds between retries
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
+            
+            if (reportDocumentId === false) {
+                logger.error("Report failed or was cancelled");
+                return false;
+            }
+            
+            if (reportDocumentId) {
+                logger.info(`✅ Report ready after ${attempt} attempts`);
+                break;
+            }
+            
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, retryInterval));
+            }
         }
         
         if (!reportDocumentId) {
-            logger.error("Report is still processing or has no data");
+            logger.error(`Report is still processing after ${maxRetries} attempts (${maxRetries * retryInterval / 1000} seconds)`);
             return false;
         }
 
@@ -152,7 +164,6 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
         const refinedData = convertTSVToJson(fullReport.data);
-        console.log("🔍 Debug - refinedData:", refinedData);
 
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -178,8 +189,6 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             logger.error(new ApiError(404, "Seller not found"));
             return false;
         }
-        
-        console.log("🔍 Debug - getSellerDetails:", getSellerDetails);
         
 
         for (let i = 0; i < getSellerDetails.sellerAccount.length; i++) {

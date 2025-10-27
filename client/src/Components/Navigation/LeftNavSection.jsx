@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, Activity, Calendar} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -335,6 +335,33 @@ const LeftNavSection = () => {
                             </NavLink>
                         )}
 
+                        {/* Reimbursement Dashboard - Only for PRO/AGENCY users */}
+                        {!isLiteUser && (
+                            <NavLink
+                                to="/seller-central-checker/reimbursement-dashboard"
+                                className={({ isActive }) =>
+                                    `group flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-300 ${
+                                        isActive
+                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                    }`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <div className={`p-1.5 rounded-lg transition-colors duration-300 ${
+                                            isActive ? 'bg-white/20' : 'bg-emerald-50 group-hover:bg-emerald-100'
+                                        }`}>
+                                            <DollarSign className={`w-4 h-4 transition-colors duration-300 ${
+                                                isActive ? 'text-white' : 'text-emerald-600'
+                                            }`}/>
+                                        </div>
+                                        <span className="font-medium">Reimbursement</span>
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
+
                         {/* ASIN Analyzer - Available for ALL users including LITE */}
                         <NavLink
                             to="/seller-central-checker/asin-analyzer"
@@ -359,6 +386,33 @@ const LeftNavSection = () => {
                                 </>
                             )}
                         </NavLink>
+
+                        {/* Keyword Analysis - Only for PRO/AGENCY users */}
+                        {!isLiteUser && (
+                            <NavLink
+                                to="/seller-central-checker/keyword-analysis"
+                                className={({ isActive }) =>
+                                    `group flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-300 ${
+                                        isActive
+                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                    }`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <div className={`p-1.5 rounded-lg transition-colors duration-300 ${
+                                            isActive ? 'bg-white/20' : 'bg-emerald-50 group-hover:bg-emerald-100'
+                                        }`}>
+                                            <Target className={`w-4 h-4 transition-colors duration-300 ${
+                                                isActive ? 'text-white' : 'text-emerald-600'
+                                            }`}/>
+                                        </div>
+                                        <span className="font-medium">Keyword Analysis</span>
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
 
                         {/* Tasks - Available for ALL users including LITE */}
                       {  <NavLink

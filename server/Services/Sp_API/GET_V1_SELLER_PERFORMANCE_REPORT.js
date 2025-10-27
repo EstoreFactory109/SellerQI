@@ -113,7 +113,10 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
     }
 
     try {
-        // console.log("📄 Generating Report...");
+        logger.info(`🚀 [V1_Seller_Performance_Report] Starting for user: ${userId}, country: ${country}, region: ${region}`);
+        logger.info(`📊 [V1_Seller_Performance_Report] Marketplace IDs: ${JSON.stringify(marketplaceIds)}`);
+        
+        logger.info("📄 [V1_Seller_Performance_Report] Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -124,7 +127,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         let retries = 30; 
 
         while (!reportDocumentId && retries > 0) {
-            // console.log(`⏳ Checking report status... (Retries left: ${retries})`);
+            logger.info(`⏳ [V1_Seller_Performance_Report] Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
@@ -144,10 +147,11 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
             };
         }
 
-        // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+        logger.info(`✅ [V1_Seller_Performance_Report] Report Ready! Document ID: ${reportDocumentId}`);
 
-        // console.log("📥 Downloading Report...");
+        logger.info("📥 [V1_Seller_Performance_Report] Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
+        logger.info(`📄 [V1_Seller_Performance_Report] Report URL obtained: ${reportUrl ? 'Success' : 'Failed'}`);
 
         const fullReport = await axios({
             method: "GET",
@@ -160,8 +164,10 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         }
 
         // Convert XML to JSON
+        logger.info("🔄 [V1_Seller_Performance_Report] Converting XML data to JSON...");
         const xmlData = fullReport.data;
         const jsonData = await convertXMLToJson(xmlData);
+        logger.info("✅ [V1_Seller_Performance_Report] XML to JSON conversion completed");
 
         let negativeFeedbacks=null;
         let lateShipmentCount=null
@@ -213,6 +219,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
 
         const User=userId
 
+        logger.info("💾 [V1_Seller_Performance_Report] Saving data to database...");
         const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
             User,
             region,
@@ -226,15 +233,18 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         })
 
         if(!createReportData){
+            logger.error("❌ [V1_Seller_Performance_Report] Failed to store report data");
             logger.error(new ApiError(500, "Internal server error in generating the report"));
             return false;
         }
 
-        
+        logger.info(`✅ [V1_Seller_Performance_Report] Report data saved successfully for user: ${userId}`);
 
         return createReportData;
 
     } catch (error) {
+        logger.error(`❌ [V1_Seller_Performance_Report] Error: ${error.message}`);
+        logger.error(`❌ [V1_Seller_Performance_Report] Stack: ${error.stack}`);
         console.error("❌ Error in getReport:", error.message);
         throw new ApiError(500, error.message);
     }

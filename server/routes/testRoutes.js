@@ -3,7 +3,7 @@ const router=express.Router();
 const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testPPCSpendsSalesUnitsSold,testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,
-    testGetBrand,testSendEmailOnRegistered}=require('../controllers/TestController.js')
+    testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration}=require('../controllers/TestController.js')
 
     
 router.post('/testreport',testReport);
@@ -18,5 +18,6 @@ router.post('/testGetPPCSpendsBySKU',testGetPPCSpendsBySKU)
 router.get('/testListFinancialEvents',testListFinancialEvents)
 router.post('/testGetBrand',testGetBrand)
 router.post('/testSendEmailOnRegistered',testSendEmailOnRegistered)
+router.post('/testKeywordDataIntegration',testKeywordDataIntegration)
 
 module.exports=router

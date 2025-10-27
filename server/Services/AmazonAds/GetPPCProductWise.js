@@ -15,6 +15,7 @@ const BASE_URIS = {
 
 async function getReportId(accessToken, profileId, region) {
     try {
+        console.log(`📄 [GetPPCProductWise] Generating report ID for profile: ${profileId}, region: ${region}`);
         // Validate region and get base URI
         const baseUri = BASE_URIS[region];
         if (!baseUri) {
@@ -80,6 +81,7 @@ async function getReportId(accessToken, profileId, region) {
 
         // Make the API request
         const response = await axios.post(url, body, { headers });
+        console.log(`✅ [GetPPCProductWise] Report request successful, report ID: ${response.data.reportId}`);
 
         // Return the response data
         return response.data;
@@ -135,16 +137,18 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
                 // Token refresh is now handled automatically by TokenManager
 
-                // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                console.log(`📊 [GetPPCProductWise] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
+                    console.log(`✅ [GetPPCProductWise] Report completed after ${attempts + 1} attempts`);
                     return {
                         status: 'COMPLETED',
                         location: location,
                         reportId: reportId
                     };
                 } else if (status === 'FAILURE') {
+                    console.error(`❌ [GetPPCProductWise] Report generation failed after ${attempts + 1} attempts`);
                     return {
                         status: 'FAILURE',
                         reportId: reportId,
@@ -154,10 +158,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
                 // If still processing, wait 60 seconds before next check
                 if (status === 'PROCESSING' || status === 'PENDING') {
+                    console.log(`⏳ [GetPPCProductWise] Report still ${status}, waiting 60 seconds...`);
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds
                     attempts++;
                 } else {
                     // Unknown status
+                    console.error(`❓ [GetPPCProductWise] Unknown report status: ${status}`);
                     throw new Error(`Unknown report status: ${status}`);
                 }
 
