@@ -112,6 +112,31 @@ const ProductChecker = () => {
     }
   }
 
+  const navigateToCategoryPage=(category)=>{
+    // Map category names to filter values for the category page
+    const categoryMap = {
+      'Rankings': 'Ranking',
+      'Conversion': 'Conversion',
+      'Inventory': 'Inventory',
+      'Account Health': 'account', // This goes to account tab
+      'Profitability': 'Profitability',
+      'Sponsored Ads': 'SponsoredAds'
+    };
+    
+    const filterValue = categoryMap[category];
+    
+    if (category === 'Account Health') {
+      // Navigate to account issues page
+      navigate('/seller-central-checker/issues?tab=account');
+    } else if (filterValue) {
+      // Navigate to category page with filter
+      navigate(`/seller-central-checker/issues?tab=category&filter=${filterValue}`);
+    } else {
+      // Fallback to category page
+      navigate('/seller-central-checker/issues?tab=category');
+    }
+  }
+
   const [tooltipForProductChecker,setToolTipForProductChecker] = useState(false) 
   const [tooltipForProductWithIssues,setToolTipForProductWithIssues] = useState(false)
   const [hoveredProductIndex, setHoveredProductIndex] = useState(null)
@@ -157,18 +182,31 @@ const ProductChecker = () => {
 
         {/* Legend */}
         <div className='flex flex-col justify-center space-y-3'>
-          {LableData.map((label, index) => (
-            <div key={index} className='flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors'>
-              <div className='flex items-center gap-3'>
-                <div 
-                  className='w-3 h-3 rounded-full flex-shrink-0' 
-                  style={{ backgroundColor: chartData.options.colors[index] }}
-                ></div>
-                <p className='text-sm font-medium text-gray-700'>{label}</p>
+          {LableData.map((label, index) => {
+            const errorCount = seriesData[index] || 0;
+            const hasErrors = errorCount > 0;
+            
+            return (
+              <div 
+                key={index} 
+                onClick={() => hasErrors && navigateToCategoryPage(label)}
+                className={`flex items-center justify-between p-3 bg-gray-50 rounded-lg transition-colors ${
+                  hasErrors 
+                    ? 'hover:bg-gray-100 cursor-pointer hover:shadow-md' 
+                    : 'opacity-60 cursor-not-allowed'
+                }`}
+              >
+                <div className='flex items-center gap-3'>
+                  <div 
+                    className='w-3 h-3 rounded-full flex-shrink-0' 
+                    style={{ backgroundColor: chartData.options.colors[index] }}
+                  ></div>
+                  <p className='text-sm font-medium text-gray-700'>{label}</p>
+                </div>
+                <span className='text-sm font-semibold text-gray-900'>{errorCount}</span>
               </div>
-              <span className='text-sm font-semibold text-gray-900'>{seriesData[index] || 0}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Top Products to Optimize */}

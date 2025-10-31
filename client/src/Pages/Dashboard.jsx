@@ -1,128 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target, ArrowUp, ArrowDown } from 'lucide-react'
+import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
-
-// Simulated components - replace with your actual imports
-const ExpectedReimbursement = () => (
-  <div className="p-4">
-    <div className="flex items-center justify-between mb-1.5">
-      <h3 className="text-xs font-medium text-slate-600">Expected Reimbursement</h3>
-      <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-    </div>
-    <p className="text-xl font-semibold text-slate-900">$12,450</p>
-    <p className="text-xs text-slate-500 mt-0.5">5 pending claims</p>
-  </div>
-)
-
-const ProductsToReplinish = () => (
-  <div className="p-4">
-    <div className="flex items-center justify-between mb-1.5">
-      <h3 className="text-xs font-medium text-slate-600">Products to Replenish</h3>
-      <Package className="w-3.5 h-3.5 text-slate-400" />
-    </div>
-    <p className="text-xl font-semibold text-slate-900">24</p>
-    <p className="text-xs text-slate-500 mt-0.5">Low stock alert</p>
-  </div>
-)
-
-const ProductsWithoutBuybox = () => (
-  <div className="p-4">
-    <div className="flex items-center justify-between mb-1.5">
-      <h3 className="text-xs font-medium text-slate-600">Without Buy Box</h3>
-      <ShoppingCart className="w-3.5 h-3.5 text-slate-400" />
-    </div>
-    <p className="text-xl font-semibold text-slate-900">7</p>
-    <p className="text-xs text-slate-500 mt-0.5">Needs attention</p>
-  </div>
-)
-
-const AmazonReadyProducts = () => (
-  <div className="p-4">
-    <div className="flex items-center justify-between mb-1.5">
-      <h3 className="text-xs font-medium text-slate-600">Amazon Ready</h3>
-      <Activity className="w-3.5 h-3.5 text-slate-400" />
-    </div>
-    <p className="text-xl font-semibold text-slate-900">156</p>
-    <p className="text-xs text-slate-500 mt-0.5">Ready to ship</p>
-  </div>
-)
-
-const ProductChecker = () => (
-  <div className="p-5">
-    <div className="mb-4">
-      <h3 className="text-base font-semibold text-slate-900">Product Analysis</h3>
-      <p className="text-xs text-slate-500 mt-0.5">Monitor your product performance metrics</p>
-    </div>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div className="bg-slate-50 rounded-md p-3">
-        <p className="text-xs text-slate-600 mb-1">Profitability Issues</p>
-        <p className="text-lg font-semibold text-slate-900">12</p>
-      </div>
-      <div className="bg-slate-50 rounded-md p-3">
-        <p className="text-xs text-slate-600 mb-1">Sponsored Ads Errors</p>
-        <p className="text-lg font-semibold text-slate-900">5</p>
-      </div>
-      <div className="bg-slate-50 rounded-md p-3">
-        <p className="text-xs text-slate-600 mb-1">Inventory Errors</p>
-        <p className="text-lg font-semibold text-slate-900">8</p>
-      </div>
-    </div>
-  </div>
-)
-
-const TotalSales = () => (
-  <div className="p-5">
-    <div className="mb-4">
-      <h3 className="text-base font-semibold text-slate-900">Sales Overview</h3>
-      <p className="text-xs text-slate-500 mt-0.5">Track your revenue performance</p>
-    </div>
-    <div className="h-48 bg-slate-50 rounded-lg flex items-center justify-center">
-      <p className="text-slate-400 text-sm">Sales Chart Placeholder</p>
-    </div>
-  </div>
-)
-
-const AccountHealth = () => (
-  <div className="p-5">
-    <div className="mb-4">
-      <h3 className="text-base font-semibold text-slate-900">Account Health</h3>
-      <p className="text-xs text-slate-500 mt-0.5">Overall account status</p>
-    </div>
-    <div className="flex items-center justify-center">
-      <div className="relative w-28 h-28">
-        <svg className="transform -rotate-90 w-28 h-28">
-          <circle cx="56" cy="56" r="48" stroke="#e2e8f0" strokeWidth="10" fill="none" />
-          <circle cx="56" cy="56" r="48" stroke="#3b82f6" strokeWidth="10" fill="none"
-            strokeDasharray={`${2 * Math.PI * 48 * 0.92} ${2 * Math.PI * 48}`}
-            strokeLinecap="round" />
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xl font-bold text-slate-900">92%</span>
-        </div>
-      </div>
-    </div>
-    <p className="text-center text-xs text-slate-600 mt-3">Excellent</p>
-  </div>
-)
-
-const Calender = ({ setOpenCalender, setSelectedPeriod }) => (
-  <div className="p-3 w-56">
-    <div className="space-y-0.5">
-      {['Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Custom Range'].map((period) => (
-        <button
-          key={period}
-          onClick={() => {
-            setSelectedPeriod(period)
-            setOpenCalender(false)
-          }}
-          className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-md transition-colors"
-        >
-          {period}
-        </button>
-      ))}
-    </div>
-  </div>
-)
+import ExpectedReimbursement from '../Components/Dashboard/SamePageComponents/ExpectedReimbursement.jsx'
+import ProductsToReplinish from '../Components/Dashboard/SamePageComponents/ProductsToReplinish.jsx'
+import ProductsWithoutBuybox from '../Components/Dashboard/SamePageComponents/ProductsWithoutBuybox.jsx'
+import AmazonReadyProducts from '../Components/Dashboard/SamePageComponents/AmazonReadyProducts.jsx'
+import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
+import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.jsx'
+import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
+import Calender from '../Components/Calender/Calender.jsx'
+import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
+import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
+import { useSelector } from 'react-redux'
+import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -130,6 +20,58 @@ const Dashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
   const ExportRef = useRef(null)
+
+  // Get dashboard data from Redux
+  const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
+  
+  // Get sponsored ads metrics from Redux (same as sponsored ads page)
+  const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  
+  // Get currency from Redux
+  const currency = useSelector(state => state.currency?.currency) || '$';
+  
+  // Update selectedPeriod based on Redux state
+  useEffect(() => {
+    const calendarMode = dashboardInfo?.calendarMode || 'default';
+    
+    console.log('=== Dashboard: Calendar Mode Update ===');
+    console.log('Calendar mode:', calendarMode);
+    console.log('Start date:', dashboardInfo?.startDate);
+    console.log('End date:', dashboardInfo?.endDate);
+    
+    if (calendarMode === 'custom' && dashboardInfo?.startDate && dashboardInfo?.endDate) {
+      // Show custom date range
+      const formatDate = (dateStr) => {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+      };
+      const customPeriod = `${formatDate(dashboardInfo.startDate)} - ${formatDate(dashboardInfo.endDate)}`;
+      setSelectedPeriod(customPeriod);
+      console.log('Dashboard showing custom range:', customPeriod);
+    } else if (calendarMode === 'last7') {
+      // Show "Last 7 Days"
+      setSelectedPeriod('Last 7 Days');
+      console.log('Dashboard showing Last 7 Days');
+    } else {
+      // Show default "Last 30 Days"
+      setSelectedPeriod('Last 30 Days');
+      console.log('Dashboard showing Last 30 Days');
+    }
+  }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
+  
+  // Check data availability
+  const { hasAnyData, hasAllData, missingItems, availableItems } = useDataAvailability({
+    accountHealth: dashboardInfo?.accountHealthPercentage,
+    financeData: dashboardInfo?.accountFinance,
+    totalSales: dashboardInfo?.TotalWeeklySale,
+    products: dashboardInfo?.TotalProduct,
+    reimbursement: dashboardInfo?.reimbustment,
+    inventoryAnalysis: dashboardInfo?.InventoryAnalysis
+  });
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -146,67 +88,163 @@ const Dashboard = () => {
     }
   }, [])
 
-  const quickStats = [
-    { 
-      icon: BarChart3, 
-      label: 'Total Sales', 
-      value: '$48,250', 
-      change: '+12.5%', 
-      trend: 'up' 
-    },
-    { 
-      icon: Zap, 
-      label: 'PPC Sales', 
-      value: '$15,320', 
-      change: '+8.2%', 
-      trend: 'up' 
-    },
-    { 
-      icon: Target, 
-      label: 'ACOS', 
-      value: '24.5%', 
-      change: '-2.1%', 
-      trend: 'down' 
-    },
-    { 
-      icon: AlertTriangle, 
-      label: 'Total Issues', 
-      value: '32', 
-      change: '-5', 
-      trend: 'down' 
+  // Calculate PPC sales using only real Amazon Advertising data
+  const calculatePPCSales = () => {
+    // Only use actual PPC sales from sponsored ads data
+    if (sponsoredAdsMetrics?.totalSalesIn30Days && sponsoredAdsMetrics.totalSalesIn30Days > 0) {
+      return sponsoredAdsMetrics.totalSalesIn30Days;
     }
+    
+    // Return 0 when no real PPC data is available - no assumptions
+    return 0;
+  };
+
+  // Calculate PPC Spend using actual ProductAdsPayment data from finance
+  const calculatePPCSpend = () => {
+    // Use actual PPC spend from accountFinance ProductAdsPayment (official data)
+    const actualPPCSpend = Number(dashboardInfo?.accountFinance?.ProductAdsPayment || 0);
+    
+    // Fall back to sponsored ads metrics if no finance data available
+    const spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+    return spend;
+  };
+
+  const handleDownloadCSV = () => {
+    // Use actual dashboard data for CSV export
+    const ppcSales = calculatePPCSales();
+    const ppcSpend = calculatePPCSpend();
+    const csvData = [
+      ['Metric', 'Value', 'Change'],
+      ['Revenue', formatCurrency(totalSales), 'N/A'],
+      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
+      ['ACOS', `${acos}%`, 'N/A'],
+      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
+      ['Period', selectedPeriod, '']
+    ]
+    
+    const csvContent = csvData.map(row => row.join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `dashboard-export-${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setOpenExportDropdown(false)
+  }
+
+  const handleDownloadExcel = () => {
+    // For Excel export, we'll create a simple tab-separated values file
+    // In a real implementation, you might want to use a library like xlsx
+    const ppcSales = calculatePPCSales();
+    const ppcSpend = calculatePPCSpend();
+    const excelData = [
+      ['Metric', 'Value', 'Change'],
+      ['Revenue', formatCurrency(totalSales), 'N/A'],
+      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
+      ['ACOS', `${acos}%`, 'N/A'],
+      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
+      ['Period', selectedPeriod, '']
+    ]
+    
+    const excelContent = excelData.map(row => row.join('\t')).join('\n')
+    const blob = new Blob([excelContent], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `dashboard-export-${new Date().toISOString().split('T')[0]}.xls`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setOpenExportDropdown(false)
+  }
+
+  // Calculate real data from backend
+  const totalSales = Number(dashboardInfo?.TotalWeeklySale || 0);
+  const totalProducts = dashboardInfo?.TotalProduct?.length || 0;
+  
+  // Store filtered orders array where status is Shipped, Unshipped, or PartiallyShipped
+  console.log("dashboardInfo?.GetOrderData: ", dashboardInfo?.GetOrderData);
+  const totalOrders = dashboardInfo?.GetOrderData?.filter(order => 
+    order?.orderStatus === 'Shipped' || 
+    order?.orderStatus === 'Unshipped' || 
+    order?.orderStatus === 'PartiallyShipped'
+  ) || [];
+  
+  // Get the count of filtered orders
+  const totalOrdersCount = totalOrders.length;
+  
+  // Calculate total issues from ProductChecker data
+  const totalIssues = (
+    (dashboardInfo?.totalProfitabilityErrors || 0) +
+    (dashboardInfo?.totalSponsoredAdsErrors || 0) +
+    (dashboardInfo?.totalInventoryErrors || 0) +
+    (dashboardInfo?.TotalRankingerrors || 0) +
+    (dashboardInfo?.totalErrorInConversion || 0) +
+    (dashboardInfo?.totalErrorInAccount || 0)
+  );
+
+  // Calculate PPC Sales and Spend for the quickStats
+  const ppcSales = calculatePPCSales();
+  const ppcSpend = calculatePPCSpend();
+  
+  // Calculate ACOS using only real data - no assumptions
+  const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
+
+  // Format sales value
+  const formatCurrencyLocal = (value) => {
+    return formatCurrency(value, currency);
+  };
+
+  const quickStats = [
+    { icon: BarChart3, label: 'Sales', value: formatCurrencyWithLocale(totalSales, currency), change: 'N/A', trend: 'neutral', color: 'emerald' },
+    { icon: Zap, label: 'PPC Sales', value: formatCurrencyWithLocale(ppcSales, currency), change: 'N/A', trend: 'neutral', color: 'blue' },
+    { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple' },
+    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange' }
   ]
 
   return (
-    <div className='min-h-screen w-full bg-slate-50'>
+    <div className='min-h-screen w-full bg-gray-50/50 lg:mt-0 mt-[12vh]'>
       {/* Header Section */}
-      <div className='bg-white border-b border-slate-200'>
-        <div className='px-6 py-4'>
+      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
+        <div className='px-4 lg:px-6 py-4'>
           <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-            <div>
-              <h1 className='text-xl font-semibold text-slate-900'>Dashboard</h1>
-              <p className='text-xs text-slate-500 mt-0.5'>Monitor your Amazon business performance</p>
+            <div className='flex items-center gap-4'>
+              <div>
+                <h1 className='text-2xl font-bold text-gray-900'>Dashboard</h1>
+                <p className='text-sm text-gray-600 mt-1'>Monitor your Amazon business performance</p>
+              </div>
+              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium'>
+                <div className='w-2 h-2 bg-emerald-500 rounded-full'></div>
+                All systems operational
+              </div>
             </div>
             
-            <div className='flex items-center gap-2'>
-              {/* Date Range Selector */}
+            <div className='flex items-center gap-3'>
               <div className='relative' ref={CalenderRef}>
                 <button 
                   onClick={() => setOpenCalender(!openCalender)}
-                  className='flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-lg transition-all duration-200'
+                  className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
                 >
-                  <Calendar className='w-3.5 h-3.5 text-slate-400' />
-                  <span className='text-sm font-medium text-slate-700'>{selectedPeriod}</span>
-                  <ChevronDown className='w-3.5 h-3.5 text-slate-400' />
+                  <Calendar className='w-4 h-4 text-gray-500' />
+                  <span className='text-sm font-medium text-gray-700'>{selectedPeriod}</span>
                 </button>
                 
                 <AnimatePresence>
                   {openCalender && (
                     <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-lg rounded-lg border border-slate-200"
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
+                      style={{ 
+                        maxHeight: 'calc(100vh - 150px)',
+                        transform: 'translateY(0)'
+                      }}
                     >
                       <Calender 
                         setOpenCalender={setOpenCalender} 
@@ -217,32 +255,39 @@ const Dashboard = () => {
                 </AnimatePresence>
               </div>
 
-              {/* Export Button */}
               <div className='relative' ref={ExportRef}>
                 <button 
                   onClick={() => setOpenExportDropdown(!openExportDropdown)}
-                  className='flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200'
+                  className='flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow'
                 >
-                  <Download className='w-3.5 h-3.5' />
-                  <span className='text-sm font-medium'>Export</span>
+                  <Download className='w-4 h-4' />
+                  <span className='hidden sm:inline text-sm font-medium'>Export</span>
+                  <ChevronDown className='w-4 h-4' />
                 </button>
                 
                 <AnimatePresence>
                   {openExportDropdown && (
                     <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-lg rounded-lg border border-slate-200 w-44"
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
                     >
                       <div className="py-1">
-                        <button className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
-                          <FileText className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-sm">Download CSV</span>
+                        <button
+                          onClick={handleDownloadCSV}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                        >
+                          <FileText className="w-4 h-4 text-green-600" />
+                          <span className="text-sm font-medium">Download as CSV</span>
                         </button>
-                        <button className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-sm">Download Excel</span>
+                        <button
+                          onClick={handleDownloadExcel}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                        >
+                          <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-medium">Download as Excel</span>
                         </button>
                       </div>
                     </motion.div>
@@ -254,108 +299,249 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className='px-6 py-5'>
-        {/* Quick Stats */}
-        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5'>
-          {quickStats.map((stat, index) => {
-            const Icon = stat.icon
-            return (
+      {/* Main Content - Scrollable */}
+      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
+        <div className='px-4 lg:px-6 py-6 pb-20'>
+          {/* Show partial data notice if some data is missing */}
+          {hasAnyData && !hasAllData && (
+            <PartialDataNotice 
+              missingItems={missingItems} 
+              availableItems={availableItems}
+              className="mb-6"
+            />
+          )}
+
+          {/* Show fallback if no data at all */}
+          {!hasAnyData ? (
+            <DataFallback 
+              type="database"
+              message="Dashboard data is currently unavailable. Please try refreshing the page or contact support if the issue persists."
+              size="large"
+            />
+          ) : (
+            <>
+              {/* Quick Stats */}
+              <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
+            {quickStats.map((stat, index) => {
+              const Icon = stat.icon
+              const colorClasses = {
+                emerald: {
+                  iconBg: 'bg-gradient-to-br from-emerald-100 via-emerald-50 to-emerald-200',
+                  iconColor: 'text-emerald-700',
+                  badge: 'bg-gradient-to-br from-emerald-100 via-emerald-50 to-emerald-200 text-emerald-800 border border-emerald-200/80',
+                  badgeShadow: 'shadow-emerald-200/60',
+                  gradient: 'from-emerald-50 to-emerald-100',
+                  shadow: 'shadow-emerald-200/60'
+                },
+                blue: {
+                  iconBg: 'bg-gradient-to-br from-blue-100 via-blue-50 to-blue-200',
+                  iconColor: 'text-blue-700',
+                  badge: 'bg-gradient-to-br from-blue-100 via-blue-50 to-blue-200 text-blue-800 border border-blue-200/80',
+                  badgeShadow: 'shadow-blue-200/60',
+                  gradient: 'from-blue-50 to-blue-100',
+                  shadow: 'shadow-blue-200/60'
+                },
+                purple: {
+                  iconBg: 'bg-gradient-to-br from-purple-100 via-purple-50 to-purple-200',
+                  iconColor: 'text-purple-700',
+                  badge: 'bg-gradient-to-br from-purple-100 via-purple-50 to-purple-200 text-purple-800 border border-purple-200/80',
+                  badgeShadow: 'shadow-purple-200/60',
+                  gradient: 'from-purple-50 to-purple-100',
+                  shadow: 'shadow-purple-200/60'
+                },
+                orange: {
+                  iconBg: 'bg-gradient-to-br from-orange-100 via-orange-50 to-orange-200',
+                  iconColor: 'text-orange-700',
+                  badge: 'bg-gradient-to-br from-orange-100 via-orange-50 to-orange-200 text-orange-800 border border-orange-200/80',
+                  badgeShadow: 'shadow-orange-200/60',
+                  gradient: 'from-orange-50 to-orange-100',
+                  shadow: 'shadow-orange-200/60'
+                }
+              }
+              const colors = colorClasses[stat.color] || colorClasses.blue
+              
+              return (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  className={`bg-gradient-to-br ${colors.gradient} rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-xl hover:scale-105 transform shadow-lg`}
+                  style={{
+                    boxShadow: `
+                      0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.3)
+                    `
+                  }}
+                >
+                  <div className='flex items-center gap-3 mb-4'>
+                    <div className={`w-12 h-12 ${colors.iconBg} rounded-xl flex items-center justify-center shadow-lg ${colors.shadow} border-2 border-white/90 ring-1 ring-gray-300/30 transform transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5`} 
+                         style={{
+                           boxShadow: `
+                             0 4px 6px -1px rgba(0, 0, 0, 0.1),
+                             0 2px 4px -1px rgba(0, 0, 0, 0.06),
+                             inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                             inset 0 -1px 0 rgba(0, 0, 0, 0.1)
+                           `
+                         }}>
+                      <Icon className={`w-6 h-6 ${colors.iconColor} drop-shadow-sm`} />
+                    </div>
+                    <div>
+                      <p className='text-sm font-medium text-gray-600'>{stat.label}</p>
+                    </div>
+                  </div>
+                  <div className='text-2xl font-bold text-gray-900'>{stat.value}</div>
+                </motion.div>
+              )
+            })}
+          </div>
+
+              {/* Main Dashboard Grid */}
+              <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8'>
+                {/* Left Column - Account Health */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.6, delay: 0.2 }}
+                  className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
+                >
+                  <ErrorBoundary
+                    title="Account Health Unavailable"
+                    message="Unable to load account health data. Showing available information."
+                  >
+                    <AccountHealth />
+                  </ErrorBoundary>
+                </motion.div>
+
+                {/* Middle Column - Total Sales */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.3 }}
+                  className='lg:col-span-2 bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
+                >
+                  <ErrorBoundary
+                    title="Sales Data Unavailable"
+                    message="Unable to load sales data. Showing available information."
+                  >
+                    <TotalSales />
+                  </ErrorBoundary>
+                </motion.div>
+              </div>
+
+              {/* Second Row - Product Checker */}
               <motion.div
-                key={stat.label}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
-                className='bg-white rounded-lg p-4 border border-slate-200 hover:shadow-md transition-shadow duration-200'
+                transition={{ duration: 0.6, delay: 0.4 }}
+                className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8'
               >
-                <div className='flex items-start justify-between mb-3'>
-                  <div className='p-1.5 bg-blue-50 rounded-md'>
-                    <Icon className='w-4 h-4 text-blue-600' />
-                  </div>
-                  <div className={`flex items-center gap-0.5 text-xs font-medium ${
-                    stat.trend === 'up' ? 'text-green-600' : 'text-green-600'
-                  }`}>
-                    {stat.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                    {stat.change}
-                  </div>
-                </div>
-                <p className='text-xs text-slate-600 mb-0.5'>{stat.label}</p>
-                <p className='text-xl font-semibold text-slate-900'>{stat.value}</p>
+                <ErrorBoundary
+                  title="Product Analysis Unavailable"
+                  message="Unable to load product analysis data. Showing available information."
+                >
+                  <ProductChecker />
+                </ErrorBoundary>
               </motion.div>
-            )
-          })}
-        </div>
 
-        {/* Main Dashboard Grid */}
-        <div className='grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5'>
-          {/* Account Health */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3, delay: 0.2 }}
-            className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <AccountHealth />
-          </motion.div>
+              {/* Third Row - Small Cards */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.5 }}
+                className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'
+              >
+                {/* Expected Reimbursement - Green Theme */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  className='bg-gradient-to-br from-emerald-50 via-emerald-25 to-emerald-100 rounded-xl border border-emerald-200/60 hover:border-emerald-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
+                  style={{
+                    boxShadow: `
+                      0 8px 25px -5px rgba(16, 185, 129, 0.15),
+                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
+                    `
+                  }}
+                >
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-emerald-200/30 to-emerald-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
+                  <ErrorBoundary
+                    title="Reimbursement Data Unavailable"
+                    message="Unable to load reimbursement data."
+                  >
+                    <ExpectedReimbursement />
+                  </ErrorBoundary>
+                </motion.div>
 
-          {/* Total Sales */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.25 }}
-            className='lg:col-span-2 bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <TotalSales />
-          </motion.div>
-        </div>
+                {/* Amazon Ready Products - Blue Theme */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  className='bg-gradient-to-br from-blue-50 via-blue-25 to-blue-100 rounded-xl border border-blue-200/60 hover:border-blue-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
+                  style={{
+                    boxShadow: `
+                      0 8px 25px -5px rgba(59, 130, 246, 0.15),
+                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
+                    `
+                  }}
+                >
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-200/30 to-blue-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
+                  <ErrorBoundary
+                    title="Product Data Unavailable"
+                    message="Unable to load Amazon ready products data."
+                  >
+                    <AmazonReadyProducts />
+                  </ErrorBoundary>
+                </motion.div>
 
-        {/* Product Checker */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-          className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200 mb-5'
-        >
-          <ProductChecker />
-        </motion.div>
+                {/* Products to Replenish - Orange Theme */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  className='bg-gradient-to-br from-orange-50 via-orange-25 to-orange-100 rounded-xl border border-orange-200/60 hover:border-orange-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
+                  style={{
+                    boxShadow: `
+                      0 8px 25px -5px rgba(251, 146, 60, 0.15),
+                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
+                    `
+                  }}
+                >
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-orange-200/30 to-orange-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
+                  <ErrorBoundary
+                    title="Inventory Data Unavailable"
+                    message="Unable to load inventory replenishment data."
+                  >
+                    <ProductsToReplinish />
+                  </ErrorBoundary>
+                </motion.div>
 
-        {/* Bottom Cards Grid */}
-        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'>
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.35 }}
-            className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <ExpectedReimbursement />
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.4 }}
-            className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <AmazonReadyProducts />
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.45 }}
-            className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <ProductsToReplinish />
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.5 }}
-            className='bg-white rounded-lg border border-slate-200 hover:shadow-md transition-shadow duration-200'
-          >
-            <ProductsWithoutBuybox />
-          </motion.div>
+                {/* Products Without Buybox - Purple Theme */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  className='bg-gradient-to-br from-purple-50 via-purple-25 to-purple-100 rounded-xl border border-purple-200/60 hover:border-purple-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
+                  style={{
+                    boxShadow: `
+                      0 8px 25px -5px rgba(147, 51, 234, 0.15),
+                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
+                    `
+                  }}
+                >
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-purple-200/30 to-purple-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
+                  <ErrorBoundary
+                    title="Buy Box Data Unavailable"
+                    message="Unable to load buy box data."
+                  >
+                    <ProductsWithoutBuybox />
+                  </ErrorBoundary>
+                </motion.div>
+              </motion.div>
+            </>
+          )}
         </div>
       </div>
     </div>

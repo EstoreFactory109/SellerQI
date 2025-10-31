@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
+import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers } from 'lucide-react';
 import dropdown from '../../assets/Icons/Arrow.png'
 
@@ -428,9 +429,40 @@ const InventoryTableSection = ({ title, data }) => {
 const OptimizationDashboard = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   console.log("info: ",info)
-  const [issuesSelectedOption, setIssuesSelectedOption] = useState("All");
+  const [searchParams] = useSearchParams();
+  const filterParam = searchParams.get('filter');
+  
+  // Map URL filter values to component filter options
+  const getInitialFilter = () => {
+    if (!filterParam) return "All";
+    const filterMap = {
+      'Ranking': 'Ranking',
+      'Conversion': 'Conversion',
+      'Inventory': 'Inventory',
+      'Profitability': 'Profitability',
+      'SponsoredAds': 'SponsoredAds'
+    };
+    return filterMap[filterParam] || "All";
+  };
+  
+  const [issuesSelectedOption, setIssuesSelectedOption] = useState(getInitialFilter());
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const categoryDropdownRef = useRef(null);
+
+  // Update filter when URL parameter changes
+  useEffect(() => {
+    if (filterParam) {
+      const filterMap = {
+        'Ranking': 'Ranking',
+        'Conversion': 'Conversion',
+        'Inventory': 'Inventory',
+        'Profitability': 'Profitability',
+        'SponsoredAds': 'SponsoredAds'
+      };
+      const newFilter = filterMap[filterParam] || "All";
+      setIssuesSelectedOption(newFilter);
+    }
+  }, [filterParam]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
