@@ -601,7 +601,7 @@ const LeftNavSection = () => {
                                         )}
                                         
                                         {/* Plans & Billing - Available for non-AGENCY users */}
-                                        {!isAgencyUser && (
+                                        {/* {!isAgencyUser && (
                                             <motion.div
                                                 initial={{ y: -10, opacity: 0 }}
                                                 animate={{ y: 0, opacity: 1 }}
@@ -622,7 +622,7 @@ const LeftNavSection = () => {
                                                     Plans & Billing
                                                 </NavLink>
                                             </motion.div>
-                                        )}
+                                        )} */}
                                         {/* Support - Available for non-AGENCY users */}
                                         {!isAgencyUser && (
                                             <motion.div
