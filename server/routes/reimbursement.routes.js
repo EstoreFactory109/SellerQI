@@ -10,7 +10,7 @@ const {
     updateReimbursementCosts,
     getUrgentClaims
 } = require('../controllers/ReimbursementController.js');
-const verifyToken = require('../middlewares/Auth/VerifyToken.js');
+const verifyToken = require('../middlewares/Auth/auth.js');
 
 /**
  * Reimbursement Routes

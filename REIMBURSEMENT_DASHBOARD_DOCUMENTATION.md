@@ -61,6 +61,7 @@ Frontend (React 19)
   - Potential claim identification
   - Data merging and deduplication
   - Summary statistics calculation
+  -summary of the reimbursement
 
 #### 4. **Controller**
 - **File**: `server/controllers/ReimbursementController.js`
