@@ -1,9 +1,6 @@
 const nodemailer = require('nodemailer');
-const dns = require('dns');
-const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/EmailLogsModel.js');
-const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 

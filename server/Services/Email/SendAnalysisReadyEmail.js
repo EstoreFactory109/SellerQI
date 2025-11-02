@@ -1,9 +1,6 @@
 const nodemailer = require('nodemailer');
-const dns = require('dns');
-const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/EmailLogsModel.js');
-const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
@@ -12,16 +9,6 @@ let AnalysisReadyEmailTemplate = fs.readFileSync(path.join(__dirname, '..', '..'
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
-};
-
-const checkEmailDomain = async (email) => {
-    const domain = email.split('@')[1];
-    try {
-        const addresses = await resolveMx(domain);
-        return addresses && addresses.length > 0;
-    } catch (err) {
-        return false;
-    }
 };
 
 const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl, userId = null) => {
@@ -59,14 +46,6 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl, userId = n
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
             await emailLog.markAsFailed('Invalid email address');
-            return false;
-        }
-
-        // Step 2: Check if email domain has valid MX records
-        const domainValid = await checkEmailDomain(email);
-        if (!domainValid) {
-            logger.error(`Invalid email domain for ${email}`);
-            await emailLog.markAsFailed('Invalid email domain');
             return false;
         }
 

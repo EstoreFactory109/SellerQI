@@ -1,195 +1,112 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, RefreshCw } from 'lucide-react';
+import { useSelector } from 'react-redux';
+import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
-  const [selectedAsin, setSelectedAsin] = useState('B00GB85JR4');
-  const [marketplace, setMarketplace] = useState('us');
+  const [selectedAsin, setSelectedAsin] = useState('');
+  const [analyzedAsin, setAnalyzedAsin] = useState(''); // ASIN used for filtering table data
   const [activeTab, setActiveTab] = useState('all');
-  const [keywords, setKeywords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedKeywords, setSelectedKeywords] = useState([]);
-  const [sortConfig, setSortConfig] = useState({ key: 'opportunityScore', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'searchVolume', direction: 'desc' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [filters, setFilters] = useState({
     competition: 'all',
-    matchType: 'all',
-    ranking: 'all',
     indexed: 'all'
   });
 
-  // Sample products list
-  const products = [
-    { asin: 'B00GB85JR4', name: 'Vitamin D3 5000iu - NatureWise', category: 'Supplements' },
-    { asin: 'B07XYZABC1', name: 'Organic Protein Powder - Chocolate', category: 'Supplements' },
-    { asin: 'B08DEFGH23', name: 'Multivitamin for Men', category: 'Supplements' },
-    { asin: 'B09IJKLMN4', name: 'Omega-3 Fish Oil Capsules', category: 'Supplements' },
-    { asin: 'B10OPQRST5', name: 'Probiotic Complex 50 Billion CFU', category: 'Supplements' }
-  ];
-
-  // Sample data - in production, this would come from API calls
-  const sampleKeywords = [
-    {
-      id: 1,
-      keyword: 'vitamin d3',
-      searchVolume: 125000,
-      relevanceScore: 95,
-      cpc: 1.85,
-      competition: 'high',
-      organicRank: 3,
-      ppcPosition: 1,
-      indexed: true,
-      opportunityScore: 92,
-      trending: true,
-      matchType: 'exact',
-      estimatedOrders: 450
-    },
-    {
-      id: 2,
-      keyword: 'vitamin d supplement',
-      searchVolume: 89000,
-      relevanceScore: 92,
-      cpc: 1.65,
-      competition: 'medium',
-      organicRank: 8,
-      ppcPosition: null,
-      indexed: true,
-      opportunityScore: 85,
-      trending: false,
-      matchType: 'phrase',
-      estimatedOrders: 380
-    },
-    {
-      id: 3,
-      keyword: 'vitamin d3 5000 iu',
-      searchVolume: 67500,
-      relevanceScore: 98,
-      cpc: 2.15,
-      competition: 'high',
-      organicRank: 45,
-      ppcPosition: null,
-      indexed: true,
-      opportunityScore: 88,
-      trending: false,
-      matchType: 'exact',
-      isOpportunity: true,
-      estimatedOrders: 290
-    },
-    {
-      id: 4,
-      keyword: 'd3 supplement',
-      searchVolume: 45000,
-      relevanceScore: 88,
-      cpc: 1.45,
-      competition: 'low',
-      organicRank: 12,
-      ppcPosition: 3,
-      indexed: true,
-      opportunityScore: 76,
-      trending: false,
-      matchType: 'broad',
-      estimatedOrders: 250
-    },
-    {
-      id: 5,
-      keyword: 'vitamin d deficiency supplement',
-      searchVolume: 38000,
-      relevanceScore: 72,
-      cpc: 1.95,
-      competition: 'medium',
-      organicRank: null,
-      ppcPosition: null,
-      indexed: false,
-      opportunityScore: 65,
-      trending: false,
-      matchType: 'phrase',
-      isGap: true,
-      estimatedOrders: 180
-    },
-    {
-      id: 6,
-      keyword: 'best vitamin d3',
-      searchVolume: 32000,
-      relevanceScore: 85,
-      cpc: 1.55,
-      competition: 'medium',
-      organicRank: 18,
-      ppcPosition: 5,
-      indexed: true,
-      opportunityScore: 70,
-      trending: false,
-      matchType: 'broad',
-      estimatedOrders: 195
-    },
-    {
-      id: 7,
-      keyword: 'vitamin d3 organic',
-      searchVolume: 28500,
-      relevanceScore: 78,
-      cpc: 2.25,
-      competition: 'high',
-      organicRank: 52,
-      ppcPosition: null,
-      indexed: true,
-      opportunityScore: 52,
-      trending: false,
-      matchType: 'exact',
-      estimatedOrders: 120
-    },
-    {
-      id: 8,
-      keyword: 'vitamin d3 k2',
-      searchVolume: 26000,
-      relevanceScore: 65,
-      cpc: 1.75,
-      competition: 'medium',
-      organicRank: 28,
-      ppcPosition: 8,
-      indexed: true,
-      opportunityScore: 68,
-      trending: true,
-      matchType: 'exact',
-      estimatedOrders: 145
+  // Get keywordTrackingData from Redux
+  const keywordTrackingData = useSelector((state) => state.Dashboard.DashBoardInfo?.keywordTrackingData) || [];
+  
+  // Get current marketplace from Redux (from currency slice or keyword data)
+  const currentCountry = useSelector((state) => state.currency?.country) || '';
+  const currentMarketplace = useMemo(() => {
+    // First try to get from keywordTrackingData
+    if (keywordTrackingData.length > 0 && keywordTrackingData[0].country) {
+      return keywordTrackingData[0].country.toUpperCase();
     }
-  ];
+    // Fallback to currency slice
+    if (currentCountry) {
+      return currentCountry.toUpperCase();
+    }
+    return 'N/A';
+  }, [keywordTrackingData, currentCountry]);
+  
+  // Transform Redux data to match component needs and filter by analyzed ASIN (only when button is clicked)
+  const keywords = useMemo(() => {
+    if (!keywordTrackingData || keywordTrackingData.length === 0) return [];
+    
+    let filtered = keywordTrackingData;
+    
+    // Filter by ASIN only if analyze button was clicked (analyzedAsin is set)
+    if (analyzedAsin) {
+      filtered = filtered.filter(k => k.asin === analyzedAsin);
+    }
+    
+    // Add unique IDs for selection management
+    return filtered.map((keyword, index) => ({
+      ...keyword,
+      id: `${keyword.asin}-${keyword.keyword}-${index}`,
+      keyword: keyword.keyword || '',
+      asin: keyword.asin || '',
+      searchVolume: keyword.searchVolume || 0,
+      competition: keyword.competition || 'unknown',
+      difficulty: keyword.difficulty || 0,
+      cpc: keyword.cpc || 0,
+      rank: keyword.rank || null,
+      isIndexed: keyword.isIndexed !== undefined ? keyword.isIndexed : null,
+      impressions: keyword.impressions || 0,
+      clicks: keyword.clicks || 0,
+      ctr: keyword.ctr || 0,
+      sponsored: keyword.sponsored !== undefined ? keyword.sponsored : false,
+      country: keyword.country || '',
+      region: keyword.region || ''
+    }));
+  }, [keywordTrackingData, analyzedAsin]);
 
-  // Initialize keywords on mount
+  // Get unique ASINs from keywordTrackingData for product selection
+  const products = useMemo(() => {
+    const uniqueAsins = new Set();
+    keywordTrackingData.forEach(k => {
+      if (k.asin) uniqueAsins.add(k.asin);
+    });
+    return Array.from(uniqueAsins).map(asin => ({
+      asin: asin,
+      name: `Product ${asin}`,
+      category: 'Product'
+    }));
+  }, [keywordTrackingData]);
+
+  // Set default ASIN when products are loaded (for dropdown selection only)
   useEffect(() => {
-    setKeywords(sampleKeywords);
-  }, []);
+    if (products.length > 0 && !selectedAsin) {
+      setSelectedAsin(products[0].asin);
+    }
+  }, [products, selectedAsin]);
 
   // Filter keywords based on active tab and filters
   const filteredKeywords = useMemo(() => {
     let filtered = [...keywords];
 
     // Tab filtering
-    if (activeTab === 'campaign') {
-      filtered = filtered.filter(k => k.ppcPosition !== null);
-    } else if (activeTab === 'gap') {
-      filtered = filtered.filter(k => k.isGap || !k.indexed);
-    } else if (activeTab === 'opportunities') {
-      filtered = filtered.filter(k => k.opportunityScore >= 80);
+    if (activeTab === 'indexed') {
+      filtered = filtered.filter(k => k.isIndexed === true);
+    } else if (activeTab === 'notIndexed') {
+      filtered = filtered.filter(k => k.isIndexed === false || k.isIndexed === null);
+    } else if (activeTab === 'ranked') {
+      filtered = filtered.filter(k => k.rank !== null && k.rank !== undefined);
+    } else if (activeTab === 'campaignKeywords') {
+      filtered = filtered.filter(k => k.sponsored === true);
     }
 
     // Apply filters
     if (filters.competition !== 'all') {
-      filtered = filtered.filter(k => k.competition === filters.competition);
-    }
-    if (filters.matchType !== 'all') {
-      filtered = filtered.filter(k => k.matchType === filters.matchType);
-    }
-    if (filters.ranking !== 'all') {
-      if (filters.ranking === 'top10') {
-        filtered = filtered.filter(k => k.organicRank && k.organicRank <= 10);
-      } else if (filters.ranking === 'top20') {
-        filtered = filtered.filter(k => k.organicRank && k.organicRank <= 20);
-      } else if (filters.ranking === 'top50') {
-        filtered = filtered.filter(k => k.organicRank && k.organicRank <= 50);
-      } else if (filters.ranking === 'notRanked') {
-        filtered = filtered.filter(k => !k.organicRank);
-      }
+      filtered = filtered.filter(k => k.competition && k.competition.toLowerCase() === filters.competition.toLowerCase());
     }
     if (filters.indexed !== 'all') {
-      filtered = filtered.filter(k => k.indexed === (filters.indexed === 'indexed'));
+      filtered = filtered.filter(k => k.isIndexed === (filters.indexed === 'indexed'));
     }
 
     // Sort
@@ -209,28 +126,55 @@ const KeywordAnalysisDashboard = () => {
     return filtered;
   }, [keywords, activeTab, filters, sortConfig]);
 
+  // Pagination calculations
+  const totalPages = useMemo(() => Math.ceil(filteredKeywords.length / itemsPerPage), [filteredKeywords.length]);
+  
+  const paginatedKeywords = useMemo(() => {
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    return filteredKeywords.slice(indexOfFirstItem, indexOfLastItem);
+  }, [filteredKeywords, currentPage]);
+
+  // Reset to page 1 when filters, tabs, sorting, or analyzed ASIN changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, filters, sortConfig.key, analyzedAsin]);
+
   // Metrics calculation
   const metrics = useMemo(() => {
     const totalKeywords = keywords.length;
-    const indexedKeywords = keywords.filter(k => k.indexed).length;
-    const avgCpc = keywords.reduce((sum, k) => sum + k.cpc, 0) / keywords.length;
-    const highOpportunityCount = keywords.filter(k => k.opportunityScore >= 80).length;
+    const indexedKeywords = keywords.filter(k => k.isIndexed === true).length;
+    const avgCpc = keywords.length > 0 
+      ? (keywords.reduce((sum, k) => sum + (parseFloat(k.cpc) || 0), 0) / keywords.length).toFixed(2)
+      : '0.00';
+    const rankedKeywords = keywords.filter(k => k.rank !== null && k.rank !== undefined).length;
+    const totalImpressions = keywords.reduce((sum, k) => sum + (parseFloat(k.impressions) || 0), 0);
+    const totalClicks = keywords.reduce((sum, k) => sum + (parseFloat(k.clicks) || 0), 0);
     
     return {
       totalKeywords,
       indexedKeywords,
-      avgCpc: avgCpc.toFixed(2),
-      highOpportunityCount
+      avgCpc,
+      rankedKeywords,
+      totalImpressions,
+      totalClicks
     };
   }, [keywords]);
 
-  // Handle analyze
+  // Handle analyze - filter table by selected ASIN
   const handleAnalyze = async () => {
+    if (!selectedAsin) {
+      alert('Please select an ASIN first');
+      return;
+    }
+    
     setLoading(true);
-    // Simulate API call
+    // Set the analyzed ASIN to filter the table
     setTimeout(() => {
+      setAnalyzedAsin(selectedAsin);
       setLoading(false);
-    }, 1500);
+      setCurrentPage(1); // Reset to first page
+    }, 500);
   };
 
   // Handle sort
@@ -244,10 +188,23 @@ const KeywordAnalysisDashboard = () => {
   // Select all keywords
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedKeywords(filteredKeywords.map(k => k.id));
+      setSelectedKeywords(paginatedKeywords.map(k => k.id));
     } else {
       setSelectedKeywords([]);
     }
+  };
+
+  // Pagination navigation functions
+  const goToPage = (page) => {
+    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+  };
+
+  const goToPreviousPage = () => {
+    setCurrentPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage(prev => Math.min(prev + 1, totalPages));
   };
 
   // Toggle keyword selection
@@ -662,10 +619,6 @@ const KeywordAnalysisDashboard = () => {
           <div className="logo">
             🎯 Keyword Analysis Dashboard
           </div>
-          <div className="sync-status">
-            <RefreshCw size={14} />
-            Last sync: 2 mins ago
-          </div>
         </div>
 
         {/* Product Analysis Panel */}
@@ -677,36 +630,43 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="input-grid">
             <div className="form-group">
-              <label>Select Product</label>
+              <label>Select Product (ASIN)</label>
               <select 
                 value={selectedAsin}
                 onChange={(e) => setSelectedAsin(e.target.value)}
               >
+                <option value="">All Products</option>
                 {products.map(product => (
                   <option key={product.asin} value={product.asin}>
-                    {product.name} ({product.asin})
+                    {product.asin}
                   </option>
                 ))}
               </select>
               <div className="product-info">
-                {products.find(p => p.asin === selectedAsin)?.category}
+                {analyzedAsin ? `Showing keywords for ASIN: ${analyzedAsin}` : selectedAsin ? `Selected ASIN: ${selectedAsin}` : 'Select an ASIN and click "Check Keywords"'}
               </div>
             </div>
             
             <div className="form-group">
               <label>Marketplace</label>
-              <select value={marketplace} onChange={(e) => setMarketplace(e.target.value)}>
-                <option value="us">United States (US)</option>
-                <option value="uk">United Kingdom (UK)</option>
-                <option value="de">Germany (DE)</option>
-              </select>
+              <div style={{ 
+                padding: '10px 14px', 
+                border: '1px solid #e2e8f0', 
+                borderRadius: '8px', 
+                background: '#f8fafc',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#1e293b'
+              }}>
+                {currentMarketplace}
+              </div>
             </div>
             
             <div className="form-group">
               <label>Quick Actions</label>
               <button className="btn-secondary" onClick={handleAnalyze}>
                 {loading ? <span className="loading" /> : <Search size={16} />}
-                Analyze Product
+                Check Keywords
               </button>
             </div>
           </div>
@@ -757,10 +717,10 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Opportunity Score</div>
-              <div className="metric-value">{metrics.highOpportunityCount}</div>
+              <div className="metric-label">Ranked Keywords</div>
+              <div className="metric-value">{metrics.rankedKeywords}</div>
               <div className="metric-trend">
-                High potential keywords
+                {metrics.totalKeywords > 0 ? ((metrics.rankedKeywords / metrics.totalKeywords) * 100).toFixed(1) : 0}% of total
               </div>
             </div>
             <div className="metric-icon icon-purple">
@@ -778,22 +738,28 @@ const KeywordAnalysisDashboard = () => {
             All Keywords ({keywords.length})
           </div>
           <div 
-            className={`tab ${activeTab === 'campaign' ? 'active' : ''}`}
-            onClick={() => setActiveTab('campaign')}
+            className={`tab ${activeTab === 'indexed' ? 'active' : ''}`}
+            onClick={() => setActiveTab('indexed')}
           >
-            Campaign Keywords ({keywords.filter(k => k.ppcPosition).length})
+            Indexed ({keywords.filter(k => k.isIndexed === true).length})
           </div>
           <div 
-            className={`tab ${activeTab === 'gap' ? 'active' : ''}`}
-            onClick={() => setActiveTab('gap')}
+            className={`tab ${activeTab === 'notIndexed' ? 'active' : ''}`}
+            onClick={() => setActiveTab('notIndexed')}
           >
-            Gap Analysis ({keywords.filter(k => k.isGap || !k.indexed).length})
+            Not Indexed ({keywords.filter(k => k.isIndexed === false || k.isIndexed === null).length})
           </div>
           <div 
-            className={`tab ${activeTab === 'opportunities' ? 'active' : ''}`}
-            onClick={() => setActiveTab('opportunities')}
+            className={`tab ${activeTab === 'ranked' ? 'active' : ''}`}
+            onClick={() => setActiveTab('ranked')}
           >
-            Opportunities ({keywords.filter(k => k.opportunityScore >= 80).length})
+            Ranked ({keywords.filter(k => k.rank !== null && k.rank !== undefined).length})
+          </div>
+          <div 
+            className={`tab ${activeTab === 'campaignKeywords' ? 'active' : ''}`}
+            onClick={() => setActiveTab('campaignKeywords')}
+          >
+            Campaign Keywords ({keywords.filter(k => k.sponsored === true).length})
           </div>
         </div>
 
@@ -813,34 +779,20 @@ const KeywordAnalysisDashboard = () => {
             
             <select 
               className="filter-select"
-              value={filters.matchType}
-              onChange={(e) => setFilters(prev => ({ ...prev, matchType: e.target.value }))}
+              value={filters.indexed}
+              onChange={(e) => setFilters(prev => ({ ...prev, indexed: e.target.value }))}
             >
-              <option value="all">All Match Types</option>
-              <option value="exact">Exact</option>
-              <option value="phrase">Phrase</option>
-              <option value="broad">Broad</option>
+              <option value="all">All Status</option>
+              <option value="indexed">Indexed</option>
+              <option value="notIndexed">Not Indexed</option>
             </select>
             
-            <select 
-              className="filter-select"
-              value={filters.ranking}
-              onChange={(e) => setFilters(prev => ({ ...prev, ranking: e.target.value }))}
-            >
-              <option value="all">All Rankings</option>
-              <option value="top10">Top 10</option>
-              <option value="top20">Top 20</option>
-              <option value="top50">Top 50</option>
-              <option value="notRanked">Not Ranked</option>
-            </select>
           </div>
           
           <button 
             className="filter-select"
             onClick={() => setFilters({
               competition: 'all',
-              matchType: 'all',
-              ranking: 'all',
               indexed: 'all'
             })}
           >
@@ -856,38 +808,38 @@ const KeywordAnalysisDashboard = () => {
                 <th style={{ width: 40 }}>
                   <input 
                     type="checkbox"
-                    checked={selectedKeywords.length === filteredKeywords.length && filteredKeywords.length > 0}
+                    checked={paginatedKeywords.length > 0 && paginatedKeywords.every(k => selectedKeywords.includes(k.id))}
                     onChange={handleSelectAll}
                   />
                 </th>
                 <th onClick={() => handleSort('keyword')}>
                   Keyword {sortConfig.key === 'keyword' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
+                <th onClick={() => handleSort('asin')}>
+                  ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                </th>
                 <th onClick={() => handleSort('searchVolume')}>
                   Search Volume {sortConfig.key === 'searchVolume' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                </th>
-                <th onClick={() => handleSort('relevanceScore')}>
-                  Relevance
                 </th>
                 <th onClick={() => handleSort('cpc')}>
                   CPC {sortConfig.key === 'cpc' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th>Competition</th>
-                <th onClick={() => handleSort('organicRank')}>
-                  Organic Rank
+                <th onClick={() => handleSort('competition')}>
+                  Competition {sortConfig.key === 'competition' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th>PPC Position</th>
-                <th>Status</th>
-                <th onClick={() => handleSort('opportunityScore')}>
-                  Opportunity {sortConfig.key === 'opportunityScore' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                <th onClick={() => handleSort('rank')}>
+                  Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th>Actions</th>
+                <th onClick={() => handleSort('sponsored')}>
+                  Sponsored {sortConfig.key === 'sponsored' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th>Indexed</th>
               </tr>
             </thead>
             <tbody>
-              {filteredKeywords.length > 0 ? (
-                filteredKeywords.map(keyword => (
-                  <tr key={keyword.id} style={{ background: keyword.isOpportunity ? '#fffbeb' : 'white' }}>
+              {paginatedKeywords.length > 0 ? (
+                paginatedKeywords.map(keyword => (
+                  <tr key={keyword.id}>
                     <td>
                       <input 
                         type="checkbox"
@@ -896,78 +848,153 @@ const KeywordAnalysisDashboard = () => {
                       />
                     </td>
                     <td>
-                      <span className="keyword-cell">{keyword.keyword}</span>
-                      {keyword.trending && <span className="badge badge-trending">Trending</span>}
-                      {keyword.isOpportunity && <span className="badge badge-opportunity">Opportunity</span>}
-                      {keyword.isGap && <span className="badge badge-gap">Gap</span>}
+                      <span className="keyword-cell">{keyword.keyword || 'N/A'}</span>
                     </td>
-                    <td>{keyword.searchVolume.toLocaleString()}</td>
                     <td>
-                      <div className="relevance-bar">
-                        <div className="bar-bg">
-                          <div 
-                            className={`bar-fill ${
-                              keyword.relevanceScore >= 80 ? 'bar-green' : 
-                              keyword.relevanceScore >= 60 ? 'bar-yellow' : 'bar-red'
-                            }`}
-                            style={{ width: `${keyword.relevanceScore}%` }}
-                          />
-                        </div>
-                        <span>{keyword.relevanceScore}%</span>
-                      </div>
+                      <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{keyword.asin || 'N/A'}</span>
                     </td>
-                    <td>${keyword.cpc.toFixed(2)}</td>
+                    <td>{keyword.searchVolume ? keyword.searchVolume.toLocaleString() : '0'}</td>
+                    <td>${parseFloat(keyword.cpc || 0).toFixed(2)}</td>
                     <td>
-                      <span className={`competition-badge comp-${keyword.competition}`}>
-                        {keyword.competition.charAt(0).toUpperCase() + keyword.competition.slice(1)}
+                      <span className={`competition-badge comp-${keyword.competition?.toLowerCase() || 'unknown'}`}>
+                        {keyword.competition ? keyword.competition.charAt(0).toUpperCase() + keyword.competition.slice(1) : 'Unknown'}
                       </span>
                     </td>
                     <td>
-                      {keyword.organicRank ? (
+                      {keyword.rank !== null && keyword.rank !== undefined ? (
                         <span className={`rank ${
-                          keyword.organicRank <= 10 ? 'rank-good' : 
-                          keyword.organicRank <= 50 ? 'rank-medium' : 'rank-poor'
+                          keyword.rank <= 10 ? 'rank-good' : 
+                          keyword.rank <= 50 ? 'rank-medium' : 'rank-poor'
                         }`}>
-                          #{keyword.organicRank}
+                          #{keyword.rank}
                         </span>
                       ) : '—'}
                     </td>
                     <td>
-                      {keyword.ppcPosition ? (
-                        <span className="rank rank-good">#{keyword.ppcPosition}</span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      <span className={`status-badge-small ${keyword.indexed ? 'status-indexed' : 'status-not-indexed'}`}>
-                        {keyword.indexed ? 'Indexed' : 'Not Indexed'}
+                      <span className={`status-badge-small ${
+                        keyword.sponsored === true ? 'status-indexed' : 'status-not-indexed'
+                      }`}>
+                        {keyword.sponsored === true ? 'Yes' : 'No'}
                       </span>
                     </td>
                     <td>
-                      <span className="opportunity-score">{keyword.opportunityScore}</span>
-                    </td>
-                    <td>
-                      <button 
-                        style={{ 
-                          background: 'none', 
-                          border: 'none', 
-                          cursor: 'pointer',
-                          color: '#64748b'
-                        }}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
+                      <span className={`status-badge-small ${
+                        keyword.isIndexed === true ? 'status-indexed' : 
+                        keyword.isIndexed === false ? 'status-not-indexed' : 
+                        'status-not-indexed'
+                      }`}>
+                        {keyword.isIndexed === true ? 'Indexed' : 
+                         keyword.isIndexed === false ? 'Not Indexed' : 
+                         'Unknown'}
+                      </span>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={11} className="empty-state">
-                    No keywords found matching your filters
+                  <td colSpan={9} className="empty-state">
+                    {keywordTrackingData.length === 0 
+                      ? 'No keyword tracking data available. Please ensure data is loaded.'
+                      : 'No keywords found matching your filters'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#f8fafc'
+            }}>
+              <div style={{ fontSize: '14px', color: '#64748b' }}>
+                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredKeywords.length)} of {filteredKeywords.length} keywords
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={goToPreviousPage}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    background: currentPage === 1 ? '#f1f5f9' : 'white',
+                    color: currentPage === 1 ? '#94a3b8' : '#475569',
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  <ChevronLeft size={16} />
+                  Previous
+                </button>
+                
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => goToPage(pageNum)}
+                        style={{
+                          minWidth: '36px',
+                          height: '36px',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          background: currentPage === pageNum ? '#3b82f6' : 'white',
+                          color: currentPage === pageNum ? 'white' : '#475569',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: currentPage === pageNum ? '600' : '500'
+                        }}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                <button
+                  onClick={goToNextPage}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    background: currentPage === totalPages ? '#f1f5f9' : 'white',
+                    color: currentPage === totalPages ? '#94a3b8' : '#475569',
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  Next
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
