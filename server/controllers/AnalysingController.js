@@ -30,7 +30,6 @@ const {
     checkAPlus,
     checkProductWithOutBuyBox
 } = require('../Services/Calculations/Conversion.js');
-const calculateTotalReimbursement = require('../Services/Calculations/Reimburstment.js');
 const ProductWiseSponsoredAdsData = require('../models/ProductWiseSponseredAdsModel.js');
 const NegetiveKeywords = require('../models/NegetiveKeywords.js');
 const KeywordModel = require('../models/keywordModel.js');
@@ -48,6 +47,7 @@ const GetDateWisePPCspendModel = require('../models/GetDateWisePPCspendModel.js'
 const AdsGroup = require('../models/adsgroupModel.js');
 const LoggingHelper = require('../utils/LoggingHelper.js');
 const differenceCalculation = require('../Services/Calculations/DifferenceCalcualtion.js');
+const KeywordTrackingModel = require('../models/KeywordTrackingModel.js');
 
 const Analyse = async (userId, country, region, adminId = null) => {
     console.log("userId in the start: ",userId);
@@ -224,7 +224,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         adsKeywordsPerformanceData,
         GetOrderData,
         GetDateWisePPCspendData,
-        AdsGroupData
+        AdsGroupData,
+        keywordTrackingData
     ] = await Promise.all([
         V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
         V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -260,7 +261,8 @@ const Analyse = async (userId, country, region, adminId = null) => {
         adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
         GetOrderDataModel.findOne({ User:userId, country, region }).sort({ createdAt: -1 }),
         GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-        AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 })
+        AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+        KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 })
     ]);
 
     console.log("v2Data: ",v2Data)
@@ -295,6 +297,17 @@ const Analyse = async (userId, country, region, adminId = null) => {
     const safeGetOrderData = GetOrderData || { orderData: [] };
     const safeGetDateWisePPCspendData = GetDateWisePPCspendData || { dateWisePPCSpends: [] };
     const safeAdsGroupData = AdsGroupData || { adsGroupData: [] };
+    const safeKeywordTrackingData = keywordTrackingData || { keywords: [] };
+    
+    // Debug keyword tracking data
+    console.log('[DEBUG] KeywordTrackingData found:', !!keywordTrackingData);
+    if (keywordTrackingData) {
+        console.log('[DEBUG] KeywordTrackingData keywords count:', keywordTrackingData.keywords?.length || 0);
+        console.log('[DEBUG] KeywordTrackingData sample:', JSON.stringify(keywordTrackingData.keywords?.[0] || {}, null, 2));
+    } else {
+        console.log('[DEBUG] No KeywordTrackingData found for userId:', userId, 'country:', country, 'region:', region);
+    }
+    
     // Log warnings for missing data instead of failing
     const missingDataWarnings = [];
     if (!v2Data) missingDataWarnings.push('v2Data');
@@ -320,6 +333,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
     if (!GetOrderData) missingDataWarnings.push('GetOrderData');
     if (!GetDateWisePPCspendData) missingDataWarnings.push('GetDateWisePPCspendData');
     if (!AdsGroupData) missingDataWarnings.push('AdsGroupData');
+    if (!keywordTrackingData) missingDataWarnings.push('keywordTrackingData');
     // Log missing data warnings
     if (missingDataWarnings.length > 0) {
         logger.warn(`Missing data (using defaults): ${missingDataWarnings.join(', ')}`);
@@ -463,6 +477,7 @@ const Analyse = async (userId, country, region, adminId = null) => {
         GetOrderData: safeGetOrderData.RevenueData,
         GetDateWisePPCspendData: safeGetDateWisePPCspendData.dateWisePPCSpends,
         AdsGroupData: safeAdsGroupData.adsGroupData,
+        keywordTrackingData: safeKeywordTrackingData.keywords || [],
         DifferenceData: differenceData.percentageDifference
     };
 
@@ -673,27 +688,6 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
     result.Defaulters = DefaulterList;
 
-    // Validate shipment data and products before calculating reimbursement
-    let reimburstmentData = null;
-    if (safeShipmentData && safeShipmentData.shipmentData && SellerAccount && SellerAccount.products) {
-        reimburstmentData = calculateTotalReimbursement(safeShipmentData.shipmentData, SellerAccount.products);
-    } else {
-        reimburstmentData = {
-            productWiseReimburstment: [],
-            totalReimbursement: 0
-        };
-    }
-
-    if (!reimburstmentData) {
-        logger.warn("Failed to calculate reimbursement data - using defaults");
-        reimburstmentData = {
-            productWiseReimburstment: [],
-            totalReimbursement: 0
-        };
-    }
-
-
-    result.Reimburstment = reimburstmentData
     result.SalesByProducts = safeSaleByProduct.productWiseSales
 
     // Calculate total errors across all categories
@@ -747,6 +741,10 @@ const Analyse = async (userId, country, region, adminId = null) => {
 
     // Log comprehensive summary
     logger.info(`Analysis Summary: Total Errors=${totalErrorsAllCategories}, Inventory Analysis: Planning=${inventoryAnalysis.inventoryPlanning.length}, Stranded=${inventoryAnalysis.strandedInventory.length}, NonCompliance=${inventoryAnalysis.inboundNonCompliance.length}, Amazon Ready Products=${AmazonReadyProductsSet.size}`);
+
+    // Debug final result
+    console.log('[DEBUG] Final result keywordTrackingData:', result.keywordTrackingData?.length || 0, 'keywords');
+    console.log('[DEBUG] Final result sample keywordTrackingData:', JSON.stringify(result.keywordTrackingData?.[0] || {}, null, 2));
 
     return {
         status: 200,
@@ -1464,6 +1462,60 @@ function formatDuration(milliseconds) {
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
 }
+
+/**
+ * Get keyword tracking data for the logged-in user
+ */
+const getKeywordTrackingData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    try {
+        const keywordTrackingData = await KeywordTrackingModel.findOne({
+            userId: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        if (!keywordTrackingData) {
+            return res.status(200).json(new ApiResponse(200, {
+                keywords: [],
+                totalKeywords: 0,
+                message: "No keyword tracking data found for this user, country, and region"
+            }, "Keyword tracking data fetched successfully"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, {
+            keywords: keywordTrackingData.keywords || [],
+            totalKeywords: keywordTrackingData.keywords?.length || 0,
+            userId: keywordTrackingData.userId,
+            country: keywordTrackingData.country,
+            region: keywordTrackingData.region,
+            createdAt: keywordTrackingData.createdAt,
+            updatedAt: keywordTrackingData.updatedAt
+        }, "Keyword tracking data fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error fetching keyword tracking data", {
+            error: error.message,
+            userId,
+            country,
+            region
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch keyword tracking data"));
+    }
+});
 
 module.exports = { 
     analysingController, 

@@ -225,6 +225,12 @@ const calculateTotalReimbursement = (shipmentData, products) => {
  */
 const getReimbursementSummary = async (userId, country, region) => {
     try {
+        logger.info('getReimbursementSummary: Searching for reimbursement record', {
+            userId: userId?.toString(),
+            country,
+            region
+        });
+
         const reimbursementRecord = await ReimbursementModel.findOne({
             User: userId,
             country: country,
@@ -232,6 +238,11 @@ const getReimbursementSummary = async (userId, country, region) => {
         }).sort({ createdAt: -1 });
 
         if (!reimbursementRecord) {
+            logger.info('getReimbursementSummary: No reimbursement record found', {
+                userId: userId?.toString(),
+                country,
+                region
+            });
             return {
                 totalReceived: 0,
                 totalPending: 0,
@@ -246,6 +257,15 @@ const getReimbursementSummary = async (userId, country, region) => {
                 byType: {}
             };
         }
+
+        logger.info('getReimbursementSummary: Found reimbursement record', {
+            userId: userId?.toString(),
+            country,
+            region,
+            recordId: reimbursementRecord._id?.toString(),
+            totalCount: reimbursementRecord.totalCount || 0,
+            hasSummary: !!reimbursementRecord.summary
+        });
 
         // Ensure summary is calculated
         if (!reimbursementRecord.summary || !reimbursementRecord.summary.totalReceived) {

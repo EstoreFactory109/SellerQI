@@ -4,6 +4,7 @@ const { UserSchedulingService } = require('./UserSchedulingService.js');
 const { sendMail } = require('./sendEmailWeekly.js');
 const { sendTrialReminderEmails } = require('./ReminderEmailToUpgrade.js');
 const logger = require('../../utils/Logger.js');
+const { MonthlyKeywordTrackingService } = require('./MonthlyKeywordTrackingService.js');
 
 class JobScheduler {
     constructor() {
@@ -37,6 +38,7 @@ class JobScheduler {
             this.setupHealthCheckJob();
             this.setupWeeklyEmailJob();
             this.setupTrialReminderJob();
+            this.setupMonthlyKeywordTrackingJob();
 
             this.isInitialized = true;
             logger.info('Background job scheduler initialized successfully');
@@ -162,6 +164,29 @@ class JobScheduler {
     }
 
     /**
+     * Setup monthly keyword tracking job - runs on the 1st of every month at 02:00
+     */
+    setupMonthlyKeywordTrackingJob() {
+        // Cron: minute hour day-of-month month day-of-week → 0 2 1 * *
+        const monthlyJob = cron.schedule('0 2 1 * *', async () => {
+            try {
+                logger.info('Running monthly keyword tracking job (1st of month at 02:00)');
+                const result = await MonthlyKeywordTrackingService.run();
+                logger.info('Monthly keyword tracking job completed', result);
+            } catch (error) {
+                logger.error('Error in monthly keyword tracking job:', error);
+            }
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || 'UTC'
+        });
+
+        this.jobs.set('monthlyKeywordTracking', monthlyJob);
+        monthlyJob.start();
+        logger.info('Monthly keyword tracking job scheduled (runs on the 1st at 02:00)');
+    }
+
+    /**
      * Stop a specific job
      */
     stopJob(jobName) {
@@ -245,6 +270,8 @@ class JobScheduler {
                 case 'trialReminder':
                     await sendTrialReminderEmails();
                     return { message: 'Trial reminder email job executed successfully' };
+                case 'monthlyKeywordTracking':
+                    return await MonthlyKeywordTrackingService.run();
                 default:
                     throw new Error(`Unknown job: ${jobName}`);
             }

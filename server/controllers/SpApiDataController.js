@@ -1301,39 +1301,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
             thirdResultIndex++;
         }
 
-        // ===== PROCESS REIMBURSEMENT DATA =====
-        console.log("🔄 Processing reimbursement data...");
-        
-        try {
-            // Calculate potential claims from shipment discrepancies
-            let potentialClaims = [];
-            if (shipment.success && shipment.data && shipment.data.shipmentData && Array.isArray(ProductDetails)) {
-                potentialClaims = calculateShipmentDiscrepancies(
-                    shipment.data.shipmentData,
-                    ProductDetails
-                );
-                console.log(`✅ Found ${potentialClaims.length} potential reimbursement claims from shipment discrepancies`);
-            }
-
-            // Merge reimbursement data from API and potential claims
-            if (reimbursementDataFromAPI.success || potentialClaims.length > 0) {
-                await mergeReimbursementData(
-                    userId,
-                    Country,
-                    Region,
-                    potentialClaims,
-                    reimbursementDataFromAPI.success ? reimbursementDataFromAPI.data : null
-                );
-                console.log(`✅ Reimbursement data merged and saved successfully`);
-            }
-        } catch (reimbursementError) {
-            logger.error("Error processing reimbursement data", {
-                error: reimbursementError.message,
-                userId
-            });
-            // Continue without failing the entire process
-        }
-
         // ===== VALIDATE AND TRANSFORM FINANCE DATA =====
         let financeData = [];
         if (financeDataFromAPI.success && financeDataFromAPI.data) {
@@ -1375,6 +1342,50 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 userId
             });
             financeData = [];
+        }
+
+        // ===== PROCESS REIMBURSEMENT DATA =====
+        console.log("🔄 Processing reimbursement data...");
+        
+        try {
+            // Calculate potential claims from shipment discrepancies
+            let potentialClaims = [];
+            // Extract product list from merchant listings data
+            let productList = [];
+            if (merchantListingsData && Array.isArray(merchantListingsData.sellerAccount)) {
+                const sellerAccount = merchantListingsData.sellerAccount.find(
+                    acc => acc && acc.country === Country && acc.region === Region
+                );
+                if (sellerAccount && Array.isArray(sellerAccount.products)) {
+                    productList = sellerAccount.products;
+                }
+            }
+            
+            if (shipment.success && shipment.data && shipment.data.shipmentData && Array.isArray(productList) && productList.length > 0) {
+                potentialClaims = calculateShipmentDiscrepancies(
+                    shipment.data.shipmentData,
+                    productList
+                );
+                console.log(`✅ Found ${potentialClaims.length} potential reimbursement claims from shipment discrepancies`);
+            }
+
+            // Merge reimbursement data from API and potential claims
+            if (reimbursementDataFromAPI.success || potentialClaims.length > 0) {
+                await mergeReimbursementData(
+                    userId,
+                    Country,
+                    Region,
+                    potentialClaims,
+                    reimbursementDataFromAPI.success ? reimbursementDataFromAPI.data : null
+                );
+                console.log(`✅ Reimbursement data merged and saved successfully`);
+            }
+        } catch (reimbursementError) {
+            logger.error("Error processing reimbursement data", {
+                error: reimbursementError.message,
+                userId
+            });
+            // Continue without failing the entire process
         }
 
         // ===== FOURTH BATCH: NEGATIVE KEYWORDS AND SEARCH KEYWORDS =====
@@ -1610,7 +1621,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
             // Inventory and compliance data
             fbaInventoryPlanningData: fbaInventoryPlanningData.success ? fbaInventoryPlanningData.data : null,
             strandedInventoryData: strandedInventoryData.success ? strandedInventoryData.data : null,
-            inboundNonComplianceData: inboundNonComplianceData.success ? inboundNonComplianceData.data : null
+            inboundNonComplianceData: inboundNonComplianceData.success ? inboundNonComplianceData.data : null,
+
+            // Reimbursement data
+            reimbursementData: reimbursementDataFromAPI.success ? reimbursementDataFromAPI.data : null
         };
 
         // ===== COMPREHENSIVE SUCCESS/FAILURE SUMMARY =====
