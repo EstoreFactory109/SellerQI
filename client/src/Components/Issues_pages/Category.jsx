@@ -35,16 +35,13 @@ const RankingTableSection = ({ title, data }) => {
         // charLim section has a different structure - it's a direct object with status, Message, HowTOSolve
         if (sectionKey === 'charLim') {
           if (section.status === 'Error') {
-            errorRows.push({
-              asin: item.asin,
-              title:
-                item.data?.Title?.length > 40
-                  ? item.data.Title.slice(0, 40) + '...'
-                  : item.data?.Title || 'N/A',
-              issueHeading: `${sectionLabels[sectionKey]}`,
-              message: section.Message,
-              solution: section.HowTOSolve
-            });
+              errorRows.push({
+                asin: item.asin,
+                title: item.data?.Title || 'N/A',
+                issueHeading: `${sectionLabels[sectionKey]}`,
+                message: section.Message,
+                solution: section.HowTOSolve
+              });
           }
         } else {
           // For other sections (TitleResult, BulletPoints, Description), check nested properties
@@ -56,10 +53,7 @@ const RankingTableSection = ({ title, data }) => {
             if (check?.status === 'Error') {
               errorRows.push({
                 asin: item.asin,
-                title:
-                  item.data?.Title?.length > 40
-                    ? item.data.Title.slice(0, 40) + '...'
-                    : item.data?.Title || 'N/A',
+                title: item.data?.Title || 'N/A',
                 issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
                 message: check.Message,
                 solution: check.HowTOSolve
@@ -101,10 +95,10 @@ const RankingTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-20">ASIN</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Product Title</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -112,29 +106,29 @@ const RankingTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200 h-20"
+                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block truncate">{row.asin}</span>
+                  <td className="py-8 px-3 align-top">
+                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-blue-600" />
+                      <div className="w-5 h-5 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-2.5 h-2.5 text-blue-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-xs leading-tight break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 truncate w-full">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800 truncate w-full">
                         {row.issueHeading}
                       </span>
-                      <p className="text-xs text-gray-600 leading-tight break-words">{row.message}</p>
+                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
-                    <p className="text-xs text-green-700 bg-green-50 p-2 rounded-lg leading-tight break-words">{row.solution}</p>
+                  <td className="py-8 px-3 align-top">
+                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}
@@ -184,8 +178,7 @@ const ConversionTableSection = ({ title, data }) => {
   const flattenData = data.flatMap((item) =>
     getFormattedErrors(item).map((err) => ({
       asin: item.asin,
-      title:
-        item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title,
+      title: item.Title || 'N/A',
       issueHeading: `${err.heading} | ${err.subheading}`,
       message: err.message,
       solution: err.solution
@@ -219,10 +212,10 @@ const ConversionTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-20">ASIN</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Product Title</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -230,29 +223,29 @@ const ConversionTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200 h-20"
+                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block truncate">{row.asin}</span>
+                  <td className="py-8 px-3 align-top">
+                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-green-600" />
+                      <div className="w-5 h-5 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-2.5 h-2.5 text-green-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-xs leading-tight break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 truncate w-full">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 truncate w-full">
                         {row.issueHeading}
                       </span>
-                      <p className="text-xs text-gray-600 leading-tight break-words">{row.message}</p>
+                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
-                    <p className="text-xs text-green-700 bg-green-50 p-2 rounded-lg leading-tight break-words">{row.solution}</p>
+                  <td className="py-8 px-3 align-top">
+                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}
@@ -289,7 +282,7 @@ const InventoryTableSection = ({ title, data }) => {
       if (planning.longTermStorageFees?.status === "Error") {
         errorRows.push({
           asin: item.asin,
-          title: item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title || 'N/A',
+          title: item.Title || 'N/A',
           issueHeading: 'Inventory Planning | Long-Term Storage Fees',
           message: planning.longTermStorageFees.Message,
           solution: planning.longTermStorageFees.HowToSolve
@@ -298,7 +291,7 @@ const InventoryTableSection = ({ title, data }) => {
       if (planning.unfulfillable?.status === "Error") {
         errorRows.push({
           asin: item.asin,
-          title: item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title || 'N/A',
+          title: item.Title || 'N/A',
           issueHeading: 'Inventory Planning | Unfulfillable Inventory',
           message: planning.unfulfillable.Message,
           solution: planning.unfulfillable.HowToSolve
@@ -310,7 +303,7 @@ const InventoryTableSection = ({ title, data }) => {
     if (item.strandedInventoryErrorData) {
       errorRows.push({
         asin: item.asin,
-        title: item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title || 'N/A',
+        title: item.Title || 'N/A',
         issueHeading: 'Stranded Inventory | Product Not Listed',
         message: item.strandedInventoryErrorData.Message,
         solution: item.strandedInventoryErrorData.HowToSolve
@@ -321,7 +314,7 @@ const InventoryTableSection = ({ title, data }) => {
     if (item.inboundNonComplianceErrorData) {
       errorRows.push({
         asin: item.asin,
-        title: item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title || 'N/A',
+        title: item.Title || 'N/A',
         issueHeading: 'Inbound Non-Compliance | Shipment Issue',
         message: item.inboundNonComplianceErrorData.Message,
         solution: item.inboundNonComplianceErrorData.HowToSolve
@@ -332,7 +325,7 @@ const InventoryTableSection = ({ title, data }) => {
     if (item.replenishmentErrorData) {
       errorRows.push({
         asin: item.asin,
-        title: item.Title?.length > 40 ? item.Title.slice(0, 40) + '...' : item.Title || 'N/A',
+        title: item.Title || 'N/A',
         issueHeading: 'Replenishment | Low Inventory Risk',
         message: item.replenishmentErrorData.Message,
         solution: item.replenishmentErrorData.HowToSolve
@@ -370,10 +363,10 @@ const InventoryTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-20">ASIN</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Product Title</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-5 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -381,29 +374,29 @@ const InventoryTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200 h-20"
+                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block truncate">{row.asin}</span>
+                  <td className="py-8 px-3 align-top">
+                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-yellow-600" />
+                      <div className="w-5 h-5 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-2.5 h-2.5 text-yellow-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-xs leading-tight break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
+                  <td className="py-8 px-3 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 truncate w-full">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-800 truncate w-full">
                         {row.issueHeading}
                       </span>
-                      <p className="text-xs text-gray-600 leading-tight break-words">{row.message}</p>
+                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-5 px-3 align-top">
-                    <p className="text-xs text-green-700 bg-green-50 p-2 rounded-lg leading-tight break-words">{row.solution}</p>
+                  <td className="py-8 px-3 align-top">
+                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}

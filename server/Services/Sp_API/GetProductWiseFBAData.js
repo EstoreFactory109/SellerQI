@@ -66,6 +66,10 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
                 // console.log("⏳ Report is still processing...");
                 return null;
 
+            case "IN_QUEUE":
+                logger.info("📋 Report is queued for processing...");
+                return null;
+
             case "DONE_NO_DATA":
                 console.warn("⚠️ Report completed but contains no data.");
                 return false;
@@ -168,12 +172,43 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         const fbaData = [];
 
         refinedData.forEach(item => {
+            // Extract all fields from the report
+            const asin = item.asin || item["asin"] || "";
+            const sku = item.sku || item["sku"] || "";
+            const fnsku = item.fnsku || item["fnsku"] || "";
+            const totalFba = item["expected_fulfillment_fee_per_unit"] || item["expected_fulfillment_fee_per_unit"] || "0";
+            const totalAmzFee = item["estimated_fee_total"] || item["estimated_fee_total"] || "0";
+            const longestSide = item["longest-side"] || item["longest_side"] || item["longestSide"] || "";
+            const medianSide = item["median-side"] || item["median_side"] || item["medianSide"] || "";
+            const shortestSide = item["shortest-side"] || item["shortest_side"] || item["shortestSide"] || "";
+            const unitOfDimension = item["unit-of-dimension"] || item["unit_of_dimension"] || item["unitOfDimension"] || "";
+            const itemPackageWeight = item["item-package-weight"] || item["item_package_weight"] || item["itemPackageWeight"] || "";
+            const unitOfWeight = item["unit-of-weight"] || item["unit_of_weight"] || item["unitOfWeight"] || "";
+            const salesPrice = item["sales-price"] || item["sales_price"] || item["salesPrice"] || "0";
+            const currency = item["currency"] || item["currency-unit"] || item["currency_unit"] || "USD";
+            
+            // Calculate Reimbursement Per Unit = (Sales Price – Fees)
+            const salesPriceNum = parseFloat(salesPrice) || 0;
+            const feesNum = parseFloat(totalAmzFee) || 0;
+            const reimbursementPerUnit = salesPriceNum - feesNum;
+
             fbaData.push({
-                asin: item.asin,
-                totalFba: item["expected_fulfillment_fee_per_unit"],
-                totalAmzFee: item["estimated_fee_total"]
-            })
-        })
+                asin: asin,
+                sku: sku,
+                fnsku: fnsku,
+                totalFba: totalFba,
+                totalAmzFee: totalAmzFee,
+                longestSide: longestSide,
+                medianSide: medianSide,
+                shortestSide: shortestSide,
+                unitOfDimension: unitOfDimension,
+                itemPackageWeight: itemPackageWeight,
+                unitOfWeight: unitOfWeight,
+                salesPrice: salesPrice,
+                currency: currency,
+                reimbursementPerUnit: reimbursementPerUnit
+            });
+        });
 
         const createProductWiseFBAData = await ProductWiseFBAData.create({
             userId: userId,

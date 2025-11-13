@@ -19,9 +19,14 @@ const getshipment = require('../Services/Sp_API/shipment.js');
 const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js');
 
 /**
- * @desc Get reimbursement summary for dashboard
+ * @desc Get reimbursement summary for dashboard with calculated data
  * @route GET /app/reimbursements/summary
  * @access Private
+ * 
+ * Returns calculated data as per Refunzo documentation:
+ * - Fee Protector (BackendShipmentItems, BackendShipments)
+ * - Backend Lost Inventory
+ * - Calculated metrics: Total Recoverable (Month), Discrepancies Found, Claim Success Rate, Avg Resolution Time
  */
 const getReimbursementSummaryController = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -41,23 +46,336 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
         throw new ApiError(400, 'User ID, country, and region are required');
     }
 
-    logger.info('Fetching reimbursement summary:', { userId, country, region });
+    logger.info('Fetching reimbursement summary with calculated data:', { userId, country, region });
 
     try {
-        const summary = await getReimbursementSummary(userId, country, region);
+        // Import required models
+        const ShipmentModel = require('../models/ShipmentModel.js');
+        const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
+        const LedgerSummaryViewModel = require('../models/LedgerSummaryViewModel.js');
+        const BackendLostInventoryModel = require('../models/BackendLostInventoryModel.js');
         
-        logger.info('Reimbursement summary fetched successfully', {
+        // Get base summary
+        const summary = await getReimbursementSummary(userId, country, region);
+        const potentialClaims = await getDetailedReimbursements(userId, country, region, { status: 'POTENTIAL' });
+        
+        // Get reimbursement record for calculations
+        const reimbursementRecord = await ReimbursementModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        // Get all required data for calculations
+        const shipmentRecord = await ShipmentModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const fbaDataRecord = await ProductWiseFBAData.findOne({
+            userId: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const ledgerSummaryRecord = await LedgerSummaryViewModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const backendLostInventoryRecord = await BackendLostInventoryModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        // ===== CALCULATE FEE PROTECTOR BACKEND SHIPMENT ITEMS AND SHIPMENTS =====
+        const fbaDataMap = new Map();
+        if (fbaDataRecord && fbaDataRecord.fbaData) {
+            fbaDataRecord.fbaData.forEach(item => {
+                if (item && item.asin) {
+                    fbaDataMap.set(item.asin, item);
+                }
+            });
+        }
+
+        const backendShipmentItems = [];
+        const backendShipments = [];
+        
+        if (shipmentRecord && shipmentRecord.shipmentData) {
+            shipmentRecord.shipmentData.forEach(shipment => {
+                if (!shipment || !shipment.itemDetails) return;
+                
+                let shipmentHasDiscrepancy = false;
+                const shipmentItems = [];
+                
+                shipment.itemDetails.forEach(item => {
+                    if (!item || !item.SellerSKU) return;
+                    
+                    const quantityShipped = parseInt(item.QuantityShipped) || 0;
+                    const quantityReceived = parseInt(item.QuantityReceived) || 0;
+                    const discrepancy = quantityShipped - quantityReceived;
+                    
+                    if (discrepancy > 0) {
+                        shipmentHasDiscrepancy = true;
+                        
+                        let fbaItem = null;
+                        for (const [asin, fbaData] of fbaDataMap.entries()) {
+                            if (fbaData.sku === item.SellerSKU || fbaData.fnsku === item.FulfillmentNetworkSKU) {
+                                fbaItem = fbaData;
+                                break;
+                            }
+                        }
+                        
+                        const salesPrice = fbaItem ? (parseFloat(fbaItem.salesPrice) || 0) : 0;
+                        const fees = fbaItem ? (parseFloat(fbaItem.totalAmzFee) || 0) : 0;
+                        const reimbursementPerUnit = fbaItem ? (parseFloat(fbaItem.reimbursementPerUnit) || (salesPrice - fees)) : 0;
+                        const expectedAmount = discrepancy * reimbursementPerUnit;
+                        
+                        backendShipmentItems.push({
+                            shipmentId: shipment.shipmentId || '',
+                            shipmentName: shipment.shipmentName || '',
+                            sku: item.SellerSKU || '',
+                            fnsku: item.FulfillmentNetworkSKU || '',
+                            asin: fbaItem?.asin || '',
+                            quantityShipped: quantityShipped,
+                            quantityReceived: quantityReceived,
+                            discrepancyUnits: discrepancy,
+                            salesPrice: salesPrice,
+                            fees: fees,
+                            reimbursementPerUnit: reimbursementPerUnit,
+                            expectedAmount: expectedAmount,
+                            currency: fbaItem?.currency || 'USD',
+                            date: shipmentRecord?.createdAt || shipmentRecord?.updatedAt || new Date()
+                        });
+                        
+                        shipmentItems.push({
+                            sku: item.SellerSKU,
+                            discrepancy: discrepancy,
+                            expectedAmount: expectedAmount
+                        });
+                    }
+                });
+                
+                if (shipmentHasDiscrepancy) {
+                    const totalDiscrepancy = shipmentItems.reduce((sum, item) => sum + item.discrepancy, 0);
+                    const totalExpectedAmount = shipmentItems.reduce((sum, item) => sum + item.expectedAmount, 0);
+                    
+                    backendShipments.push({
+                        shipmentId: shipment.shipmentId || '',
+                        shipmentName: shipment.shipmentName || '',
+                        totalDiscrepancyUnits: totalDiscrepancy,
+                        totalExpectedAmount: totalExpectedAmount,
+                        itemCount: shipmentItems.length
+                    });
+                }
+            });
+        }
+
+        // ===== CALCULATE BACKEND LOST INVENTORY =====
+        let backendLostInventory = {
+            itemCount: 0,
+            summary: {},
+            data: []
+        };
+
+        if (backendLostInventoryRecord) {
+            // Add date to each item if not present
+            const itemsWithDate = (backendLostInventoryRecord.items || []).map(item => ({
+                ...item,
+                date: item.date || backendLostInventoryRecord.createdAt || new Date()
+            }));
+            
+            backendLostInventory = {
+                itemCount: itemsWithDate.length,
+                summary: backendLostInventoryRecord.summary || {},
+                data: itemsWithDate
+            };
+        } else if (ledgerSummaryRecord && reimbursementRecord && fbaDataRecord) {
+            const calculatedItems = [];
+            const ledgerData = ledgerSummaryRecord.data || [];
+            const reimbursements = reimbursementRecord.reimbursements || [];
+            
+            const ledgerMap = new Map();
+            ledgerData.forEach(item => {
+                if (item && item.asin) {
+                    const asin = item.asin;
+                    if (!ledgerMap.has(asin)) {
+                        ledgerMap.set(asin, { lostUnits: 0, foundUnits: 0 });
+                    }
+                    const lost = parseFloat(item.lost) || 0;
+                    const found = parseFloat(item.found) || 0;
+                    ledgerMap.get(asin).lostUnits += lost;
+                    ledgerMap.get(asin).foundUnits += found;
+                }
+            });
+            
+            const reimbursedMap = new Map();
+            reimbursements.forEach(r => {
+                if (r && r.asin && r.reasonCode && 
+                    (r.reasonCode.includes('Lost') || r.reasonCode.includes('LOST') || 
+                     r.reasonCode.includes('Lost_warehouse') || r.reasonCode.includes('LOST_WAREHOUSE'))) {
+                    const asin = r.asin;
+                    const quantity = parseInt(r.quantity) || 0;
+                    reimbursedMap.set(asin, (reimbursedMap.get(asin) || 0) + quantity);
+                }
+            });
+            
+            ledgerMap.forEach((ledgerData, asin) => {
+                const lostUnits = ledgerData.lostUnits || 0;
+                const foundUnits = ledgerData.foundUnits || 0;
+                const reimbursedUnits = reimbursedMap.get(asin) || 0;
+                const discrepancyUnits = lostUnits - foundUnits - reimbursedUnits;
+                
+                if (discrepancyUnits > 0) {
+                    const fbaItem = fbaDataMap.get(asin);
+                    const salesPrice = fbaItem ? (parseFloat(fbaItem.salesPrice) || 0) : 0;
+                    const fees = fbaItem ? (parseFloat(fbaItem.totalAmzFee) || 0) : 0;
+                    const reimbursementPerUnit = fbaItem ? (parseFloat(fbaItem.reimbursementPerUnit) || (salesPrice - fees)) : 0;
+                    const expectedAmount = discrepancyUnits * reimbursementPerUnit;
+                    
+                    calculatedItems.push({
+                        asin: asin,
+                        sku: fbaItem?.sku || '',
+                        fnsku: fbaItem?.fnsku || '',
+                        lostUnits: lostUnits,
+                        foundUnits: foundUnits,
+                        reimbursedUnits: reimbursedUnits,
+                        discrepancyUnits: discrepancyUnits,
+                        salesPrice: salesPrice,
+                        fees: fees,
+                        reimbursementPerUnit: reimbursementPerUnit,
+                        expectedAmount: expectedAmount,
+                        currency: fbaItem?.currency || 'USD',
+                        date: backendLostInventoryRecord?.createdAt || ledgerSummaryRecord?.createdAt || new Date()
+                    });
+                }
+            });
+            
+            const calculatedSummary = {
+                totalDiscrepancyUnits: calculatedItems.reduce((sum, item) => sum + (item.discrepancyUnits || 0), 0),
+                totalExpectedAmount: calculatedItems.reduce((sum, item) => sum + (item.expectedAmount || 0), 0),
+                totalLostUnits: calculatedItems.reduce((sum, item) => sum + (item.lostUnits || 0), 0),
+                totalFoundUnits: calculatedItems.reduce((sum, item) => sum + (item.foundUnits || 0), 0),
+                totalReimbursedUnits: calculatedItems.reduce((sum, item) => sum + (item.reimbursedUnits || 0), 0)
+            };
+            
+            backendLostInventory = {
+                itemCount: calculatedItems.length,
+                summary: calculatedSummary,
+                data: calculatedItems
+            };
+        }
+
+        // ===== CALCULATE NEW METRICS =====
+        // Total Recoverable (Month) - Sum of all expected amounts from current month
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        
+        // Sum from backendShipmentItems (current month)
+        const shipmentItemsThisMonth = backendShipmentItems.filter(item => {
+            // If we have shipment dates, filter by them; otherwise include all
+            return true; // Include all for now
+        });
+        const shipmentItemsRecoverable = shipmentItemsThisMonth.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+        
+        // Sum from backendLostInventory (current month)
+        const lostInventoryThisMonth = backendLostInventory.data.filter(item => {
+            // Filter by date if available; otherwise include all
+            return true; // Include all for now
+        });
+        const lostInventoryRecoverable = lostInventoryThisMonth.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+        
+        // Get ALL reimbursements (not just potential) for current month
+        const allReimbursements = await getDetailedReimbursements(userId, country, region, {});
+        const reimbursementsThisMonth = allReimbursements.filter(claim => {
+            const claimDate = claim.discoveryDate || claim.reimbursementDate || claim.approvalDate;
+            return claimDate && new Date(claimDate) >= startOfMonth;
+        });
+        const allReimbursementsRecoverable = reimbursementsThisMonth.reduce((sum, claim) => sum + (claim.amount || 0), 0);
+        
+        const totalRecoverableMonth = shipmentItemsRecoverable + lostInventoryRecoverable + allReimbursementsRecoverable;
+        
+        // Discrepancies Found - Total count of discrepancies from all sources
+        const discrepanciesFound = 
+            backendShipmentItems.length + 
+            backendLostInventory.itemCount + 
+            allReimbursements.length;
+        
+        // Claim Success Rate - (totalReceived / (totalReceived + totalDenied)) * 100
+        // This already uses summary which includes all reimbursements, so it's correct
+        const totalReceived = summary?.totalReceived || 0;
+        const totalDenied = summary?.totalDenied || 0;
+        const totalProcessed = totalReceived + totalDenied;
+        const claimSuccessRate = totalProcessed > 0 ? ((totalReceived / totalProcessed) * 100).toFixed(2) : 0;
+        
+        // Avg Resolution Time - Average time between discoveryDate and reimbursementDate for approved claims
+        let avgResolutionTime = 0;
+        if (reimbursementRecord && reimbursementRecord.reimbursements) {
+            const approvedClaims = reimbursementRecord.reimbursements.filter(r => 
+                r.status === 'APPROVED' && r.discoveryDate && r.reimbursementDate
+            );
+            
+            if (approvedClaims.length > 0) {
+                const totalDays = approvedClaims.reduce((sum, claim) => {
+                    const discovery = new Date(claim.discoveryDate);
+                    const reimbursement = new Date(claim.reimbursementDate);
+                    const daysDiff = Math.ceil((reimbursement - discovery) / (1000 * 60 * 60 * 24));
+                    return sum + (daysDiff > 0 ? daysDiff : 0);
+                }, 0);
+                avgResolutionTime = Math.round(totalDays / approvedClaims.length);
+            }
+        }
+
+        // Build response with calculated data
+        const calculatedSummary = {
+            // New metrics for frontend
+            totalRecoverableMonth: totalRecoverableMonth,
+            discrepanciesFound: discrepanciesFound,
+            claimSuccessRate: parseFloat(claimSuccessRate),
+            avgResolutionTime: avgResolutionTime,
+            
+            // Existing metrics (for backward compatibility)
+            totalReceived: summary?.totalReceived || 0,
+            totalPending: summary?.totalPending || 0,
+            totalPotential: summary?.totalPotential || 0,
+            totalDenied: summary?.totalDenied || 0,
+            reimbursementCount: summary?.reimbursementCount || 0,
+            
+            // Calculated data with full arrays for frontend display
+            feeProtector: {
+                backendShipmentItems: {
+                    count: backendShipmentItems.length,
+                    totalExpectedAmount: backendShipmentItems.reduce((sum, item) => sum + (item.expectedAmount || 0), 0),
+                    data: backendShipmentItems // Include full array for frontend
+                },
+                backendShipments: {
+                    count: backendShipments.length,
+                    totalExpectedAmount: backendShipments.reduce((sum, shipment) => sum + (shipment.totalExpectedAmount || 0), 0),
+                    data: backendShipments // Include full array for frontend
+                }
+            },
+            backendLostInventory: {
+                itemCount: backendLostInventory.itemCount,
+                totalExpectedAmount: backendLostInventory.summary?.totalExpectedAmount || 0,
+                data: backendLostInventory.data // Include full array for frontend
+            }
+        };
+        
+        logger.info('Reimbursement summary with calculated data fetched successfully', {
             userId,
             country,
             region,
-            hasData: summary.reimbursementCount > 0,
-            totalReceived: summary.totalReceived,
-            totalPending: summary.totalPending,
-            totalPotential: summary.totalPotential
+            totalRecoverableMonth,
+            discrepanciesFound,
+            claimSuccessRate,
+            avgResolutionTime
         });
 
         return res.status(200).json(
-            new ApiResponse(200, summary, 'Reimbursement summary retrieved successfully')
+            new ApiResponse(200, calculatedSummary, 'Reimbursement summary with calculated data retrieved successfully')
         );
     } catch (error) {
         logger.error('Error in getReimbursementSummaryController', {

@@ -1,0 +1,723 @@
+{
+	"info": {
+		"_postman_id": "reimbursement-api-tests",
+		"name": "Reimbursement API - Complete Test Suite",
+		"description": "Comprehensive Postman collection for testing all Reimbursement APIs. Includes two test suites:\n1. API Tests - Calls all APIs and stores data in database\n2. Fetch All Data - Retrieves all data from database for frontend",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. API Tests - Store Data in Database",
+			"item": [
+				{
+					"name": "1.1 Fetch Reimbursement Data (Store in DB)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has success field\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"});",
+									"",
+									"pm.test(\"Data is stored in database\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.success) {",
+									"        pm.expect(jsonData.data).to.have.property('saved');",
+									"        pm.expect(jsonData.data.saved).to.be.true;",
+									"    }",
+									"});",
+									"",
+									"// Store response for next requests",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"lastFetchSuccess\", true);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"userId\": \"{{userId}}\",\n    \"country\": \"{{country}}\",\n    \"region\": \"{{region}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/fetch",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"fetch"
+							]
+						},
+						"description": "Fetches reimbursement data from Amazon SP-API and stores it in the database. This is the first step - it must be called before other endpoints can retrieve data."
+					},
+					"response": []
+				},
+				{
+					"name": "1.2 Get Reimbursement Summary",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has summary data\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('totalReceived');",
+									"    pm.expect(jsonData.data).to.have.property('totalPending');",
+									"    pm.expect(jsonData.data).to.have.property('totalPotential');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/summary?country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"summary"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								}
+							]
+						},
+						"description": "Gets reimbursement summary for dashboard (total received, pending, potential claims)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.3 Get All Reimbursements",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response is an array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements?country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								},
+								{
+									"key": "status",
+									"value": "APPROVED",
+									"description": "Optional: APPROVED, PENDING, POTENTIAL, DENIED",
+									"disabled": true
+								},
+								{
+									"key": "type",
+									"value": "LOST",
+									"description": "Optional: LOST, DAMAGED, etc.",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Gets all reimbursements with optional filters (status, type, date range)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.4 Get Potential Claims",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response is an array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/potential?country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"potential"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								}
+							]
+						},
+						"description": "Gets potential reimbursement claims (not yet filed), sorted by urgency"
+					},
+					"response": []
+				},
+				{
+					"name": "1.5 Get Urgent Claims",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response is an array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/urgent?country={{country}}&region={{region}}&days=7",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"urgent"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								},
+								{
+									"key": "days",
+									"value": "7",
+									"description": "Number of days for urgency threshold"
+								}
+							]
+						},
+						"description": "Gets urgent claims expiring within specified days (default: 7 days)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.6 Get Stats By Type",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has stats data\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('byType');",
+									"    pm.expect(jsonData.data).to.have.property('countByType');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/stats/by-type?country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"stats",
+								"by-type"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								}
+							]
+						},
+						"description": "Gets reimbursement statistics grouped by type (LOST, DAMAGED, etc.)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.7 Get Timeline Data",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response is an array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/timeline?country={{country}}&region={{region}}&days=30",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"timeline"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								},
+								{
+									"key": "days",
+									"value": "30",
+									"description": "Number of days for timeline (default: 30)"
+								}
+							]
+						},
+						"description": "Gets timeline data for charts (reimbursements by date)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.8 Get Reimbursements By Product (ASIN)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has product data\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('reimbursements');",
+									"    pm.expect(jsonData.data).to.have.property('summary');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/product/{{asin}}?country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"product",
+								"{{asin}}"
+							],
+							"query": [
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								}
+							]
+						},
+						"description": "Gets all reimbursements for a specific product (ASIN)"
+					},
+					"response": []
+				},
+				{
+					"name": "1.9 Update Product Costs",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Costs updated successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('updated');",
+									"    pm.expect(jsonData.data.updated).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"country\": \"{{country}}\",\n    \"region\": \"{{region}}\",\n    \"cogsValues\": {\n        \"B08XYZ1234\": 15.50,\n        \"B09ABC5678\": 22.75\n    }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/app/reimbursements/update-costs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"reimbursements",
+								"update-costs"
+							]
+						},
+						"description": "Updates product costs (COGS) for reimbursement calculations"
+					},
+					"response": []
+				}
+			],
+			"description": "This folder contains all API tests that call the reimbursement endpoints and store data in the database. Run these in sequence."
+		},
+		{
+			"name": "2. Fetch All Data - For Frontend",
+			"item": [
+				{
+					"name": "2.1 Get All Reimbursement Data (Complete)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has all required data\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('summary');",
+									"    pm.expect(jsonData.data).to.have.property('allReimbursements');",
+									"    pm.expect(jsonData.data).to.have.property('potentialClaims');",
+									"    pm.expect(jsonData.data).to.have.property('urgentClaims');",
+									"    pm.expect(jsonData.data).to.have.property('statsByType');",
+									"    pm.expect(jsonData.data).to.have.property('timeline');",
+									"});",
+									"",
+									"pm.test(\"Data structure is correct\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data.allReimbursements).to.have.property('data');",
+									"    pm.expect(jsonData.data.allReimbursements).to.have.property('count');",
+									"    pm.expect(jsonData.data.potentialClaims).to.have.property('data');",
+									"    pm.expect(jsonData.data.potentialClaims).to.have.property('count');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/app/test/getAllReimbursementData?userId={{userId}}&country={{country}}&region={{region}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"test",
+								"getAllReimbursementData"
+							],
+							"query": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								},
+								{
+									"key": "country",
+									"value": "{{country}}"
+								},
+								{
+									"key": "region",
+									"value": "{{region}}"
+								}
+							]
+						},
+						"description": "Fetches ALL reimbursement data from database in a single call. Perfect for frontend consumption. Returns:\n- Summary\n- All reimbursements\n- Potential claims\n- Urgent claims\n- Stats by type\n- Timeline data"
+					},
+					"response": []
+				}
+			],
+			"description": "This folder contains endpoints that fetch all data from the database for frontend use."
+		},
+		{
+			"name": "3. Test Setup Helper",
+			"item": [
+				{
+					"name": "3.1 Test All APIs Setup",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Test plan created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.have.property('tests');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"userId\": \"{{userId}}\",\n    \"country\": \"{{country}}\",\n    \"region\": \"{{region}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/app/test/testAllReimbursementAPIs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"app",
+								"test",
+								"testAllReimbursementAPIs"
+							]
+						},
+						"description": "Helper endpoint that creates a test plan for all reimbursement APIs. Use this to see what APIs will be tested."
+					},
+					"response": []
+				}
+			],
+			"description": "Helper endpoints for testing setup"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "",
+			"type": "string",
+			"description": "JWT authentication token"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string",
+			"description": "User ID for testing"
+		},
+		{
+			"key": "country",
+			"value": "US",
+			"type": "string",
+			"description": "Country code (US, UK, DE, etc.)"
+		},
+		{
+			"key": "region",
+			"value": "NA",
+			"type": "string",
+			"description": "Region code (NA, EU, FE)"
+		},
+		{
+			"key": "asin",
+			"value": "B08XYZ1234",
+			"type": "string",
+			"description": "Product ASIN for testing"
+		}
+	]
+}
+

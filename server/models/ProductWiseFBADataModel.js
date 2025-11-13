@@ -7,6 +7,16 @@ const fbaDataProductWiseSchema = new Schema({
     type: String,
     required: true,
   },
+  sku: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  fnsku: {
+    type: String,
+    required: false,
+    default: ""
+  },
   totalFba: {
     type: String,
     required: true,
@@ -16,6 +26,53 @@ const fbaDataProductWiseSchema = new Schema({
     type: String,
     required: true,
     default: "0"
+  },
+  // Additional fields from GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA report
+  longestSide: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  medianSide: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  shortestSide: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  unitOfDimension: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  itemPackageWeight: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  unitOfWeight: {
+    type: String,
+    required: false,
+    default: ""
+  },
+  salesPrice: {
+    type: String,
+    required: false,
+    default: "0"
+  },
+  currency: {
+    type: String,
+    required: false,
+    default: "USD"
+  },
+  // Calculated field: Reimbursement Per Unit = (Sales Price – Fees)
+  reimbursementPerUnit: {
+    type: Number,
+    required: false,
+    default: 0
   }
 }, { _id: false }); // _id: false to avoid creating separate ids for subdocuments
 

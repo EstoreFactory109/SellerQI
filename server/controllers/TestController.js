@@ -16,6 +16,9 @@ const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
 const { sendRegisteredEmail } = require('../Services/Email/SendEmailOnRegistered.js');
 const getKeywordData = require('../Services/SellerApp/integrate.js');
+const getLedgerSummaryReport = require('../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
+const getProductWiseFBAData = require('../Services/Sp_API/GetProductWiseFBAData.js');
+const { calculateBackendLostInventory, getBackendLostInventory } = require('../Services/Calculations/BackendLostInventory.js');
 
 const testReport = async (req, res) => {
     const {accessToken}=req.body
@@ -310,8 +313,1439 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
     })
   }
 
+const testLedgerSummaryReport = async (req, res) => {
+    try {
+        const { accessToken, marketplaceIds, baseuri, userId, country, region, dataStartTime, dataEndTime } = req.body;
+
+        if (!accessToken) {
+            return res.status(400).json({ 
+                success: false,
+                message: "accessToken is required" 
+            });
+        }
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({ 
+                success: false,
+                message: "userId, country, and region are required" 
+            });
+        }
+
+        // Default values if not provided
+        const marketplaceIdsArray = marketplaceIds || ["ATVPDKIKX0DER"]; // Default US marketplace
+        const baseURI = baseuri || "sellingpartnerapi-na.amazon.com";
+
+        let report;
+        try {
+            report = await getLedgerSummaryReport(accessToken, marketplaceIdsArray, baseURI, userId, country, region, dataStartTime, dataEndTime);
+        } catch (error) {
+            // Handle authorization and other errors
+            if (error.message.includes('Access denied') || error.message.includes('Unauthorized')) {
+                return res.status(403).json({
+                    success: false,
+                    message: error.message,
+                    data: null,
+                    hint: "This report may require specific SP-API permissions. Check your Amazon Developer Console app permissions."
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error generating report",
+                data: null
+            });
+        }
+        
+        if (!report || !report.success) {
+            return res.status(408).json({ 
+                success: false,
+                message: report?.message || "Report did not complete within the time limit",
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: report.message || "Report fetched and saved successfully",
+            data: report.data,
+            recordId: report.recordId,
+            totalRecords: report.totalRecords
+        });
+    } catch (error) {
+        console.error("❌ Error in testLedgerSummaryReport:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Internal server error",
+            data: null
+        });
+    }
+}
+
+const testGetProductWiseFBAData = async (req, res) => {
+    try {
+        const { accessToken, marketplaceIds, baseuri, userId, country, region } = req.body;
+
+        if (!accessToken) {
+            return res.status(400).json({ 
+                success: false,
+                message: "accessToken is required" 
+            });
+        }
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({ 
+                success: false,
+                message: "userId, country, and region are required" 
+            });
+        }
+
+        // Default values if not provided
+        const marketplaceIdsArray = marketplaceIds || ["ATVPDKIKX0DER"]; // Default US marketplace
+        const baseURI = baseuri || "sellingpartnerapi-na.amazon.com";
+
+        let result;
+        try {
+            result = await getProductWiseFBAData(accessToken, marketplaceIdsArray, userId, baseURI, country, region);
+        } catch (error) {
+            // Handle authorization and other errors
+            if (error.message.includes('Access denied') || error.message.includes('Unauthorized')) {
+                return res.status(403).json({
+                    success: false,
+                    message: error.message,
+                    data: null,
+                    hint: "This report may require specific SP-API permissions. Check your Amazon Developer Console app permissions."
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error generating report",
+                data: null
+            });
+        }
+        
+        if (!result || !result.success) {
+            return res.status(408).json({ 
+                success: false,
+                message: result?.message || "Report did not complete within the time limit",
+                data: null
+            });
+        }
+
+        // Extract summary information from the data
+        const fbaDataArray = result.data?.fbaData || [];
+        const summary = {
+            totalProducts: fbaDataArray.length,
+            productsWithReimbursementPerUnit: fbaDataArray.filter(item => item.reimbursementPerUnit && item.reimbursementPerUnit > 0).length,
+            totalReimbursementPerUnit: fbaDataArray.reduce((sum, item) => sum + (parseFloat(item.reimbursementPerUnit) || 0), 0),
+            productsWithSalesPrice: fbaDataArray.filter(item => item.salesPrice && parseFloat(item.salesPrice) > 0).length,
+            productsWithFees: fbaDataArray.filter(item => item.totalAmzFee && parseFloat(item.totalAmzFee) > 0).length
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: result.message || "Product wise FBA data fetched and saved successfully",
+            data: result.data,
+            summary: summary,
+            sampleData: fbaDataArray.slice(0, 5) // Return first 5 items as sample
+        });
+    } catch (error) {
+        console.error("❌ Error in testGetProductWiseFBAData:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Internal server error",
+            data: null
+        });
+    }
+}
+
+const testCalculateBackendLostInventory = async (req, res) => {
+    try {
+        const { userId, country, region } = req.body;
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({ 
+                success: false,
+                message: "userId, country, and region are required" 
+            });
+        }
+
+        let result;
+        try {
+            result = await calculateBackendLostInventory(userId, country, region);
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error calculating Backend Lost Inventory",
+                data: null
+            });
+        }
+        
+        if (!result || !result.success) {
+            return res.status(400).json({ 
+                success: false,
+                message: result?.message || "Calculation failed",
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: result.message || "Backend Lost Inventory calculated successfully",
+            data: result.data,
+            summary: result.summary,
+            sampleItems: result.data?.items?.slice(0, 10) || [] // Return first 10 items as sample
+        });
+    } catch (error) {
+        console.error("❌ Error in testCalculateBackendLostInventory:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Internal server error",
+            data: null
+        });
+    }
+}
+
+const testGetBackendLostInventory = async (req, res) => {
+    try {
+        const { userId, country, region } = req.body;
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({ 
+                success: false,
+                message: "userId, country, and region are required" 
+            });
+        }
+
+        let result;
+        try {
+            result = await getBackendLostInventory(userId, country, region);
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error getting Backend Lost Inventory",
+                data: null
+            });
+        }
+        
+        if (!result || !result.success) {
+            return res.status(404).json({ 
+                success: false,
+                message: result?.message || "No data found",
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: result.message || "Backend Lost Inventory data retrieved successfully",
+            data: result.data,
+            summary: result.summary,
+            sampleItems: result.data?.items?.slice(0, 10) || []
+        });
+    } catch (error) {
+        console.error("❌ Error in testGetBackendLostInventory:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Internal server error",
+            data: null
+        });
+    }
+}
+
+/**
+ * @desc Test all reimbursement APIs together and store data in database
+ * @route POST /app/test/testAllReimbursementAPIs
+ * @access Public (for testing)
+ * 
+ * This endpoint executes all reimbursement-related APIs from Refunzo documentation:
+ * 1. All Shipments API - /fba/inbound/v0/shipments
+ * 2. Shipment Items API - /fba/inbound/v0/shipments/{ship}/items (called within shipment.js)
+ * 3. Listing Items API - /listings/2021-08-01/items/{sellerId}/{sku}
+ * 4. GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA - Fee Protector Data
+ * 5. Units Sold API - /sales/v1/orderMetrics
+ * 6. GET_LEDGER_SUMMARY_VIEW_DATA - Backend Lost Inventory
+ * 7. GET_FBA_REIMBURSEMENTS_DATA - Reimbursement Data
+ * 8. Backend Lost Inventory Calculation
+ * 9. All reimbursement retrieval endpoints
+ */
+const testAllReimbursementAPIs = async (req, res) => {
+    try {
+        const { userId, country, region } = req.body;
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({
+                success: false,
+                message: 'userId, country, and region are required'
+            });
+        }
+
+        // Import required services and models
+        const Seller = require('../models/sellerCentralModel.js');
+        const getTemporaryCredentials = require('../utils/GenerateTemporaryCredentials.js');
+        const { generateAccessToken } = require('../Services/Sp_API/GenerateTokens.js');
+        const tokenManager = require('../utils/TokenManager.js');
+        const { URIs, marketplaceConfig, spapiRegions } = require('./config/config.js');
+        const getshipment = require('../Services/Sp_API/shipment.js');
+        const getProductWiseFBAData = require('../Services/Sp_API/GetProductWiseFBAData.js');
+        const TotalSales = require('../Services/Sp_API/WeeklySales.js');
+        const getLedgerSummaryReport = require('../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
+        const GET_FBA_REIMBURSEMENT_DATA = require('../Services/Sp_API/GET_FBA_REIMBURSEMENT_DATA.js');
+        const { calculateBackendLostInventory } = require('../Services/Calculations/BackendLostInventory.js');
+        const GetListingItem = require('../Services/Sp_API/GetListingItemsIssues.js');
+        const {
+            fetchReimbursementData,
+            getReimbursementSummaryController,
+            getAllReimbursements,
+            getPotentialClaims,
+            getUrgentClaims,
+            getReimbursementStatsByType,
+            getReimbursementTimeline
+        } = require('./ReimbursementController.js');
+
+        const results = {
+            timestamp: new Date().toISOString(),
+            userId,
+            country,
+            region,
+            tests: {},
+            summary: {
+                totalTests: 0,
+                passed: 0,
+                failed: 0,
+                errors: []
+            }
+        };
+
+        // ===== GET SELLER DATA AND CREDENTIALS =====
+        const getSellerData = await Seller.findOne({ User: userId });
+        if (!getSellerData) {
+            return res.status(404).json({
+                success: false,
+                message: 'No seller account found for this user'
+            });
+        }
+
+        const sellerAccounts = Array.isArray(getSellerData.sellerAccount) 
+            ? getSellerData.sellerAccount 
+            : [];
+        const getSellerAccount = sellerAccounts.find(
+            item => item && item.country === country && item.region === region
+        );
+
+        if (!getSellerAccount) {
+            return res.status(400).json({
+                success: false,
+                message: `No seller account found for region ${region} and country ${country}`
+            });
+        }
+
+        const RefreshToken = getSellerAccount.spiRefreshToken;
+        if (!RefreshToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'SP-API refresh token not found'
+            });
+        }
+
+        // Get AWS credentials
+        let Base_URI = URIs[region];
+        if (!Base_URI) {
+            const defaultURIs = {
+                NA: 'sellingpartnerapi-na.amazon.com',
+                EU: 'sellingpartnerapi-eu.amazon.com',
+                FE: 'sellingpartnerapi-fe.amazon.com'
+            };
+            Base_URI = defaultURIs[region];
+        }
+        if (!Base_URI) {
+            return res.status(400).json({
+                success: false,
+                message: `Unsupported region: ${region}`
+            });
+        }
+
+        const regionConfig = spapiRegions[region];
+        if (!regionConfig) {
+            return res.status(400).json({
+                success: false,
+                message: `No credential configuration for region: ${region}`
+            });
+        }
+
+        const credentials = await getTemporaryCredentials(regionConfig);
+        if (!credentials || !credentials.AccessKey || !credentials.SecretKey) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate AWS credentials'
+            });
+        }
+
+        // Generate access token
+        const AccessToken = await generateAccessToken(userId, RefreshToken);
+        if (!AccessToken) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate SP-API access token'
+            });
+        }
+
+        // Initialize token manager
+        tokenManager.setTokens(userId, AccessToken, null, RefreshToken, null);
+
+        // Get marketplace ID
+        let Marketplace_Id = marketplaceConfig[country] || marketplaceConfig[country.toUpperCase()];
+        if (!Marketplace_Id && country) {
+            const foundKey = Object.keys(marketplaceConfig).find(
+                key => key.toLowerCase() === country.toLowerCase()
+            );
+            if (foundKey) {
+                Marketplace_Id = marketplaceConfig[foundKey];
+            }
+        }
+        if (!Marketplace_Id) {
+            return res.status(400).json({
+                success: false,
+                message: `Unsupported country: ${country}`
+            });
+        }
+
+        const dataToSend = {
+            marketplaceId: Marketplace_Id,
+            AccessToken: AccessToken,
+            AccessKey: credentials.AccessKey,
+            SecretKey: credentials.SecretKey,
+            SessionToken: credentials.SessionToken,
+            SellerId: getSellerAccount.selling_partner_id
+        };
+
+        // Mock request/response objects for controller functions
+        const createMockReq = (params = {}, query = {}, body = {}) => ({
+            userId,
+            country: query.country || body.country || country,
+            region: query.region || body.region || region,
+            query: { ...query, country: query.country || country, region: query.region || region },
+            body: { ...body, country: body.country || country, region: body.region || region },
+            params
+        });
+
+        const createMockRes = () => {
+            let responseData = null;
+            let statusCode = 200;
+            return {
+                status: (code) => {
+                    statusCode = code;
+                    return {
+                        json: (data) => {
+                            responseData = { statusCode, data };
+                            return responseData;
+                        }
+                    };
+                },
+                json: (data) => {
+                    responseData = { statusCode, data };
+                    return responseData;
+                },
+                getResponse: () => responseData
+            };
+        };
+
+        // Create mock next function for asyncHandler
+        const createMockNext = (errorHandler) => {
+            return (error) => {
+                if (error) {
+                    errorHandler(error);
+                }
+            };
+        };
+
+        // Test 1: All Shipments API - /fba/inbound/v0/shipments
+        results.summary.totalTests++;
+        try {
+            const shipmentResult = await tokenManager.wrapDataToSendFunction(
+                getshipment,
+                userId,
+                RefreshToken,
+                null
+            )(dataToSend, userId, Base_URI, country, region);
+            
+            results.tests.allShipments = {
+                status: shipmentResult ? 'success' : 'failed',
+                hasData: !!shipmentResult,
+                shipmentCount: shipmentResult?.shipmentData?.length || 0,
+                note: 'Fetches all shipments with status CLOSED. Shipment items are automatically fetched for each shipment.'
+            };
+            
+            if (shipmentResult) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push('All Shipments: No data returned');
+            }
+        } catch (error) {
+            results.tests.allShipments = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`All Shipments: ${error.message}`);
+        }
+
+        // Test 2: GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA - Fee Protector Data
+        results.summary.totalTests++;
+        try {
+            const fbaFeesResult = await getProductWiseFBAData(
+                AccessToken,
+                [Marketplace_Id],
+                userId,
+                Base_URI,
+                country,
+                region
+            );
+            
+            results.tests.fbaEstimatedFees = {
+                status: fbaFeesResult?.success ? 'success' : 'failed',
+                hasData: !!fbaFeesResult?.success,
+                productCount: fbaFeesResult?.data?.fbaData?.length || 0,
+                message: fbaFeesResult?.message || 'Fee Protector data fetched',
+                note: 'Stores SKU, FNSKU, ASIN, dimensions, weight, sales price, fees, and calculates Reimbursement Per Unit = (Sales Price – Fees)'
+            };
+            
+            if (fbaFeesResult?.success) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`FBA Estimated Fees: ${fbaFeesResult?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.fbaEstimatedFees = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`FBA Estimated Fees: ${error.message}`);
+        }
+
+        // Test 3: Units Sold API - /sales/v1/orderMetrics
+        results.summary.totalTests++;
+        try {
+            // Calculate date range for last 30 days
+            const now = new Date();
+            const before = now.toISOString();
+            const after = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            
+            const salesData = {
+                ...dataToSend,
+                after,
+                before
+            };
+            
+            const unitsSoldResult = await tokenManager.wrapDataToSendFunction(
+                TotalSales,
+                userId,
+                RefreshToken,
+                null
+            )(salesData, userId, Base_URI, country, region);
+            
+            results.tests.unitsSold = {
+                status: unitsSoldResult ? 'success' : 'failed',
+                hasData: !!unitsSoldResult,
+                note: 'Fetches units sold data for Fee Protector calculations'
+            };
+            
+            if (unitsSoldResult) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push('Units Sold: No data returned');
+            }
+        } catch (error) {
+            results.tests.unitsSold = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Units Sold: ${error.message}`);
+        }
+
+        // Test 4: GET_LEDGER_SUMMARY_VIEW_DATA - Backend Lost Inventory
+        results.summary.totalTests++;
+        try {
+            const ledgerResult = await getLedgerSummaryReport(
+                AccessToken,
+                [Marketplace_Id],
+                Base_URI,
+                userId,
+                country,
+                region
+            );
+            
+            results.tests.ledgerSummary = {
+                status: ledgerResult?.success ? 'success' : 'failed',
+                hasData: !!ledgerResult?.success,
+                recordId: ledgerResult?.recordId || null,
+                totalRecords: ledgerResult?.totalRecords || 0,
+                message: ledgerResult?.message || 'Ledger summary data fetched',
+                note: 'Gets found and lost quantity for Backend Lost Inventory calculations'
+            };
+            
+            if (ledgerResult?.success) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Ledger Summary: ${ledgerResult?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.ledgerSummary = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Ledger Summary: ${error.message}`);
+        }
+
+        // Test 5: GET_FBA_REIMBURSEMENTS_DATA - Reimbursement Data
+        results.summary.totalTests++;
+        try {
+            const reimbursementResult = await tokenManager.wrapDataToSendFunction(
+                GET_FBA_REIMBURSEMENT_DATA,
+                userId,
+                RefreshToken,
+                null
+            )(dataToSend, userId, Base_URI, country, region);
+            
+            results.tests.fbaReimbursements = {
+                status: reimbursementResult ? 'success' : 'failed',
+                hasData: !!reimbursementResult,
+                reimbursementCount: reimbursementResult?.reimbursements?.length || 0,
+                note: 'Gets reimbursed units where reason is "Lost_warehouse" for Backend Lost Inventory calculations'
+            };
+            
+            if (reimbursementResult) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push('FBA Reimbursements: No data returned');
+            }
+        } catch (error) {
+            results.tests.fbaReimbursements = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`FBA Reimbursements: ${error.message}`);
+        }
+
+        // Test 6: Backend Lost Inventory Calculation
+        results.summary.totalTests++;
+        try {
+            const backendLostResult = await calculateBackendLostInventory(userId, country, region);
+            
+            results.tests.backendLostInventory = {
+                status: backendLostResult?.success ? 'success' : 'failed',
+                hasData: !!backendLostResult?.success,
+                itemCount: backendLostResult?.data?.items?.length || 0,
+                message: backendLostResult?.message || 'Backend Lost Inventory calculated',
+                note: 'Calculates: Discrepancy Units = Lost Units – Found Units – Reimbursed Units. Also identifies Underpaid items.'
+            };
+            
+            if (backendLostResult?.success) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Backend Lost Inventory: ${backendLostResult?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.backendLostInventory = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Backend Lost Inventory: ${error.message}`);
+        }
+
+        // Test 7: Fetch and merge reimbursement data (includes shipment discrepancies)
+        results.summary.totalTests++;
+        try {
+            const mockReq7 = createMockReq({}, {}, { country, region });
+            const mockRes7 = createMockRes();
+            let testError = null;
+            const mockNext7 = createMockNext((error) => {
+                testError = error;
+            });
+            
+            await fetchReimbursementData(mockReq7, mockRes7, mockNext7);
+            
+            if (testError) {
+                throw testError;
+            }
+            
+            const response7 = mockRes7.getResponse();
+            
+            results.tests.fetchReimbursementData = {
+                status: response7.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response7.statusCode,
+                apiDataCount: response7.data?.data?.apiDataCount || 0,
+                potentialClaimsCount: response7.data?.data?.potentialClaimsCount || 0,
+                totalReimbursements: response7.data?.data?.totalReimbursements || 0,
+                message: response7.data?.message || 'Reimbursement data fetched and merged',
+                note: 'Fetches reimbursement data from SP-API, calculates potential claims from shipment discrepancies, and merges everything to database'
+            };
+            
+            if (response7.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Fetch Reimbursement Data: ${response7.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.fetchReimbursementData = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Fetch Reimbursement Data: ${error.message}`);
+        }
+
+        // Test 8: Get reimbursement summary
+        results.summary.totalTests++;
+        try {
+            const mockReq8 = createMockReq({}, { country, region });
+            const mockRes8 = createMockRes();
+            let testError8 = null;
+            const mockNext8 = createMockNext((error) => {
+                testError8 = error;
+            });
+            
+            await getReimbursementSummaryController(mockReq8, mockRes8, mockNext8);
+            
+            if (testError8) {
+                throw testError8;
+            }
+            
+            const response8 = mockRes8.getResponse();
+            
+            results.tests.getSummary = {
+                status: response8.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response8.statusCode,
+                totalReceived: response8.data?.data?.totalReceived || 0,
+                totalPending: response8.data?.data?.totalPending || 0,
+                totalPotential: response8.data?.data?.totalPotential || 0
+            };
+            
+            if (response8.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get Summary: ${response8.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getSummary = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get Summary: ${error.message}`);
+        }
+
+        // Test 9: Get all reimbursements
+        results.summary.totalTests++;
+        try {
+            const mockReq9 = createMockReq({}, { country, region });
+            const mockRes9 = createMockRes();
+            let testError9 = null;
+            const mockNext9 = createMockNext((error) => {
+                testError9 = error;
+            });
+            
+            await getAllReimbursements(mockReq9, mockRes9, mockNext9);
+            
+            if (testError9) {
+                throw testError9;
+            }
+            
+            const response9 = mockRes9.getResponse();
+            
+            results.tests.getAllReimbursements = {
+                status: response9.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response9.statusCode,
+                count: Array.isArray(response9.data?.data) ? response9.data.data.length : 0,
+                hasMore: Array.isArray(response9.data?.data) && response9.data.data.length > 5
+            };
+            
+            if (response9.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get All: ${response9.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getAllReimbursements = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get All: ${error.message}`);
+        }
+
+        // Test 10: Get potential claims
+        results.summary.totalTests++;
+        try {
+            const mockReq10 = createMockReq({}, { country, region });
+            const mockRes10 = createMockRes();
+            let testError10 = null;
+            const mockNext10 = createMockNext((error) => {
+                testError10 = error;
+            });
+            
+            await getPotentialClaims(mockReq10, mockRes10, mockNext10);
+            
+            if (testError10) {
+                throw testError10;
+            }
+            
+            const response10 = mockRes10.getResponse();
+            
+            results.tests.getPotentialClaims = {
+                status: response10.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response10.statusCode,
+                count: Array.isArray(response10.data?.data) ? response10.data.data.length : 0
+            };
+            
+            if (response10.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get Potential: ${response10.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getPotentialClaims = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get Potential: ${error.message}`);
+        }
+
+        // Test 11: Get urgent claims
+        results.summary.totalTests++;
+        try {
+            const mockReq11 = createMockReq({}, { country, region, days: 7 });
+            const mockRes11 = createMockRes();
+            let testError11 = null;
+            const mockNext11 = createMockNext((error) => {
+                testError11 = error;
+            });
+            
+            await getUrgentClaims(mockReq11, mockRes11, mockNext11);
+            
+            if (testError11) {
+                throw testError11;
+            }
+            
+            const response11 = mockRes11.getResponse();
+            
+            results.tests.getUrgentClaims = {
+                status: response11.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response11.statusCode,
+                count: Array.isArray(response11.data?.data) ? response11.data.data.length : 0
+            };
+            
+            if (response11.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get Urgent: ${response11.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getUrgentClaims = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get Urgent: ${error.message}`);
+        }
+
+        // Test 12: Get stats by type
+        results.summary.totalTests++;
+        try {
+            const mockReq12 = createMockReq({}, { country, region });
+            const mockRes12 = createMockRes();
+            let testError12 = null;
+            const mockNext12 = createMockNext((error) => {
+                testError12 = error;
+            });
+            
+            await getReimbursementStatsByType(mockReq12, mockRes12, mockNext12);
+            
+            if (testError12) {
+                throw testError12;
+            }
+            
+            const response12 = mockRes12.getResponse();
+            
+            results.tests.getStatsByType = {
+                status: response12.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response12.statusCode,
+                byType: response12.data?.data?.byType || {},
+                countByType: response12.data?.data?.countByType || {}
+            };
+            
+            if (response12.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get Stats: ${response12.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getStatsByType = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get Stats: ${error.message}`);
+        }
+
+        // Test 13: Get timeline
+        results.summary.totalTests++;
+        try {
+            const mockReq13 = createMockReq({}, { country, region, days: 30 });
+            const mockRes13 = createMockRes();
+            let testError13 = null;
+            const mockNext13 = createMockNext((error) => {
+                testError13 = error;
+            });
+            
+            await getReimbursementTimeline(mockReq13, mockRes13, mockNext13);
+            
+            if (testError13) {
+                throw testError13;
+            }
+            
+            const response13 = mockRes13.getResponse();
+            
+            results.tests.getTimeline = {
+                status: response13.statusCode === 200 ? 'success' : 'failed',
+                statusCode: response13.statusCode,
+                count: Array.isArray(response13.data?.data) ? response13.data.data.length : 0
+            };
+            
+            if (response13.statusCode === 200) {
+                results.summary.passed++;
+            } else {
+                results.summary.failed++;
+                results.summary.errors.push(`Get Timeline: ${response13.data?.message || 'Failed'}`);
+            }
+        } catch (error) {
+            results.tests.getTimeline = {
+                status: 'error',
+                error: error.message
+            };
+            results.summary.failed++;
+            results.summary.errors.push(`Get Timeline: ${error.message}`);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'All reimbursement APIs executed successfully. Data has been fetched and stored in database.',
+            data: results,
+            executionTime: new Date().toISOString()
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: 'Error executing reimbursement APIs',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+};
+
+/**
+ * @desc Get all reimbursement data from database for frontend
+ * @route GET /app/test/getAllReimbursementData
+ * @access Public (for testing)
+ * 
+ * Returns all models mentioned in Refunzo Final Documentation 6.md:
+ * 1. AllShipments (ShipmentModel) - with ShipmentItems nested
+ * 2. Listing Items (ListingItems)
+ * 3. Fee Protector Data (ProductWiseFBAData)
+ * 4. Units Sold (TotalSalesModel)
+ * 5. Ledger Summary View (LedgerSummaryViewModel)
+ * 6. Reimbursement Data (ReimbursementModel)
+ * 7. Backend Lost Inventory (BackendLostInventoryModel)
+ */
+const getAllReimbursementData = async (req, res) => {
+    try {
+        const { userId, country, region } = req.query;
+
+        if (!userId || !country || !region) {
+            return res.status(400).json({
+                success: false,
+                message: 'userId, country, and region are required as query parameters'
+            });
+        }
+
+        // Import all models
+        const ReimbursementModel = require('../models/ReimbursementModel.js');
+        const ShipmentModel = require('../models/ShipmentModel.js');
+        const ListingItems = require('../models/GetListingItemsModel.js');
+        const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
+        const TotalSalesModel = require('../models/TotalSalesModel.js');
+        const LedgerSummaryViewModel = require('../models/LedgerSummaryViewModel.js');
+        const BackendLostInventoryModel = require('../models/BackendLostInventoryModel.js');
+        const {
+            getReimbursementSummary,
+            getDetailedReimbursements
+        } = require('../Services/Calculations/EnhancedReimbursement.js');
+
+        // 1. Get AllShipments (includes ShipmentItems nested in itemDetails)
+        const shipmentRecord = await ShipmentModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const shipments = shipmentRecord ? {
+            shipmentCount: shipmentRecord.shipmentData?.length || 0,
+            totalItems: shipmentRecord.shipmentData?.reduce((sum, shipment) => 
+                sum + (shipment.itemDetails?.length || 0), 0) || 0,
+            data: shipmentRecord.shipmentData || [],
+            note: 'Includes ShipmentItems nested in itemDetails array'
+        } : {
+            shipmentCount: 0,
+            totalItems: 0,
+            data: [],
+            note: 'No shipment data found'
+        };
+
+        // 2. Get Listing Items
+        const listingItemsRecord = await ListingItems.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const listingItems = listingItemsRecord ? {
+            keywordCount: listingItemsRecord.GenericKeyword?.length || 0,
+            data: listingItemsRecord.GenericKeyword || []
+        } : {
+            keywordCount: 0,
+            data: []
+        };
+
+        // 3. Get Fee Protector Data (ProductWiseFBAData)
+        const fbaDataRecord = await ProductWiseFBAData.findOne({
+            userId: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const feeProtectorData = fbaDataRecord ? {
+            productCount: fbaDataRecord.fbaData?.length || 0,
+            data: fbaDataRecord.fbaData || [],
+            note: 'Includes SKU, FNSKU, ASIN, dimensions, weight, sales price, fees, and calculated Reimbursement Per Unit = (Sales Price – Fees)'
+        } : {
+            productCount: 0,
+            data: [],
+            note: 'No fee protector data found'
+        };
+
+        // 4. Get Units Sold (TotalSalesModel)
+        const unitsSoldRecord = await TotalSalesModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const unitsSold = unitsSoldRecord ? {
+            intervalCount: unitsSoldRecord.totalSales?.length || 0,
+            data: unitsSoldRecord.totalSales || []
+        } : {
+            intervalCount: 0,
+            data: []
+        };
+
+        // 5. Get Ledger Summary View Data
+        const ledgerSummaryRecord = await LedgerSummaryViewModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const ledgerSummary = ledgerSummaryRecord ? {
+            recordCount: ledgerSummaryRecord.data?.length || 0,
+            data: ledgerSummaryRecord.data || [],
+            note: 'Contains found and lost quantity for Backend Lost Inventory calculations'
+        } : {
+            recordCount: 0,
+            data: [],
+            note: 'No ledger summary data found'
+        };
+
+        // 6. Get Reimbursement Data
+        const summary = await getReimbursementSummary(userId, country, region);
+        const allReimbursements = await getDetailedReimbursements(userId, country, region, {});
+        const potentialClaims = await getDetailedReimbursements(userId, country, region, { status: 'POTENTIAL' });
+        
+        // Get urgent claims (expiring in 7 days)
+        const urgentClaims = potentialClaims.filter(claim => {
+            return claim.daysToDeadline !== undefined && 
+                   claim.daysToDeadline >= 0 && 
+                   claim.daysToDeadline <= 7;
+        });
+
+        // Get stats by type
+        const reimbursementRecord = await ReimbursementModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        const statsByType = reimbursementRecord ? {
+            byType: reimbursementRecord.summary?.amountByType || {},
+            countByType: reimbursementRecord.summary?.countByType || {},
+            total: reimbursementRecord.summary?.totalReceived || 0
+        } : { byType: {}, countByType: {}, total: 0 };
+
+        // Get timeline data (last 30 days)
+        const days = 30;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+
+        const timelineData = {};
+        if (reimbursementRecord && reimbursementRecord.reimbursements) {
+            reimbursementRecord.reimbursements
+                .filter(r => {
+                    const date = r.reimbursementDate || r.discoveryDate;
+                    return date && date >= startDate;
+                })
+                .forEach(r => {
+                    const date = r.reimbursementDate || r.discoveryDate;
+                    const dateKey = date.toISOString().split('T')[0];
+
+                    if (!timelineData[dateKey]) {
+                        timelineData[dateKey] = {
+                            date: dateKey,
+                            totalAmount: 0,
+                            count: 0,
+                            byType: {}
+                        };
+                    }
+
+                    timelineData[dateKey].totalAmount += r.amount || 0;
+                    timelineData[dateKey].count++;
+
+                    const type = r.reimbursementType || 'OTHER';
+                    if (!timelineData[dateKey].byType[type]) {
+                        timelineData[dateKey].byType[type] = 0;
+                    }
+                    timelineData[dateKey].byType[type] += r.amount || 0;
+                });
+        }
+
+        const timeline = Object.values(timelineData).sort((a, b) => 
+            new Date(a.date) - new Date(b.date)
+        );
+
+        // 7. Get Backend Lost Inventory
+        const backendLostInventoryRecord = await BackendLostInventoryModel.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        // ===== CALCULATE FEE PROTECTOR BACKEND SHIPMENT ITEMS AND SHIPMENTS =====
+        // Create FBA data map for quick lookup
+        const fbaDataMap = new Map();
+        if (fbaDataRecord && fbaDataRecord.fbaData) {
+            fbaDataRecord.fbaData.forEach(item => {
+                if (item && item.asin) {
+                    fbaDataMap.set(item.asin, item);
+                }
+            });
+        }
+
+        // Calculate BackendShipmentItems from shipments with discrepancies
+        const backendShipmentItems = [];
+        const backendShipments = [];
+        
+        if (shipmentRecord && shipmentRecord.shipmentData) {
+            shipmentRecord.shipmentData.forEach(shipment => {
+                if (!shipment || !shipment.itemDetails) return;
+                
+                let shipmentHasDiscrepancy = false;
+                const shipmentItems = [];
+                
+                shipment.itemDetails.forEach(item => {
+                    if (!item || !item.SellerSKU) return;
+                    
+                    const quantityShipped = parseInt(item.QuantityShipped) || 0;
+                    const quantityReceived = parseInt(item.QuantityReceived) || 0;
+                    const discrepancy = quantityShipped - quantityReceived;
+                    
+                    if (discrepancy > 0) {
+                        shipmentHasDiscrepancy = true;
+                        
+                        // Find FBA data by SKU or FNSKU
+                        let fbaItem = null;
+                        for (const [asin, fbaData] of fbaDataMap.entries()) {
+                            if (fbaData.sku === item.SellerSKU || fbaData.fnsku === item.FulfillmentNetworkSKU) {
+                                fbaItem = fbaData;
+                                break;
+                            }
+                        }
+                        
+                        const salesPrice = fbaItem ? (parseFloat(fbaItem.salesPrice) || 0) : 0;
+                        const fees = fbaItem ? (parseFloat(fbaItem.totalAmzFee) || 0) : 0;
+                        const reimbursementPerUnit = fbaItem ? (parseFloat(fbaItem.reimbursementPerUnit) || (salesPrice - fees)) : 0;
+                        const expectedAmount = discrepancy * reimbursementPerUnit;
+                        
+                        backendShipmentItems.push({
+                            sku: item.SellerSKU || '',
+                            fnsku: item.FulfillmentNetworkSKU || '',
+                            asin: fbaItem?.asin || '',
+                            quantityShipped: quantityShipped,
+                            quantityReceived: quantityReceived,
+                            discrepancyUnits: discrepancy,
+                            salesPrice: salesPrice,
+                            fees: fees,
+                            reimbursementPerUnit: reimbursementPerUnit,
+                            expectedAmount: expectedAmount,
+                            currency: fbaItem?.currency || 'USD'
+                        });
+                        
+                        shipmentItems.push({
+                            sku: item.SellerSKU,
+                            discrepancy: discrepancy,
+                            expectedAmount: expectedAmount
+                        });
+                    }
+                });
+                
+                if (shipmentHasDiscrepancy) {
+                    const totalDiscrepancy = shipmentItems.reduce((sum, item) => sum + item.discrepancy, 0);
+                    const totalExpectedAmount = shipmentItems.reduce((sum, item) => sum + item.expectedAmount, 0);
+                    
+                    backendShipments.push({
+                        shipmentId: shipment.shipmentId || '',
+                        shipmentName: shipment.shipmentName || '',
+                        totalDiscrepancyUnits: totalDiscrepancy,
+                        totalExpectedAmount: totalExpectedAmount,
+                        itemCount: shipmentItems.length
+                    });
+                }
+            });
+        }
+
+        // ===== CALCULATE BACKEND LOST INVENTORY (if not already calculated) =====
+        let backendLostInventory = {
+            itemCount: 0,
+            summary: {},
+            data: [],
+            note: 'No backend lost inventory data found. Run calculateBackendLostInventory first.'
+        };
+
+        if (backendLostInventoryRecord) {
+            backendLostInventory = {
+                itemCount: backendLostInventoryRecord.items?.length || 0,
+                summary: backendLostInventoryRecord.summary || {},
+                data: backendLostInventoryRecord.items || [],
+                note: 'Calculated from Ledger Summary View and Reimbursement Data. Discrepancy Units = Lost Units – Found Units – Reimbursed Units'
+            };
+        } else {
+            // Calculate on the fly if data exists
+            if (ledgerSummaryRecord && reimbursementRecord && fbaDataRecord) {
+                const calculatedItems = [];
+                const ledgerData = ledgerSummaryRecord.data || [];
+                const reimbursements = reimbursementRecord.reimbursements || [];
+                
+                // Create maps for quick lookup
+                const ledgerMap = new Map();
+                ledgerData.forEach(item => {
+                    if (item && item.asin) {
+                        const asin = item.asin;
+                        if (!ledgerMap.has(asin)) {
+                            ledgerMap.set(asin, {
+                                lostUnits: 0,
+                                foundUnits: 0
+                            });
+                        }
+                        const lost = parseFloat(item.lost) || 0;
+                        const found = parseFloat(item.found) || 0;
+                        ledgerMap.get(asin).lostUnits += lost;
+                        ledgerMap.get(asin).foundUnits += found;
+                    }
+                });
+                
+                // Map reimbursed units (where reason is "Lost_warehouse")
+                const reimbursedMap = new Map();
+                reimbursements.forEach(r => {
+                    if (r && r.asin && r.reasonCode && 
+                        (r.reasonCode.includes('Lost') || r.reasonCode.includes('LOST') || 
+                         r.reasonCode.includes('Lost_warehouse') || r.reasonCode.includes('LOST_WAREHOUSE'))) {
+                        const asin = r.asin;
+                        const quantity = parseInt(r.quantity) || 0;
+                        reimbursedMap.set(asin, (reimbursedMap.get(asin) || 0) + quantity);
+                    }
+                });
+                
+                // Calculate for each ASIN
+                ledgerMap.forEach((ledgerData, asin) => {
+                    const lostUnits = ledgerData.lostUnits || 0;
+                    const foundUnits = ledgerData.foundUnits || 0;
+                    const reimbursedUnits = reimbursedMap.get(asin) || 0;
+                    
+                    // Discrepancy Units = Lost Units – Found Units – Reimbursed Units
+                    const discrepancyUnits = lostUnits - foundUnits - reimbursedUnits;
+                    
+                    if (discrepancyUnits > 0) {
+                        // Get FBA data for this ASIN
+                        const fbaItem = fbaDataMap.get(asin);
+                        const salesPrice = fbaItem ? (parseFloat(fbaItem.salesPrice) || 0) : 0;
+                        const fees = fbaItem ? (parseFloat(fbaItem.totalAmzFee) || 0) : 0;
+                        const reimbursementPerUnit = fbaItem ? (parseFloat(fbaItem.reimbursementPerUnit) || (salesPrice - fees)) : 0;
+                        
+                        // Expected Amount = Discrepancy Units × (Sales Price – Fees)
+                        const expectedAmount = discrepancyUnits * reimbursementPerUnit;
+                        
+                        // Get amount per unit from reimbursement (if available)
+                        const reimbursementForAsin = reimbursements.find(r => r.asin === asin && r.reasonCode && 
+                            (r.reasonCode.includes('Lost') || r.reasonCode.includes('LOST')));
+                        const amountPerUnit = reimbursementForAsin ? ((reimbursementForAsin.amount || 0) / (reimbursementForAsin.quantity || 1)) : 0;
+                        
+                        // Check if underpaid: If Amount per Unit < ((Sales Price – Fees) × 0.4)
+                        const isUnderpaid = amountPerUnit > 0 && amountPerUnit < (reimbursementPerUnit * 0.4);
+                        const underpaidExpectedAmount = isUnderpaid ? 
+                            ((reimbursementPerUnit - amountPerUnit) * discrepancyUnits) : 0;
+                        
+                        calculatedItems.push({
+                            asin: asin,
+                            sku: fbaItem?.sku || '',
+                            fnsku: fbaItem?.fnsku || '',
+                            lostUnits: lostUnits,
+                            foundUnits: foundUnits,
+                            reimbursedUnits: reimbursedUnits,
+                            discrepancyUnits: discrepancyUnits,
+                            salesPrice: salesPrice,
+                            fees: fees,
+                            reimbursementPerUnit: reimbursementPerUnit,
+                            expectedAmount: expectedAmount,
+                            currency: fbaItem?.currency || 'USD',
+                            isUnderpaid: isUnderpaid,
+                            amountPerUnit: amountPerUnit,
+                            underpaidExpectedAmount: underpaidExpectedAmount
+                        });
+                    }
+                });
+                
+                // Calculate summary
+                const summary = {
+                    totalDiscrepancyUnits: calculatedItems.reduce((sum, item) => sum + (item.discrepancyUnits || 0), 0),
+                    totalExpectedAmount: calculatedItems.reduce((sum, item) => sum + (item.expectedAmount || 0), 0),
+                    totalUnderpaidItems: calculatedItems.filter(item => item.isUnderpaid).length,
+                    totalUnderpaidExpectedAmount: calculatedItems.reduce((sum, item) => sum + (item.underpaidExpectedAmount || 0), 0),
+                    totalLostUnits: calculatedItems.reduce((sum, item) => sum + (item.lostUnits || 0), 0),
+                    totalFoundUnits: calculatedItems.reduce((sum, item) => sum + (item.foundUnits || 0), 0),
+                    totalReimbursedUnits: calculatedItems.reduce((sum, item) => sum + (item.reimbursedUnits || 0), 0)
+                };
+                
+                backendLostInventory = {
+                    itemCount: calculatedItems.length,
+                    summary: summary,
+                    data: calculatedItems,
+                    note: 'Calculated on-the-fly from Ledger Summary View and Reimbursement Data. Discrepancy Units = Lost Units – Found Units – Reimbursed Units'
+                };
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'All calculated reimbursement data retrieved successfully',
+            data: {
+                // Calculated Data as per Refunzo Documentation
+                feeProtector: {
+                    backendShipmentItems: {
+                        count: backendShipmentItems.length,
+                        data: backendShipmentItems,
+                        note: 'Calculated from shipments with discrepancies. Reimbursement Per Unit = (Sales Price – Fees). Missing data treated as zero.'
+                    },
+                    backendShipments: {
+                        count: backendShipments.length,
+                        data: backendShipments,
+                        note: 'Calculated from shipments where there is a discrepancy. Total expected amount = sum of all item discrepancies.'
+                    }
+                },
+                
+                backendLostInventory: {
+                    itemCount: backendLostInventory.itemCount,
+                    summary: backendLostInventory.summary,
+                    data: backendLostInventory.data,
+                    calculations: {
+                        formula: 'Discrepancy Units = Lost Units – Found Units – Reimbursed Units',
+                        expectedAmountFormula: 'Expected Amount = Discrepancy Units × (Sales Price – Fees)',
+                        underpaidFormula: 'If Amount per Unit < ((Sales Price – Fees) × 0.4), then Underpaid Expected Amount = ((Sales Price – Fees) - Amount per Unit) × quantity',
+                        note: 'All missing data treated as zero. Calculated from Ledger Summary View, Reimbursement Data, and ProductWiseFBAData.'
+                    }
+                },
+                
+                // Calculated Reimbursement Summary
+                summary: {
+                    totalReceived: summary?.totalReceived || 0,
+                    totalPending: summary?.totalPending || 0,
+                    totalPotential: summary?.totalPotential || 0,
+                    totalDenied: summary?.totalDenied || 0
+                },
+                
+                // Calculated Claims
+                potentialClaims: {
+                    count: potentialClaims.length,
+                    data: potentialClaims
+                },
+                urgentClaims: {
+                    count: urgentClaims.length,
+                    data: urgentClaims
+                },
+                
+                // Calculated Statistics
+                statsByType: {
+                    byType: statsByType.byType,
+                    countByType: statsByType.countByType,
+                    total: statsByType.total
+                },
+                
+                // Calculated Timeline
+                timeline: {
+                    data: timeline,
+                    days: days,
+                    count: timeline.length
+                },
+                
+                metadata: {
+                    userId,
+                    country,
+                    region,
+                    fetchedAt: new Date().toISOString(),
+                    calculations: {
+                        backendShipmentItemsCalculated: backendShipmentItems.length > 0,
+                        backendShipmentsCalculated: backendShipments.length > 0,
+                        backendLostInventoryCalculated: backendLostInventory.itemCount > 0,
+                        potentialClaimsCalculated: potentialClaims.length > 0,
+                        urgentClaimsCalculated: urgentClaims.length > 0
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: 'Error fetching reimbursement data',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+};
+
 module.exports = { testReport, getTotalSales, 
   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData
    }

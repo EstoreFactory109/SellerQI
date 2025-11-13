@@ -9,10 +9,9 @@ import { useSelector } from 'react-redux';
 import { 
   getAllReimbursements,
   getReimbursementSummary,
-  getReimbursementTimeline,
-  getReimbursementStatsByType 
+  getReimbursementTimeline
 } from '../services/reimbursementService';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const ReimbursementDashboard = () => {
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -22,7 +21,6 @@ const ReimbursementDashboard = () => {
   const [summary, setSummary] = useState(null);
   const [reimbursements, setReimbursements] = useState([]);
   const [timeline, setTimeline] = useState([]);
-  const [stats, setStats] = useState(null);
   
   // Filter state
   const [filterStatus, setFilterStatus] = useState('all');
@@ -30,6 +28,7 @@ const ReimbursementDashboard = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('date');
   const [showFilters, setShowFilters] = useState(false);
+  const [showUnderpaidOnly, setShowUnderpaidOnly] = useState(false);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,17 +43,15 @@ const ReimbursementDashboard = () => {
     try {
       setLoading(true);
       
-      const [summaryRes, reimbursementsRes, timelineRes, statsRes] = await Promise.all([
+      const [summaryRes, reimbursementsRes, timelineRes] = await Promise.all([
         getReimbursementSummary(),
         getAllReimbursements(),
-        getReimbursementTimeline(90),
-        getReimbursementStatsByType()
+        getReimbursementTimeline(90)
       ]);
 
       setSummary(summaryRes.data);
       setReimbursements(reimbursementsRes.data || []);
       setTimeline(timelineRes.data || []);
-      setStats(statsRes.data);
     } catch (error) {
       console.error('Error fetching reimbursement data:', error);
     } finally {
@@ -126,51 +123,39 @@ const ReimbursementDashboard = () => {
 
   const totalPages = Math.ceil(filteredReimbursements.length / itemsPerPage);
 
-  // Summary cards data
+  // Summary cards data - Updated metrics as per requirements
   const summaryCards = [
     {
-      label: 'Total Received',
-      value: formatCurrency(summary?.totalReceived || 0),
-      icon: CheckCircle,
+      label: 'Total Recoverable (Month)',
+      value: formatCurrency(summary?.totalRecoverableMonth || 0),
+      icon: DollarSign,
       color: 'emerald',
-      trend: summary?.last30Days || 0,
-      subtitle: 'Last 30 days'
+      subtitle: 'This month'
     },
     {
-      label: 'Potential Claims',
-      value: formatCurrency(summary?.totalPotential || 0),
+      label: 'Discrepancies Found',
+      value: summary?.discrepanciesFound || 0,
       icon: AlertCircle,
       color: 'blue',
-      count: filteredReimbursements.filter(r => r.status === 'POTENTIAL').length,
-      subtitle: 'Awaiting filing'
-    },
-    {
-      label: 'Pending Claims',
-      value: formatCurrency(summary?.totalPending || 0),
-      icon: Clock,
-      color: 'orange',
-      count: filteredReimbursements.filter(r => r.status === 'PENDING').length,
-      subtitle: 'Under review'
-    },
-    {
-      label: 'Urgent Claims',
-      value: summary?.claimsExpiringIn7Days || 0,
-      icon: AlertCircle,
-      color: 'red',
       isCount: true,
-      subtitle: 'Expiring in 7 days'
+      subtitle: 'Total discrepancies'
+    },
+    {
+      label: 'Claim Success Rate',
+      value: `${summary?.claimSuccessRate || 0}%`,
+      icon: TrendingUp,
+      color: 'orange',
+      subtitle: 'Approved vs processed'
+    },
+    {
+      label: 'Avg Resolution Time',
+      value: `${summary?.avgResolutionTime || 0} days`,
+      icon: Clock,
+      color: 'red',
+      subtitle: 'Average days to resolve'
     }
   ];
 
-  // Reimbursement types for pie chart
-  const pieData = stats?.byType?.amount ? Object.entries(stats.byType.amount)
-    .filter(([_, value]) => value > 0)
-    .map(([key, value]) => ({
-      name: key.replace(/_/g, ' '),
-      value: value
-    })) : [];
-
-  const COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
 
   // Status badge component
   const StatusBadge = ({ status }) => {
@@ -343,16 +328,14 @@ const ReimbursementDashboard = () => {
             })}
           </div>
 
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Timeline Chart */}
+          {/* Timeline Chart - Full Width */}
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white rounded-xl p-6 border border-gray-200"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
             >
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Reimbursement Timeline</h3>
-              <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={400}>
                 <AreaChart data={timeline}>
                   <defs>
                     <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
@@ -372,40 +355,166 @@ const ReimbursementDashboard = () => {
               </ResponsiveContainer>
             </motion.div>
 
-            {/* Type Distribution Chart */}
+          {/* Calculated Discrepancies Section */}
+          {(summary?.feeProtector?.backendShipmentItems?.data?.length > 0 || summary?.backendLostInventory?.data?.length > 0) && (
             <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white rounded-xl p-6 border border-gray-200"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8"
             >
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Reimbursement Types</h3>
-              {pieData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({name, percent}) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => formatCurrency(value)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[300px] flex items-center justify-center text-gray-500">
-                  No data available
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                    <AlertCircle className="w-4 h-4 text-white" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900">Calculated Discrepancies</h3>
+                </div>
+                <p className="text-sm text-gray-600 ml-11">
+                  Items calculated from shipment data and inventory ledgers (included in Total Recoverable)
+                </p>
+              </div>
+
+              <div className="p-6">
+                {/* Fee Protector - Backend Shipment Items (Combined) */}
+                {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 && (
+                  <div className="mb-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h4 className="text-md font-semibold text-gray-900">Backend Shipment Items</h4>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {summary.feeProtector.backendShipmentItems.count} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipment ID</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipment Name</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipped</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Received</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discrepancy</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
+                            <tr key={index} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.shipmentId || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">{item.shipmentName || 'N/A'}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.quantityShipped || 0}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.quantityReceived || 0}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.discrepancyUnits || 0}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Backend Lost Inventory */}
+                {summary?.backendLostInventory && (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h4 className="text-md font-semibold text-gray-900">Backend Lost Inventory</h4>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {summary.backendLostInventory.itemCount || 0} items • {formatCurrency(summary.backendLostInventory.totalExpectedAmount || 0)} total
+                          {summary.backendLostInventory.data && summary.backendLostInventory.data.filter(item => item.isUnderpaid).length > 0 && (
+                            <span className="ml-2 text-orange-600 font-medium">
+                              • {summary.backendLostInventory.data.filter(item => item.isUnderpaid).length} underpaid
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowUnderpaidOnly(!showUnderpaidOnly)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                            showUnderpaidOnly
+                              ? 'bg-orange-100 border-orange-300 text-orange-700'
+                              : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {showUnderpaidOnly ? 'Show All' : 'Show Underpaid Only'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lost</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Found</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursed</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discrepancy</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {(!summary.backendLostInventory.data || summary.backendLostInventory.data.length === 0) ? (
+                            <tr>
+                              <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
+                                No data found
+                              </td>
+                            </tr>
+                          ) : (
+                            summary.backendLostInventory.data
+                              .filter(item => !showUnderpaidOnly || item.isUnderpaid)
+                              .map((item, index) => (
+                              <tr key={index} className={`hover:bg-gray-50 transition-colors ${item.isUnderpaid ? 'bg-orange-50' : ''}`}>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.lostUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.foundUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.reimbursedUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.discrepancyUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+                                  {item.isUnderpaid && item.underpaidExpectedAmount ? (
+                                    <div>
+                                      <div className="text-gray-900">{formatCurrency(item.expectedAmount || 0)}</div>
+                                      <div className="text-xs text-orange-600 font-medium">Underpaid: {formatCurrency(item.underpaidExpectedAmount)}</div>
+                                    </div>
+                                  ) : (
+                                    formatCurrency(item.expectedAmount || 0)
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {item.isUnderpaid ? (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                                      Underpaid
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                      Normal
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                 </div>
               )}
+              </div>
             </motion.div>
-          </div>
+          )}
 
           {/* Reimbursements Table */}
           <motion.div

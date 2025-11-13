@@ -17,7 +17,7 @@ const logger = require('../../utils/Logger.js');
  * Calculate potential reimbursements from shipment discrepancies
  * This analyzes inbound shipments where quantity shipped > quantity received
  */
-const calculateShipmentDiscrepancies = (shipmentData, products) => {
+const calculateShipmentDiscrepancies = (shipmentData, products, fbaData = null) => {
     const potentialClaims = [];
     
     if (!shipmentData || !Array.isArray(shipmentData)) {
@@ -28,6 +28,16 @@ const calculateShipmentDiscrepancies = (shipmentData, products) => {
     if (!products || !Array.isArray(products)) {
         logger.warn('Invalid products data for reimbursement calculation');
         return potentialClaims;
+    }
+
+    // Create a map of FBA data by ASIN for quick lookup
+    const fbaDataMap = new Map();
+    if (fbaData && Array.isArray(fbaData)) {
+        fbaData.forEach(item => {
+            if (item && item.asin) {
+                fbaDataMap.set(item.asin, item);
+            }
+        });
     }
 
     const now = new Date();
@@ -82,20 +92,41 @@ const calculateShipmentDiscrepancies = (shipmentData, products) => {
                     return;
                 }
 
-                // Calculate potential reimbursement amount
-                // Use product price as estimated value
-                const estimatedValue = (product.price || 0) * discrepancy;
+                const asin = product.asin || '';
+                const price = product.price || 0;
+                
+                // Calculate Reimbursement Per Unit = (Sales Price – Fees)
+                // Try to get from FBA data first, otherwise use product price
+                let reimbursementPerUnit = price;
+                let salesPrice = price;
+                let fees = 0;
+                
+                const fbaItem = fbaDataMap.get(asin);
+                if (fbaItem) {
+                    // Use pre-calculated reimbursementPerUnit if available
+                    if (fbaItem.reimbursementPerUnit !== undefined && fbaItem.reimbursementPerUnit !== null) {
+                        reimbursementPerUnit = parseFloat(fbaItem.reimbursementPerUnit) || 0;
+                    } else {
+                        // Calculate on the fly: (Sales Price – Fees)
+                        salesPrice = parseFloat(fbaItem.salesPrice) || price;
+                        fees = parseFloat(fbaItem.totalAmzFee) || 0;
+                        reimbursementPerUnit = salesPrice - fees;
+                    }
+                }
+                
+                // Calculate expected amount using formula: (Sales Price – Fees) × Discrepancy Units
+                const expectedAmount = reimbursementPerUnit * discrepancy;
                 
                 // Calculate expiry date
                 const expiryDate = new Date(shipmentDate);
                 expiryDate.setDate(expiryDate.getDate() + CLAIM_WINDOW_DAYS);
 
                 potentialClaims.push({
-                    asin: product.asin || '',
+                    asin: asin,
                     sku: item.SellerSKU,
                     fnsku: item.FulfillmentNetworkSKU || '',
                     reimbursementType: 'INBOUND_SHIPMENT',
-                    amount: estimatedValue,
+                    amount: expectedAmount,
                     quantity: discrepancy,
                     status: 'POTENTIAL',
                     discoveryDate: now,
@@ -107,7 +138,10 @@ const calculateShipmentDiscrepancies = (shipmentData, products) => {
                     reasonDescription: `${discrepancy} unit(s) not received in shipment`,
                     isAutomated: false,
                     productCost: 0, // Can be updated if COGS is available
-                    retailValue: estimatedValue
+                    retailValue: expectedAmount,
+                    reimbursementPerUnit: reimbursementPerUnit,
+                    salesPrice: salesPrice,
+                    fees: fees
                 });
             }
         });
@@ -195,8 +229,8 @@ const mergeReimbursementData = async (userId, country, region, newPotentialClaim
  * Calculate total expected reimbursement (wrapper for existing function + enhancements)
  * This maintains backward compatibility with existing code
  */
-const calculateTotalReimbursement = (shipmentData, products) => {
-    const potentialClaims = calculateShipmentDiscrepancies(shipmentData, products);
+const calculateTotalReimbursement = (shipmentData, products, fbaData = null) => {
+    const potentialClaims = calculateShipmentDiscrepancies(shipmentData, products, fbaData);
     
     let totalReimbursement = 0;
     const reimburstmentArr = [];

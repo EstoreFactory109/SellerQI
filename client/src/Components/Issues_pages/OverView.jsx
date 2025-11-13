@@ -757,13 +757,13 @@ const OverView = () => {
             <table className="w-full table-fixed">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                 <tr>
-                  <th className="text-left py-4 px-3 text-xs font-semibold text-gray-700 w-2/5 sm:w-1/3">Product</th>
-                  <th className="text-left py-4 px-2 text-xs font-semibold text-gray-700 w-20 hidden sm:table-cell">ASIN</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-16">Issues</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20 hidden md:table-cell">Revenue</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-16 hidden lg:table-cell">Units sold</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20">Priority</th>
-                  <th className="text-center py-4 px-2 text-xs font-semibold text-gray-700 w-20">Action</th>
+                  <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 w-1/4 sm:w-1/5">Product</th>
+                  <th className="text-left py-6 px-2 text-xs font-semibold text-gray-700 w-28 hidden sm:table-cell">ASIN</th>
+                  <th className="text-center py-6 px-2 text-xs font-semibold text-gray-700 w-16">Issues</th>
+                  <th className="text-center py-6 px-2 text-xs font-semibold text-gray-700 w-20 hidden md:table-cell">Revenue</th>
+                  <th className="text-center py-6 px-2 text-xs font-semibold text-gray-700 w-16 hidden lg:table-cell">Units sold</th>
+                  <th className="text-center py-6 px-2 text-xs font-semibold text-gray-700 w-20">Priority</th>
+                  <th className="text-center py-6 px-2 text-xs font-semibold text-gray-700 w-20">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -781,22 +781,16 @@ const OverView = () => {
                       className="cursor-pointer hover:shadow-sm transition-all duration-200"
                       onClick={() => handleProductClick(product.asin)}
                     >
-                      <td className="py-4 px-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
-                            <Package className="w-4 h-4 text-gray-500" />
+                      <td className="py-8 px-3 align-top">
+                        <div className="flex items-start gap-2">
+                          <div className="w-5 h-5 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0 mt-0.5">
+                            <Package className="w-2.5 h-2.5 text-gray-500" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-gray-900 truncate" title={product.name || 'Product Name Not Available'}>
-                              {product.name ? 
-                                (product.name.length > 35 ? 
-                                  `${product.name.substring(0, 35)}...` : 
-                                  product.name
-                                ) : 
-                                'Product Name Not Available'
-                              }
+                            <p className="text-[10px] font-semibold text-gray-900 leading-relaxed break-words" title={product.name || 'Product Name Not Available'}>
+                              {product.name || 'Product Name Not Available'}
                             </p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <div className="flex items-center gap-2 text-[9px] text-gray-500 mt-1">
                               <span className="sm:hidden">{product.asin}</span>
                               <span className="md:hidden">{currency}{(product.sales || 0).toFixed(2)}</span>
                               <span className="lg:hidden">{(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()} units</span>
@@ -804,26 +798,26 @@ const OverView = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 px-2 text-xs text-gray-900 font-mono truncate hidden sm:table-cell" title={product.asin}>
+                      <td className="py-8 px-2 text-xs text-gray-900 font-mono whitespace-nowrap hidden sm:table-cell align-top" title={product.asin}>
                         {product.asin}
                       </td>
-                      <td className="py-4 px-2 text-center">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                      <td className="py-8 px-2 text-center align-top">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold bg-red-100 text-red-800">
                           {product.errors || 0}
                         </span>
                       </td>
-                      <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden md:table-cell">
+                      <td className="py-8 px-2 text-center text-[10px] font-semibold text-gray-900 hidden md:table-cell align-top">
                         {currency}{(product.sales || 0).toFixed(2)}
                       </td>
-                      <td className="py-4 px-2 text-center text-xs font-semibold text-gray-900 hidden lg:table-cell">
+                      <td className="py-8 px-2 text-center text-[10px] font-semibold text-gray-900 hidden lg:table-cell align-top">
                         {(product.quantity || 0) > 999 ? `${((product.quantity || 0) / 1000).toFixed(1)}k` : (product.quantity || 0).toLocaleString()}
                       </td>
-                      <td className="py-4 px-2 text-center">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${priorityColor}`}>
+                      <td className="py-8 px-2 text-center align-top">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${priorityColor}`}>
                           {priorityLabel.charAt(0)}
                         </span>
                       </td>
-                      <td className="py-4 px-2 text-center">
+                      <td className="py-8 px-2 text-center align-top">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

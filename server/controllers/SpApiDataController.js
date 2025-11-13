@@ -63,6 +63,8 @@ const userModel = require('../models/userModel.js');
 
 // REIMBURSEMENT FUNCTIONS
 const GET_FBA_REIMBURSEMENT_DATA = require('../Services/Sp_API/GET_FBA_REIMBURSEMENT_DATA.js');
+const GetProductWiseFBAData = require('../Services/Sp_API/GetProductWiseFBAData.js');
+const GET_LEDGER_SUMMARY_VIEW_DATA = require('../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
 const { mergeReimbursementData, calculateShipmentDiscrepancies } = require('../Services/Calculations/EnhancedReimbursement.js');
 
 
@@ -1244,6 +1246,22 @@ const getSpApiData = asyncHandler(async (req, res) => {
                 )(dataToSend, userId, Base_URI, Country, Region)
             );
             thirdBatchServiceNames.push("Reimbursement Data");
+
+            // FEE PROTECTOR: Fetch FBA Estimated Fees Data (GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA)
+            thirdBatchPromises.push(
+                tokenManager.wrapSpApiFunction(
+                    GetProductWiseFBAData, userId, RefreshToken, AdsRefreshToken
+                )(AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+            );
+            thirdBatchServiceNames.push("Fee Protector Data");
+
+            // BACKEND LOST INVENTORY: Fetch Ledger Summary View Data
+            thirdBatchPromises.push(
+                tokenManager.wrapSpApiFunction(
+                    GET_LEDGER_SUMMARY_VIEW_DATA, userId, RefreshToken, AdsRefreshToken
+                )(AccessToken, marketplaceIds, Base_URI, userId, Country, Region)
+            );
+            thirdBatchServiceNames.push("Ledger Summary View Data");
         }
 
         // Ads functions (require AdsAccessToken)
@@ -1275,6 +1293,8 @@ const getSpApiData = asyncHandler(async (req, res) => {
         let feesResult = { success: false, data: null, error: "SP-API token not available" };
         let financeDataFromAPI = { success: false, data: null, error: "SP-API token not available" };
         let reimbursementDataFromAPI = { success: false, data: null, error: "SP-API token not available" };
+        let feeProtectorData = { success: false, data: null, error: "SP-API token not available" };
+        let ledgerSummaryData = { success: false, data: null, error: "SP-API token not available" };
         let adGroupsData = { success: false, data: null, error: "Ads token not available" };
 
         let thirdResultIndex = 0;
@@ -1292,6 +1312,10 @@ const getSpApiData = asyncHandler(async (req, res) => {
             financeDataFromAPI = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
             thirdResultIndex++;
             reimbursementDataFromAPI = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+            thirdResultIndex++;
+            feeProtectorData = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
+            thirdResultIndex++;
+            ledgerSummaryData = processApiResult(thirdBatchResults[thirdResultIndex], thirdBatchServiceNames[thirdResultIndex]);
             thirdResultIndex++;
         }
 

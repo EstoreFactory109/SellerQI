@@ -1,4 +1,4 @@
-const calculateTotalReimbursement = (data, products) => {
+const calculateTotalReimbursement = (data, products, fbaData = null) => {
     // Validate input parameters
     if (!data || !Array.isArray(data)) {
         console.error('Invalid data parameter: expected an array');
@@ -14,6 +14,16 @@ const calculateTotalReimbursement = (data, products) => {
             productWiseReimburstment: [],
             totalReimbursement: 0
         };
+    }
+
+    // Create a map of FBA data by ASIN for quick lookup
+    const fbaDataMap = new Map();
+    if (fbaData && Array.isArray(fbaData)) {
+        fbaData.forEach(item => {
+            if (item && item.asin) {
+                fbaDataMap.set(item.asin, item);
+            }
+        });
     }
 
     let reimburstmentArr = [];
@@ -75,16 +85,46 @@ const calculateTotalReimbursement = (data, products) => {
                     // Validate quantity properties
                     const quantityShipped = elm.QuantityShipped || 0;
                     const quantityReceived = elm.QuantityReceived || 0;
+                    const discrepancy = quantityShipped - quantityReceived;
 
-                    const price = product.price;
+                    if (discrepancy <= 0) {
+                        return; // Skip if no discrepancy
+                    }
+
                     const asin = product.asin;
-                    const reimbustment = price * (quantityShipped - quantityReceived);
+                    const price = product.price || 0;
+                    
+                    // Calculate Reimbursement Per Unit = (Sales Price – Fees)
+                    // Try to get from FBA data first, otherwise use product price
+                    let reimbursementPerUnit = price;
+                    let salesPrice = price;
+                    let fees = 0;
+                    
+                    const fbaItem = fbaDataMap.get(asin);
+                    if (fbaItem) {
+                        // Use pre-calculated reimbursementPerUnit if available
+                        if (fbaItem.reimbursementPerUnit !== undefined && fbaItem.reimbursementPerUnit !== null) {
+                            reimbursementPerUnit = parseFloat(fbaItem.reimbursementPerUnit) || 0;
+                        } else {
+                            // Calculate on the fly: (Sales Price – Fees)
+                            salesPrice = parseFloat(fbaItem.salesPrice) || price;
+                            fees = parseFloat(fbaItem.totalAmzFee) || 0;
+                            reimbursementPerUnit = salesPrice - fees;
+                        }
+                    }
+                    
+                    // Calculate reimbursement amount using the formula: (Sales Price – Fees) × Discrepancy Units
+                    const reimbustment = reimbursementPerUnit * discrepancy;
                     
                     totalReimbursement += reimbustment;
                     reimburstmentArr.push({
                         asin: asin,
                         amount: reimbustment,
-                        sku: elm.SellerSKU
+                        sku: elm.SellerSKU,
+                        reimbursementPerUnit: reimbursementPerUnit,
+                        salesPrice: salesPrice,
+                        fees: fees,
+                        discrepancy: discrepancy
                     });
                 });
             }

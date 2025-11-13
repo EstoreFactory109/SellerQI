@@ -3,7 +3,7 @@ const router=express.Router();
 const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testPPCSpendsSalesUnitsSold,testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,
-    testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration}=require('../controllers/TestController.js')
+    testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData}=require('../controllers/TestController.js')
 
     
 router.post('/testreport',testReport);
@@ -19,5 +19,11 @@ router.get('/testListFinancialEvents',testListFinancialEvents)
 router.post('/testGetBrand',testGetBrand)
 router.post('/testSendEmailOnRegistered',testSendEmailOnRegistered)
 router.post('/testKeywordDataIntegration',testKeywordDataIntegration)
+router.post('/testLedgerSummaryReport',testLedgerSummaryReport)
+router.post('/testGetProductWiseFBAData',testGetProductWiseFBAData)
+router.post('/testCalculateBackendLostInventory',testCalculateBackendLostInventory)
+router.post('/testGetBackendLostInventory',testGetBackendLostInventory)
+router.post('/testAllReimbursementAPIs',testAllReimbursementAPIs)
+router.get('/getAllReimbursementData',getAllReimbursementData)
 
 module.exports=router
