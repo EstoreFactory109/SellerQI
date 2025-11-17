@@ -54,6 +54,7 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
         const ProductWiseFBAData = require('../models/ProductWiseFBADataModel.js');
         const LedgerSummaryViewModel = require('../models/LedgerSummaryViewModel.js');
         const BackendLostInventoryModel = require('../models/BackendLostInventoryModel.js');
+        const { calculateBackendDamagedInventory } = require('../Services/Calculations/BackendLostInventory.js');
         
         // Get base summary
         const summary = await getReimbursementSummary(userId, country, region);
@@ -269,6 +270,52 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
             };
         }
 
+        // ===== CALCULATE BACKEND DAMAGED INVENTORY =====
+        let backendDamagedInventory = {
+            itemCount: 0,
+            summary: {
+                totalDamagedUnits: 0,
+                totalExpectedAmount: 0
+            },
+            data: []
+        };
+
+        try {
+            const damagedResult = await calculateBackendDamagedInventory(userId, country, region);
+            logger.info('Backend Damaged Inventory calculation result:', {
+                success: damagedResult?.success,
+                itemCount: damagedResult?.items?.length || 0,
+                hasItems: !!damagedResult?.items
+            });
+            
+            if (damagedResult && damagedResult.success && damagedResult.items && damagedResult.items.length > 0) {
+                // Add date to each item
+                const itemsWithDate = damagedResult.items.map(item => ({
+                    ...item,
+                    date: item.date || ledgerSummaryRecord?.createdAt || new Date()
+                }));
+                
+                backendDamagedInventory = {
+                    itemCount: itemsWithDate.length,
+                    summary: damagedResult.summary || {
+                        totalDamagedUnits: 0,
+                        totalExpectedAmount: 0
+                    },
+                    data: itemsWithDate
+                };
+                
+                logger.info('Backend Damaged Inventory populated:', {
+                    itemCount: backendDamagedInventory.itemCount,
+                    totalExpectedAmount: backendDamagedInventory.summary.totalExpectedAmount
+                });
+            } else {
+                logger.info('Backend Damaged Inventory: No items found or calculation returned no data');
+            }
+        } catch (error) {
+            logger.warn('Error calculating Backend Damaged Inventory:', error.message);
+            // Continue with empty structure
+        }
+
         // ===== CALCULATE NEW METRICS =====
         // Total Recoverable (Month) - Sum of all expected amounts from current month
         const now = new Date();
@@ -288,6 +335,13 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
         });
         const lostInventoryRecoverable = lostInventoryThisMonth.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
         
+        // Sum from backendDamagedInventory (current month)
+        const damagedInventoryThisMonth = backendDamagedInventory.data.filter(item => {
+            // Filter by date if available; otherwise include all
+            return true; // Include all for now
+        });
+        const damagedInventoryRecoverable = damagedInventoryThisMonth.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+        
         // Get ALL reimbursements (not just potential) for current month
         const allReimbursements = await getDetailedReimbursements(userId, country, region, {});
         const reimbursementsThisMonth = allReimbursements.filter(claim => {
@@ -296,12 +350,13 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
         });
         const allReimbursementsRecoverable = reimbursementsThisMonth.reduce((sum, claim) => sum + (claim.amount || 0), 0);
         
-        const totalRecoverableMonth = shipmentItemsRecoverable + lostInventoryRecoverable + allReimbursementsRecoverable;
+        const totalRecoverableMonth = shipmentItemsRecoverable + lostInventoryRecoverable + damagedInventoryRecoverable + allReimbursementsRecoverable;
         
         // Discrepancies Found - Total count of discrepancies from all sources
         const discrepanciesFound = 
             backendShipmentItems.length + 
             backendLostInventory.itemCount + 
+            backendDamagedInventory.itemCount +
             allReimbursements.length;
         
         // Claim Success Rate - (totalReceived / (totalReceived + totalDenied)) * 100
@@ -361,6 +416,11 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
                 itemCount: backendLostInventory.itemCount,
                 totalExpectedAmount: backendLostInventory.summary?.totalExpectedAmount || 0,
                 data: backendLostInventory.data // Include full array for frontend
+            },
+            backendDamagedInventory: {
+                itemCount: backendDamagedInventory.itemCount || 0,
+                totalExpectedAmount: backendDamagedInventory.summary?.totalExpectedAmount || 0,
+                data: backendDamagedInventory.data || [] // Include full array for frontend, ensure it's always an array
             }
         };
         
@@ -371,7 +431,13 @@ const getReimbursementSummaryController = asyncHandler(async (req, res) => {
             totalRecoverableMonth,
             discrepanciesFound,
             claimSuccessRate,
-            avgResolutionTime
+            avgResolutionTime,
+            backendDamagedInventory: {
+                itemCount: backendDamagedInventory.itemCount,
+                dataLength: backendDamagedInventory.data?.length || 0,
+                totalExpectedAmount: backendDamagedInventory.summary?.totalExpectedAmount || 0
+            },
+            reimbursementsCount: allReimbursements.length
         });
 
         return res.status(200).json(

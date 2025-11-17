@@ -287,8 +287,165 @@ const getBackendLostInventory = async (userId, country, region) => {
     }
 };
 
+/**
+ * Calculate Backend Damaged Inventory
+ * 
+ * This service implements the formulas from Refunzo Final Documentation:
+ * 1. Gets damaged quantities from GET_LEDGER_SUMMARY_VIEW_DATA (LedgerSummaryViewModel)
+ * 2. Gets Sales Price and Fees from ProductWiseFBAData
+ * 3. Calculates Discrepancy Units = damaged quantity
+ * 4. Calculates Expected Amount = Discrepancy Units × (Sales Price – Fees)
+ * 
+ * Note: This calculates on the fly from existing models, no separate storage model needed
+ */
+const calculateBackendDamagedInventory = async (userId, country, region) => {
+    try {
+        logger.info('Starting Backend Damaged Inventory calculation', {
+            userId,
+            country,
+            region
+        });
+
+        // Step 1: Get Ledger Summary View Data (damaged quantities)
+        const ledgerSummaryRecord = await LedgerSummaryView.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        if (!ledgerSummaryRecord || !ledgerSummaryRecord.data || ledgerSummaryRecord.data.length === 0) {
+            logger.warn('No ledger summary data found for Backend Damaged Inventory calculation');
+            return {
+                success: false,
+                message: 'No ledger summary data found. Please fetch GET_LEDGER_SUMMARY_VIEW_DATA first.',
+                data: null,
+                items: [],
+                summary: {
+                    totalDamagedUnits: 0,
+                    totalExpectedAmount: 0
+                }
+            };
+        }
+
+        // Step 2: Get ProductWiseFBAData (for Sales Price and Fees)
+        const fbaDataRecord = await ProductWiseFBAData.findOne({
+            userId: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        // Create maps for quick lookup
+        const fbaDataMap = new Map();
+        if (fbaDataRecord && fbaDataRecord.fbaData) {
+            fbaDataRecord.fbaData.forEach(item => {
+                if (item && item.asin) {
+                    fbaDataMap.set(item.asin, item);
+                }
+            });
+        }
+
+        // Aggregate damaged units by ASIN from ledger summary
+        const damagedUnitsMap = new Map();
+        const asinMetadataMap = new Map(); // Store SKU, FNSKU for each ASIN
+
+        ledgerSummaryRecord.data.forEach(item => {
+            const asin = item.asin;
+            if (!asin) return;
+
+            // Aggregate damaged units
+            const damagedQty = parseFloat(item.damaged || '0') || 0;
+            if (damagedQty > 0) {
+                const currentDamaged = damagedUnitsMap.get(asin) || 0;
+                damagedUnitsMap.set(asin, currentDamaged + damagedQty);
+
+                // Store metadata (use first occurrence)
+                if (!asinMetadataMap.has(asin)) {
+                    asinMetadataMap.set(asin, {
+                        sku: item.msku || '',
+                        fnsku: item.fnsku || ''
+                    });
+                }
+            }
+        });
+
+        // Step 3: Calculate expected amounts for each ASIN
+        const calculatedItems = [];
+        let totalDamagedUnits = 0;
+        let totalExpectedAmount = 0;
+
+        damagedUnitsMap.forEach((damagedUnits, asin) => {
+            // Discrepancy Units = damaged quantity (from documentation)
+            const discrepancyUnits = damagedUnits;
+            totalDamagedUnits += discrepancyUnits;
+
+            const metadata = asinMetadataMap.get(asin) || { sku: '', fnsku: '' };
+            const fbaItem = fbaDataMap.get(asin);
+
+            // Get Sales Price and Fees from FBA data
+            let salesPrice = 0;
+            let fees = 0;
+            let reimbursementPerUnit = 0;
+            let currency = 'USD';
+
+            if (fbaItem) {
+                salesPrice = parseFloat(fbaItem.salesPrice || '0') || 0;
+                fees = parseFloat(fbaItem.totalAmzFee || '0') || 0;
+                reimbursementPerUnit = parseFloat(fbaItem.reimbursementPerUnit || '0') || 0;
+                currency = fbaItem.currency || 'USD';
+
+                // If reimbursementPerUnit not pre-calculated, calculate it
+                if (reimbursementPerUnit === 0 && salesPrice > 0) {
+                    reimbursementPerUnit = salesPrice - fees;
+                }
+            }
+
+            // Calculate Expected Amount = Discrepancy Units × (Sales Price – Fees)
+            const expectedAmount = discrepancyUnits * reimbursementPerUnit;
+            totalExpectedAmount += expectedAmount;
+
+            calculatedItems.push({
+                asin: asin,
+                sku: metadata.sku,
+                fnsku: metadata.fnsku,
+                damagedUnits: discrepancyUnits,
+                salesPrice: salesPrice,
+                fees: fees,
+                reimbursementPerUnit: reimbursementPerUnit,
+                expectedAmount: expectedAmount,
+                currency: currency
+            });
+        });
+
+        const summary = {
+            totalDamagedUnits: totalDamagedUnits,
+            totalExpectedAmount: totalExpectedAmount
+        };
+
+        logger.info('Backend Damaged Inventory calculation completed', {
+            userId,
+            country,
+            region,
+            totalItems: calculatedItems.length,
+            totalDamagedUnits: summary.totalDamagedUnits,
+            totalExpectedAmount: summary.totalExpectedAmount
+        });
+
+        return {
+            success: true,
+            message: 'Backend Damaged Inventory calculated successfully',
+            items: calculatedItems,
+            summary: summary
+        };
+
+    } catch (error) {
+        logger.error('Error calculating Backend Damaged Inventory:', error.message);
+        throw error;
+    }
+};
+
 module.exports = {
     calculateBackendLostInventory,
-    getBackendLostInventory
+    getBackendLostInventory,
+    calculateBackendDamagedInventory
 };
 

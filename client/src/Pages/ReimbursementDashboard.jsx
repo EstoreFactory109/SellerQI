@@ -49,9 +49,25 @@ const ReimbursementDashboard = () => {
         getReimbursementTimeline(90)
       ]);
 
-      setSummary(summaryRes.data);
-      setReimbursements(reimbursementsRes.data || []);
-      setTimeline(timelineRes.data || []);
+      // Debug logging
+      console.log('Summary Response:', summaryRes);
+      console.log('Reimbursements Response:', reimbursementsRes);
+      console.log('Timeline Response:', timelineRes);
+
+      // ApiResponse structure: { statusCode, data, message }
+      // Service already returns response.data, so summaryRes is the ApiResponse object
+      const summaryData = summaryRes?.data || summaryRes;
+      const reimbursementsData = reimbursementsRes?.data || reimbursementsRes || [];
+      const timelineData = timelineRes?.data || timelineRes || [];
+      
+      console.log('Processed Summary Data:', summaryData);
+      console.log('Processed Reimbursements Data:', reimbursementsData);
+      console.log('Backend Damaged Inventory:', summaryData?.backendDamagedInventory);
+      console.log('Reimbursements Count:', reimbursementsData?.length || 0);
+      
+      setSummary(summaryData);
+      setReimbursements(Array.isArray(reimbursementsData) ? reimbursementsData : []);
+      setTimeline(Array.isArray(timelineData) ? timelineData : []);
     } catch (error) {
       console.error('Error fetching reimbursement data:', error);
     } finally {
@@ -356,7 +372,7 @@ const ReimbursementDashboard = () => {
             </motion.div>
 
           {/* Calculated Discrepancies Section */}
-          {(summary?.feeProtector?.backendShipmentItems?.data?.length > 0 || summary?.backendLostInventory?.data?.length > 0) && (
+          {(summary?.feeProtector?.backendShipmentItems?.data?.length > 0 || summary?.backendLostInventory?.data?.length > 0 || summary?.backendDamagedInventory?.data?.length > 0) && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -512,6 +528,60 @@ const ReimbursementDashboard = () => {
                     </div>
                 </div>
               )}
+
+                {/* Backend Damaged Inventory */}
+                {summary?.backendDamagedInventory && (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h4 className="text-md font-semibold text-gray-900">Backend Damaged Inventory</h4>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {summary.backendDamagedInventory.itemCount || 0} items • {formatCurrency(summary.backendDamagedInventory.totalExpectedAmount || 0)} total
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FNSKU</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Damaged Units</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sales Price</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fees</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursement/Unit</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {(!summary.backendDamagedInventory.data || summary.backendDamagedInventory.data.length === 0) ? (
+                            <tr>
+                              <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
+                                No data found
+                              </td>
+                            </tr>
+                          ) : (
+                            summary.backendDamagedInventory.data.map((item, index) => (
+                              <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.fnsku || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.damagedUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
