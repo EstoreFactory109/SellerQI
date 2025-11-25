@@ -66,33 +66,84 @@ class TokenManager {
         try {
             logger.info(`Refreshing both tokens for user ${userId}`);
 
-            // Refresh both tokens in parallel
-            const [newSpApiToken, newAdsToken] = await Promise.all([
-                generateAccessToken(userId, spRefreshToken).catch(err => {
-                    logger.error(`SP-API token refresh failed: ${err.message}`);
-                    throw err;
-                }),
-                generateAdsAccessToken(adsRefreshToken).catch(err => {
-                    logger.error(`Ads token refresh failed: ${err.message}`);
-                    throw err;
-                })
-            ]);
+            // Track which tokens we're refreshing
+            const tokensToRefresh = [];
+            const refreshPromises = [];
 
-            if (!newSpApiToken || !newAdsToken) {
-                throw new Error('Failed to refresh one or both tokens');
+            // Only refresh SP-API token if we have a refresh token
+            if (spRefreshToken) {
+                tokensToRefresh.push('SP-API');
+                refreshPromises.push(
+                    generateAccessToken(userId, spRefreshToken).catch(err => {
+                        logger.error(`SP-API token refresh failed: ${err.message}`);
+                        // Return null instead of throwing, so we can still refresh Ads token
+                        return null;
+                    })
+                );
+            } else {
+                refreshPromises.push(Promise.resolve(null));
             }
 
-            // Update stored tokens
-            this.setTokens(userId, newSpApiToken, newAdsToken, spRefreshToken, adsRefreshToken);
+            // Only refresh Ads token if we have a refresh token
+            if (adsRefreshToken) {
+                tokensToRefresh.push('Ads');
+                refreshPromises.push(
+                    generateAdsAccessToken(adsRefreshToken).catch(err => {
+                        logger.error(`Ads token refresh failed: ${err.message}`);
+                        // Check if it's a permanent failure (invalid refresh token)
+                        if (err.message && (
+                            err.message.includes('invalid_grant') ||
+                            err.message.includes('invalid or expired') ||
+                            err.message.includes('Invalid token')
+                        )) {
+                            // This refresh token is permanently invalid
+                            logger.error(`⚠️ Ads refresh token is permanently invalid for user ${userId}. User needs to reconnect their Amazon Ads account.`);
+                        }
+                        throw err; // Still throw for Ads errors since that's what we're trying to refresh
+                    })
+                );
+            } else {
+                refreshPromises.push(Promise.resolve(null));
+            }
 
-            logger.info(`Successfully refreshed both tokens for user ${userId}`);
+            console.log(`🔄 Refreshing tokens for user ${userId}: ${tokensToRefresh.join(', ')}`);
+            const [newSpApiToken, newAdsToken] = await Promise.all(refreshPromises);
+
+            // Check if we got the tokens we needed
+            if (spRefreshToken && !newSpApiToken) {
+                logger.warn(`⚠️ SP-API token refresh failed for user ${userId}`);
+            }
+            if (adsRefreshToken && !newAdsToken) {
+                throw new Error('Failed to refresh Ads token - refresh token may be invalid or expired');
+            }
+
+            // Update stored tokens (only if they were successfully refreshed)
+            this.setTokens(
+                userId, 
+                newSpApiToken || this.getTokens(userId)?.spApiToken, 
+                newAdsToken || this.getTokens(userId)?.adsToken, 
+                spRefreshToken, 
+                adsRefreshToken
+            );
+
+            logger.info(`Successfully refreshed tokens for user ${userId}: SP-API=${!!newSpApiToken}, Ads=${!!newAdsToken}`);
             return {
-                spApiToken: newSpApiToken,
-                adsToken: newAdsToken
+                spApiToken: newSpApiToken || this.getTokens(userId)?.spApiToken,
+                adsToken: newAdsToken || this.getTokens(userId)?.adsToken
             };
 
         } catch (error) {
             logger.error(`Failed to refresh tokens for user ${userId}: ${error.message}`);
+            
+            // Add more context to the error
+            if (error.message && (
+                error.message.includes('invalid_grant') ||
+                error.message.includes('invalid or expired') ||
+                error.message.includes('Invalid token')
+            )) {
+                error.isRefreshTokenInvalid = true;
+            }
+            
             throw error;
         }
     }
@@ -155,7 +206,10 @@ class TokenManager {
             if (directCode === 'unauthorized' ||
                 directMessage.includes('unauthorized') ||
                 directMessage.includes('access denied') ||
-                directMessage.includes('access to requested resource is denied')) {
+                directMessage.includes('access to requested resource is denied') ||
+                directMessage.includes('invalid token') ||
+                directMessage.includes('invalid_token') ||
+                directMessage.includes('authenticating lwa token')) {
                 console.log("🔍 TokenManager: Detected unauthorized in direct response", { code: directCode, message: responseData.message });
                 return true;
             }
@@ -166,11 +220,14 @@ class TokenManager {
             errorString.includes('unauthorized') ||
             errorString.includes('401') ||
             errorString.includes('invalid_token') ||
+            errorString.includes('invalid token') ||
             errorString.includes('token expired') ||
             errorString.includes('access denied') ||
             errorString.includes('access to requested resource is denied') ||
             errorString.includes('invalid access token') ||
-            errorString.includes('authentication failed')
+            errorString.includes('authentication failed') ||
+            errorString.includes('authenticating lwa token') ||
+            errorString.includes('lwa token')
         );
         
         if (messageChecks) {
@@ -283,6 +340,12 @@ class TokenManager {
         if ('AdsAccessToken' in updatedParams) {
             updatedParams.AdsAccessToken = validTokens.adsToken;
         }
+        if ('adsToken' in updatedParams) {
+            updatedParams.adsToken = validTokens.adsToken;
+        }
+        if ('spApiToken' in updatedParams) {
+            updatedParams.spApiToken = validTokens.spApiToken;
+        }
         if ('dataToSend' in updatedParams && updatedParams.dataToSend) {
             updatedParams.dataToSend = {
                 ...updatedParams.dataToSend,
@@ -316,9 +379,11 @@ class TokenManager {
     // Create wrapper for Ads functions  
     wrapAdsFunction(fn, userId, spRefreshToken, adsRefreshToken) {
         return async (...args) => {
+            console.log(`🔄 TokenManager: Wrapping Ads function for user ${userId}`);
             return await this.executeWithTokenRefresh(
                 async (tokens) => {
                     // Replace first argument (token) with fresh token for Ads functions
+                    console.log(`🔄 TokenManager: Using refreshed Ads token for function execution`);
                     const updatedArgs = [tokens.adsToken, ...args.slice(1)];
                     return await fn(...updatedArgs);
                 },

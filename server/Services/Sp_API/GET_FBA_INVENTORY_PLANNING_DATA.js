@@ -160,27 +160,35 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
 
         const refinedData = convertTSVToJson(fullReport.data);
 
-        if (refinedData.length === 0) {
+        if (!refinedData || refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return {
                 success: false,
-                message: "Report did not complete within 5 minutes",
+                message: "Report completed but contains no data",
             };
         }
 
         const result = [];
 
         refinedData.forEach((item) => {
+            // Helper function to convert empty strings to "0" for required fields
+            const getValue = (value) => {
+                if (value === null || value === undefined || value === '') {
+                    return "0";
+                }
+                return String(value).trim();
+            };
+
             result.push({
-                asin: item.asin,
-                quantity_to_be_charged_ais_181_210_days: item["quantity-to-be-charged-ais-181-210-days"],
-                quantity_to_be_charged_ais_211_240_days: item["quantity-to-be-charged-ais-211-240-days"],
-                quantity_to_be_charged_ais_241_270_days: item["quantity-to-be-charged-ais-241-270-days"],
-                quantity_to_be_charged_ais_271_300_days: item["quantity-to-be-charged-ais-271-300-days"],
-                quantity_to_be_charged_ais_301_330_days: item["quantity-to-be-charged-ais-301-330-days"],
-                quantity_to_be_charged_ais_331_365_days: item["quantity-to-be-charged-ais-331-365-days"],
-                quantity_to_be_charged_ais_365_plus_days: item["quantity-to-be-charged-ais-365-plus-days"],
-                unfulfillable_quantity: item["unfulfillable-quantity"],
+                asin: item.asin || "",
+                quantity_to_be_charged_ais_181_210_days: getValue(item["quantity-to-be-charged-ais-181-210-days"]),
+                quantity_to_be_charged_ais_211_240_days: getValue(item["quantity-to-be-charged-ais-211-240-days"]),
+                quantity_to_be_charged_ais_241_270_days: getValue(item["quantity-to-be-charged-ais-241-270-days"]),
+                quantity_to_be_charged_ais_271_300_days: getValue(item["quantity-to-be-charged-ais-271-300-days"]),
+                quantity_to_be_charged_ais_301_330_days: getValue(item["quantity-to-be-charged-ais-301-330-days"]),
+                quantity_to_be_charged_ais_331_365_days: getValue(item["quantity-to-be-charged-ais-331-365-days"]),
+                quantity_to_be_charged_ais_365_plus_days: getValue(item["quantity-to-be-charged-ais-365-plus-days"]),
+                unfulfillable_quantity: getValue(item["unfulfillable-quantity"]),
             });
         });
 

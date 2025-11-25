@@ -1,4 +1,6 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+// COMMENTED OUT FOR TESTING - No Stripe key available
+// const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = null; // Dummy stripe object for testing
 const Subscription = require('../../models/SubscriptionModel');
 const User = require('../../models/userModel');
 const logger = require('../../utils/Logger');

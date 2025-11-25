@@ -11,6 +11,7 @@ const {getCampaign} = require('../Services/AmazonAds/GetCampaigns.js');
 //const {getPPCSpendsDateWise} = require('../Services/AmazonAds/GetDateWiseSpendKeywords.js');
 const {getNegativeKeywords} = require('../Services/AmazonAds/NegetiveKeywords.js');
 const {getSearchKeywords} = require('../Services/AmazonAds/GetSearchKeywords.js');
+const GET_FBA_INVENTORY_PLANNING_DATA = require('../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
 const {listFinancialEventsMethod} = require('../Services/Test/TestFinance.js');
 const {getBrand} = require('../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../Services/AmazonAds/AdGroups.js');
@@ -189,12 +190,244 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
   }
 
   const testGetPPCSpendsBySKU = async (req, res) => {
-    const { accessToken, region,profileId } = req.body;
-   
-    const result = await getSearchKeywords(accessToken,profileId,"684b2156d5c2340ff1b7bd2b","US",region);
-    return res.status(200).json({
+    try {
+      const { accessToken, region, profileId, userId, country, fetchTokenFromDB } = req.body;
+      
+      // If fetchTokenFromDB is true, get token from database
+      let adsAccessToken = accessToken;
+      let adsProfileId = profileId;
+      let testUserId = userId || "684b2156d5c2340ff1b7bd2b";
+      let testCountry = country || "US";
+      
+      if (fetchTokenFromDB && userId) {
+        const Seller = require('../models/sellerCentralModel.js');
+        const { generateAdsAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
+        const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js');
+        
+        const sellerAccount = await Seller.findOne({ userId: userId });
+        
+        if (!sellerAccount) {
+          return res.status(404).json({
+            success: false,
+            error: 'Seller account not found for the provided userId'
+          });
+        }
+        
+        if (!sellerAccount.adsRefreshToken) {
+          return res.status(400).json({
+            success: false,
+            error: 'Ads refresh token not found for this user. Please connect Amazon Ads account first.'
+          });
+        }
+        
+        // Generate access token from refresh token
+        adsAccessToken = await generateAdsAccessToken(sellerAccount.adsRefreshToken);
+        
+        if (!adsAccessToken) {
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to generate Ads access token. Please check refresh token validity.'
+          });
+        }
+        
+        // Get profile ID if not provided
+        if (!adsProfileId && sellerAccount.adsProfileId) {
+          adsProfileId = sellerAccount.adsProfileId;
+        } else if (!adsProfileId) {
+          // Try to get profile ID
+          try {
+            const profiles = await getProfileById(adsAccessToken, region || 'NA');
+            if (profiles && profiles.length > 0) {
+              adsProfileId = profiles[0].profileId;
+            }
+          } catch (profileError) {
+            console.error('Error fetching profile ID:', profileError.message);
+          }
+        }
+        
+        testUserId = userId;
+        testCountry = sellerAccount.country || country || "US";
+      }
+      
+      // Validate required parameters
+      if (!adsAccessToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'accessToken is required. Either provide it in the request body or set fetchTokenFromDB to true with a valid userId.'
+        });
+      }
+      
+      if (!adsProfileId) {
+        return res.status(400).json({
+          success: false,
+          error: 'profileId is required. Either provide it in the request body or ensure the user has a profileId in the database.'
+        });
+      }
+      
+      if (!region) {
+        return res.status(400).json({
+          success: false,
+          error: 'region is required. Valid values: NA, EU, FE'
+        });
+      }
+      
+      // Validate region
+      const validRegions = ['NA', 'EU', 'FE'];
+      if (!validRegions.includes(region)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
+        });
+      }
+      
+      console.log('🧪 Testing Search Keywords API:', {
+        userId: testUserId,
+        country: testCountry,
+        region: region,
+        profileId: adsProfileId,
+        hasAccessToken: !!adsAccessToken
+      });
+      
+      // Call the getSearchKeywords function
+      const result = await getSearchKeywords(
+        adsAccessToken,
+        adsProfileId,
+        testUserId,
+        testCountry,
+        region
+      );
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Search Keywords data retrieved successfully',
+        data: result,
+        metadata: {
+          userId: testUserId,
+          country: testCountry,
+          region: region,
+          profileId: adsProfileId,
+          timestamp: new Date().toISOString()
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error in testGetPPCSpendsBySKU:', error);
+      
+      // Handle specific error types
+      if (error.response) {
+        const status = error.response.status || 500;
+        const errorData = error.response.data || {};
+        
+        return res.status(status).json({
+          success: false,
+          error: 'Amazon Ads API Error',
+          message: error.message,
+          details: errorData,
+          statusCode: status
+        });
+      }
+      
+      // Handle token-related errors
+      if (error.message && (
+        error.message.includes('token') || 
+        error.message.includes('unauthorized') ||
+        error.message.includes('401')
+      )) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication Error',
+          message: error.message,
+          suggestion: 'Please check if your access token is valid or try setting fetchTokenFromDB to true to refresh the token.'
+        });
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Internal Server Error',
+        message: error.message || 'An unexpected error occurred while fetching search keywords'
+      });
+    }
+  }
+
+  const testGetWastedSpendKeywords = async (req, res) => {
+    try {
+      const { accessToken, profileId, userId, country, region } = req.body;
+
+      // Validate required parameters
+      if (!accessToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'accessToken is required'
+        });
+      }
+
+      if (!profileId) {
+        return res.status(400).json({
+          success: false,
+          error: 'profileId is required'
+        });
+      }
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId is required'
+        });
+      }
+
+      if (!country) {
+        return res.status(400).json({
+          success: false,
+          error: 'country is required'
+        });
+      }
+
+      if (!region) {
+        return res.status(400).json({
+          success: false,
+          error: 'region is required (NA, EU, or FE)'
+        });
+      }
+
+      // Validate region
+      const validRegions = ['NA', 'EU', 'FE'];
+      if (!validRegions.includes(region)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid region: ${region}. Must be one of: ${validRegions.join(', ')}`
+        });
+      }
+
+      console.log('Testing GetWastedSpendKeywords with params:', {
+        profileId,
+        userId,
+        country,
+        region,
+        hasAccessToken: !!accessToken
+      });
+
+      const result = await getKeywordPerformanceReport(
+        accessToken,
+        profileId,
+        userId,
+        country,
+        region
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Keyword performance report generated successfully',
         data: result
-    })
+      });
+
+    } catch (error) {
+      console.error('Error in testGetWastedSpendKeywords:', error);
+      return res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to generate keyword performance report',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
   }
 
   const testListFinancialEvents = async (req, res) => {
@@ -1744,8 +1977,645 @@ const getAllReimbursementData = async (req, res) => {
     }
 };
 
+// Dedicated test function for Search Keywords
+const testSearchKeywords = async (req, res) => {
+  try {
+    const { accessToken, region, profileId, userId, country, fetchTokenFromDB } = req.body;
+    
+    // Import required modules
+    const Seller = require('../models/sellerCentralModel.js');
+    const tokenManager = require('../utils/TokenManager.js');
+    const { getProfileById } = require('../Services/AmazonAds/GenerateProfileId.js');
+    
+    let adsAccessToken = accessToken;
+    let adsProfileId = profileId;
+    let testUserId = userId;
+    let testCountry = country || "US";
+    let spRefreshToken = null;
+    let adsRefreshToken = null;
+    
+    // If fetchTokenFromDB is true, get tokens from database
+    if (fetchTokenFromDB && userId) {
+      // Convert userId to ObjectId if it's a string
+      const mongoose = require('mongoose');
+      let userIdQuery = userId;
+      
+      // Try to convert to ObjectId if it's a valid ObjectId string
+      if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+        userIdQuery = new mongoose.Types.ObjectId(userId);
+      }
+      
+      console.log('🔍 Searching for seller account:', {
+        userId: userId,
+        userIdType: typeof userId,
+        userIdQuery: userIdQuery,
+        userIdQueryType: typeof userIdQuery
+      });
+      
+      // Find the Seller document by User field
+      const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 });
+      
+      if (!sellerCentral) {
+        // Try alternative queries for debugging
+        const allSellers = await Seller.find({}).limit(5).select('User sellerAccount.country sellerAccount.region');
+        console.log('🔍 Debug: Sample sellers in database:', allSellers.map(s => ({
+          userId: s.User,
+          userIdType: typeof s.User,
+          userIdString: s.User?.toString(),
+          accounts: s.sellerAccount?.map(acc => ({ country: acc.country, region: acc.region }))
+        })));
+        
+        return res.status(404).json({
+          success: false,
+          error: 'Seller account not found for the provided userId',
+          debug: {
+            searchedUserId: userId,
+            searchedUserIdType: typeof userId,
+            isObjectIdValid: mongoose.Types.ObjectId.isValid(userId),
+            suggestion: 'Please ensure the user has connected their Amazon Seller Central account first.'
+          }
+        });
+      }
+      
+      console.log('✅ Found seller central:', {
+        sellerCentralId: sellerCentral._id,
+        userField: sellerCentral.User,
+        userFieldType: typeof sellerCentral.User,
+        userFieldString: sellerCentral.User?.toString(),
+        sellerAccountCount: sellerCentral.sellerAccount?.length || 0
+      });
+      
+      // Find the specific sellerAccount by country and region
+      const sellerAccount = sellerCentral.sellerAccount?.find(
+        account => account.country === (country || "US") && account.region === region
+      );
+      
+      if (!sellerAccount) {
+        return res.status(404).json({
+          success: false,
+          error: `Seller account not found for country: ${country || "US"} and region: ${region}`,
+          availableAccounts: sellerCentral.sellerAccount?.map(acc => ({
+            country: acc.country,
+            region: acc.region,
+            hasAdsToken: !!acc.adsRefreshToken
+          })) || [],
+          suggestion: 'Please ensure the user has connected their Amazon Ads account for this country and region.'
+        });
+      }
+      
+      if (!sellerAccount.adsRefreshToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'Ads refresh token not found for this user. Please connect Amazon Ads account first.',
+          country: sellerAccount.country,
+          region: sellerAccount.region
+        });
+      }
+      
+      // Store refresh tokens for TokenManager
+      adsRefreshToken = sellerAccount.adsRefreshToken;
+      spRefreshToken = sellerCentral.sellerAccount?.find(acc => acc.spiRefreshToken)?.spiRefreshToken || null; // SP-API refresh token (may be null)
+      
+      // Get initial access token (TokenManager will refresh if needed)
+      const { generateAdsAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
+      try {
+        adsAccessToken = await generateAdsAccessToken(adsRefreshToken);
+        if (!adsAccessToken) {
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to generate Ads access token. The refresh token may be invalid or expired. Please reconnect your Amazon Ads account.'
+          });
+        }
+      } catch (tokenError) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to generate Ads access token',
+          message: tokenError.message,
+          suggestion: 'The refresh token may be invalid or expired. Please reconnect your Amazon Ads account.'
+        });
+      }
+      
+      // Get profile ID if not provided
+      if (!adsProfileId && sellerAccount.ProfileId) {
+        adsProfileId = sellerAccount.ProfileId;
+        console.log('✅ Using profile ID from database:', adsProfileId);
+      } else if (!adsProfileId) {
+        // Try to get profile ID from Amazon Ads API
+        console.log('🔄 Profile ID not found in database, fetching from Amazon Ads API...');
+        try {
+          const testCountryValue = sellerAccount.country || country || "US";
+          const profiles = await getProfileById(adsAccessToken, region || 'NA', testCountryValue, userId);
+          
+          if (profiles && Array.isArray(profiles) && profiles.length > 0) {
+            // Use the first profile, or you could let user choose
+            adsProfileId = profiles[0].profileId;
+            console.log(`✅ Found ${profiles.length} profile(s), using first one:`, adsProfileId);
+            
+            // Optionally save it to database for future use
+            if (profiles.length === 1) {
+              try {
+                // Update the specific sellerAccount in the sellerAccount array
+                await Seller.findOneAndUpdate(
+                  { 
+                    User: userId,
+                    'sellerAccount.country': sellerAccount.country,
+                    'sellerAccount.region': sellerAccount.region
+                  },
+                  { 
+                    $set: { 'sellerAccount.$.ProfileId': adsProfileId }
+                  },
+                  { new: true }
+                );
+                console.log('✅ Profile ID saved to database for future use');
+              } catch (saveError) {
+                console.warn('⚠️ Could not save profile ID to database:', saveError.message);
+              }
+            } else {
+              console.log(`ℹ️ Multiple profiles found (${profiles.length}). Using first one. Available profiles:`, 
+                profiles.map(p => ({ profileId: p.profileId, accountInfo: p.accountInfo }))
+              );
+            }
+          } else if (profiles && !Array.isArray(profiles)) {
+            // Handle case where API returns single profile object
+            adsProfileId = profiles.profileId || profiles.id;
+            console.log('✅ Found single profile:', adsProfileId);
+          } else {
+            console.warn('⚠️ No profiles found from Amazon Ads API');
+          }
+        } catch (profileError) {
+          console.error('❌ Error fetching profile ID:', profileError.message);
+          // Don't fail here, let it fail later with a clearer error message
+        }
+      }
+      
+      testUserId = userId;
+      testCountry = sellerAccount.country || country || "US";
+    } else if (userId) {
+      // Even if not fetching from DB, we need refresh tokens for TokenManager
+      const sellerCentral = await Seller.findOne({ User: userId }).sort({ createdAt: -1 });
+      if (sellerCentral) {
+        const sellerAccount = sellerCentral.sellerAccount?.find(
+          account => account.country === (country || "US") && account.region === region
+        );
+        if (sellerAccount) {
+          adsRefreshToken = sellerAccount.adsRefreshToken;
+          spRefreshToken = sellerCentral.sellerAccount?.find(acc => acc.spiRefreshToken)?.spiRefreshToken || null;
+        }
+      }
+    }
+    
+    // Validate required parameters
+    if (!adsAccessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'accessToken is required. Either provide it in the request body or set fetchTokenFromDB to true with a valid userId.'
+      });
+    }
+    
+    // Try to fetch profile ID one more time if still missing (even if not using fetchTokenFromDB)
+    if (!adsProfileId && adsAccessToken && region && testUserId) {
+      console.log('🔄 Profile ID still missing, attempting to fetch from API...');
+      try {
+        const profiles = await getProfileById(adsAccessToken, region, testCountry || country || "US", testUserId);
+        
+        if (profiles && Array.isArray(profiles) && profiles.length > 0) {
+          adsProfileId = profiles[0].profileId;
+          console.log(`✅ Successfully fetched profile ID: ${adsProfileId}`);
+        } else if (profiles && !Array.isArray(profiles)) {
+          // Handle single profile object response
+          if (profiles.profileId) {
+            adsProfileId = profiles.profileId;
+          } else if (Array.isArray(profiles.profiles) && profiles.profiles.length > 0) {
+            adsProfileId = profiles.profiles[0].profileId;
+          }
+          if (adsProfileId) {
+            console.log(`✅ Successfully fetched profile ID: ${adsProfileId}`);
+          }
+        }
+      } catch (profileError) {
+        console.error('❌ Failed to fetch profile ID:', profileError.message);
+      }
+    }
+    
+    if (!adsProfileId) {
+      return res.status(400).json({
+        success: false,
+        error: 'profileId is required',
+        details: 'Profile ID could not be found. Please provide it in the request body, ensure it exists in the database, or ensure your Amazon Ads account has an active profile.',
+        suggestion: 'You can either: 1) Provide profileId in the request body, 2) Ensure the user has adsProfileId saved in the database, or 3) The system will attempt to fetch it automatically if you have a valid access token.'
+      });
+    }
+    
+    if (!region) {
+      return res.status(400).json({
+        success: false,
+        error: 'region is required. Valid values: NA, EU, FE'
+      });
+    }
+    
+    if (!testUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required. Either provide it in the request body or set fetchTokenFromDB to true.'
+      });
+    }
+    
+    // Validate region
+    const validRegions = ['NA', 'EU', 'FE'];
+    if (!validRegions.includes(region)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
+      });
+    }
+    
+    console.log('🧪 Testing Search Keywords API:', {
+      userId: testUserId,
+      country: testCountry,
+      region: region,
+      profileId: adsProfileId,
+      hasAccessToken: !!adsAccessToken,
+      hasRefreshToken: !!adsRefreshToken,
+      tokenSource: fetchTokenFromDB ? 'database' : 'request body',
+      usingTokenManager: !!adsRefreshToken
+    });
+    
+    // Use TokenManager if we have refresh tokens, otherwise call directly
+    let result;
+    if (adsRefreshToken && testUserId) {
+      // Use TokenManager for automatic token refresh and retry
+      console.log('🔄 Using TokenManager for automatic token refresh...');
+      result = await tokenManager.wrapAdsFunction(
+        getSearchKeywords,
+        testUserId,
+        spRefreshToken,
+        adsRefreshToken
+      )(adsAccessToken, adsProfileId, testUserId, testCountry, region, adsRefreshToken);
+    } else {
+      // Call directly without TokenManager (no automatic refresh)
+      console.log('⚠️ Calling without TokenManager - no refresh token available');
+      result = await getSearchKeywords(
+        adsAccessToken,
+        adsProfileId,
+        testUserId,
+        testCountry,
+        region,
+        adsRefreshToken
+      );
+    }
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Search Keywords data retrieved successfully',
+      data: result,
+      metadata: {
+        userId: testUserId,
+        country: testCountry,
+        region: region,
+        profileId: adsProfileId,
+        usedTokenManager: !!adsRefreshToken,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in testSearchKeywords:', error);
+    
+    // Handle specific error types
+    if (error.response) {
+      const status = error.response.status || 500;
+      const errorData = error.response.data || {};
+      
+      return res.status(status).json({
+        success: false,
+        error: 'Amazon Ads API Error',
+        message: error.message,
+        details: errorData,
+        statusCode: status,
+        suggestion: status === 401 ? 
+          'Token may be expired or invalid. If you set fetchTokenFromDB to true, the refresh token itself may be invalid. Please reconnect your Amazon Ads account.' : 
+          undefined
+      });
+    }
+    
+    // Handle token generation errors
+    if (error.message && (
+      error.message.includes('token refresh failed') ||
+      error.message.includes('refresh token') ||
+      error.message.includes('invalid_client') ||
+      error.message.includes('Invalid token')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token Refresh Error',
+        message: error.message,
+        suggestion: 'The refresh token may be invalid or expired. Please reconnect your Amazon Ads account through the application.'
+      });
+    }
+    
+    // Handle token-related errors
+    if (error.message && (
+      error.message.includes('token') || 
+      error.message.includes('unauthorized') ||
+      error.message.includes('401')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication Error',
+        message: error.message,
+        suggestion: 'Please check if your access token is valid. If using fetchTokenFromDB, the refresh token may be invalid. Please reconnect your Amazon Ads account.'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while fetching search keywords'
+    });
+  }
+};
+
+// Test function for FBA Inventory Planning Data
+const testFbaInventoryPlanningData = async (req, res) => {
+  try {
+    const { accessToken, userId, country, region, marketplaceIds, fetchTokenFromDB } = req.body;
+    
+    // Import required modules
+    const Seller = require('../models/sellerCentralModel.js');
+    const tokenManager = require('../utils/TokenManager.js');
+    const { URIs, marketplaceConfig } = require('./config/config.js');
+    const { generateAccessToken } = require('../Services/Sp_API/GenerateTokens.js');
+    
+    let spApiToken = accessToken;
+    let testUserId = userId;
+    let testCountry = country || "US";
+    let testRegion = region || "NA";
+    let spRefreshToken = null;
+    let adsRefreshToken = null;
+    
+    // Convert userId to ObjectId if needed
+    const mongoose = require('mongoose');
+    let userIdQuery = userId;
+    if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+      userIdQuery = new mongoose.Types.ObjectId(userId);
+    }
+    
+    // If fetchTokenFromDB is true, get tokens from database
+    if (fetchTokenFromDB && userId) {
+      const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 });
+      
+      if (!sellerCentral) {
+        return res.status(404).json({
+          success: false,
+          error: 'Seller account not found for the provided userId',
+          suggestion: 'Please ensure the user has connected their Amazon Seller Central account first.'
+        });
+      }
+      
+      // Find the specific sellerAccount by country and region
+      const sellerAccount = sellerCentral.sellerAccount?.find(
+        account => account.country === (country || "US") && account.region === (region || "NA")
+      );
+      
+      if (!sellerAccount) {
+        return res.status(404).json({
+          success: false,
+          error: `Seller account not found for country: ${country || "US"} and region: ${region || "NA"}`,
+          availableAccounts: sellerCentral.sellerAccount?.map(acc => ({
+            country: acc.country,
+            region: acc.region,
+            hasSpApiToken: !!acc.spiRefreshToken
+          })) || [],
+          suggestion: 'Please ensure the user has connected their Amazon Seller Central account for this country and region.'
+        });
+      }
+      
+      if (!sellerAccount.spiRefreshToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'SP-API refresh token not found for this user. Please connect Amazon Seller Central account first.',
+          country: sellerAccount.country,
+          region: sellerAccount.region
+        });
+      }
+      
+      // Store refresh tokens for TokenManager
+      spRefreshToken = sellerAccount.spiRefreshToken;
+      adsRefreshToken = sellerAccount.adsRefreshToken || null;
+      
+      // Get initial access token (TokenManager will refresh if needed)
+      try {
+        spApiToken = await generateAccessToken(userId, spRefreshToken);
+        if (!spApiToken) {
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to generate SP-API access token. The refresh token may be invalid or expired. Please reconnect your Amazon Seller Central account.'
+          });
+        }
+      } catch (tokenError) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to generate SP-API access token',
+          message: tokenError.message,
+          suggestion: 'The refresh token may be invalid or expired. Please reconnect your Amazon Seller Central account.'
+        });
+      }
+      
+      testUserId = userId;
+      testCountry = sellerAccount.country || country || "US";
+      testRegion = sellerAccount.region || region || "NA";
+    } else if (userId) {
+      // Even if not fetching from DB, we need refresh tokens for TokenManager
+      const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 });
+      if (sellerCentral) {
+        const sellerAccount = sellerCentral.sellerAccount?.find(
+          account => account.country === (country || "US") && account.region === (region || "NA")
+        );
+        if (sellerAccount) {
+          spRefreshToken = sellerAccount.spiRefreshToken;
+          adsRefreshToken = sellerAccount.adsRefreshToken || null;
+        }
+      }
+    }
+    
+    // Validate required parameters
+    if (!spApiToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'accessToken is required. Either provide it in the request body or set fetchTokenFromDB to true with a valid userId.'
+      });
+    }
+    
+    if (!testUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required. Either provide it in the request body or set fetchTokenFromDB to true.'
+      });
+    }
+    
+    if (!testCountry) {
+      return res.status(400).json({
+        success: false,
+        error: 'country is required. Valid values: US, UK, CA, DE, FR, etc.'
+      });
+    }
+    
+    if (!testRegion) {
+      return res.status(400).json({
+        success: false,
+        error: 'region is required. Valid values: NA, EU, FE'
+      });
+    }
+    
+    // Validate region
+    const validRegions = ['NA', 'EU', 'FE'];
+    if (!validRegions.includes(testRegion)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid region: ${testRegion}. Valid values are: ${validRegions.join(', ')}`
+      });
+    }
+    
+    // Get Base URI from config
+    const Base_URI = URIs[testRegion];
+    if (!Base_URI) {
+      return res.status(400).json({
+        success: false,
+        error: `Base URI not configured for region: ${testRegion}`,
+        suggestion: 'Please check environment variables: AMAZON_BASE_URI_NA, AMAZON_BASE_URI_EU, or AMAZON_BASE_URI_FE'
+      });
+    }
+    
+    // Get marketplace ID from config
+    let marketplaceId = marketplaceIds?.[0] || marketplaceConfig[testCountry];
+    if (!marketplaceId) {
+      // Try uppercase country
+      const upperCountry = testCountry.toUpperCase();
+      marketplaceId = marketplaceConfig[upperCountry];
+      
+      if (!marketplaceId) {
+        return res.status(400).json({
+          success: false,
+          error: `Marketplace ID not found for country: ${testCountry}`,
+          availableCountries: Object.keys(marketplaceConfig),
+          suggestion: 'Please provide a valid country code or marketplaceIds array in the request body.'
+        });
+      }
+    }
+    
+    // Ensure marketplaceIds is an array
+    const marketplaceIdsArray = Array.isArray(marketplaceIds) ? marketplaceIds : [marketplaceId];
+    
+    console.log('🧪 Testing FBA Inventory Planning Data API:', {
+      userId: testUserId,
+      country: testCountry,
+      region: testRegion,
+      marketplaceIds: marketplaceIdsArray,
+      baseUri: Base_URI,
+      hasAccessToken: !!spApiToken,
+      hasRefreshToken: !!spRefreshToken,
+      tokenSource: fetchTokenFromDB ? 'database' : 'request body',
+      usingTokenManager: !!spRefreshToken
+    });
+    
+    // Use TokenManager if we have refresh tokens, otherwise call directly
+    let result;
+    if (spRefreshToken && testUserId) {
+      // Use TokenManager for automatic token refresh and retry
+      console.log('🔄 Using TokenManager for automatic token refresh...');
+      result = await tokenManager.wrapSpApiFunction(
+        GET_FBA_INVENTORY_PLANNING_DATA,
+        testUserId,
+        spRefreshToken,
+        adsRefreshToken
+      )(spApiToken, marketplaceIdsArray, testUserId, Base_URI, testCountry, testRegion);
+    } else {
+      // Call directly without TokenManager (no automatic refresh)
+      console.log('⚠️ Calling without TokenManager - no refresh token available');
+      result = await GET_FBA_INVENTORY_PLANNING_DATA(
+        spApiToken,
+        marketplaceIdsArray,
+        testUserId,
+        Base_URI,
+        testCountry,
+        testRegion
+      );
+    }
+    
+    return res.status(200).json({
+      success: true,
+      message: 'FBA Inventory Planning Data retrieved successfully',
+      data: result,
+      metadata: {
+        userId: testUserId,
+        country: testCountry,
+        region: testRegion,
+        marketplaceIds: marketplaceIdsArray,
+        baseUri: Base_URI,
+        usedTokenManager: !!spRefreshToken,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in testFbaInventoryPlanningData:', error);
+    
+    // Handle specific error types
+    if (error.response) {
+      const status = error.response.status || 500;
+      const errorData = error.response.data || {};
+      
+      return res.status(status).json({
+        success: false,
+        error: 'Amazon SP-API Error',
+        message: error.message,
+        details: errorData,
+        statusCode: status,
+        suggestion: status === 401 ? 
+          'Token may be expired or invalid. If you set fetchTokenFromDB to true, the refresh token itself may be invalid. Please reconnect your Amazon Seller Central account.' : 
+          undefined
+      });
+    }
+    
+    // Handle token generation errors
+    if (error.message && (
+      error.message.includes('token refresh failed') ||
+      error.message.includes('refresh token') ||
+      error.message.includes('invalid_client') ||
+      error.message.includes('Invalid token')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token Refresh Error',
+        message: error.message,
+        suggestion: 'The refresh token may be invalid or expired. Please reconnect your Amazon Seller Central account through the application.'
+      });
+    }
+    
+    // Handle token-related errors
+    if (error.message && (
+      error.message.includes('token') || 
+      error.message.includes('unauthorized') ||
+      error.message.includes('401')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication Error',
+        message: error.message,
+        suggestion: 'Please check if your access token is valid. If using fetchTokenFromDB, the refresh token may be invalid. Please reconnect your Amazon Seller Central account.'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while fetching FBA Inventory Planning Data'
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
-  getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
+   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData
+   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData
    }

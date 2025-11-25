@@ -760,7 +760,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
         console.log("🔍 Debug - marketplaceIds being passed:", marketplaceIds);
         console.log("🔍 Debug - dataToSend.marketplaceId:", dataToSend.marketplaceId);
         console.log(`🔍 Debug - Available tokens - SP-API: ${!!AccessToken}, Ads: ${!!AdsAccessToken}`);
-
         if (loggingHelper) {
             loggingHelper.logFunctionStart('firstBatch_ApiCalls', {
                 hasAccessToken: !!AccessToken,
@@ -794,24 +793,25 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
         // Ads functions (require AdsAccessToken)
         if (AdsAccessToken) {
+            // NOTE: Token refresh has been added to these functions - they now accept refreshToken parameter
             firstBatchPromises.push(
                 tokenManager.wrapAdsFunction(
                     getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken
-                )(AdsAccessToken, ProfileId, userId, Country, Region)
+                )(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
             );
             firstBatchServiceNames.push("PPC Spends by SKU");
 
             firstBatchPromises.push(
                 tokenManager.wrapAdsFunction(
                     getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken
-                )(AdsAccessToken, ProfileId, userId, Country, Region)
+                )(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
             );
             firstBatchServiceNames.push("Ads Keywords Performance");
 
             firstBatchPromises.push(
                 tokenManager.wrapAdsFunction(
                     getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken
-                )(AdsAccessToken, ProfileId, userId, Country, Region)
+                )(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
             );
             firstBatchServiceNames.push("PPC Spends Date Wise");
         } else {
@@ -913,7 +913,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
         // ===== SECOND BATCH OF API CALLS WITH STRUCTURED ERROR HANDLING =====
         console.log("🔄 Starting second batch of API calls...");
-
         if (loggingHelper) {
             loggingHelper.logFunctionStart('secondBatch_ApiCalls', {
                 hasAccessToken: !!AccessToken,
@@ -1407,7 +1406,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
         } catch (reimbursementError) {
             logger.error("Error processing reimbursement data", {
                 error: reimbursementError.message,
-                userId
+                userId,
             });
             // Continue without failing the entire process
         }
@@ -1438,7 +1437,7 @@ const getSpApiData = asyncHandler(async (req, res) => {
 
                 tokenManager.wrapAdsFunction(
                     getSearchKeywords, userId, RefreshToken, AdsRefreshToken
-                )(AdsAccessToken, ProfileId, userId, Country, Region)
+                )(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
             ]);
 
             // Process fourth batch results
@@ -1447,7 +1446,6 @@ const getSpApiData = asyncHandler(async (req, res) => {
         } else {
             console.log("⚠️ Skipping fourth batch - AdsAccessToken not available");
         }
-
         // ===== LISTING ITEMS PROCESSING WITH MEMORY SAFETY =====
         console.log("🔄 Starting listing items processing...");
 

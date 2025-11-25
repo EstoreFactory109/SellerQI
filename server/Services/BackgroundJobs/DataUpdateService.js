@@ -100,9 +100,13 @@ class DataUpdateService {
                         });
                     }
                 } else {
-                    logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}`);
+                    const statusCode = spApiResult?.statusCode ?? 'no response';
+                    logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}. Status: ${statusCode}`);
                     if (loggingHelper) {
-                        loggingHelper.logFunctionError('SpApiDataController.getSpApiData', new Error(`Non-200 status: ${spApiResult?.statusCode}`));
+                        const errorMessage = spApiResult 
+                            ? `Non-200 status: ${statusCode}` 
+                            : 'No response received from getSpApiData (function may have thrown an error or returned early)';
+                        loggingHelper.logFunctionError('SpApiDataController.getSpApiData', new Error(errorMessage));
                     }
                 }
             } catch (apiError) {

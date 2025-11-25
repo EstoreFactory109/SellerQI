@@ -3,7 +3,7 @@ const router=express.Router();
 const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testPPCSpendsSalesUnitsSold,testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,
-    testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData}=require('../controllers/TestController.js')
+    testGetBrand,testSendEmailOnRegistered,testKeywordDataIntegration,testLedgerSummaryReport,testGetProductWiseFBAData,testCalculateBackendLostInventory,testGetBackendLostInventory,testAllReimbursementAPIs,getAllReimbursementData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData}=require('../controllers/TestController.js')
 
     
 router.post('/testreport',testReport);
@@ -25,5 +25,8 @@ router.post('/testCalculateBackendLostInventory',testCalculateBackendLostInvento
 router.post('/testGetBackendLostInventory',testGetBackendLostInventory)
 router.post('/testAllReimbursementAPIs',testAllReimbursementAPIs)
 router.get('/getAllReimbursementData',getAllReimbursementData)
+router.post('/testGetWastedSpendKeywords',testGetWastedSpendKeywords)
+router.post('/testSearchKeywords',testSearchKeywords)
+router.post('/testFbaInventoryPlanningData',testFbaInventoryPlanningData)
 
 module.exports=router

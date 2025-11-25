@@ -84,6 +84,7 @@ const redisConnection = async () => {
     }
 };
  
+// Background jobs re-enabled after testing
 const initializeBackgroundJobs = async () => {
     try {
         // Initialize background job scheduler
@@ -106,6 +107,7 @@ const initializeBackgroundJobs = async () => {
  
 redisConnection();
 initializeBackgroundJobs();
+logger.info('✅ Background jobs enabled - automatic data fetching active');
 
 
 module.exports=app

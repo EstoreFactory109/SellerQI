@@ -1,7 +1,7 @@
 const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
-const { generateAccessToken } = require('./GenerateToken');
+const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const userModel = require('../../models/userModel.js');
 const ProductWiseSponsoredAdsData = require('../../models/ProductWiseSponseredAdsModel.js');
@@ -105,7 +105,7 @@ async function getReportId(accessToken, profileId, region) {
     }
 }
 
-async function checkReportStatus(reportId, accessToken, profileId, region, userId) {
+async function checkReportStatus(reportId, accessToken, profileId, region, userId, tokenRefreshCallback) {
     try {
         // Validate region and get base URI
         const baseUri = BASE_URIS[region];
@@ -115,14 +115,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
         // Construct the endpoint URL with reportId as parameter
         const url = `${baseUri}/reporting/reports/${reportId}`;
-
-        // Set up headers
-        const headers = {
-            'Authorization': `Bearer ${accessToken}`,
-            'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
-            'Amazon-Advertising-API-Scope': profileId,
-            'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
-        };
+        let currentAccessToken = accessToken; // Use a mutable token variable
 
         // Poll for report status
         let attempts = 0;
@@ -130,12 +123,18 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
         while (true) {
             try {
+                // Set up headers with current token
+                const headers = {
+                    'Authorization': `Bearer ${currentAccessToken}`,
+                    'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+                    'Amazon-Advertising-API-Scope': profileId,
+                    'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+                };
+                
                 // Make GET request to check status
                 const response = await axios.get(url, { headers });
                 const { status } = response.data;
                 const location = response.data.url;
-
-                // Token refresh is now handled automatically by TokenManager
 
                 console.log(`📊 [GetPPCProductWise] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
@@ -145,7 +144,8 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                     return {
                         status: 'COMPLETED',
                         location: location,
-                        reportId: reportId
+                        reportId: reportId,
+                        finalAccessToken: currentAccessToken
                     };
                 } else if (status === 'FAILURE') {
                     console.error(`❌ [GetPPCProductWise] Report generation failed after ${attempts + 1} attempts`);
@@ -168,6 +168,31 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 }
 
             } catch (error) {
+                // Handle 401 Unauthorized - refresh token and continue polling
+                if (error.response && error.response.status === 401) {
+                    console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
+                    
+                    if (tokenRefreshCallback) {
+                        try {
+                            // Get a fresh token using the callback
+                            const newToken = await tokenRefreshCallback();
+                            if (newToken) {
+                                currentAccessToken = newToken;
+                                console.log(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
+                                // Continue the loop with the new token
+                                continue;
+                            } else {
+                                throw new Error('Token refresh callback returned null/undefined');
+                            }
+                        } catch (refreshError) {
+                            console.error('❌ Failed to refresh token during polling:', refreshError.message);
+                            throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
+                        }
+                    } else {
+                        // No token refresh callback provided, throw the error
+                        throw new Error('Token expired during polling and no refresh callback provided');
+                    }
+                }
                 // If it's a network error, we might want to retry
                 if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
                     console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
@@ -260,7 +285,7 @@ async function downloadReportData(location, accessToken, profileId) {
     }
 }
 
-async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) {
+async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region, refreshToken = null) {
             // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
     try {
@@ -276,12 +301,31 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region) 
 
         // console.log(`Report ID generated: ${reportData.reportId}`);
 
+        // Create token refresh callback for polling
+        const tokenRefreshCallback = refreshToken ? async () => {
+            try {
+                console.log('🔄 Refreshing Amazon Ads token during polling...');
+                const newToken = await generateAdsAccessToken(refreshToken);
+                if (newToken) {
+                    console.log('✅ Token refreshed successfully for polling');
+                    return newToken;
+                } else {
+                    throw new Error('Failed to generate new access token');
+                }
+            } catch (error) {
+                console.error('❌ Token refresh failed during polling:', error.message);
+                throw error;
+            }
+        } : null;
+
         // Check report status until completion
-        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId);
+        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId, tokenRefreshCallback);
 
         if (reportStatus.status === 'COMPLETED') {
             // Download and parse the report data
-            const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
+            // Use the latest token if refreshed
+            const downloadToken = reportStatus.finalAccessToken || accessToken;
+            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId);
 
             
 

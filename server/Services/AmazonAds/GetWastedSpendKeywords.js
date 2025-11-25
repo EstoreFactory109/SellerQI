@@ -3,6 +3,7 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const adsKeywordsPerformanceModel = require('../../models/adsKeywordsPerformanceModel');
 const gunzip = promisify(zlib.gunzip);
+const { generateAdsAccessToken } = require('./GenerateToken.js');
 
 // Analyze raw buffer (for debugging)
 function analyzeRawData(data) {
@@ -112,47 +113,73 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
     }
 }
 
-// Check report status
-async function checkReportStatus(reportId, accessToken, profileId, region) {
+// Check report status with token refresh support
+async function checkReportStatus(reportId, accessToken, profileId, region, tokenRefreshCallback) {
     const baseUri = BASE_URIS[region];
     if (!baseUri) {
         throw new Error(`Invalid region: ${region}`);
     }
 
     const url = `${baseUri}/reporting/reports/${reportId}`;
-    const headers = {
-        'Authorization': `Bearer ${accessToken}`,
-        'Amazon-Advertising-API-Scope': profileId,
-        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
-        'Content-Type': 'application/json'
-    };
-
+    let currentAccessToken = accessToken; // Use a mutable token variable
     let attempts = 0;
-    const maxAttempts = 30;
 
     while (true) {
         try {
+            // Set up headers with current token
+            const headers = {
+                'Authorization': `Bearer ${currentAccessToken}`,
+                'Amazon-Advertising-API-Scope': profileId,
+                'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+                'Content-Type': 'application/json'
+            };
+            
             const response = await axios.get(url, { headers });
             const data = response.data;
             const status = data.status;
 
-                            // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+            // console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
             if (status === 'COMPLETED') {
-                return { status: 'SUCCESS', location:data.url, reportId };
+                return { status: 'SUCCESS', location:data.url, reportId, finalAccessToken: currentAccessToken };
             } else if (status === 'FAILED') {
                 return { status: 'FAILURE', reportId, error: 'Report generation failed' };
-            } else if (status === 'IN_PROGRESS' || status === 'PENDING') {
-                await new Promise(res => setTimeout(res, 60000));
+            } else if (status === 'PENDING' || status === 'PROCESSING') {
                 attempts++;
+                console.log(`⏳ [GetWastedSpendKeywords] Report still ${status}, waiting 60 seconds... (attempt ${attempts})`);
+                await new Promise(res => setTimeout(res, 60000));
             } else {
-                throw new Error(`Unknown report status: ${status}`);
+                throw new Error(`Unknown report status: ${status}. Expected one of: COMPLETED, FAILED, PENDING, PROCESSING`);
             }
         } catch (error) {
-            if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                console.warn(`Network error, retrying... (attempt ${attempts + 1})`);
-                await new Promise(res => setTimeout(res, 60000));
+            // Handle 401 Unauthorized - refresh token and continue polling
+            if (error.response && error.response.status === 401) {
+                console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
+                
+                if (tokenRefreshCallback) {
+                    try {
+                        // Get a fresh token using the callback
+                        const newToken = await tokenRefreshCallback();
+                        if (newToken) {
+                            currentAccessToken = newToken;
+                            console.log(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
+                            // Continue the loop with the new token
+                            continue;
+                        } else {
+                            throw new Error('Token refresh callback returned null/undefined');
+                        }
+                    } catch (refreshError) {
+                        console.error('❌ Failed to refresh token during polling:', refreshError.message);
+                        throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
+                    }
+                } else {
+                    // No token refresh callback provided, throw the error
+                    throw new Error('Token expired during polling and no refresh callback provided');
+                }
+            } else if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
                 attempts++;
+                console.warn(`Network error, retrying... (attempt ${attempts})`);
+                await new Promise(res => setTimeout(res, 60000));
             } else if (error.response) {
                 console.error('API Error Response:', error.response);
                 // Preserve the original error structure for TokenManager to detect 401s
@@ -166,8 +193,6 @@ async function checkReportStatus(reportId, accessToken, profileId, region) {
             }
         }
     }
-
-    throw new Error(`Report status check timed out after ${maxAttempts} attempts`);
 }
 
 // Download and parse report data
@@ -199,7 +224,7 @@ async function downloadReportData(location, accessToken, profileId) {
 }
 
 // Orchestrator function
-async function getKeywordPerformanceReport(accessToken, profileId,userId,country, region) {
+async function getKeywordPerformanceReport(accessToken, profileId,userId,country, region, refreshToken = null) {
     const now = new Date();
     
     // End date: 24 hours before now (yesterday)
@@ -226,11 +251,30 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
 
         // console.log(`Report ID: ${reportData.reportId}`);
 
-        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region);
+        // Create token refresh callback for polling
+        const tokenRefreshCallback = refreshToken ? async () => {
+            try {
+                console.log('🔄 Refreshing Amazon Ads token during polling...');
+                const newToken = await generateAdsAccessToken(refreshToken);
+                if (newToken) {
+                    console.log('✅ Token refreshed successfully for polling');
+                    return newToken;
+                } else {
+                    throw new Error('Failed to generate new access token');
+                }
+            } catch (error) {
+                console.error('❌ Token refresh failed during polling:', error.message);
+                throw error;
+            }
+        } : null;
+
+        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, tokenRefreshCallback);
 
         if (reportStatus.status === 'SUCCESS') {
             // console.log('Downloading report from:', reportStatus.location);
-            const reportContent = await downloadReportData(reportStatus.location, accessToken, profileId);
+            // Use the latest token if refreshed
+            const downloadToken = reportStatus.finalAccessToken || accessToken;
+            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId);
 
             const data = reportContent
 
