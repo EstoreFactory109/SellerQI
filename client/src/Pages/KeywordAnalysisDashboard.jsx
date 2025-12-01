@@ -1,112 +1,110 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
+import axiosInstance from '../config/axios.config.js';
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
-  const [selectedAsin, setSelectedAsin] = useState('');
-  const [analyzedAsin, setAnalyzedAsin] = useState(''); // ASIN used for filtering table data
+  const [keywordRecommendationsData, setKeywordRecommendationsData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
-  const [loading, setLoading] = useState(false);
   const [selectedKeywords, setSelectedKeywords] = useState([]);
-  const [sortConfig, setSortConfig] = useState({ key: 'searchVolume', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'keyword', direction: 'desc' });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const [filters, setFilters] = useState({
-    competition: 'all',
-    indexed: 'all'
-  });
+  // Only show BROAD match type keywords - no filter needed
 
-  // Get keywordTrackingData from Redux
-  const keywordTrackingData = useSelector((state) => state.Dashboard.DashBoardInfo?.keywordTrackingData) || [];
-  
-  // Get current marketplace from Redux (from currency slice or keyword data)
+  // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
-  const currentMarketplace = useMemo(() => {
-    // First try to get from keywordTrackingData
-    if (keywordTrackingData.length > 0 && keywordTrackingData[0].country) {
-      return keywordTrackingData[0].country.toUpperCase();
-    }
-    // Fallback to currency slice
-    if (currentCountry) {
-      return currentCountry.toUpperCase();
-    }
-    return 'N/A';
-  }, [keywordTrackingData, currentCountry]);
-  
-  // Transform Redux data to match component needs and filter by analyzed ASIN (only when button is clicked)
-  const keywords = useMemo(() => {
-    if (!keywordTrackingData || keywordTrackingData.length === 0) return [];
-    
-    let filtered = keywordTrackingData;
-    
-    // Filter by ASIN only if analyze button was clicked (analyzedAsin is set)
-    if (analyzedAsin) {
-      filtered = filtered.filter(k => k.asin === analyzedAsin);
-    }
-    
-    // Add unique IDs for selection management
-    return filtered.map((keyword, index) => ({
-      ...keyword,
-      id: `${keyword.asin}-${keyword.keyword}-${index}`,
-      keyword: keyword.keyword || '',
-      asin: keyword.asin || '',
-      searchVolume: keyword.searchVolume || 0,
-      competition: keyword.competition || 'unknown',
-      difficulty: keyword.difficulty || 0,
-      cpc: keyword.cpc || 0,
-      rank: keyword.rank || null,
-      isIndexed: keyword.isIndexed !== undefined ? keyword.isIndexed : null,
-      impressions: keyword.impressions || 0,
-      clicks: keyword.clicks || 0,
-      ctr: keyword.ctr || 0,
-      sponsored: keyword.sponsored !== undefined ? keyword.sponsored : false,
-      country: keyword.country || '',
-      region: keyword.region || ''
-    }));
-  }, [keywordTrackingData, analyzedAsin]);
+  const currentRegion = useSelector((state) => state.currency?.region) || '';
 
-  // Get unique ASINs from keywordTrackingData for product selection
-  const products = useMemo(() => {
-    const uniqueAsins = new Set();
-    keywordTrackingData.forEach(k => {
-      if (k.asin) uniqueAsins.add(k.asin);
-    });
-    return Array.from(uniqueAsins).map(asin => ({
-      asin: asin,
-      name: `Product ${asin}`,
-      category: 'Product'
-    }));
-  }, [keywordTrackingData]);
-
-  // Set default ASIN when products are loaded (for dropdown selection only)
+  // Fetch keyword recommendations data
   useEffect(() => {
-    if (products.length > 0 && !selectedAsin) {
-      setSelectedAsin(products[0].asin);
-    }
-  }, [products, selectedAsin]);
+    const fetchKeywordRecommendations = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await axiosInstance.get('/app/analyse/keywordRecommendations');
+        
+        if (response.data && response.data.data) {
+          setKeywordRecommendationsData(response.data.data);
+        } else {
+          setError('No data received from server');
+        }
+      } catch (err) {
+        console.error('Error fetching keyword recommendations:', err);
+        setError(err.response?.data?.message || 'Failed to fetch keyword recommendations');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Filter keywords based on active tab and filters
+    fetchKeywordRecommendations();
+  }, []);
+
+  // Transform keywordTargetList data to flat structure for table display
+  const keywords = useMemo(() => {
+    if (!keywordRecommendationsData?.keywordRecommendationData?.keywordTargetList) {
+      return [];
+    }
+
+    const keywordTargetList = keywordRecommendationsData.keywordRecommendationData.keywordTargetList;
+    const flattened = [];
+
+    keywordTargetList.forEach((keywordTarget) => {
+      // Each keywordTarget can have multiple bidInfo entries (one per match type)
+      if (keywordTarget.bidInfo && keywordTarget.bidInfo.length > 0) {
+        keywordTarget.bidInfo.forEach((bidInfo) => {
+          flattened.push({
+            id: `${keywordTarget.recId}-${bidInfo.matchType}`,
+            keyword: keywordTarget.keyword || '',
+            matchType: bidInfo.matchType || '',
+            theme: bidInfo.theme || '',
+            rank: bidInfo.rank || null,
+            bid: bidInfo.bid || 0,
+            suggestedBid: bidInfo.suggestedBid || null,
+            translation: keywordTarget.translation || '',
+            userSelectedKeyword: keywordTarget.userSelectedKeyword || false,
+            searchTermImpressionRank: keywordTarget.searchTermImpressionRank || null,
+            searchTermImpressionShare: keywordTarget.searchTermImpressionShare || null,
+            recId: keywordTarget.recId || ''
+          });
+        });
+      } else {
+        // If no bidInfo, still add the keyword with default values
+        flattened.push({
+          id: `${keywordTarget.recId}-no-bid`,
+          keyword: keywordTarget.keyword || '',
+          matchType: 'N/A',
+          theme: '',
+          rank: null,
+          bid: 0,
+          suggestedBid: null,
+          translation: keywordTarget.translation || '',
+          userSelectedKeyword: keywordTarget.userSelectedKeyword || false,
+          searchTermImpressionRank: keywordTarget.searchTermImpressionRank || null,
+          searchTermImpressionShare: keywordTarget.searchTermImpressionShare || null,
+          recId: keywordTarget.recId || ''
+        });
+      }
+    });
+
+    return flattened;
+  }, [keywordRecommendationsData]);
+
+  // Filter keywords - only show BROAD match type
   const filteredKeywords = useMemo(() => {
-    let filtered = [...keywords];
+    // First filter to only BROAD match type
+    let filtered = keywords.filter(k => k.matchType === 'BROAD');
 
     // Tab filtering
-    if (activeTab === 'indexed') {
-      filtered = filtered.filter(k => k.isIndexed === true);
-    } else if (activeTab === 'notIndexed') {
-      filtered = filtered.filter(k => k.isIndexed === false || k.isIndexed === null);
-    } else if (activeTab === 'ranked') {
-      filtered = filtered.filter(k => k.rank !== null && k.rank !== undefined);
-    } else if (activeTab === 'campaignKeywords') {
-      filtered = filtered.filter(k => k.sponsored === true);
-    }
-
-    // Apply filters
-    if (filters.competition !== 'all') {
-      filtered = filtered.filter(k => k.competition && k.competition.toLowerCase() === filters.competition.toLowerCase());
-    }
-    if (filters.indexed !== 'all') {
-      filtered = filtered.filter(k => k.isIndexed === (filters.indexed === 'indexed'));
+    if (activeTab === 'selected') {
+      filtered = filtered.filter(k => k.userSelectedKeyword === true);
+    } else if (activeTab === 'highRank') {
+      filtered = filtered.filter(k => k.rank !== null && k.rank <= 5);
+    } else if (activeTab === 'highImpression') {
+      filtered = filtered.filter(k => k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50);
     }
 
     // Sort
@@ -124,7 +122,7 @@ const KeywordAnalysisDashboard = () => {
     }
 
     return filtered;
-  }, [keywords, activeTab, filters, sortConfig]);
+  }, [keywords, activeTab, sortConfig]);
 
   // Pagination calculations
   const totalPages = useMemo(() => Math.ceil(filteredKeywords.length / itemsPerPage), [filteredKeywords.length]);
@@ -135,47 +133,33 @@ const KeywordAnalysisDashboard = () => {
     return filteredKeywords.slice(indexOfFirstItem, indexOfLastItem);
   }, [filteredKeywords, currentPage]);
 
-  // Reset to page 1 when filters, tabs, sorting, or analyzed ASIN changes
+  // Reset to page 1 when tabs or sorting changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, filters, sortConfig.key, analyzedAsin]);
+  }, [activeTab, sortConfig.key]);
 
-  // Metrics calculation
+  // Metrics calculation - only for BROAD match type keywords
   const metrics = useMemo(() => {
-    const totalKeywords = keywords.length;
-    const indexedKeywords = keywords.filter(k => k.isIndexed === true).length;
-    const avgCpc = keywords.length > 0 
-      ? (keywords.reduce((sum, k) => sum + (parseFloat(k.cpc) || 0), 0) / keywords.length).toFixed(2)
+    const broadKeywords = keywords.filter(k => k.matchType === 'BROAD');
+    const totalKeywords = broadKeywords.length;
+    const uniqueKeywords = new Set(broadKeywords.map(k => k.keyword)).size;
+    const avgBid = broadKeywords.length > 0 
+      ? (broadKeywords.reduce((sum, k) => sum + (parseFloat(k.bid) || 0), 0) / broadKeywords.length).toFixed(2)
       : '0.00';
-    const rankedKeywords = keywords.filter(k => k.rank !== null && k.rank !== undefined).length;
-    const totalImpressions = keywords.reduce((sum, k) => sum + (parseFloat(k.impressions) || 0), 0);
-    const totalClicks = keywords.reduce((sum, k) => sum + (parseFloat(k.clicks) || 0), 0);
+    const highRankKeywords = broadKeywords.filter(k => k.rank !== null && k.rank <= 10).length;
+    const totalImpressionShare = broadKeywords.reduce((sum, k) => sum + (parseFloat(k.searchTermImpressionShare) || 0), 0);
+    const avgImpressionShare = broadKeywords.length > 0 
+      ? (totalImpressionShare / broadKeywords.length).toFixed(2)
+      : '0.00';
     
     return {
       totalKeywords,
-      indexedKeywords,
-      avgCpc,
-      rankedKeywords,
-      totalImpressions,
-      totalClicks
+      uniqueKeywords,
+      avgBid,
+      highRankKeywords,
+      avgImpressionShare
     };
   }, [keywords]);
-
-  // Handle analyze - filter table by selected ASIN
-  const handleAnalyze = async () => {
-    if (!selectedAsin) {
-      alert('Please select an ASIN first');
-      return;
-    }
-    
-    setLoading(true);
-    // Set the analyzed ASIN to filter the table
-    setTimeout(() => {
-      setAnalyzedAsin(selectedAsin);
-      setLoading(false);
-      setCurrentPage(1); // Reset to first page
-    }, 500);
-  };
 
   // Handle sort
   const handleSort = (key) => {
@@ -216,6 +200,99 @@ const KeywordAnalysisDashboard = () => {
     );
   };
 
+  // Export to CSV
+  const exportToCSV = () => {
+    // Get the filtered keywords (already filtered to BROAD only)
+    const dataToExport = filteredKeywords;
+
+    // Define CSV headers
+    const headers = [
+      'Keyword',
+      'Bid',
+      'Rank',
+      'Impression Share',
+      'Impression Rank',
+      'Suggested Bid Range Start',
+      'Suggested Bid Range End',
+      'Suggested Bid Median',
+      'User Selected'
+    ];
+
+    // Convert data to CSV rows
+    const csvRows = [
+      headers.join(','),
+      ...dataToExport.map(keyword => {
+        const suggestedBidStart = keyword.suggestedBid ? (keyword.suggestedBid.rangeStart / 100).toFixed(2) : '';
+        const suggestedBidEnd = keyword.suggestedBid ? (keyword.suggestedBid.rangeEnd / 100).toFixed(2) : '';
+        const suggestedBidMedian = keyword.suggestedBid ? (keyword.suggestedBid.rangeMedian / 100).toFixed(2) : '';
+        
+        return [
+          `"${(keyword.keyword || '').replace(/"/g, '""')}"`, // Escape quotes in keyword
+          (keyword.bid / 100).toFixed(2),
+          keyword.rank !== null ? keyword.rank : '',
+          keyword.searchTermImpressionShare !== null ? keyword.searchTermImpressionShare.toFixed(2) : '',
+          keyword.searchTermImpressionRank !== null ? keyword.searchTermImpressionRank : '',
+          suggestedBidStart,
+          suggestedBidEnd,
+          suggestedBidMedian,
+          keyword.userSelectedKeyword ? 'Yes' : 'No'
+        ].join(',');
+      })
+    ];
+
+    // Create CSV content
+    const csvContent = csvRows.join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `keyword-recommendations-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  if (loading) {
+    return (
+      <div className="dashboard-container">
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '100vh',
+          flexDirection: 'column',
+          gap: '20px'
+        }}>
+          <div className="loading" style={{ width: '40px', height: '40px' }}></div>
+          <p style={{ color: '#64748b', fontSize: '16px' }}>Loading keyword recommendations...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="dashboard-container">
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '100vh',
+          flexDirection: 'column',
+          gap: '20px'
+        }}>
+          <AlertCircle size={48} color="#ef4444" />
+          <p style={{ color: '#ef4444', fontSize: '16px' }}>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-container">
       <style>{`
@@ -249,90 +326,6 @@ const KeywordAnalysisDashboard = () => {
           display: flex;
           align-items: center;
           gap: 10px;
-        }
-        
-        .sync-status {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #64748b;
-          font-size: 14px;
-        }
-        
-        .panel {
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-          padding: 24px;
-          margin-bottom: 24px;
-        }
-        
-        .panel-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-        }
-        
-        .panel-title {
-          font-size: 20px;
-          font-weight: 600;
-          color: #1e293b;
-        }
-        
-        .status-badge {
-          background: #10b981;
-          color: white;
-          padding: 6px 16px;
-          border-radius: 20px;
-          font-size: 13px;
-          font-weight: 500;
-        }
-        
-        .input-grid {
-          display: grid;
-          grid-template-columns: 2fr 1fr 1fr;
-          gap: 20px;
-        }
-        
-        .form-group label {
-          display: block;
-          margin-bottom: 8px;
-          font-size: 14px;
-          font-weight: 500;
-          color: #64748b;
-        }
-        
-        select, .btn-secondary {
-          width: 100%;
-          padding: 10px 14px;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          background: white;
-          font-size: 14px;
-          cursor: pointer;
-        }
-        
-        .btn-secondary {
-          background: #3b82f6;
-          color: white;
-          font-weight: 500;
-          border: 1px solid #3b82f6;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-        }
-        
-        .btn-secondary:hover {
-          background: #2563eb;
-          border-color: #2563eb;
-        }
-        
-        .product-info {
-          margin-top: 6px;
-          font-size: 13px;
-          color: #94a3b8;
         }
         
         .metrics-grid {
@@ -375,10 +368,6 @@ const KeywordAnalysisDashboard = () => {
           display: flex;
           align-items: center;
           gap: 4px;
-        }
-        
-        .metric-trend.negative {
-          color: #ef4444;
         }
         
         .metric-icon {
@@ -494,102 +483,17 @@ const KeywordAnalysisDashboard = () => {
         
         .badge {
           display: inline-block;
-          padding: 3px 8px;
-          border-radius: 12px;
-          font-size: 11px;
-          font-weight: 500;
-          margin-left: 8px;
-        }
-        
-        .badge-trending {
-          background: #fef3c7;
-          color: #92400e;
-        }
-        
-        .badge-opportunity {
-          background: #e9d5ff;
-          color: #6b21a8;
-        }
-        
-        .badge-gap {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-        
-        .relevance-bar {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .bar-bg {
-          width: 60px;
-          height: 6px;
-          background: #e2e8f0;
-          border-radius: 3px;
-          overflow: hidden;
-        }
-        
-        .bar-fill {
-          height: 100%;
-          transition: width 0.3s;
-        }
-        
-        .bar-green { background: #10b981; }
-        .bar-yellow { background: #f59e0b; }
-        .bar-red { background: #ef4444; }
-        
-        .competition-badge {
           padding: 4px 10px;
           border-radius: 12px;
           font-size: 11px;
           font-weight: 600;
         }
         
-        .comp-low {
-          background: #d1fae5;
-          color: #065f46;
-        }
-        
-        .comp-medium {
-          background: #fef3c7;
-          color: #92400e;
-        }
-        
-        .comp-high {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-        
-        .rank {
-          font-weight: 600;
-        }
-        
-        .rank-good { color: #10b981; }
-        .rank-medium { color: #f59e0b; }
-        .rank-poor { color: #ef4444; }
-        
-        .status-badge-small {
+        .match-type-badge {
           padding: 4px 10px;
           border-radius: 12px;
           font-size: 11px;
           font-weight: 600;
-        }
-        
-        .status-indexed {
-          background: #d1fae5;
-          color: #065f46;
-        }
-        
-        .status-not-indexed {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-        
-        .opportunity-score {
-          font-weight: 700;
-          font-size: 16px;
-          color: #a855f7;
         }
         
         .empty-state {
@@ -617,57 +521,33 @@ const KeywordAnalysisDashboard = () => {
         {/* Header */}
         <div className="header">
           <div className="logo">
-            🎯 Keyword Analysis Dashboard
+            🎯 Keyword Recommendations Dashboard
           </div>
-        </div>
-
-        {/* Product Analysis Panel */}
-        <div className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Product Analysis</h2>
-            <span className="status-badge">Connected: SellerApp + Amazon Ads</span>
-          </div>
-          
-          <div className="input-grid">
-            <div className="form-group">
-              <label>Select Product (ASIN)</label>
-              <select 
-                value={selectedAsin}
-                onChange={(e) => setSelectedAsin(e.target.value)}
-              >
-                <option value="">All Products</option>
-                {products.map(product => (
-                  <option key={product.asin} value={product.asin}>
-                    {product.asin}
-                  </option>
-                ))}
-              </select>
-              <div className="product-info">
-                {analyzedAsin ? `Showing keywords for ASIN: ${analyzedAsin}` : selectedAsin ? `Selected ASIN: ${selectedAsin}` : 'Select an ASIN and click "Check Keywords"'}
-              </div>
-            </div>
-            
-            <div className="form-group">
-              <label>Marketplace</label>
-              <div style={{ 
-                padding: '10px 14px', 
-                border: '1px solid #e2e8f0', 
-                borderRadius: '8px', 
-                background: '#f8fafc',
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <button
+              onClick={exportToCSV}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 16px',
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
-                color: '#1e293b'
-              }}>
-                {currentMarketplace}
-              </div>
-            </div>
-            
-            <div className="form-group">
-              <label>Quick Actions</label>
-              <button className="btn-secondary" onClick={handleAnalyze}>
-                {loading ? <span className="loading" /> : <Search size={16} />}
-                Check Keywords
-              </button>
+                transition: 'background-color 0.2s'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
+            >
+              <Download size={16} />
+              Export CSV
+            </button>
+            <div style={{ fontSize: '14px', color: '#64748b' }}>
+              {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'Amazon Ads'}
             </div>
           </div>
         </div>
@@ -676,11 +556,11 @@ const KeywordAnalysisDashboard = () => {
         <div className="metrics-grid">
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Total Keywords</div>
+              <div className="metric-label">Total Recommendations</div>
               <div className="metric-value">{metrics.totalKeywords}</div>
               <div className="metric-trend">
                 <TrendingUp size={14} />
-                23 new this week
+                {metrics.uniqueKeywords} unique keywords
               </div>
             </div>
             <div className="metric-icon icon-blue">
@@ -690,10 +570,10 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Indexed Keywords</div>
-              <div className="metric-value">{metrics.indexedKeywords}</div>
+              <div className="metric-label">Unique Keywords</div>
+              <div className="metric-value">{metrics.uniqueKeywords}</div>
               <div className="metric-trend">
-                {((metrics.indexedKeywords / metrics.totalKeywords) * 100).toFixed(1)}% coverage
+                {metrics.totalKeywords > 0 ? ((metrics.uniqueKeywords / metrics.totalKeywords) * 100).toFixed(1) : 0}% unique
               </div>
             </div>
             <div className="metric-icon icon-green">
@@ -703,11 +583,11 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Avg. CPC</div>
-              <div className="metric-value">${metrics.avgCpc}</div>
-              <div className="metric-trend negative">
-                <ChevronUp size={14} />
-                $0.12 from last month
+              <div className="metric-label">Avg. Bid</div>
+              <div className="metric-value">${metrics.avgBid}</div>
+              <div className="metric-trend">
+                <DollarSign size={14} />
+                Average bid amount
               </div>
             </div>
             <div className="metric-icon icon-orange">
@@ -717,10 +597,10 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Ranked Keywords</div>
-              <div className="metric-value">{metrics.rankedKeywords}</div>
+              <div className="metric-label">High Rank Keywords</div>
+              <div className="metric-value">{metrics.highRankKeywords}</div>
               <div className="metric-trend">
-                {metrics.totalKeywords > 0 ? ((metrics.rankedKeywords / metrics.totalKeywords) * 100).toFixed(1) : 0}% of total
+                Rank ≤ 10
               </div>
             </div>
             <div className="metric-icon icon-purple">
@@ -735,69 +615,26 @@ const KeywordAnalysisDashboard = () => {
             className={`tab ${activeTab === 'all' ? 'active' : ''}`}
             onClick={() => setActiveTab('all')}
           >
-            All Keywords ({keywords.length})
+            All Keywords ({keywords.filter(k => k.matchType === 'BROAD').length})
           </div>
           <div 
-            className={`tab ${activeTab === 'indexed' ? 'active' : ''}`}
-            onClick={() => setActiveTab('indexed')}
+            className={`tab ${activeTab === 'selected' ? 'active' : ''}`}
+            onClick={() => setActiveTab('selected')}
           >
-            Indexed ({keywords.filter(k => k.isIndexed === true).length})
+            User Selected ({keywords.filter(k => k.matchType === 'BROAD' && k.userSelectedKeyword === true).length})
           </div>
           <div 
-            className={`tab ${activeTab === 'notIndexed' ? 'active' : ''}`}
-            onClick={() => setActiveTab('notIndexed')}
+            className={`tab ${activeTab === 'highRank' ? 'active' : ''}`}
+            onClick={() => setActiveTab('highRank')}
           >
-            Not Indexed ({keywords.filter(k => k.isIndexed === false || k.isIndexed === null).length})
+            High Rank ({keywords.filter(k => k.matchType === 'BROAD' && k.rank !== null && k.rank <= 5).length})
           </div>
           <div 
-            className={`tab ${activeTab === 'ranked' ? 'active' : ''}`}
-            onClick={() => setActiveTab('ranked')}
+            className={`tab ${activeTab === 'highImpression' ? 'active' : ''}`}
+            onClick={() => setActiveTab('highImpression')}
           >
-            Ranked ({keywords.filter(k => k.rank !== null && k.rank !== undefined).length})
+            High Impression ({keywords.filter(k => k.matchType === 'BROAD' && k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50).length})
           </div>
-          <div 
-            className={`tab ${activeTab === 'campaignKeywords' ? 'active' : ''}`}
-            onClick={() => setActiveTab('campaignKeywords')}
-          >
-            Campaign Keywords ({keywords.filter(k => k.sponsored === true).length})
-          </div>
-        </div>
-
-        {/* Filters Bar */}
-        <div className="filters-bar">
-          <div className="filter-group">
-            <select 
-              className="filter-select"
-              value={filters.competition}
-              onChange={(e) => setFilters(prev => ({ ...prev, competition: e.target.value }))}
-            >
-              <option value="all">All Competition</option>
-              <option value="low">Low Competition</option>
-              <option value="medium">Medium Competition</option>
-              <option value="high">High Competition</option>
-            </select>
-            
-            <select 
-              className="filter-select"
-              value={filters.indexed}
-              onChange={(e) => setFilters(prev => ({ ...prev, indexed: e.target.value }))}
-            >
-              <option value="all">All Status</option>
-              <option value="indexed">Indexed</option>
-              <option value="notIndexed">Not Indexed</option>
-            </select>
-            
-          </div>
-          
-          <button 
-            className="filter-select"
-            onClick={() => setFilters({
-              competition: 'all',
-              indexed: 'all'
-            })}
-          >
-            Clear Filters
-          </button>
         </div>
 
         {/* Keywords Table */}
@@ -815,86 +652,82 @@ const KeywordAnalysisDashboard = () => {
                 <th onClick={() => handleSort('keyword')}>
                   Keyword {sortConfig.key === 'keyword' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th onClick={() => handleSort('asin')}>
-                  ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                </th>
-                <th onClick={() => handleSort('searchVolume')}>
-                  Search Volume {sortConfig.key === 'searchVolume' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                </th>
-                <th onClick={() => handleSort('cpc')}>
-                  CPC {sortConfig.key === 'cpc' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                </th>
-                <th onClick={() => handleSort('competition')}>
-                  Competition {sortConfig.key === 'competition' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                <th onClick={() => handleSort('bid')}>
+                  Bid {sortConfig.key === 'bid' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
                 <th onClick={() => handleSort('rank')}>
                   Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th onClick={() => handleSort('sponsored')}>
-                  Sponsored {sortConfig.key === 'sponsored' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                <th onClick={() => handleSort('searchTermImpressionShare')}>
+                  Impression Share {sortConfig.key === 'searchTermImpressionShare' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th>Indexed</th>
+                <th onClick={() => handleSort('searchTermImpressionRank')}>
+                  Impression Rank {sortConfig.key === 'searchTermImpressionRank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th>Suggested Bid Range</th>
+                <th>User Selected</th>
               </tr>
             </thead>
             <tbody>
               {paginatedKeywords.length > 0 ? (
-                paginatedKeywords.map(keyword => (
-                  <tr key={keyword.id}>
-                    <td>
-                      <input 
-                        type="checkbox"
-                        checked={selectedKeywords.includes(keyword.id)}
-                        onChange={() => toggleKeywordSelection(keyword.id)}
-                      />
-                    </td>
-                    <td>
-                      <span className="keyword-cell">{keyword.keyword || 'N/A'}</span>
-                    </td>
-                    <td>
-                      <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{keyword.asin || 'N/A'}</span>
-                    </td>
-                    <td>{keyword.searchVolume ? keyword.searchVolume.toLocaleString() : '0'}</td>
-                    <td>${parseFloat(keyword.cpc || 0).toFixed(2)}</td>
-                    <td>
-                      <span className={`competition-badge comp-${keyword.competition?.toLowerCase() || 'unknown'}`}>
-                        {keyword.competition ? keyword.competition.charAt(0).toUpperCase() + keyword.competition.slice(1) : 'Unknown'}
-                      </span>
-                    </td>
-                    <td>
-                      {keyword.rank !== null && keyword.rank !== undefined ? (
-                        <span className={`rank ${
-                          keyword.rank <= 10 ? 'rank-good' : 
-                          keyword.rank <= 50 ? 'rank-medium' : 'rank-poor'
-                        }`}>
-                          #{keyword.rank}
+                paginatedKeywords.map(keyword => {
+                  return (
+                    <tr key={keyword.id}>
+                      <td>
+                        <input 
+                          type="checkbox"
+                          checked={selectedKeywords.includes(keyword.id)}
+                          onChange={() => toggleKeywordSelection(keyword.id)}
+                        />
+                      </td>
+                      <td>
+                        <span className="keyword-cell">{keyword.keyword || 'N/A'}</span>
+                      </td>
+                      <td>${(keyword.bid / 100).toFixed(2)}</td>
+                      <td>
+                        {keyword.rank !== null ? (
+                          <span style={{ fontWeight: 600, color: keyword.rank <= 5 ? '#10b981' : keyword.rank <= 10 ? '#f59e0b' : '#ef4444' }}>
+                            #{keyword.rank}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td>
+                        {keyword.searchTermImpressionShare !== null ? `${keyword.searchTermImpressionShare.toFixed(2)}%` : '—'}
+                      </td>
+                      <td>
+                        {keyword.searchTermImpressionRank !== null ? `#${keyword.searchTermImpressionRank}` : '—'}
+                      </td>
+                      <td>
+                        {keyword.suggestedBid ? (
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            ${(keyword.suggestedBid.rangeStart / 100).toFixed(2)} - ${(keyword.suggestedBid.rangeEnd / 100).toFixed(2)}
+                            <br />
+                            <span style={{ color: '#3b82f6', fontWeight: 600 }}>
+                              Median: ${(keyword.suggestedBid.rangeMedian / 100).toFixed(2)}
+                            </span>
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td>
+                        <span style={{
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: keyword.userSelectedKeyword ? '#d1fae5' : '#f1f5f9',
+                          color: keyword.userSelectedKeyword ? '#065f46' : '#475569'
+                        }}>
+                          {keyword.userSelectedKeyword ? 'Yes' : 'No'}
                         </span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      <span className={`status-badge-small ${
-                        keyword.sponsored === true ? 'status-indexed' : 'status-not-indexed'
-                      }`}>
-                        {keyword.sponsored === true ? 'Yes' : 'No'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`status-badge-small ${
-                        keyword.isIndexed === true ? 'status-indexed' : 
-                        keyword.isIndexed === false ? 'status-not-indexed' : 
-                        'status-not-indexed'
-                      }`}>
-                        {keyword.isIndexed === true ? 'Indexed' : 
-                         keyword.isIndexed === false ? 'Not Indexed' : 
-                         'Unknown'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={9} className="empty-state">
-                    {keywordTrackingData.length === 0 
-                      ? 'No keyword tracking data available. Please ensure data is loaded.'
+                  <td colSpan={8} className="empty-state">
+                    {keywords.length === 0 
+                      ? 'No keyword recommendations available. Please ensure data is loaded.'
                       : 'No keywords found matching your filters'}
                   </td>
                 </tr>

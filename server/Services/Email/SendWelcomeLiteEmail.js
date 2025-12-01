@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 const logger = require('../../utils/Logger.js');
-const EmailLogs = require('../../models/EmailLogsModel.js');
+const EmailLogs = require('../../models/system/EmailLogsModel.js');
 const fs = require('fs');
 const path = require('path');
 

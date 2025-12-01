@@ -1,7 +1,7 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const SellerModel = require('../../models/sellerCentralModel.js');
+const SellerModel = require('../../models/user-auth/sellerCentralModel.js');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
     logger.info(marketplaceIds);

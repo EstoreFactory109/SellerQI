@@ -2,7 +2,7 @@ const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
-const SearchTerms = require('../../models/SearchTermsModel.js');
+const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const { generateAdsAccessToken } = require('./GenerateToken.js');
 
 // Base URIs for different regions

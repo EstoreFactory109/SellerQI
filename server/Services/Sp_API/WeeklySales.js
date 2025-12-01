@@ -1,6 +1,6 @@
 const axios = require('axios');
 const aws4 = require('aws4');
-const TotalSalesModel = require('../../models/TotalSalesModel.js');
+const TotalSalesModel = require('../../models/products/TotalSalesModel.js');
 const logger = require('../../utils/Logger.js');
 const apiError = require('../../utils/ApiError.js');
 

@@ -1,5 +1,5 @@
 const ReminderEmail = require('../Email/ReminderEmailToUpgrade');
-const User = require('../../models/userModel');
+const User = require('../../models/user-auth/userModel');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 

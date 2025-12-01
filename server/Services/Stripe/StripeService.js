@@ -1,8 +1,8 @@
 // COMMENTED OUT FOR TESTING - No Stripe key available
 // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const stripe = null; // Dummy stripe object for testing
-const Subscription = require('../../models/SubscriptionModel');
-const User = require('../../models/userModel');
+const Subscription = require('../../models/user-auth/SubscriptionModel');
+const User = require('../../models/user-auth/userModel');
 const logger = require('../../utils/Logger');
 const { createAccessToken } = require('../../utils/Tokens');
 

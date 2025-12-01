@@ -1,8 +1,8 @@
 const axios = require('axios');
 const aws4 = require('aws4');
-const listFinancialEvents = require('../../models/listFinancialEventsModel.js');
-const ProductWiseSales = require('../../models/ProductWiseSalesModel.js');
-const UserModel = require('../../models/userModel.js');
+const listFinancialEvents = require('../../models/finance/listFinancialEventsModel.js');
+const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
+const UserModel = require('../../models/user-auth/userModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 

@@ -2,7 +2,7 @@ const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
-const GetDateWisePPCspendModel = require('../../models/GetDateWisePPCspendModel.js');
+const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 
 // Base URIs for different regions
 const BASE_URIS = {

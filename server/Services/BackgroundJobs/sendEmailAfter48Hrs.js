@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const logger = require('../../utils/Logger.js');
-const User = require('../../models/userModel.js');
-const Seller = require('../../models/sellerCentralModel.js');
+const User = require('../../models/user-auth/userModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { sendAnalysisReadyEmail } = require('../Email/sendEmailAfter48hrs.js');
 
 /**

@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
-const sellerCentral=require('../../models/sellerCentralModel.js');
+const sellerCentral=require('../../models/user-auth/sellerCentralModel.js');
 
 const getProfileById = async (accessToken,region ,country,userId) => {
 

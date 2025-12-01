@@ -1,4 +1,4 @@
-const getv2SellerPerformanceReportModel = require('../../models/V2_Seller_Performance_ReportModel.js');
+const getv2SellerPerformanceReportModel = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 
 const differenceCalculation = async (userId, country, region) => {
     const now = new Date();

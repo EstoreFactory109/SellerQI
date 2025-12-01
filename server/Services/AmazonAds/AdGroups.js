@@ -1,5 +1,5 @@
 const axios = require('axios');
-const AdsGroup = require('../../models/adsgroupModel.js');
+const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
 const logger = require('../../utils/Logger.js');
 
 // Base URIs for different regions (same as PPCSpendsSalesUnitsSold.js)

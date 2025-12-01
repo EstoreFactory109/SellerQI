@@ -1,5 +1,5 @@
 const express=require("express");
-const {createSupportTicket}=require("../controllers/SupportController");
+const {createSupportTicket}=require("../controllers/system/SupportController");
 const router=express.Router();
 
 router.post("",createSupportTicket);

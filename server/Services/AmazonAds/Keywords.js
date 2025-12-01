@@ -1,5 +1,5 @@
 const axios = require('axios');
-const KeywordModel = require('../../models/keywordModel.js');
+const KeywordModel = require('../../models/amazon-ads/keywordModel.js');
 
 
 const BASE_URIS = {

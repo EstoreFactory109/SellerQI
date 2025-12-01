@@ -1,6 +1,6 @@
 const axios = require('axios');
 const aws4 = require('aws4');
-const FBAFeesModel = require('../../models/FBAFees.js');
+const FBAFeesModel = require('../../models/finance/FBAFees.js');
 
 // Helper function to add delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

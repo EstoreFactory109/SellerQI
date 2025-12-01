@@ -1,0 +1,144 @@
+require('dotenv').config()
+const express=require('express')
+const app=express();
+const path=require('path')
+const _dirname=path.resolve()
+ 
+const cors = require('cors')
+const cookieParser=require('cookie-parser')
+
+
+const userRoute=require('../routes/user.routes.js')
+const tokenRoute=require('../routes/spi.tokens.routes.js')
+const spapiroute=require('../routes/spi.routes.js');
+const analysingRoute=require('../routes/analysing.routes.js')
+const testRoute=require('../routes/testRoutes.js')
+const accountHistoryRoute=require('../routes/AccountHistory.routes.js')
+const cacheRoute=require('../routes/cache.routes.js')
+const backgroundJobsRoute=require('../routes/backgroundJobs.routes.js')
+const jobStatusRoute=require('../routes/jobStatus.routes.js')
+const profileRoute=require('../routes/profile.routes.js')
+const stripeRoute=require('../routes/stripe.routes.js')
+const supportTicketRoute=require('../routes/supportTicket.routes.js')
+const adminRoute=require('../routes/admin.routes.js')
+const userDetailsRoute=require('../routes/userDetails.routes.js')
+const reimbursementRoute=require('../routes/reimbursement.routes.js')
+const dbConnect=require('../config/dbConn.js')
+const logger=require('../utils/Logger.js')
+const {connectRedis} = require('../config/redisConn.js')
+const { jobScheduler } = require('../Services/BackgroundJobs/JobScheduler.js')
+const { initializeEmailReminderJob } = require('../Services/BackgroundJobs/sendEmailAfter48Hrs.js')
+const { setupDailyUpdateCron } = require('../Services/BackgroundJobs/cronProducer.js')
+const config = require('../config/config.js')
+
+
+app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
+app.use(cookieParser());
+ 
+// Stripe webhook route MUST come before express.json() middleware
+// because Stripe requires raw body for signature verification
+app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
+ 
+// Apply JSON parsing for all other routes
+app.use(express.json({limit:"16kb"}));
+app.use(express.urlencoded({extended:true,limit:"16kb",}))
+
+
+app.use('/app',userRoute)
+app.use('/app/token',tokenRoute)
+app.use('/app/info',spapiroute)
+app.use('/app/analyse',analysingRoute)
+app.use('/app/test',testRoute);
+app.use('/app/accountHistory',accountHistoryRoute)
+app.use('/app/cache',cacheRoute)
+app.use('/app/jobs',backgroundJobsRoute)
+app.use('/app/job-status',jobStatusRoute)
+app.use('/app/profile',profileRoute)
+app.use('/app/stripe',stripeRoute)
+app.use('/app/support',supportTicketRoute)
+app.use('/app/auth',adminRoute)
+app.use('/app/getUserDetails',userDetailsRoute)
+app.use('/app/reimbursements',reimbursementRoute)
+ 
+app.use(express.static(path.join(_dirname,'/client/dist')))
+ 
+app.get('*',(req,res)=>{
+    res.sendFile(path.resolve(_dirname,'client/dist/index.html'))
+})
+
+
+dbConnect()
+.then(()=>{
+    logger.info('Connection to database established');
+})
+.catch((err)=>{
+    logger.error(`Error in connecting to database: ${err}`);
+})
+
+
+const redisConnection = async () => {
+    try {
+        // Connect to Redis once when app starts
+        await connectRedis();
+        logger.info('Redis initialized successfully');
+       
+    } catch (error) {
+        logger.error('Failed to initalize redis:', error);
+        process.exit(1);
+    }
+};
+ 
+// Background jobs initialization
+const initializeBackgroundJobs = async () => {
+    // Check if background jobs are disabled via config file
+    const backgroundJobsEnabled = config.backgroundJobs?.enabled !== false;
+    
+    if (!backgroundJobsEnabled) {
+        logger.warn('⚠️  Background jobs are DISABLED (config.backgroundJobs.enabled = false)');
+        logger.warn('⚠️  Automatic data fetching is inactive - manual testing mode');
+        return;
+    }
+
+    try {
+        // NEW: Initialize queue-based cron producer (replaces old batch processing)
+        // This ONLY enqueues user IDs - actual processing is done by separate worker processes
+        if (config.backgroundJobs?.jobs?.dailyUpdates !== false) {
+            setupDailyUpdateCron({ enabled: true });
+            logger.info('✅ Queue-based daily update cron producer initialized (enqueues users only)');
+            logger.info('⚠️  IMPORTANT: Workers must be running separately (via PM2) to process jobs');
+        } else {
+            logger.warn('⚠️  Daily updates cron is disabled in config');
+        }
+
+        // Keep other background jobs (cache cleanup, health check, etc.)
+        // Initialize background job scheduler for non-daily-update jobs
+        await jobScheduler.initialize();
+        logger.info('Background job scheduler initialized successfully');
+       
+        // Initialize email reminder cron job
+        const emailJobInitialized = initializeEmailReminderJob();
+        if (emailJobInitialized) {
+            logger.info('Email reminder job initialized successfully');
+        } else {
+            logger.error('Failed to initialize email reminder job');
+        }
+       
+    } catch (error) {
+        logger.error('Failed to initialize background job scheduler:', error);
+        // Don't exit process for job scheduler failure, just log it
+    }
+};
+ 
+redisConnection();
+initializeBackgroundJobs();
+
+// Log status based on config
+if (config.backgroundJobs?.enabled !== false) {
+    logger.info('✅ Background jobs enabled - automatic data fetching active');
+} else {
+    logger.info('⏸️  Background jobs disabled - manual testing mode');
+}
+
+
+module.exports=app
+

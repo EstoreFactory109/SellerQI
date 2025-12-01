@@ -2,7 +2,7 @@ const axios = require("axios");
 const zlib = require("zlib");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const LedgerSummaryView = require('../../models/LedgerSummaryViewModel');
+const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel');
 
 const generateReport = async (accessToken, marketplaceIds, baseuri, dataStartTime = null, dataEndTime = null) => {
     try {
@@ -29,16 +29,6 @@ const generateReport = async (accessToken, marketplaceIds, baseuri, dataStartTim
             "Content-Type": "application/json",
         };
 
-        logger.info("📤 Request details:", {
-            url: `https://${baseuri}/reports/2021-06-30/reports`,
-            reportType: requestBody.reportType,
-            marketplaceIds: requestBody.marketplaceIds,
-            dataStartTime: requestBody.dataStartTime,
-            dataEndTime: requestBody.dataEndTime,
-            hasAccessToken: !!accessToken,
-            accessTokenLength: accessToken ? accessToken.length : 0
-        });
-        
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
             requestBody,
@@ -47,11 +37,10 @@ const generateReport = async (accessToken, marketplaceIds, baseuri, dataStartTim
             }
         );
 
-        logger.info(`✅ Report Requested! Report ID: ${response.data.reportId}`);
         return response.data.reportId;
     } catch (error) {
         const errorData = error.response ? error.response.data : null;
-        console.error("❌ Error generating report:", errorData || error.message);
+        logger.error("Error generating report:", errorData || error.message);
         
         // Check if it's an authorization error
         if (errorData && errorData.errors && Array.isArray(errorData.errors)) {
@@ -84,43 +73,41 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
         const status = response.data.processingStatus;
         const reportDocumentId = response.data.reportDocumentId || null;
 
-        logger.info(`🔄 Report Status: ${status}`);
+        logger.info(`Report Status: ${status}`);
 
         switch (status) {
             case "DONE":
-                logger.info(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+                logger.info(`Report Ready! Document ID: ${reportDocumentId}`);
                 return reportDocumentId;
 
             case "FATAL":
-                console.error("❌ Report failed with a fatal error.");
+                logger.error("Report failed with a fatal error.");
                 return false;
 
             case "CANCELLED":
-                logger.warn("🚫 Report was cancelled by Amazon.");
+                logger.error("Report was cancelled by Amazon.");
                 return false;
 
             case "IN_PROGRESS":
-                logger.info("⏳ Report is still processing...");
                 return null;
 
             case "IN_QUEUE":
-                logger.info("📋 Report is queued for processing...");
                 return null;
 
             case "DONE_NO_DATA":
-                console.warn("⚠️ Report completed but contains no data.");
+                logger.error("Report completed but contains no data.");
                 return false;
 
             case "FAILED":
-                logger.error("❌ Report failed for an unknown reason.");
+                logger.error("Report failed for an unknown reason.");
                 return false;
 
             default:
-                console.warn(`⚠️ Unknown report status: ${status}`);
+                logger.error(`Unknown report status: ${status}`);
                 return false;
         }
     } catch (error) {
-        console.error("❌ Error checking report status:", error.response ? error.response.data : error.message);
+        logger.error("Error checking report status:", error.response ? error.response.data : error.message);
         throw new Error("Failed to check report status");
     }
 };
@@ -138,7 +125,7 @@ const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
 
         return response.data.url;
     } catch (error) {
-        console.error("❌ Error downloading report:", error.response ? error.response.data : error.message);
+        logger.error("Error downloading report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to download report");
     }
 };
@@ -153,7 +140,8 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
     }
 
     try {
-        logger.info("📄 Generating GET_LEDGER_SUMMARY_VIEW_DATA Report...");
+        logger.info("GET_LEDGER_SUMMARY_VIEW_DATA starting");
+        
         const reportId = await generateReport(accessToken, marketplaceIds, baseuri, dataStartTime, dataEndTime);
         if (!reportId) {
             logger.error(new ApiError(408, "Report generation failed"));
@@ -167,8 +155,8 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
         let retries = 30;
 
         while (!reportDocumentId && retries > 0) {
-            logger.info(`⏳ Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait 20 seconds
+            logger.info(`Checking report status... (Retries left: ${retries})`);
+            await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
                 return {
@@ -187,9 +175,6 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
             };
         }
 
-        logger.info(`✅ Report Ready! Document ID: ${reportDocumentId}`);
-
-        logger.info("📥 Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
 
         const fullReport = await axios({
@@ -208,25 +193,15 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
         
         const refinedData = convertTSVToJson(fullReport.data);
         
-        logger.info(`📊 Parsed ${refinedData.length} records from TSV`);
-        if (refinedData.length > 0) {
-            logger.info("📋 Sample record (first item):", JSON.stringify(refinedData[0], null, 2));
-        }
-
-        // Map field names to match database schema (warehouse_transfer_in/out -> warehouse_transfer_in_out)
         const mappedData = refinedData.map(item => {
             const mappedItem = { ...item };
-            // Handle warehouse_transfer_in/out field - convert slash to underscore
             if (mappedItem.hasOwnProperty('warehouse_transfer_in/out')) {
                 mappedItem.warehouse_transfer_in_out = mappedItem['warehouse_transfer_in/out'];
                 delete mappedItem['warehouse_transfer_in/out'];
             }
-            // Also handle if it comes as warehouse_transfer_in_out already
             return mappedItem;
         });
 
-        // Save to database
-        logger.info("💾 Saving ledger summary data to database...");
         try {
             const ledgerSummaryRecord = await LedgerSummaryView.create({
                 User: userId,
@@ -236,13 +211,12 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
             });
 
             if (!ledgerSummaryRecord) {
-                logger.error("❌ Failed to save ledger summary data to database");
+                logger.error("Failed to save ledger summary data to database");
                 throw new ApiError(500, "Failed to save data to database");
             }
 
-            logger.info(`✅ Successfully saved ${mappedData.length} records to database for user: ${userId}`);
-            logger.info(`📊 Database record ID: ${ledgerSummaryRecord._id}`);
-
+            logger.info("Data saved successfully");
+            logger.info("GET_LEDGER_SUMMARY_VIEW_DATA ended");
             return {
                 success: true,
                 message: "Report fetched and saved successfully",
@@ -251,16 +225,15 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
                 totalRecords: mappedData.length
             };
         } catch (dbError) {
-            logger.error("❌ Database error:", dbError.message);
-            // If it's a validation error, provide more details
+            logger.error("Database error:", dbError.message);
             if (dbError.name === 'ValidationError') {
-                logger.error("❌ Validation errors:", dbError.errors);
+                logger.error("Validation errors:", dbError.errors);
             }
             throw new ApiError(500, `Database error: ${dbError.message}`);
         }
 
     } catch (error) {
-        console.error("❌ Error in getReport:", error.message);
+        logger.error("Error in getReport:", error.message);
         throw new ApiError(500, error.message);
     }
 };
@@ -275,17 +248,13 @@ function convertTSVToJson(tsvBuffer) {
         const firstBytes = tsvBuffer.slice(0, 2);
         if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
             isGzipped = true;
-            logger.info("🔓 Detected gzipped data, decompressing...");
             try {
                 decompressedData = zlib.gunzipSync(tsvBuffer);
-                logger.info(`✅ Successfully decompressed: ${tsvBuffer.length} bytes -> ${decompressedData.length} bytes`);
             } catch (decompressError) {
-                logger.error("❌ Failed to decompress gzipped data:", decompressError.message);
+                logger.error("Failed to decompress gzipped data:", decompressError.message);
                 throw new Error(`Failed to decompress gzipped data: ${decompressError.message}`);
             }
         } else {
-            // If not gzipped, use as-is
-            logger.info("ℹ️ Data is not gzipped, using as plain text");
             decompressedData = tsvBuffer;
         }
         
@@ -302,58 +271,42 @@ function convertTSVToJson(tsvBuffer) {
         logger.info(`📊 TSV parsing: Found ${rows.length} total rows (including header)`);
         
         if (rows.length === 0) {
-            logger.warn("⚠️ No rows found in TSV data");
             return [];
         }
 
         if (rows.length === 1) {
-            logger.warn("⚠️ Only header row found, no data rows");
-            logger.info(`📋 Header row: ${rows[0]}`);
             return [];
         }
 
         const headers = rows[0].split("\t").map(h => {
             let header = h.trim();
-            // Remove surrounding quotes from header names if present
             if (header.startsWith('"') && header.endsWith('"')) {
                 header = header.slice(1, -1);
             }
             return header;
         });
-        logger.info(`📋 Headers found: ${headers.length} columns - ${headers.slice(0, 5).join(", ")}${headers.length > 5 ? "..." : ""}`);
 
-        const jsonData = rows.slice(1).map((row, rowIndex) => {
+        const jsonData = rows.slice(1).map((row) => {
             const values = row.split("\t");
             const obj = {};
             
             headers.forEach((header, index) => {
                 let value = values[index] ? values[index].trim() : "";
                 
-                // Remove surrounding quotes from values if present
                 if (value.startsWith('"') && value.endsWith('"')) {
                     value = value.slice(1, -1);
                 }
                 
-                // Clean header names and convert to lowercase with underscores
                 const cleanHeader = header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
-                
-                // Only use cleaned header (lowercase with underscores) to avoid duplicates
                 obj[cleanHeader] = value;
             });
-            
-            // Log first few rows for debugging
-            if (rowIndex < 3) {
-                logger.info(`📝 Row ${rowIndex + 1} sample:`, JSON.stringify(obj));
-            }
             
             return obj;
         });
 
-        logger.info(`✅ Successfully converted ${jsonData.length} rows to JSON`);
         return jsonData;
     } catch (error) {
-        logger.error("❌ Error converting TSV to JSON:", error.message);
-        logger.error("❌ Error stack:", error.stack);
+        logger.error("Error converting TSV to JSON:", error.message);
         throw error;
     }
 }

@@ -1,11 +1,11 @@
-const { Analyse } = require('../../controllers/AnalysingController.js');
+const { AnalyseService } = require('../main/Analyse.js');
 const { getRedisClient } = require('../../config/redisConn.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
-const Seller = require('../../models/sellerCentralModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const logger = require('../../utils/Logger.js');
 
-// Import all the data fetching controllers that need to be updated
-const SpApiDataController = require('../../controllers/SpApiDataController.js');
+// Import the Integration service instead of SpApiDataController
+const { Integration } = require('../main/Integration.js');
 
 // Import LoggingHelper for database logging
 const LoggingHelper = require('../../utils/LoggingHelper.js');
@@ -40,79 +40,38 @@ class DataUpdateService {
         try {
             logger.info(`Starting daily data update for user ${userId}, ${country}-${region}`);
 
-            // Create mock request object for SpApiDataController
-            const mockReq = {
-                userId: userId,
-                country: country,
-                region: region
-            };
-
-            // Create mock response object
-            let spApiResult = null;
-            const mockRes = {
-                status: (code) => ({
-                    json: (data) => {
-                        spApiResult = { statusCode: code, data };
-                        return mockRes;
-                    }
-                })
-            };
-
             try {
-                // Log the start of main SpApiDataController call
+                // Log the start of Integration service call
                 if (loggingHelper) {
-                    loggingHelper.logFunctionStart('SpApiDataController.getSpApiData', {
+                    loggingHelper.logFunctionStart('Integration.getSpApiData', {
                         userId: userId,
                         region: region,
                         country: country
                     });
                 }
 
-                // Fetch fresh data from all APIs including:
-                // - Merchant listings data (GET_MERCHANT_LISTINGS_ALL_DATA)
-                // - V1/V2 seller performance reports
-                // - Financial data (listFinancialEventsMethod)
-                // - Competitive pricing data (getCompetitivePricing)
-                // - Restock inventory recommendations
-                // - Product reviews data
-                // - Sponsored ads data (getPPCSpendsBySKU)
-                // - Campaign and ad group keywords
-                // - Negative keywords processing
-                // - Search keywords data
-                // - FBA inventory planning data
-                // - Stranded inventory data
-                // - Inbound non-compliance data
-                // - Weekly sales data
-                // - Shipment data
-                // - Brand data
-                // - Amazon fees calculation
-                // - Listing items with generic keyword processing
-                // - All other comprehensive API data
+                // Fetch fresh data from all APIs using the Integration service
                 logger.info(`Fetching fresh comprehensive API data for user ${userId}, ${country}-${region}`);
-                await SpApiDataController.getSpApiData(mockReq, mockRes);
+                const integrationResult = await Integration.getSpApiData(userId, region, country);
                 
-                if (spApiResult && spApiResult.statusCode === 200) {
+                if (integrationResult.success) {
                     logger.info(`Fresh comprehensive API data fetched successfully for user ${userId}, ${country}-${region}`);
                     if (loggingHelper) {
-                        loggingHelper.logFunctionSuccess('SpApiDataController.getSpApiData', spApiResult.data, {
+                        loggingHelper.logFunctionSuccess('Integration.getSpApiData', integrationResult.data, {
                             recordsProcessed: 1,
                             recordsSuccessful: 1
                         });
                     }
                 } else {
-                    const statusCode = spApiResult?.statusCode ?? 'no response';
-                    logger.warn(`API data fetch returned non-200 status for user ${userId}, ${country}-${region}. Status: ${statusCode}`);
+                    logger.warn(`API data fetch failed for user ${userId}, ${country}-${region}. Error: ${integrationResult.error}`);
                     if (loggingHelper) {
-                        const errorMessage = spApiResult 
-                            ? `Non-200 status: ${statusCode}` 
-                            : 'No response received from getSpApiData (function may have thrown an error or returned early)';
-                        loggingHelper.logFunctionError('SpApiDataController.getSpApiData', new Error(errorMessage));
+                        loggingHelper.logFunctionError('Integration.getSpApiData', new Error(integrationResult.error || 'Unknown error'));
                     }
                 }
             } catch (apiError) {
                 logger.error(`Error fetching fresh API data for user ${userId}, ${country}-${region}:`, apiError);
                 if (loggingHelper) {
-                    loggingHelper.logFunctionError('SpApiDataController.getSpApiData', apiError);
+                    loggingHelper.logFunctionError('Integration.getSpApiData', apiError);
                 }
                 // Continue with analysis using existing data if API fetch fails
             }
@@ -126,7 +85,7 @@ class DataUpdateService {
                 });
             }
             
-            const analysisResult = await Analyse(userId, country, region);
+            const analysisResult = await AnalyseService.Analyse(userId, country, region);
             
             if (analysisResult.status !== 200) {
                 logger.error(`Analysis failed for user ${userId}: ${analysisResult.message}`);
@@ -331,7 +290,7 @@ class DataUpdateService {
      */
     static async getUpdateStats() {
         try {
-            const UserUpdateSchedule = require('../../models/UserUpdateScheduleModel.js');
+            const UserUpdateSchedule = require('../../models/user-auth/UserUpdateScheduleModel.js');
             const totalUsers = await UserUpdateSchedule.countDocuments();
             const usersNeedingDaily = await UserSchedulingService.getUsersNeedingDailyUpdate();
             

@@ -18,7 +18,7 @@ const {
     restartJobs,
     rebalanceUsers,
     getDetailedScheduleStats
-} = require('../controllers/BackgroundJobController.js');
+} = require('../controllers/system/BackgroundJobController.js');
 
 const auth = require('../middlewares/Auth/auth.js');
 const adminAuth = require('../middlewares/Auth/adminAuth.js');

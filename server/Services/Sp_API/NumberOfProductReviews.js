@@ -2,9 +2,9 @@ const axios = require("axios");
 const axiosRetry = require("axios-retry").default;
 const promiseLimit = require("promise-limit"); // ✅ Concurrency limiter
 const logger = require("../../utils/Logger.js");
-const User = require("../../models/userModel.js");
-const NumberOfProductReviews = require("../../models/NumberOfProductReviewsModel.js");
-const APlusContentModel = require("../../models/APlusContentModel.js");
+const User = require('../../models/user-auth/userModel.js');
+const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
+const APlusContentModel = require('../../models/seller-performance/APlusContentModel.js');
 
 // ✅ Setup axios-retry globally
 axiosRetry(axios, {
@@ -29,7 +29,6 @@ function delay(ms) {
 const getNumberOfProductReviews = async (asin, country) => {
   try {
     if (!asin || !country) {
-      logger.warn("❗ Missing required parameters: asin or country");
       return false;
     }
 
@@ -46,42 +45,26 @@ const getNumberOfProductReviews = async (asin, country) => {
       }
     };
 
-    logger.info({ asin, country }, "🔍 Fetching product reviews...");
     const response = await axios.request(options);
 
     if (!response.data) {
-      logger.warn("❗ No data received from API");
       return false;
     }
 
-    logger.info(
-      { asin, country, reviewsCount: response.data?.product_num_ratings },
-      "✅ Reviews fetched successfully"
-    );
-
     return response.data;
   } catch (error) {
-    logger.error(
-      {
-        message: error.message,
-        stack: error.stack,
-        responseData: error.response?.data
-      },
-      "❌ Error fetching product reviews"
-    );
+    logger.error("Error fetching product reviews:", error.message);
     return null;
   }
 };
 
 const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
-          // console.log("asinArray: ", asinArray);
+  logger.info("NumberOfProductReviews starting");
   
   if (!asinArray || !country || !userId) {
-    logger.warn("❗ Missing required parameters: asin, country, or userId");
     return false;
   }
 
-  // ✅ Divide ASINs into 3 equal parts
   const chunkSize = Math.ceil(asinArray.length / 3);
   const chunks = [];
   for (let i = 0; i < asinArray.length; i += chunkSize) {
@@ -91,13 +74,12 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
   try {
     let allProducts = [];
 
-    // ✅ Process each chunk sequentially
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
       const chunk = chunks[chunkIndex];
       
       const tasks = chunk.map((asin, index) =>
         (async () => {
-          await delay(index * 500); // ✅ Staggered delay (0ms, 500ms, 1000ms...)
+          await delay(index * 500);
 
           const data = await getNumberOfProductReviews(asin, country);
           if (!data || !data.data) return null;
@@ -116,24 +98,20 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
         })()
       );
 
-      // ✅ Process current chunk with Promise.all
       const chunkProducts = await Promise.all(tasks);
       allProducts.push(...chunkProducts);
-      
-      logger.info(`✅ Completed batch ${chunkIndex + 1} of ${chunks.length}`);
     }
 
     const products = allProducts;
     const aplusProducts = products
-      .filter(product => product !== null) // First filter out null products
+      .filter(product => product !== null)
       .map(product => ({
-        Asins: product.asin, // Single ASIN as string (matches schema)
-        status: product.aplus ? 'true' : 'false' // Convert boolean to string to match schema
+        Asins: product.asin,
+        status: product.aplus ? 'true' : 'false'
       }));
     const filteredProducts = products.filter(product => product !== null);
 
     if (filteredProducts.length === 0) {
-      logger.warn("❗ No valid products found. Skipping database insert.");
       return false;
     }
 
@@ -146,12 +124,8 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
       })
 
       if(!aplusContent){
-        logger.warn("❗ Failed to save A+ content.");
         return false;
       }
-
-      logger.info("✅ A+ content saved successfully");
-      
     }
 
     const addReview = await NumberOfProductReviews.create({
@@ -162,28 +136,22 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
     });
 
     if (!addReview) {
-      logger.warn("❗ Failed to save review data.");
       return false;
     }
 
     const getUser = await User.findById(userId);
     if (!getUser) {
-      logger.warn("❗ No User found");
       return false;
     }
 
     getUser.numberOfProductReviews = addReview._id;
     await getUser.save();
-    logger.info("✅ Data saved successfully");
 
-                // console.log("addReview: ", addReview);
-
+    logger.info("Data saved successfully");
+    logger.info("NumberOfProductReviews ended");
     return addReview;
   } catch (error) {
-    logger.error({
-      message: "❌ Error saving product reviews to database",
-      error: error.message
-    });
+    logger.error("Error saving product reviews to database:", error.message);
     return false;
   }
 };

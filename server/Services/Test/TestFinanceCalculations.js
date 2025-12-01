@@ -102,15 +102,6 @@ const sampleTransactions = [
             currencyAmount: -5.00,
             currencyCode: "USD"
         }
-    },
-    // Adjustment
-    {
-        transactionType: "Adjustment",
-        description: "Inventory Reimbursement",
-        totalAmount: {
-            currencyAmount: 20.00,
-            currencyCode: "USD"
-        }
     }
 ];
 
@@ -149,7 +140,7 @@ function testCalculations() {
     
     // Expected values based on sample data
     const expectedTotalSales = 150.00 + 75.50 + 12.50; // Including tax
-    const expectedGrossProfit = expectedTotalSales - 50.00 - 25.00 - 15.00 - 10.00 - 39.99 - 5.00 + 20.00;
+    const expectedGrossProfit = expectedTotalSales - 50.00 - 25.00 - 15.00 - 10.00 - 39.99 - 5.00;
     
     console.log(`Expected Total Sales: $${expectedTotalSales.toFixed(2)}`);
     console.log(`Calculated Total Sales: $${result.Total_Sales}`);

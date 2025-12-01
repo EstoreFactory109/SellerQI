@@ -1,6 +1,6 @@
-const { Analyse } = require('../../controllers/AnalysingController.js');
+const { AnalyseService } = require('../main/Analyse.js');
 const logger = require('../../utils/Logger.js');
-const Seller = require('../../models/sellerCentralModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const axios = require('axios');
 const { sendWeeklyEmailToUser } = require('../Email/SendWeeklyEmail.js');
 const dbConnect = require('../../config/dbConn.js');
@@ -27,8 +27,8 @@ const analyzeUserData = async (userId, country, region) => {
             };
         }
         
-        // Call the Analyse function from AnalysingController
-        const analysisResult = await Analyse(userId, country, region);
+        // Call the Analyse function from AnalyseService
+        const analysisResult = await AnalyseService.Analyse(userId, country, region);
         
         if (analysisResult.status === 200) {
             logger.info(`Analysis completed successfully for user: ${userId}`);

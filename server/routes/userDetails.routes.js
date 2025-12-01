@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getAllUsers, getUserByEmailOrPhone } = require('../controllers/GetUserDetails.js');
+const { getAllUsers, getUserByEmailOrPhone } = require('../controllers/user-auth/GetUserDetails.js');
 
 /**
  * GET /all-users

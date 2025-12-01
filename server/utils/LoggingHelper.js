@@ -1,4 +1,4 @@
-const UserAccountLogs = require('../models/ErrorLogs.js');
+const UserAccountLogs = require('../models/system/ErrorLogs.js');
 const logger = require('./Logger.js');
 
 /**

@@ -1,7 +1,7 @@
 const axios = require('axios');
 const aws4 = require('aws4');
 const promiseLimit = require('promise-limit');
-const ShipmentModel = require('../../models/ShipmentModel.js');
+const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 

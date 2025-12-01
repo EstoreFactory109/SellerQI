@@ -1,6 +1,6 @@
-const User = require('../../models/userModel.js');
-const Seller = require('../../models/sellerCentralModel.js');
-const UserUpdateSchedule = require('../../models/UserUpdateScheduleModel.js');
+const User = require('../../models/user-auth/userModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const UserUpdateSchedule = require('../../models/user-auth/UserUpdateScheduleModel.js');
 const logger = require('../../utils/Logger.js');
 
 class UserSchedulingService {

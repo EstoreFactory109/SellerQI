@@ -2,7 +2,7 @@ const axios = require("axios");
 const xml2js = require("xml2js");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_V1_SELLER_PERFORMANCE_REPORT = require('../../models/V1_Seller_Performance_Report_Model.js');
+const GET_V1_SELLER_PERFORMANCE_REPORT = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
 
 
 
@@ -28,10 +28,9 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             }
         );
 
-        // console.log(`✅ Report Requested! Report ID: ${response.data.reportId}`);
         return response.data.reportId;
     } catch (error) {
-        console.error("❌ Error generating report:", error.response ? error.response.data : error.message);
+        logger.error("Error generating report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to generate report");
     }
 };
@@ -52,15 +51,15 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
 
                   switch (status) {
               case "DONE":
-                  // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+                logger.info(`Report Ready! Document ID: ${reportDocumentId}`);
                 return reportDocumentId;
 
             case "FATAL":
-                console.error("❌ Report failed with a fatal error.");
+                logger.error("Report failed with a fatal error.");
                 return false;
 
             case "CANCELLED":
-                logger.warn("🚫 Report was cancelled by Amazon.");
+                logger.error("Report was cancelled by Amazon.");
                 return false;
 
             case "IN_PROGRESS":
@@ -72,19 +71,19 @@ const checkReportStatus = async (accessToken, reportId, baseuri) => {
                 return null;
 
             case "DONE_NO_DATA":
-                console.warn("⚠️ Report completed but contains no data.");
+                logger.error("Report completed but contains no data.");
                 return false;
 
             case "FAILED":
-                logger.error("❌ Report failed for an unknown reason.");
+                logger.error("Report failed for an unknown reason.");
                 return false;
 
             default:
-                console.warn(`⚠️ Unknown report status: ${status}`);
+                logger.error(`Unknown report status: ${status}`);
                 return false;
         }
     } catch (error) {
-        console.error("❌ Error checking report status:", error.response ? error.response.data : error.message);
+        logger.error("Error checking report status:", error.response ? error.response.data : error.message);
         throw new Error("Failed to check report status");
     }
 };
@@ -102,72 +101,56 @@ const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
 
         return response.data.url;
     } catch (error) {
-        console.error("❌ Error downloading report:", error.response ? error.response.data : error.message);
+        logger.error("Error downloading report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to download report");
     }
 };
 
 const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,region) => {
+    logger.info("V1_Seller_Performance_Report starting");
+    
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     try {
-        logger.info(`🚀 [V1_Seller_Performance_Report] Starting for user: ${userId}, country: ${country}, region: ${region}`);
-        logger.info(`📊 [V1_Seller_Performance_Report] Marketplace IDs: ${JSON.stringify(marketplaceIds)}`);
-        
-        logger.info("📄 [V1_Seller_Performance_Report] Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return false;
         }
 
+        // Check Report Status with Retry Logic
         let reportDocumentId = null;
-        let retries = 30; 
+        let attemptCount = 0;
 
-        while (!reportDocumentId && retries > 0) {
-            logger.info(`⏳ [V1_Seller_Performance_Report] Checking report status... (Retries left: ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, 20000));
+        while (reportDocumentId === null) {
+            attemptCount++;
+            logger.info(`Checking report status... (Attempt ${attemptCount})`);
+            await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait 20 seconds before retrying
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
+            
             if (reportDocumentId === false) {
                 return {
                     success: false,
                     message: "Error in generating the report",
                 };
             }
-            retries--;
         }
 
-        if (!reportDocumentId) {
-            logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
-            return {
-                success: false,
-                message: "Report did not complete within 5 minutes",
-            };
-        }
-
-        logger.info(`✅ [V1_Seller_Performance_Report] Report Ready! Document ID: ${reportDocumentId}`);
-
-        logger.info("📥 [V1_Seller_Performance_Report] Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
-        logger.info(`📄 [V1_Seller_Performance_Report] Report URL obtained: ${reportUrl ? 'Success' : 'Failed'}`);
-
         const fullReport = await axios({
             method: "GET",
             url: reportUrl,
-            responseType: "text",  // Ensure response is in raw text format
+            responseType: "text",
         });
 
         if (!fullReport || !fullReport.data) {
             throw new ApiError(500, "Internal server error in generating the report");
         }
 
-        // Convert XML to JSON
-        logger.info("🔄 [V1_Seller_Performance_Report] Converting XML data to JSON...");
         const xmlData = fullReport.data;
         const jsonData = await convertXMLToJson(xmlData);
-        logger.info("✅ [V1_Seller_Performance_Report] XML to JSON conversion completed");
 
         let negativeFeedbacks=null;
         let lateShipmentCount=null
@@ -219,7 +202,6 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
 
         const User=userId
 
-        logger.info("💾 [V1_Seller_Performance_Report] Saving data to database...");
         const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
             User,
             region,
@@ -233,19 +215,17 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
         })
 
         if(!createReportData){
-            logger.error("❌ [V1_Seller_Performance_Report] Failed to store report data");
+            logger.error("Failed to store report data");
             logger.error(new ApiError(500, "Internal server error in generating the report"));
             return false;
         }
 
-        logger.info(`✅ [V1_Seller_Performance_Report] Report data saved successfully for user: ${userId}`);
-
+        logger.info("Data saved successfully");
+        logger.info("V1_Seller_Performance_Report ended");
         return createReportData;
 
     } catch (error) {
-        logger.error(`❌ [V1_Seller_Performance_Report] Error: ${error.message}`);
-        logger.error(`❌ [V1_Seller_Performance_Report] Stack: ${error.stack}`);
-        console.error("❌ Error in getReport:", error.message);
+        logger.error(`V1_Seller_Performance_Report Error: ${error.message}`);
         throw new ApiError(500, error.message);
     }
 };
@@ -256,7 +236,7 @@ async function convertXMLToJson(xmlData) {
         const jsonResult = await parser.parseStringPromise(xmlData);
         return jsonResult;
     } catch (error) {
-        console.error("❌ Error converting XML to JSON:", error.message);
+        logger.error("Error converting XML to JSON:", error.message);
         throw new Error("Failed to parse XML data");
     }
 }

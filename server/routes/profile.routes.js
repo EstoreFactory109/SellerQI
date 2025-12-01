@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {getProfileId,saveProfileId}=require('../controllers/profileIdController.js');
+const {getProfileId,saveProfileId}=require('../controllers/user-auth/profileIdController.js');
 const authMiddleware=require('../middlewares/Auth/auth.js');
 const {getLocation}=require('../middlewares/Auth/getLocation.js');
 

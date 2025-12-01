@@ -1,5 +1,5 @@
 const axios = require('axios');
-const NegativeKeywords = require('../../models/NegetiveKeywords.js');
+const NegativeKeywords = require('../../models/amazon-ads/NegetiveKeywords.js');
 
 
 const BASE_URIS = {

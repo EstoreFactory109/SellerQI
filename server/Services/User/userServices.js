@@ -1,4 +1,4 @@
-const UserModel = require("../../models/userModel.js");
+const UserModel = require('../../models/user-auth/userModel.js');
 const { ApiError } = require("../../utils/ApiError.js");
 const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");

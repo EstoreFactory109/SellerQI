@@ -25,9 +25,8 @@ const ExpectedReimbursement = () => {
         if (response && response.data) {
           setReimbursementData(response.data)
           console.log('[ExpectedReimbursement] Reimbursement data set:', {
-            totalPotential: response.data.totalPotential,
-            totalReceived: response.data.totalReceived,
-            reimbursementCount: response.data.reimbursementCount
+            totalRecoverable: response.data.totalRecoverable,
+            totalRecoverableMonth: response.data.totalRecoverableMonth
           })
         } else {
           console.warn('[ExpectedReimbursement] Invalid response format:', response)
@@ -95,13 +94,22 @@ const ExpectedReimbursement = () => {
     )
   }
 
+  // Calculate total reimbursement from backend data
+  // Use totalRecoverable or calculate from individual types
+  const totalReimbursement = reimbursementData?.totalRecoverable || 
+                              reimbursementData?.totalRecoverableMonth || 
+                              (reimbursementData?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0) +
+                              (reimbursementData?.backendLostInventory?.totalExpectedAmount || 0) +
+                              (reimbursementData?.backendDamagedInventory?.totalExpectedAmount || 0) +
+                              (reimbursementData?.backendDisposedInventory?.totalExpectedAmount || 0) +
+                              (reimbursementData?.backendFeeReimbursement?.totalExpectedAmount || 0)
+
   const totalPotential = reimbursementData?.totalPotential || 0
   const totalReceived = reimbursementData?.totalReceived || 0
   const claimsExpiring = reimbursementData?.claimsExpiringIn7Days || 0
-  const totalClaims = totalPotential + totalReceived
 
   // Show zero state if no reimbursements
-  if (totalClaims === 0) {
+  if (totalReimbursement === 0 && totalPotential === 0 && totalReceived === 0) {
     return (
       <div className='p-6 h-full'>
         <div className='flex items-center gap-2 mb-4'>
@@ -141,12 +149,12 @@ const ExpectedReimbursement = () => {
       </div>
       
       <div className='space-y-4 flex-1'>
-        {/* Total Potential Amount */}
+        {/* Total Reimbursement Amount */}
         <div>
           <div className='text-3xl font-bold text-emerald-600 mb-1'>
-            {formatCurrency(totalPotential)}
+            {formatCurrency(totalReimbursement)}
           </div>
-          <p className='text-sm text-gray-600'>Potential Claims</p>
+          <p className='text-sm text-gray-600'>Total Reimbursement</p>
         </div>
         
         {/* Stats */}

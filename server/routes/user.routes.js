@@ -1,11 +1,11 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp}=require('../controllers/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
 const upload=require('../middlewares/multer/multer.js')
-const {verifyResetPasswordCode}=require('../controllers/UserController.js')
+const {verifyResetPasswordCode}=require('../controllers/user-auth/UserController.js')
 
 
 

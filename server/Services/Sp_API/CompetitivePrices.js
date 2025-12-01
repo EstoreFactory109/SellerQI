@@ -1,26 +1,21 @@
 const axios = require('axios');
 const aws4 = require('aws4');
-const CompetitivePricing= require('../../models/CompetitivePricingModel.js');
-const UserModel= require('../../models/userModel.js');
+const logger = require('../../utils/Logger');
+const CompetitivePricing= require('../../models/seller-performance/CompetitivePricingModel.js');
+const UserModel= require('../../models/user-auth/userModel.js');
 
 const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,country,region) => {
-    const host = baseuri;  // Correct SP-API host
-    // console.log("asin-block: ",asinArray)
-
-    // ✅ Fixed API Path & Required Params
-
-    console.log("dataToReceive marketplaceId: ",dataToReceive.marketplaceId);
-    console.log("Region: ", region, "Country: ", country);
-    console.log("Base URI: ", baseuri);
+    logger.info("CompetitivePrices starting");
     
-    // Validate required parameters
+    const host = baseuri;
+    
     if (!dataToReceive.marketplaceId) {
-        console.error("❌ Missing marketplaceId in dataToReceive");
+        logger.error("Missing marketplaceId in dataToReceive");
         return false;
     }
     
     if (!asinArray || asinArray.length === 0) {
-        console.error("❌ Missing or empty asinArray");
+        logger.error("Missing or empty asinArray");
         return false;
     }
 
@@ -58,7 +53,7 @@ const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,count
         const response = await axios.get(`https://${request.host}${request.path}`, { headers: request.headers });
         
         if (!response || !response.data || !response.data.payload) {
-            console.error("❌ Missing payload in competitive pricing response");
+            logger.error("Missing payload in competitive pricing response");
             return [];
         }
 
@@ -82,23 +77,19 @@ const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,count
                         });
                     });
                 }
-            } else {
-                console.warn(`⚠️ No competitive pricing data for ASIN: ${asin}, Status: ${productData.status}`);
             }
         });
 
+        logger.info("CompetitivePrices ended");
         return competitivePriceData;
 
     } catch (error) {
-        console.error(`❌ Error fetching competitive pricing:`, error.response?.data || error.message);
+        logger.error(`Error fetching competitive pricing:`, error.response?.data || error.message);
         
-        // ===== ENHANCED ERROR PROPAGATION FOR TOKENMANAGER =====
         if (error.response) {
-            // Check if this is an Amazon API unauthorized error
             const responseData = error.response.data;
             let isUnauthorizedError = false;
             
-            // Check for errors array (Amazon SP-API format)
             if (Array.isArray(responseData?.errors)) {
                 isUnauthorizedError = responseData.errors.some(err => 
                     err && (
@@ -109,7 +100,6 @@ const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,count
                 );
             }
             
-            // Check direct error properties
             if (!isUnauthorizedError) {
                 const directCode = (responseData?.code || '').toLowerCase();
                 const directMessage = (responseData?.message || '').toLowerCase();
@@ -120,26 +110,21 @@ const getCompetitivePricing= async (asinArray,dataToReceive,UserId,baseuri,count
                 );
             }
             
-            // Check status code
             if (!isUnauthorizedError && error.response.status === 401) {
                 isUnauthorizedError = true;
             }
             
             if (isUnauthorizedError) {
-                console.log("🔍 CompetitivePrices: Detected unauthorized error, preserving for TokenManager");
-                
-                // Create enhanced error that TokenManager can detect
                 const enhancedError = new Error(`Amazon SP-API Unauthorized: ${JSON.stringify(responseData)}`);
                 enhancedError.response = error.response;
                 enhancedError.status = error.response.status;
                 enhancedError.statusCode = error.response.status;
-                enhancedError.amazonApiError = true; // Flag for TokenManager
+                enhancedError.amazonApiError = true;
                 
                 throw enhancedError;
             }
         }
         
-        // For non-unauthorized errors, throw normally
         throw new Error(`Competitive pricing API error: ${error.message}`);
     }
 };

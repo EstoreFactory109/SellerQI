@@ -6,9 +6,9 @@
 
 const axios = require('axios');
 const aws4 = require('aws4');
-const listFinancialEvents = require('../../models/listFinancialEventsModel.js');
-const ProductWiseSales = require('../../models/ProductWiseSalesModel.js');
-const UserModel = require('../../models/userModel.js');
+const listFinancialEvents = require('../../models/finance/listFinancialEventsModel.js');
+const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
+const UserModel = require('../../models/user-auth/userModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 const getReport = require('../Finance/GetOrdersAndRevenue.js');
@@ -39,19 +39,10 @@ async function makeAPIRequest(url, headers) {
 }
 
 const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country, region) => {
+    logger.info("Finance starting");
+    
     const host = baseuri;
-    // console.log("dataToReceive", dataToReceive);
-    logger.info("Starting listFinancialEventsMethod", {
-        userId,
-        country,
-        region,
-        dateRange: {
-            after: dataToReceive?.after,
-            before: dataToReceive?.before
-        }
-    });
 
-    // Validate required parameters
     if (!dataToReceive || !userId || !baseuri || !country || !region) {
         logger.error("Missing required parameters for listFinancialEventsMethod");
         return [];
@@ -60,13 +51,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
     const reportResult = await getReport(dataToReceive.AccessToken, [dataToReceive.marketplaceId], userId, country, region, baseuri);
     const weeklyFinanceData = await processWeeklyFinanceData(dataToReceive, userId, baseuri, country, region);
 
-    
-
-  
-
-    
-   
-    // Collect all transactions
     let allTransactions = [];
     let nextToken = null;
     let totalPages = 0;
@@ -75,7 +59,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
         do {
             totalPages++;
             
-            // Build query parameters
             const queryParams = new URLSearchParams({
                 postedAfter: dataToReceive.after,
                 postedBefore: dataToReceive.before,
@@ -85,7 +68,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
             const path = `/finances/2024-06-19/transactions?${queryParams}`;
 
-            // Prepare request
             let request = {
                 host: host,
                 path: path,
@@ -98,7 +80,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 }
             };
 
-            // Sign request
             aws4.sign(request, {
                 accessKeyId: dataToReceive.AccessKey,
                 secretAccessKey: dataToReceive.SecretKey,
@@ -107,8 +88,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 region: 'us-east-1'
             });
 
-            // Make API request without retry logic
-            logger.info(`Making API request (Page ${totalPages})`);
             const response = await makeAPIRequest(
                 `https://${request.host}${request.path}`,
                 request.headers
@@ -121,13 +100,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 break;
             }
 
-            // Log response info
-            logger.info(`Page ${totalPages} received:`, {
-                transactionCount: responseData.transactions?.length || 0,
-                hasNextToken: !!responseData.nextToken
-            });
-            
-            // Collect transactions
             if (responseData.transactions && Array.isArray(responseData.transactions)) {
                 allTransactions.push(...responseData.transactions);
             }
@@ -136,16 +108,7 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
             
         } while (nextToken);
 
-        console.log("🔍 Debug - All transactions:", allTransactions);
-
-        logger.info(`Financial events fetch completed:`, {
-            totalPages: totalPages,
-            totalTransactions: allTransactions.length
-        });
-        
-        // Handle empty results
         if (allTransactions.length === 0) {
-            logger.warn("No financial transactions found for the specified date range");
             
             const emptyFinanceData = await listFinancialEvents.create({
                 User: userId,
@@ -173,7 +136,6 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 if (getUser) {
                     getUser.listFinancialEvents = emptyFinanceData._id;
                     await getUser.save();
-                    logger.info("User record updated with empty financial events ID");
                 }
             } catch (userUpdateError) {
                 logger.error(`Failed to update user with empty financial events ID: ${userUpdateError.message}`);
@@ -182,49 +144,12 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
 
             return emptyFinanceData;
         }
-
-        // Calculate fees
-        console.log("🔍 Debug - Before calculateAmazonFees:", {
-            transactionCount: allTransactions.length,
-            hasReportResult: !!reportResult,
-            grossRevenue: reportResult?.grossRevenue,
-            hasProductWiseSales: !!reportResult?.productWiseSales
-        });
         
         const dataObj = calculateAmazonFees(allTransactions, reportResult?.grossRevenue, reportResult?.productWiseSales);
 
-        console.log("🔍 Debug - After calculateAmazonFees:", {
-            dataObjKeys: Object.keys(dataObj),
-            totalSales: dataObj.Total_Sales,
-            grossProfit: dataObj.Gross_Profit,
-            productCount: dataObj.ProductWiseSales?.length || 0
-        });
-      
-        // Log summary
-        logger.info("Amazon Fees Calculated:", {
-            transactionCount: allTransactions.length,
-            totalSales: dataObj.Total_Sales,
-            grossProfit: dataObj.Gross_Profit,
-            productCount: dataObj.ProductWiseSales.length
-        });
-
-        // Save to database
         let addToDb, addToSalesDb;
         
         try {
-            console.log("🔍 Debug - Saving to listFinancialEvents with data:", {
-                User: userId,
-                region: region,
-                country: country,
-                Total_Sales: dataObj.Total_Sales,
-                Gross_Profit: dataObj.Gross_Profit,
-                ProductAdsPayment: dataObj.ProductAdsPayment,
-                FBA_Fees: dataObj.FBA_Fees,
-                Amazon_Charges: dataObj.Amazon_Charges,
-                Refunds: dataObj.Refunds,
-                Storage: dataObj.Storage,
-            });
-
             addToDb = await listFinancialEvents.create({
                 User: userId,
                 region: region,
@@ -238,66 +163,33 @@ const listFinancialEventsMethod = async (dataToReceive, userId, baseuri, country
                 Storage: dataObj.Storage,
             });
 
-            console.log("🔍 Debug - listFinancialEvents saved successfully:", {
-                id: addToDb._id,
-                totalSales: addToDb.Total_Sales,
-                grossProfit: addToDb.Gross_Profit
-            });
-
             addToSalesDb = await ProductWiseSales.create({
                 User: userId,
                 region: region,
                 country: country,
                 productWiseSales: dataObj.ProductWiseSales
             });
-            
-            console.log("🔍 Debug - ProductWiseSales saved successfully:", {
-                id: addToSalesDb._id,
-                productCount: addToSalesDb.productWiseSales?.length || 0
-            });
-            
-            logger.info("Data saved to database successfully");
         } catch (dbError) {
-            console.error("🔍 Debug - Database save error:", dbError);
             logger.error(`Database operation failed: ${dbError.message}`);
             throw new ApiError(500, "Failed to save financial data to database");
         }
 
-        // Update user record
         try {
             const getUser = await UserModel.findById(userId);
             if (getUser) {
                 getUser.listFinancialEvents = addToDb._id;
                 await getUser.save();
-                logger.info("User record updated with financial events ID");
             }
         } catch (userUpdateError) {
             logger.error(`Failed to update user with financial events ID: ${userUpdateError.message}`);
-            // Continue - non-critical error
         }
 
+        logger.info("Data saved successfully");
+        logger.info("Finance ended");
         return addToDb;
 
     } catch (error) {
-        // Log detailed error information
-        if (error.response) {
-            logger.error("API Error Response:", {
-                status: error.response.status,
-                statusText: error.response.statusText,
-                data: error.response.data,
-                headers: error.response.headers
-            });
-            
-            // Handle specific error codes
-            if (error.response.status === 403) {
-                throw new ApiError(403, "Access denied. Please check your credentials and permissions.");
-            } else if (error.response.status === 400) {
-                throw new ApiError(400, "Invalid request parameters. Please check your date range and marketplace ID.");
-            }
-        } else {
-            logger.error("Request Error:", error.message);
-        }
-        
+        logger.error("Error in Finance:", error.message);
         throw new ApiError(500, `Failed to fetch financial events: ${error.message}`);
     }
 };

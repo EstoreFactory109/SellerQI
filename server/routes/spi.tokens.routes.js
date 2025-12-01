@@ -1,4 +1,4 @@
-const {generateSPAPITokens,SaveAllDetails,generateAmazonAdsTokens,saveDetailsOfOtherAccounts}=require('../controllers/TokenControllers');
+const {generateSPAPITokens,SaveAllDetails,generateAmazonAdsTokens,saveDetailsOfOtherAccounts}=require('../controllers/user-auth/TokenControllers');
 const auth =require('../middlewares/Auth/auth.js')
 const {getLocation}=require('../middlewares/Auth/getLocation.js');
 const express=require('express');

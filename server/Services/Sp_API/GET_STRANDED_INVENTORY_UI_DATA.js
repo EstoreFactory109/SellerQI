@@ -1,7 +1,7 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/GET_STRANDED_INVENTORY_UI_DATA_MODEL');
+const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL');
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     // console.log(marketplaceIds);
@@ -25,10 +25,9 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
             }
         );
 
-                  // console.log(`✅ Report Requested! Report ID: ${response.data.reportId}`);
         return response.data.reportId;
     } catch (error) {
-        console.error("❌ Error generating report:", error.response ? error.response.data : error.message);
+        logger.error("Error generating report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to generate report");
     }
 };
@@ -49,39 +48,37 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
 
         switch (status) {
             case "DONE":
-                // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+                logger.info(`Report Ready! Document ID: ${reportDocumentId}`);
                 return reportDocumentId;
 
             case "FATAL":
-                console.error("❌ Report failed with a fatal error.");
+                logger.error("Report failed with a fatal error.");
                 return false;
 
             case "CANCELLED":
-                logger.warn("🚫 Report was cancelled by Amazon.");
+                logger.error("Report was cancelled by Amazon.");
                 return false;
 
             case "IN_PROGRESS":
-                // console.log("⏳ Report is still processing...");
                 return null;
 
             case "IN_QUEUE":
-                // console.log("📋 Report is queued for processing...");
                 return null;
 
             case "DONE_NO_DATA":
-                console.warn("⚠️ Report completed but contains no data.");
+                logger.error("Report completed but contains no data.");
                 return false;
 
             case "FAILED":
-                logger.error("❌ Report failed for an unknown reason.");
+                logger.error("Report failed for an unknown reason.");
                 return false;
 
             default:
-                console.warn(`⚠️ Unknown report status: ${status}`);
+                logger.error(`Unknown report status: ${status}`);
                 return false;
         }
     } catch (error) {
-        console.error("❌ Error checking report status:", error.response ? error.response.data : error.message);
+        logger.error("Error checking report status:", error.response ? error.response.data : error.message);
         throw new Error("Failed to check report status");
     }
 };
@@ -99,18 +96,19 @@ const getReportLink = async (accessToken, reportDocumentId,baseuri) => {
 
         return response.data.url;
     } catch (error) {
-        console.error("❌ Error downloading report:", error.response ? error.response.data : error.message);
+        logger.error("Error downloading report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to download report");
     }
 };
 
 const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,region) => {
+    logger.info("GET_STRANDED_INVENTORY_UI_DATA starting");
+    
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     try {
-        // console.log("📄 Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds,baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -121,7 +119,7 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
         let retries = 30; 
 
         while (!reportDocumentId && retries > 0) {
-            // console.log(`⏳ Checking report status... (Retries left: ${retries})`);
+            logger.info(`Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId,baseuri);
             if (reportDocumentId === false) {
@@ -141,9 +139,6 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             };
         }
 
-                  // console.log(`✅ Report Ready! Document ID: ${reportDocumentId}`);
-  
-          // console.log("📥 Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
         const fullReport = await axios({
@@ -182,10 +177,12 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             logger.error(new ApiError(500, "Error in saving the data"));
             return false;
         }
+        logger.info("Data saved successfully");
+        logger.info("GET_STRANDED_INVENTORY_UI_DATA ended");
         return createStrandedUIdata;
 
     } catch (error) {
-        console.error("❌ Error in getReport:", error.message);
+        logger.error("Error in getReport:", error.message);
         throw new ApiError(500, error.message);
     }
 };

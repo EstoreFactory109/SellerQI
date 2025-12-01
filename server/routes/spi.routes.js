@@ -1,6 +1,6 @@
 const express=require('express');
 const auth=require('../middlewares/Auth/auth.js')
-const {getSpApiData}=require('../controllers/SpApiDataController.js')
+const {getSpApiData}=require('../controllers/analytics/SpApiDataController.js')
 const {getLocation}=require('../middlewares/Auth/getLocation.js')
 // Import subscription middleware for premium features
 const { requirePaid, getSubscriptionInfo } = require('../middlewares/Auth/checkSubscription.js');

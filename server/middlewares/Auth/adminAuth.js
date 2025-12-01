@@ -1,6 +1,6 @@
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const { ApiError } = require('../../utils/ApiError.js');
-const User = require('../../models/userModel.js');
+const User = require('../../models/user-auth/userModel.js');
 const logger = require('../../utils/Logger.js');
 
 const adminAuth = asyncHandler(async (req, res, next) => {

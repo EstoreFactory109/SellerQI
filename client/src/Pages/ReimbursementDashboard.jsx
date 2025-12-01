@@ -1,17 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  DollarSign, TrendingUp, AlertCircle, Package, Clock, 
-  Calendar, Download, Filter, Search, ChevronDown, ChevronRight,
+  DollarSign, AlertCircle, Package, 
+  Download, Filter, Search, ChevronDown, ChevronRight,
   FileText, CheckCircle, XCircle, HelpCircle, ExternalLink
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { 
   getAllReimbursements,
-  getReimbursementSummary,
-  getReimbursementTimeline
+  getReimbursementSummary
 } from '../services/reimbursementService';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const ReimbursementDashboard = () => {
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -20,7 +18,6 @@ const ReimbursementDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState(null);
   const [reimbursements, setReimbursements] = useState([]);
-  const [timeline, setTimeline] = useState([]);
   
   // Filter state
   const [filterStatus, setFilterStatus] = useState('all');
@@ -29,6 +26,9 @@ const ReimbursementDashboard = () => {
   const [sortBy, setSortBy] = useState('date');
   const [showFilters, setShowFilters] = useState(false);
   const [showUnderpaidOnly, setShowUnderpaidOnly] = useState(false);
+
+  // Tab state for reimbursement types
+  const [activeTab, setActiveTab] = useState('shipment');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,22 +43,19 @@ const ReimbursementDashboard = () => {
     try {
       setLoading(true);
       
-      const [summaryRes, reimbursementsRes, timelineRes] = await Promise.all([
+      const [summaryRes, reimbursementsRes] = await Promise.all([
         getReimbursementSummary(),
-        getAllReimbursements(),
-        getReimbursementTimeline(90)
+        getAllReimbursements()
       ]);
 
       // Debug logging
       console.log('Summary Response:', summaryRes);
       console.log('Reimbursements Response:', reimbursementsRes);
-      console.log('Timeline Response:', timelineRes);
 
       // ApiResponse structure: { statusCode, data, message }
       // Service already returns response.data, so summaryRes is the ApiResponse object
       const summaryData = summaryRes?.data || summaryRes;
       const reimbursementsData = reimbursementsRes?.data || reimbursementsRes || [];
-      const timelineData = timelineRes?.data || timelineRes || [];
       
       console.log('Processed Summary Data:', summaryData);
       console.log('Processed Reimbursements Data:', reimbursementsData);
@@ -67,7 +64,6 @@ const ReimbursementDashboard = () => {
       
       setSummary(summaryData);
       setReimbursements(Array.isArray(reimbursementsData) ? reimbursementsData : []);
-      setTimeline(Array.isArray(timelineData) ? timelineData : []);
     } catch (error) {
       console.error('Error fetching reimbursement data:', error);
     } finally {
@@ -89,6 +85,164 @@ const ReimbursementDashboard = () => {
       day: 'numeric', 
       year: 'numeric' 
     });
+  };
+
+  // Export to CSV - includes summary totals and all table data
+  const exportToCSV = () => {
+    const csvRows = [];
+
+    // Calculate totals for summary boxes
+    const shipmentTotal = summary?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0;
+    const lostInventoryTotal = summary?.backendLostInventory?.totalExpectedAmount || 0;
+    const damagedInventoryTotal = summary?.backendDamagedInventory?.totalExpectedAmount || 0;
+    const disposedInventoryTotal = summary?.backendDisposedInventory?.totalExpectedAmount || 0;
+    const feeReimbursementTotal = summary?.backendFeeReimbursement?.totalExpectedAmount || 0;
+    const totalReimbursement = shipmentTotal + lostInventoryTotal + damagedInventoryTotal + disposedInventoryTotal + feeReimbursementTotal;
+
+    // Add Summary Section
+    csvRows.push('REIMBURSEMENT SUMMARY');
+    csvRows.push('');
+    csvRows.push('Category,Total Amount');
+    csvRows.push(`Total Reimbursement,${totalReimbursement.toFixed(2)}`);
+    csvRows.push(`Shipment Discrepancy,${shipmentTotal.toFixed(2)}`);
+    csvRows.push(`Lost Inventory,${lostInventoryTotal.toFixed(2)}`);
+    csvRows.push(`Damaged Inventory,${damagedInventoryTotal.toFixed(2)}`);
+    csvRows.push(`Disposed Inventory,${disposedInventoryTotal.toFixed(2)}`);
+    csvRows.push(`Fee Reimbursement,${feeReimbursementTotal.toFixed(2)}`);
+    csvRows.push('');
+    csvRows.push('');
+
+    // Shipment Discrepancy Data
+    const shipmentData = summary?.feeProtector?.backendShipmentItems?.data || [];
+    if (shipmentData.length > 0) {
+      csvRows.push('SHIPMENT DISCREPANCY DETAILS');
+      csvRows.push('Date,Shipment ID,Shipment Name,ASIN,SKU,Shipped,Received,Discrepancy,Expected Amount');
+      shipmentData.forEach(item => {
+        csvRows.push([
+          formatDate(item.date),
+          `"${(item.shipmentId || '').replace(/"/g, '""')}"`,
+          `"${(item.shipmentName || '').replace(/"/g, '""')}"`,
+          item.asin || '',
+          `"${(item.sku || '').replace(/"/g, '""')}"`,
+          item.quantityShipped || 0,
+          item.quantityReceived || 0,
+          item.discrepancyUnits || 0,
+          (item.expectedAmount || 0).toFixed(2)
+        ].join(','));
+      });
+      csvRows.push('');
+      csvRows.push('');
+    }
+
+    // Lost Inventory Data
+    const lostData = summary?.backendLostInventory?.data || [];
+    if (lostData.length > 0) {
+      csvRows.push('LOST INVENTORY DETAILS');
+      csvRows.push('Date,ASIN,SKU,FNSKU,Lost Units,Found Units,Reimbursed Units,Discrepancy Units,Expected Amount,Underpaid Amount,Status');
+      lostData.forEach(item => {
+        csvRows.push([
+          formatDate(item.date),
+          item.asin || '',
+          `"${(item.sku || '').replace(/"/g, '""')}"`,
+          item.fnsku || '',
+          item.lostUnits || 0,
+          item.foundUnits || 0,
+          item.reimbursedUnits || 0,
+          item.discrepancyUnits || 0,
+          (item.expectedAmount || 0).toFixed(2),
+          (item.underpaidExpectedAmount || 0).toFixed(2),
+          item.isUnderpaid ? 'Underpaid' : 'Normal'
+        ].join(','));
+      });
+      csvRows.push('');
+      csvRows.push('');
+    }
+
+    // Damaged Inventory Data
+    const damagedData = summary?.backendDamagedInventory?.data || [];
+    if (damagedData.length > 0) {
+      csvRows.push('DAMAGED INVENTORY DETAILS');
+      csvRows.push('Date,ASIN,SKU,FNSKU,Damaged Units,Sales Price,Fees,Reimbursement Per Unit,Expected Amount');
+      damagedData.forEach(item => {
+        csvRows.push([
+          formatDate(item.date),
+          item.asin || '',
+          `"${(item.sku || '').replace(/"/g, '""')}"`,
+          item.fnsku || '',
+          item.damagedUnits || 0,
+          (item.salesPrice || 0).toFixed(2),
+          (item.fees || 0).toFixed(2),
+          (item.reimbursementPerUnit || 0).toFixed(2),
+          (item.expectedAmount || 0).toFixed(2)
+        ].join(','));
+      });
+      csvRows.push('');
+      csvRows.push('');
+    }
+
+    // Disposed Inventory Data
+    const disposedData = summary?.backendDisposedInventory?.data || [];
+    if (disposedData.length > 0) {
+      csvRows.push('DISPOSED INVENTORY DETAILS');
+      csvRows.push('Date,ASIN,SKU,FNSKU,Disposed Units,Sales Price,Fees,Reimbursement Per Unit,Expected Amount');
+      disposedData.forEach(item => {
+        csvRows.push([
+          formatDate(item.date),
+          item.asin || '',
+          `"${(item.sku || '').replace(/"/g, '""')}"`,
+          item.fnsku || '',
+          item.disposedUnits || 0,
+          (item.salesPrice || 0).toFixed(2),
+          (item.fees || 0).toFixed(2),
+          (item.reimbursementPerUnit || 0).toFixed(2),
+          (item.expectedAmount || 0).toFixed(2)
+        ].join(','));
+      });
+      csvRows.push('');
+      csvRows.push('');
+    }
+
+    // Fee Reimbursement Data
+    const feeData = summary?.backendFeeReimbursement?.data || [];
+    if (feeData.length > 0) {
+      csvRows.push('FEE REIMBURSEMENT DETAILS');
+      csvRows.push('Date,ASIN,FNSKU,Product Name,Charged Fees,Actual Fees,Fee Difference,Units Sold,Expected Amount');
+      feeData.forEach(item => {
+        csvRows.push([
+          formatDate(item.date),
+          item.asin || '',
+          item.fnsku || '',
+          `"${(item.productName || '').replace(/"/g, '""')}"`,
+          (item.chargedFees || 0).toFixed(2),
+          (item.actualFees || 0).toFixed(2),
+          (item.feeDifference || 0).toFixed(2),
+          item.unitsSold || 0,
+          (item.expectedAmount || 0).toFixed(2)
+        ].join(','));
+      });
+    }
+
+    // Check if there's any data to export
+    if (csvRows.length <= 10) { // Only summary headers and empty rows
+      alert('No data available to export');
+      return;
+    }
+
+    // Create CSV content
+    const csvContent = csvRows.join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `reimbursement-dashboard-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Filter and sort reimbursements
@@ -139,36 +293,59 @@ const ReimbursementDashboard = () => {
 
   const totalPages = Math.ceil(filteredReimbursements.length / itemsPerPage);
 
-  // Summary cards data - Updated metrics as per requirements
-  const summaryCards = [
+  // Calculate totals for each reimbursement type
+  const shipmentTotal = summary?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0;
+  const lostInventoryTotal = summary?.backendLostInventory?.totalExpectedAmount || 0;
+  const damagedInventoryTotal = summary?.backendDamagedInventory?.totalExpectedAmount || 0;
+  const disposedInventoryTotal = summary?.backendDisposedInventory?.totalExpectedAmount || 0;
+  const feeReimbursementTotal = summary?.backendFeeReimbursement?.totalExpectedAmount || 0;
+  
+  // Calculate total reimbursement (sum of all types)
+  const totalReimbursement = shipmentTotal + lostInventoryTotal + damagedInventoryTotal + disposedInventoryTotal + feeReimbursementTotal;
+
+  // Summary boxes data - One for total and one for each type
+  const summaryBoxes = [
     {
-      label: 'Total Recoverable (Month)',
-      value: formatCurrency(summary?.totalRecoverableMonth || 0),
+      label: 'Total Reimbursement',
+      value: formatCurrency(totalReimbursement),
       icon: DollarSign,
       color: 'emerald',
-      subtitle: 'This month'
+      subtitle: 'Sum of all types'
     },
     {
-      label: 'Discrepancies Found',
-      value: summary?.discrepanciesFound || 0,
-      icon: AlertCircle,
+      label: 'Shipment Discrepancy',
+      value: formatCurrency(shipmentTotal),
+      icon: Package,
       color: 'blue',
-      isCount: true,
-      subtitle: 'Total discrepancies'
+      subtitle: 'Shipment items'
     },
     {
-      label: 'Claim Success Rate',
-      value: `${summary?.claimSuccessRate || 0}%`,
-      icon: TrendingUp,
+      label: 'Lost Inventory',
+      value: formatCurrency(lostInventoryTotal),
+      icon: AlertCircle,
       color: 'orange',
-      subtitle: 'Approved vs processed'
+      subtitle: 'Lost items'
     },
     {
-      label: 'Avg Resolution Time',
-      value: `${summary?.avgResolutionTime || 0} days`,
-      icon: Clock,
+      label: 'Damaged Inventory',
+      value: formatCurrency(damagedInventoryTotal),
+      icon: AlertCircle,
       color: 'red',
-      subtitle: 'Average days to resolve'
+      subtitle: 'Damaged items'
+    },
+    {
+      label: 'Disposed Inventory',
+      value: formatCurrency(disposedInventoryTotal),
+      icon: Package,
+      color: 'purple',
+      subtitle: 'Disposed items'
+    },
+    {
+      label: 'Fee Reimbursement',
+      value: formatCurrency(feeReimbursementTotal),
+      icon: DollarSign,
+      color: 'indigo',
+      subtitle: 'Fee overcharges'
     }
   ];
 
@@ -240,11 +417,11 @@ const ReimbursementDashboard = () => {
                 </button>
 
                 <button
-                  onClick={() => window.print()}
+                  onClick={exportToCSV}
                   className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all text-sm font-medium"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Export</span>
+                  <span>Export CSV</span>
                 </button>
               </div>
             </div>
@@ -308,99 +485,142 @@ const ReimbursementDashboard = () => {
             </AnimatePresence>
           </motion.div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {summaryCards.map((card, index) => {
-              const Icon = card.icon;
+          {/* Summary Boxes */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+            {summaryBoxes.map((box, index) => {
+              const Icon = box.icon;
               const colorClasses = {
                 emerald: 'from-emerald-500 to-emerald-600',
                 blue: 'from-blue-500 to-blue-600',
                 orange: 'from-orange-500 to-orange-600',
-                red: 'from-red-500 to-red-600'
+                red: 'from-red-500 to-red-600',
+                purple: 'from-purple-500 to-purple-600',
+                indigo: 'from-indigo-500 to-indigo-600'
               };
 
               return (
                 <motion.div
-                  key={card.label}
+                  key={box.label}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
-                  className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all"
+                  className={`bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all ${index === 0 ? 'lg:col-span-2 xl:col-span-1' : ''}`}
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <div className={`w-10 h-10 bg-gradient-to-br ${colorClasses[card.color]} rounded-lg flex items-center justify-center`}>
+                    <div className={`w-10 h-10 bg-gradient-to-br ${colorClasses[box.color]} rounded-lg flex items-center justify-center`}>
                       <Icon className="w-5 h-5 text-white" />
                     </div>
                   </div>
                   <div className="text-2xl font-bold text-gray-900 mb-1">
-                    {card.isCount ? card.value : card.value}
+                    {box.value}
                   </div>
-                  <div className="text-sm text-gray-600">{card.label}</div>
-                  {card.subtitle && (
-                    <div className="text-xs text-gray-500 mt-1">{card.subtitle}</div>
+                  <div className="text-sm text-gray-600">{box.label}</div>
+                  {box.subtitle && (
+                    <div className="text-xs text-gray-500 mt-1">{box.subtitle}</div>
                   )}
                 </motion.div>
               );
             })}
           </div>
 
-          {/* Timeline Chart - Full Width */}
-            <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
-            >
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Reimbursement Timeline</h3>
-            <ResponsiveContainer width="100%" height={400}>
-                <AreaChart data={timeline}>
-                  <defs>
-                    <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                    formatter={(value) => formatCurrency(value)}
-                  />
-                  <Area type="monotone" dataKey="totalAmount" stroke="#10B981" fillOpacity={1} fill="url(#colorAmount)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </motion.div>
-
-          {/* Calculated Discrepancies Section */}
-          {(summary?.feeProtector?.backendShipmentItems?.data?.length > 0 || summary?.backendLostInventory?.data?.length > 0 || summary?.backendDamagedInventory?.data?.length > 0) && (
+          {/* Reimbursement Types Tabs */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8"
             >
-              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                    <AlertCircle className="w-4 h-4 text-white" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900">Calculated Discrepancies</h3>
+            {/* Tabs Navigation */}
+            <div className="border-b border-gray-200 bg-gray-50">
+              <div className="flex overflow-x-auto">
+                <button
+                  onClick={() => setActiveTab('shipment')}
+                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === 'shipment'
+                      ? 'border-blue-500 text-blue-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Shipment Discrepancy
+                  {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                      {summary.feeProtector.backendShipmentItems.data.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('lost')}
+                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === 'lost'
+                      ? 'border-orange-500 text-orange-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Lost Inventory
+                  {summary?.backendLostInventory?.data?.length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-600 rounded-full">
+                      {summary.backendLostInventory.data.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('damaged')}
+                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === 'damaged'
+                      ? 'border-red-500 text-red-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Damaged Inventory
+                  {summary?.backendDamagedInventory?.data?.length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">
+                      {summary.backendDamagedInventory.data.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('disposed')}
+                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === 'disposed'
+                      ? 'border-purple-500 text-purple-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Disposed Inventory
+                  {summary?.backendDisposedInventory?.data?.length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
+                      {summary.backendDisposedInventory.data.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('fee')}
+                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === 'fee'
+                      ? 'border-indigo-500 text-indigo-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Fee Reimbursement
+                  {summary?.backendFeeReimbursement?.data?.length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-100 text-indigo-600 rounded-full">
+                      {summary.backendFeeReimbursement.data.length}
+                    </span>
+                  )}
+                </button>
                 </div>
-                <p className="text-sm text-gray-600 ml-11">
-                  Items calculated from shipment data and inventory ledgers (included in Total Recoverable)
-                </p>
               </div>
 
+            {/* Tab Content */}
               <div className="p-6">
-                {/* Fee Protector - Backend Shipment Items (Combined) */}
-                {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 && (
-                  <div className="mb-8">
-                    <div className="flex items-center justify-between mb-4">
+              {/* Shipment Discrepancy Tab */}
+              {activeTab === 'shipment' && (
                       <div>
-                        <h4 className="text-md font-semibold text-gray-900">Backend Shipment Items</h4>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {summary.feeProtector.backendShipmentItems.count} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
+                  {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 ? (
+                    <>
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-600">
+                          {summary.feeProtector.backendShipmentItems.count || summary.feeProtector.backendShipmentItems.data.length} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
                         </p>
-                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -434,25 +654,29 @@ const ReimbursementDashboard = () => {
                         </tbody>
                       </table>
                     </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      No shipment discrepancy data found
+                    </div>
+                  )}
                   </div>
                 )}
 
-                {/* Backend Lost Inventory */}
-                {summary?.backendLostInventory && (
+              {/* Lost Inventory Tab */}
+              {activeTab === 'lost' && (
                   <div>
+                  {summary?.backendLostInventory?.data?.length > 0 ? (
+                    <>
                     <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h4 className="text-md font-semibold text-gray-900">Backend Lost Inventory</h4>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {summary.backendLostInventory.itemCount || 0} items • {formatCurrency(summary.backendLostInventory.totalExpectedAmount || 0)} total
-                          {summary.backendLostInventory.data && summary.backendLostInventory.data.filter(item => item.isUnderpaid).length > 0 && (
+                        <p className="text-sm text-gray-600">
+                          {summary.backendLostInventory.itemCount || summary.backendLostInventory.data.length} items • {formatCurrency(summary.backendLostInventory.totalExpectedAmount || 0)} total
+                          {summary.backendLostInventory.data.filter(item => item.isUnderpaid).length > 0 && (
                             <span className="ml-2 text-orange-600 font-medium">
                               • {summary.backendLostInventory.data.filter(item => item.isUnderpaid).length} underpaid
                             </span>
                           )}
                         </p>
-                      </div>
-                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => setShowUnderpaidOnly(!showUnderpaidOnly)}
                           className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
@@ -463,7 +687,6 @@ const ReimbursementDashboard = () => {
                         >
                           {showUnderpaidOnly ? 'Show All' : 'Show Underpaid Only'}
                         </button>
-                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -481,14 +704,7 @@ const ReimbursementDashboard = () => {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {(!summary.backendLostInventory.data || summary.backendLostInventory.data.length === 0) ? (
-                            <tr>
-                              <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
-                                No data found
-                              </td>
-                            </tr>
-                          ) : (
-                            summary.backendLostInventory.data
+                            {summary.backendLostInventory.data
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
                               <tr key={index} className={`hover:bg-gray-50 transition-colors ${item.isUnderpaid ? 'bg-orange-50' : ''}`}>
@@ -521,24 +737,28 @@ const ReimbursementDashboard = () => {
                                   )}
                                 </td>
                               </tr>
-                            ))
-                          )}
+                            ))}
                         </tbody>
                       </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      No lost inventory data found
                     </div>
+                  )}
                 </div>
               )}
 
-                {/* Backend Damaged Inventory */}
-                {summary?.backendDamagedInventory && (
+              {/* Damaged Inventory Tab */}
+              {activeTab === 'damaged' && (
                   <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h4 className="text-md font-semibold text-gray-900">Backend Damaged Inventory</h4>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {summary.backendDamagedInventory.itemCount || 0} items • {formatCurrency(summary.backendDamagedInventory.totalExpectedAmount || 0)} total
+                  {summary?.backendDamagedInventory?.data?.length > 0 ? (
+                    <>
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-600">
+                          {summary.backendDamagedInventory.itemCount || summary.backendDamagedInventory.data.length} items • {formatCurrency(summary.backendDamagedInventory.totalExpectedAmount || 0)} total
                         </p>
-                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -556,14 +776,7 @@ const ReimbursementDashboard = () => {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {(!summary.backendDamagedInventory.data || summary.backendDamagedInventory.data.length === 0) ? (
-                            <tr>
-                              <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
-                                No data found
-                              </td>
-                            </tr>
-                          ) : (
-                            summary.backendDamagedInventory.data.map((item, index) => (
+                            {summary.backendDamagedInventory.data.map((item, index) => (
                               <tr key={index} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
@@ -575,125 +788,121 @@ const ReimbursementDashboard = () => {
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
                               </tr>
-                            ))
-                          )}
+                            ))}
                         </tbody>
                       </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      No damaged inventory data found
                     </div>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-
-          {/* Reimbursements Table */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl border border-gray-200 overflow-hidden"
-          >
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Reimbursement Cases</h3>
-                <div className="text-sm text-gray-600">
-                  Showing {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, filteredReimbursements.length)} of {filteredReimbursements.length}
+                  )}
                 </div>
-              </div>
+              )}
 
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by ASIN, SKU, or ID..."
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                />
-              </div>
+              {/* Disposed Inventory Tab */}
+              {activeTab === 'disposed' && (
+                <div>
+                  {summary?.backendDisposedInventory?.data?.length > 0 ? (
+                    <>
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-600">
+                          {summary.backendDisposedInventory.itemCount || summary.backendDisposedInventory.data.length} items • {formatCurrency(summary.backendDisposedInventory.totalExpectedAmount || 0)} total
+                        </p>
             </div>
-
-            {/* Table */}
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN / SKU</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deadline</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FNSKU</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disposed Units</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sales Price</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fees</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursement/Unit</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {paginatedReimbursements.length > 0 ? (
-                    paginatedReimbursements.map((item, index) => (
+                            {summary.backendDisposedInventory.data.map((item, index) => (
                       <tr key={index} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatDate(item.reimbursementDate || item.discoveryDate)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{item.asin || 'N/A'}</div>
-                          <div className="text-sm text-gray-500">{item.sku || 'N/A'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {(item.reimbursementType || 'OTHER').replace(/_/g, ' ')}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                          {formatCurrency(item.amount)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.quantity || 0}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <StatusBadge status={item.status} />
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.daysToDeadline !== undefined && item.daysToDeadline >= 0 ? (
-                            <span className={item.daysToDeadline <= 7 ? 'text-red-600 font-semibold' : 'text-gray-900'}>
-                              {item.daysToDeadline} days
-                            </span>
-                          ) : (
-                            <span className="text-gray-500">—</span>
-                          )}
-                        </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.fnsku || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.disposedUnits || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
                       </tr>
-                    ))
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
                   ) : (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
-                        No reimbursements found
-                      </td>
-                    </tr>
+                    <div className="text-center py-12 text-gray-500">
+                      No disposed inventory data found
+                    </div>
                   )}
+                </div>
+              )}
+
+              {/* Fee Reimbursement Tab */}
+              {activeTab === 'fee' && (
+                <div>
+                  {summary?.backendFeeReimbursement?.data?.length > 0 ? (
+                    <>
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-600">
+                          {summary.backendFeeReimbursement.itemCount || summary.backendFeeReimbursement.data.length} items • {formatCurrency(summary.backendFeeReimbursement.totalExpectedAmount || 0)} total
+                        </p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FNSKU</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Charged Fees</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Fees</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fee Difference</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Units Sold</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {summary.backendFeeReimbursement.data.map((item, index) => (
+                              <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.fnsku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">{item.productName || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.chargedFees || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.actualFees || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{formatCurrency(item.feeDifference || 0)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.unitsSold || 0}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                              </tr>
+                            ))}
                 </tbody>
               </table>
             </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                <span className="text-sm text-gray-700">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
+                    </>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      No fee reimbursement data found
+                    </div>
+                  )}
               </div>
             )}
+            </div>
           </motion.div>
         </div>
       </div>

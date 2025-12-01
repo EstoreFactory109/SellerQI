@@ -5,7 +5,7 @@ const {
     clearAnalyseCacheEndpoint,
     clearAllAnalyseCache,
     getCacheStats
-} = require('../controllers/CacheController.js');
+} = require('../controllers/system/CacheController.js');
 
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');

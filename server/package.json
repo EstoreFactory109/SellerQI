@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "bullmq": "^5.65.0",
     "dotenv": "^17.2.3"
   }
 }

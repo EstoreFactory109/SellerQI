@@ -1,6 +1,6 @@
 var jwt = require('jsonwebtoken');
 const logger = require('../utils/Logger.js');
-const User = require('../models/userModel.js');
+const User = require('../models/user-auth/userModel.js');
 const {ApiError}=require('./ApiError.js')
 
 

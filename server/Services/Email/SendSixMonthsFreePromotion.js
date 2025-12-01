@@ -7,8 +7,8 @@ const path = require('path');
 
 // Import database connection
 const dbConnect = require('../../config/dbConn.js');
-const User = require('../../models/userModel.js');
-const EmailLogs = require('../../models/EmailLogsModel.js');
+const User = require('../../models/user-auth/userModel.js');
+const EmailLogs = require('../../models/system/EmailLogsModel.js');
 
 // Read the email template
 const sixMonthsFreeTemplate = fs.readFileSync(

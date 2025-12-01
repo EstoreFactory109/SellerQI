@@ -1,4 +1,4 @@
-const User=require('../../models/userModel');
+const User=require('../../models/user-auth/userModel');
 const logger = require('../../utils/Logger.js');
 const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
@@ -59,7 +59,7 @@ const axios=require('axios');
             }
         );
 
-        console.log("Token response:", response.data);
+       
 
         // Validate response
         if (!response.data || !response.data.refresh_token) {
@@ -157,8 +157,6 @@ const generateAdsRefreshToken = async (authCode,region) => {
             }
         );
 
-        console.log("Token response:", response.data);
-
         // Validate response
         if (!response.data || !response.data.refresh_token) {
             logger.error("Invalid token response from Amazon", response.data);
@@ -231,7 +229,6 @@ const generateAccessToken=async(userId,refreshToken)=>{
                     }
                 );
 
-            console.log(response);
             if(!response){
                 logger.error(new ApiError(500,"Internal server error in generating access token"));
                 return false;

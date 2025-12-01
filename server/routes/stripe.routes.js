@@ -10,12 +10,12 @@ const {
     reactivateSubscription,
     getPaymentHistory,
     getSubscriptionConfig
-} = require('../controllers/StripeController');
+} = require('../controllers/payments/StripeController');
 
 const {
     handleWebhook,
     testWebhook
-} = require('../controllers/StripeWebhookController');
+} = require('../controllers/payments/StripeWebhookController');
 
 // Import middleware
 const auth = require('../middlewares/Auth/auth');

@@ -3,8 +3,8 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
-const userModel = require('../../models/userModel.js');
-const ProductWiseSponsoredAdsData = require('../../models/ProductWiseSponseredAdsModel.js');
+const userModel = require('../../models/user-auth/userModel.js');
+const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 
 // Base URIs for different regions
 const BASE_URIS = {

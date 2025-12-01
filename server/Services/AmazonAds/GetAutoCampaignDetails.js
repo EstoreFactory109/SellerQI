@@ -3,9 +3,9 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const { generateAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
-const userModel = require('../../models/userModel.js');
+const userModel = require('../../models/user-auth/userModel.js');
 // You'll need to create this new model
-const AutoCampaignSearchTermsModel = require('../../models/AutoCampaignSearchTermsModel.js');
+const AutoCampaignSearchTermsModel = require('../../models/amazon-ads/AutoCampaignSearchTermsModel.js');
 
 // Base URIs for different regions
 const BASE_URIS = {

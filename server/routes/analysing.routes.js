@@ -9,8 +9,9 @@ const {
     getUserLoggingStats,
     getUserErrorLogs,
     getUserEmailLogs,
-    createSampleLoggingData
-} = require('../controllers/AnalysingController.js')
+    createSampleLoggingData,
+    getKeywordRecommendations
+} = require('../controllers/analytics/AnalysingController.js')
 const auth=require('../middlewares/Auth/auth.js')
 const {getLocation}=require('../middlewares/Auth/getLocation.js')
 const {analyseDataCache}=require('../middlewares/redisCache.js')
@@ -26,5 +27,7 @@ router.get('/logging/errors', auth, getUserErrorLogs)
 router.get('/logging/emails', auth, getUserEmailLogs)
 router.post('/logging/create-sample', auth, createSampleLoggingData)
 
+// ===== KEYWORD RECOMMENDATIONS ROUTE =====
+router.get('/keywordRecommendations', auth, getLocation, getKeywordRecommendations)
 
 module.exports=router;

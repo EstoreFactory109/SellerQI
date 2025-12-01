@@ -1,7 +1,7 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const SellerModel = require('../../models/sellerCentralModel.js');
+const SellerModel = require('../../models/user-auth/sellerCentralModel.js');
 const zlib = require('zlib');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
@@ -26,10 +26,9 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
             }
         );
 
-        logger.info(`✅ Report Requested! Report ID: ${response.data.reportId}`);
         return response.data.reportId;
     } catch (error) {
-        logger.error("❌ Error generating report:", error.response ? error.response.data : error.message);
+        logger.error("Error generating report:", error.response ? error.response.data : error.message);
         return false;
     }
 };
@@ -46,36 +45,34 @@ const checkReportStatus = async (accessToken, reportId, baseURI) => {
         const status = response.data.processingStatus;
         const reportDocumentId = response.data.reportDocumentId || null;
 
-        logger.info(`🔄 Report Status: ${status}`);
+        logger.info(`Report Status: ${status}`);
 
         switch (status) {
             case "DONE":
-                logger.info(`✅ Report Ready! Document ID: ${reportDocumentId}`);
+                logger.info(`Report Ready! Document ID: ${reportDocumentId}`);
                 return reportDocumentId;
             case "FATAL":
-                logger.error("❌ Report failed with a fatal error.");
+                logger.error("Report failed with a fatal error.");
                 return false;
             case "CANCELLED":
-                logger.warn("🚫 Report was cancelled by Amazon.");
+                logger.error("Report was cancelled by Amazon.");
                 return false;
             case "IN_PROGRESS":
-                logger.info("⏳ Report is still processing...");
                 return null;
             case "IN_QUEUE":
-                logger.info("⏳ Report is in queue, waiting...");
                 return null;
             case "DONE_NO_DATA":
-                logger.warn("⚠️ Report completed but contains no data.");
+                logger.error("Report completed but contains no data.");
                 return false;
             case "FAILED":
-                logger.error("❌ Report failed for an unknown reason.");
+                logger.error("Report failed for an unknown reason.");
                 return false;
             default:
-                logger.warn(`⚠️ Unknown report status: ${status}`);
+                logger.error(`Unknown report status: ${status}`);
                 return false;
         }
     } catch (error) {
-        logger.error("❌ Error checking report status:", error.response ? error.response.data : error.message);
+        logger.error("Error checking report status:", error.response ? error.response.data : error.message);
         return false;
     }
 };
@@ -94,21 +91,20 @@ const getReportLink = async (accessToken, reportDocumentId, baseURI) => {
 
         return response.data.url;
     } catch (error) {
-        logger.error("❌ Error downloading report:", error.response ? error.response.data : error.message);
+        logger.error("Error downloading report:", error.response ? error.response.data : error.message);
         return false;
     }
 };
 
 const getReport = async (accessToken, marketplaceIds, userId, country, region, baseURI) => {
+    logger.info("GET_MERCHANT_LISTINGS_ALL_DATA starting");
+    
     if (!accessToken || !marketplaceIds) {
         logger.error(new ApiError(400, "Credentials are missing"));
         return false;
     }
 
-  
-
     try {
-        logger.info("📄 Generating Report...");
         const reportId = await generateReport(accessToken, marketplaceIds, baseURI);
         
         if (!reportId) {
@@ -118,13 +114,11 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
         let reportDocumentId = null;
         
-        // Check report status with retries for IN_QUEUE and IN_PROGRESS
-        logger.info(`⏳ Checking report status...`);
-        
-        const maxRetries = 30; // Maximum number of retries (5 minutes with 10-second intervals)
-        const retryInterval = 10000; // 10 seconds between retries
+        const maxRetries = 30;
+        const retryInterval = 10000;
         
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            logger.info(`Checking report status... (Attempt ${attempt})`);
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
             
             if (reportDocumentId === false) {
@@ -133,7 +127,6 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             }
             
             if (reportDocumentId) {
-                logger.info(`✅ Report ready after ${attempt} attempts`);
                 break;
             }
             
@@ -147,9 +140,6 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             return false;
         }
 
-        logger.info(`✅ Report Ready! Document ID: ${reportDocumentId}`);
-
-        logger.info("📥 Downloading Report...");
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseURI);
 
         const fullReport = await axios({
@@ -203,9 +193,11 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
 
         await getSellerDetails.save();
+        logger.info("Data saved successfully");
+        logger.info("GET_MERCHANT_LISTINGS_ALL_DATA ended");
         return getSellerDetails;
     } catch (error) {
-        logger.error("❌ Error in getReport:", error.message);
+        logger.error("Error in getReport:", error.message);
         return false;
     }
 };
@@ -225,7 +217,6 @@ function convertTSVToJson(tsvBuffer) {
         const rows = tsv.split("\n").filter(row => row.trim() !== "");
         
         if (rows.length === 0) {
-            logger.warn("No data rows found in TSV");
             return [];
         }
         

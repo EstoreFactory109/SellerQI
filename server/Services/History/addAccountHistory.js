@@ -1,4 +1,4 @@
-const AccountHistory = require('../../models/AccountHistory.js')
+const AccountHistory = require('../../models/user-auth/AccountHistory.js')
 const dbConnect = require('../../config/dbConn.js')
 
 const addAccountHistory = async(userId,country,region,HealthScore,TotalProducts,ProductsWithIssues,TotalNumberOfIssues)=>{

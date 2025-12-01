@@ -1,7 +1,7 @@
 const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const OrderAndRevenue = require('../../models/OrderAndRevenueModel.js');
+const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI, startTime, endTime) => {
     try {

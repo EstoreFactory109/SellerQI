@@ -1,7 +1,7 @@
 const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
-const adsKeywordsPerformanceModel = require('../../models/adsKeywordsPerformanceModel');
+const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel');
 const gunzip = promisify(zlib.gunzip);
 const { generateAdsAccessToken } = require('./GenerateToken.js');
 

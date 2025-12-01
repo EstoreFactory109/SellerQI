@@ -1,5 +1,5 @@
 const axios = require('axios');
-const Campaign = require('../../models/CampaignModel');
+const Campaign = require('../../models/amazon-ads/CampaignModel');
 const logger = require('../../utils/Logger.js');
 
 // Base URIs for different regions (same as PPCSpendsSalesUnitsSold.js)
