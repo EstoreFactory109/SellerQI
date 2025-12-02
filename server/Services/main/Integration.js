@@ -1329,6 +1329,7 @@ class Integration {
 
     /**
      * Add new account history
+     * Now uses local calculation service instead of external calculation server
      */
     static async addNewAccountHistory(userId, country, region) {
         logger.info("addNewAccountHistory starting");
@@ -1340,16 +1341,15 @@ class Integration {
                 throw new Error('Failed to get analyse data');
             }
 
-            const getCalculationData = await axios.post(
-                `https://compute.sellerqi.com/calculation-api/calculate`,
-                getAnalyseData.message
-            );
+            // Use local calculation service instead of external server
+            const { analyseData } = require('../Calculations/DashboardCalculation.js');
+            const calculationResult = await analyseData(getAnalyseData.message, userId);
 
-            if (!getCalculationData?.data?.data?.dashboardData) {
-                throw new Error('Failed to get calculation data');
+            if (!calculationResult?.dashboardData) {
+                throw new Error('Failed to calculate dashboard data');
             }
 
-            const dashboardData = getCalculationData.data.data.dashboardData;
+            const dashboardData = calculationResult.dashboardData;
             const rankingErrors = dashboardData.TotalRankingerrors || 0;
             const conversionErrors = dashboardData.totalErrorInConversion || 0;
             const accountErrors = dashboardData.totalErrorInAccount || 0;
@@ -1359,14 +1359,14 @@ class Integration {
 
             const totalIssues = rankingErrors + conversionErrors + accountErrors + profitabilityErrors + sponsoredAdsErrors + inventoryErrors;
             const healthScore = getAnalyseData.message.AccountData?.getAccountHealthPercentge?.Percentage || 0;
-            const numberOfProductsWithIssues = dashboardData.productWiseError.length;
+            const numberOfProductsWithIssues = dashboardData.productWiseError?.length || 0;
 
             const addAccountHistoryData = await addAccountHistory(
                 userId,
                 country,
                 region,
                 healthScore,
-                "69",
+                dashboardData.TotalProduct?.length?.toString() || "0",
                 numberOfProductsWithIssues.toString(),
                 totalIssues.toString()
             );

@@ -6,8 +6,9 @@ import { useDispatch } from "react-redux";
 import { setDashboardInfo } from '../redux/slices/DashboardSlice.js'
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js'
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js'
-import analyseData from "../operations/analyse.js"
+import { addBrand } from '../redux/slices/authSlice.js'
 import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js'
+import axiosInstance from '../config/axios.config.js'
 
 // Custom animated pulse loader for long processes
 const PulseLoader = () => {
@@ -158,54 +159,50 @@ const AnalysingAccount = () => {
                     // Continue processing without SP API data
                 }
 
-                // Try to get analysis data
+                // NEW: Fetch pre-calculated dashboard data from the backend
+                // This replaces the old flow of fetching raw data and calculating in frontend
                 try {
-                    const response = await axios.get(
-                        `${import.meta.env.VITE_BASE_URI}/app/analyse/getData`, { withCredentials: true }
-                    );
+                    const response = await axiosInstance.get('/api/pagewise/dashboard');
                     
-                    console.log("=== AnalysingAccount: Data fetch response ===");
+                    console.log("=== AnalysingAccount: Dashboard data fetch response ===");
                     console.log("Response status:", response?.status);
                     console.log("Response data:", response?.data);
                     
                     if (response && response.status === 200) {
-                        // Process dashboard data - analyseData will handle empty data gracefully
-                        try {
-                            dashboardData = (await analyseData(response.data?.data || {})).dashboardData;
-                            console.log("Dashboard data processed:", dashboardData);
-                            
-                            // Check if we got empty data or actual data
-                            if (isEmptyDashboardData(dashboardData)) {
-                                console.log("⚠️ Account has no data available - will show zero data instead of error");
-                                hasAnyData = false;
-                            } else {
-                                console.log("✅ Account has data available");
-                                hasAnyData = true;
-                            }
-                            
-                            // Always dispatch the dashboard data (either real data or empty structure)
-                            dispatch(setDashboardInfo(dashboardData));
-                            
-                            // Dispatch error details if available
-                            if (dashboardData.totalProfitabilityErrors !== undefined) {
-                                dispatch(setProfitabilityErrorDetails({
-                                    totalErrors: dashboardData.totalProfitabilityErrors || 0,
-                                    errorDetails: dashboardData.profitabilityErrorDetails || []
-                                }));
-                            }
-                            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-                                dispatch(setSponsoredAdsErrorDetails({
-                                    totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-                                    errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-                                }));
-                            }
-                        } catch (analyseError) {
-                            console.error("❌ Error processing dashboard data:", analyseError);
-                            // Create default data structure if analysis fails
-                            console.log("⚠️ Analysis failed - providing default empty data structure");
-                            dashboardData = createDefaultDashboardData();
-                            dispatch(setDashboardInfo(dashboardData));
+                        // Dashboard data is now pre-calculated by the backend
+                        dashboardData = response.data?.data?.dashboardData;
+                        console.log("Pre-calculated dashboard data received:", dashboardData);
+                        
+                        // Check if we got empty data or actual data
+                        if (!dashboardData || isEmptyDashboardData(dashboardData)) {
+                            console.log("⚠️ Account has no data available - will show zero data instead of error");
+                            dashboardData = dashboardData || createDefaultDashboardData();
                             hasAnyData = false;
+                        } else {
+                            console.log("✅ Account has data available");
+                            hasAnyData = true;
+                        }
+                        
+                        // Always dispatch the dashboard data (either real data or empty structure)
+                        dispatch(setDashboardInfo(dashboardData));
+                        
+                        // Dispatch brand name if available
+                        if (dashboardData.Brand) {
+                            dispatch(addBrand(dashboardData.Brand));
+                        }
+                        
+                        // Dispatch error details if available
+                        if (dashboardData.totalProfitabilityErrors !== undefined) {
+                            dispatch(setProfitabilityErrorDetails({
+                                totalErrors: dashboardData.totalProfitabilityErrors || 0,
+                                errorDetails: dashboardData.profitabilityErrorDetails || []
+                            }));
+                        }
+                        if (dashboardData.totalSponsoredAdsErrors !== undefined) {
+                            dispatch(setSponsoredAdsErrorDetails({
+                                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
+                                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
+                            }));
                         }
                     } else if (response?.status === 404 || response?.status === 204) {
                         console.log("⚠️ Account not found or no content - providing empty data structure");
@@ -213,13 +210,13 @@ const AnalysingAccount = () => {
                         dispatch(setDashboardInfo(dashboardData));
                         hasAnyData = false;
                     } else {
-                        console.warn("⚠️ Analysis data not available or invalid response");
+                        console.warn("⚠️ Dashboard data not available or invalid response");
                         dashboardData = createDefaultDashboardData();
                         dispatch(setDashboardInfo(dashboardData));
                         hasAnyData = false;
                     }
-                } catch (analysisError) {
-                    console.error("❌ Analysis data fetch failed:", analysisError);
+                } catch (dashboardError) {
+                    console.error("❌ Dashboard data fetch failed:", dashboardError);
                     // Create default data structure instead of failing
                     console.log("⚠️ Data fetch error - providing default empty data structure");
                     dashboardData = createDefaultDashboardData();
@@ -227,60 +224,16 @@ const AnalysingAccount = () => {
                     hasAnyData = false;
                 }
 
-                // Try to create account history only if we have dashboard data
-                if (dashboardData) {
+                // History is now recorded by the backend when dashboard data is calculated
+                // So we only need to fetch history data for the frontend if needed
+                if (dashboardData && hasAnyData) {
                     try {
-                        const currentDate = new Date();
-                        const expireDate = new Date();
-                        expireDate.setDate(currentDate.getDate() + 7);
-                        
-                        // Calculate total issues using EXACT SAME formula as Dashboard Total Issues box
-                        // Source: Dashboard.jsx lines 143-149 - const totalIssues = (dashboardInfo?.totalProfitabilityErrors || 0) + ...
-                        const profitabilityErrors = dashboardData.totalProfitabilityErrors || 0;
-                        const sponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
-                        const inventoryErrors = dashboardData.totalInventoryErrors || 0;
-                        const rankingErrors = dashboardData.TotalRankingerrors || 0;
-                        const conversionErrors = dashboardData.totalErrorInConversion || 0;
-                        const accountErrors = dashboardData.totalErrorInAccount || 0;
-                        
-                        // IDENTICAL calculation to Dashboard's totalIssues
-                        const totalCalculatedIssues = profitabilityErrors + sponsoredAdsErrors + inventoryErrors + 
-                                                    rankingErrors + conversionErrors + accountErrors;
-
-                        console.log("🔍 ACCOUNT HISTORY TOTAL ISSUES BREAKDOWN (DASHBOARD ORDER):");
-                        console.log("  • Profitability Errors:", profitabilityErrors);
-                        console.log("  • Sponsored Ads Errors:", sponsoredAdsErrors);
-                        console.log("  • Inventory Errors:", inventoryErrors);
-                        console.log("  • Ranking Errors:", rankingErrors);
-                        console.log("  • Conversion Errors:", conversionErrors);
-                        console.log("  • Account Errors:", accountErrors);
-                        console.log("  • TOTAL ISSUES (MATCHES DASHBOARD):", totalCalculatedIssues);
-                        
-                        const HistoryData = {
-                            Date: currentDate,
-                            HealthScore: dashboardData.accountHealthPercentage?.Percentage || 0,
-                            TotalProducts: dashboardData.TotalProduct?.length || 0,
-                            ProductsWithIssues: dashboardData.productWiseError?.length || 0,
-                            TotalNumberOfIssues: totalCalculatedIssues,
-                            expireDate: expireDate
-                        };
-
-                        const CreateAccountHistory = await axios.post(
-                            `${import.meta.env.VITE_BASE_URI}/app/accountHistory/addAccountHistory`, 
-                            HistoryData, 
-                            { withCredentials: true }
-                        );
-
-                        console.log("🔍 ACCOUNT HISTORY CREATION IN ANALYSINGACCOUNT:");
-                        console.log("History Data Being Sent:", HistoryData);
-                        console.log("Account History Creation Response:", CreateAccountHistory);
-                        console.log("Account History Created Data:", CreateAccountHistory?.data?.data);
-                        
-                        if (CreateAccountHistory && CreateAccountHistory.status === 201) {
-                            dispatch(setHistoryInfo(CreateAccountHistory.data.data));
+                        const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
+                        if (historyResponse && historyResponse.status === 200) {
+                            dispatch(setHistoryInfo(historyResponse.data.data));
                         }
                     } catch (historyError) {
-                        console.error("❌ History creation failed:", historyError);
+                        console.error("❌ History fetch failed:", historyError);
                         // Continue without history
                     }
                 }

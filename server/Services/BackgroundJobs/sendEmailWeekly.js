@@ -1,9 +1,9 @@
 const { AnalyseService } = require('../main/Analyse.js');
 const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
-const axios = require('axios');
 const { sendWeeklyEmailToUser } = require('../Email/SendWeeklyEmail.js');
 const dbConnect = require('../../config/dbConn.js');
+const { analyseData } = require('../Calculations/DashboardCalculation.js');
 
 
 const analyzeUserData = async (userId, country, region) => {
@@ -52,12 +52,7 @@ const analyzeUserData = async (userId, country, region) => {
 
 const sendMail = async()=>{
     try {
-        // Validate environment variables
-        if (!process.env.CALCULATION_API_URI) {
-            logger.error('CALCULATION_API_URI environment variable is not set');
-            return;
-        }
-        
+        // Local calculation service is now used - no external API needed
         await dbConnect();
         const getSellers = await Seller.find({}).populate('User','firstName email');
      //   const getSellers = await Seller.find({User:"689b9d9cfc29576b59e7f46c"}).populate('User','firstName email');
@@ -150,14 +145,13 @@ const getAnalysisData = async(seller)=>{
             
             const healthScore = analyseResult.AccountData?.getAccountHealthPercentge?.Percentage || 0;
 
-            let getCalculationData;
+            let calculatedData;
             try {
-                getCalculationData = await axios.post(`${process.env.CALCULATION_API_URI}/calculation-api/calculate`,
-                    analyseResult
-                );
+                // Use local calculation service instead of external API
+                calculatedData = await analyseData(analyseResult, userId);
                 
-                if(!getCalculationData || !getCalculationData.data || !getCalculationData.data.data || !getCalculationData.data.data.dashboardData){
-                    logger.error(`Invalid calculation data response for user ${userId}:`, getCalculationData?.data || 'No data');
+                if(!calculatedData || !calculatedData.dashboardData){
+                    logger.error(`Invalid calculation data response for user ${userId}`);
                     continue;
                 }
             } catch (error) {
@@ -165,15 +159,16 @@ const getAnalysisData = async(seller)=>{
                 continue;
             }
 
-            console.log("getCalculationData: ",getCalculationData.data.data.dashboardData.TotalRankingerrors);
+            console.log("calculatedData: ", calculatedData.dashboardData.TotalRankingerrors);
             
-            const rankingErrors = getCalculationData.data.data.dashboardData.TotalRankingerrors || 0;
-            const conversionErrors = getCalculationData.data.data.dashboardData.totalErrorInConversion || 0;
-            const accountErrors = getCalculationData.data.data.dashboardData.totalErrorInAccount || 0;
-            const profitabilityErrors = getCalculationData.data.data.dashboardData.totalProfitabilityErrors || 0;
-            const sponsoredAdsErrors = getCalculationData.data.data.dashboardData.totalSponsoredAdsErrors || 0;
-            const inventoryErrors = getCalculationData.data.data.dashboardData.totalInventoryErrors || 0;
-            const marketPlace = getCalculationData.data.data.dashboardData.Country || '';
+            const dashboardData = calculatedData.dashboardData;
+            const rankingErrors = dashboardData.TotalRankingerrors || 0;
+            const conversionErrors = dashboardData.totalErrorInConversion || 0;
+            const accountErrors = dashboardData.totalErrorInAccount || 0;
+            const profitabilityErrors = dashboardData.totalProfitabilityErrors || 0;
+            const sponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
+            const inventoryErrors = dashboardData.totalInventoryErrors || 0;
+            const marketPlace = dashboardData.Country || '';
             const totalIssues = rankingErrors + conversionErrors + accountErrors + profitabilityErrors + sponsoredAdsErrors + inventoryErrors;
            // const totalActiveProducts = getCalculationData.data.data.ActiveProducts.length();
             const sendEmailResult = await sendWeeklyEmailToUser(firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,"59");

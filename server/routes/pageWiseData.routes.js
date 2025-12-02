@@ -1,0 +1,67 @@
+/**
+ * Page-wise Data Routes
+ * 
+ * These routes provide separate endpoints for each dashboard page.
+ * Data is calculated in the backend and sent to the frontend ready for display.
+ */
+
+const express = require('express');
+const router = express.Router();
+const auth = require('../middlewares/Auth/auth.js');
+const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { analyseDataCache } = require('../middlewares/redisCache.js');
+
+const {
+    getDashboardData,
+    getProfitabilityData,
+    getPPCData,
+    getIssuesData,
+    getIssuesByProductData,
+    getKeywordAnalysisData,
+    getReimbursementData,
+    getTasksData,
+    updateTaskStatus,
+    getInventoryData
+} = require('../controllers/analytics/PageWiseDataController.js');
+
+// ===== MAIN DASHBOARD =====
+// Returns full calculated dashboard data
+router.get('/dashboard', auth, getLocation, analyseDataCache(3600), getDashboardData);
+
+// ===== PROFITABILITY DASHBOARD =====
+// Returns profitability-specific calculated data
+router.get('/profitability', auth, getLocation, analyseDataCache(3600), getProfitabilityData);
+
+// ===== PPC/SPONSORED ADS DASHBOARD =====
+// Returns PPC/sponsored ads specific calculated data
+router.get('/ppc', auth, getLocation, analyseDataCache(3600), getPPCData);
+
+// ===== ISSUES PAGE =====
+// Returns issues summary data
+router.get('/issues', auth, getLocation, analyseDataCache(3600), getIssuesData);
+
+// ===== ISSUES BY PRODUCT PAGE =====
+// Returns detailed issues by product data
+router.get('/issues-by-product', auth, getLocation, analyseDataCache(3600), getIssuesByProductData);
+
+// ===== KEYWORD ANALYSIS PAGE =====
+// Returns keyword analysis data
+router.get('/keyword-analysis', auth, getLocation, analyseDataCache(3600), getKeywordAnalysisData);
+
+// ===== REIMBURSEMENT DASHBOARD =====
+// Returns reimbursement data
+router.get('/reimbursement', auth, getLocation, analyseDataCache(3600), getReimbursementData);
+
+// ===== INVENTORY PAGE =====
+// Returns inventory data
+router.get('/inventory', auth, getLocation, analyseDataCache(3600), getInventoryData);
+
+// ===== TASKS PAGE =====
+// Returns tasks data
+router.get('/tasks', auth, getTasksData);
+
+// Update task status
+router.put('/tasks/status', auth, updateTaskStatus);
+
+module.exports = router;
+

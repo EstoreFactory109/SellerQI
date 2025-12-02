@@ -10,6 +10,7 @@ import cogsSlice from '../slices/cogsSlice.js'
 import errorsSlice from '../slices/errorsSlice.js'
 import notificationsSlice from '../slices/notificationsSlice.js'
 import currencySlice from '../slices/currencySlice.js'
+import pageDataSlice from '../slices/PageDataSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -22,6 +23,7 @@ export const store = configureStore({
     cogs: cogsSlice,
     errors: errorsSlice,
     notifications: notificationsSlice,
-    currency: currencySlice
+    currency: currencySlice,
+    pageData: pageDataSlice
   },
 });

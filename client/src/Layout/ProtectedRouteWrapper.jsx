@@ -8,7 +8,6 @@ import { setDashboardInfo } from '../redux/slices/DashboardSlice.js';
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js';
 import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js';
-import analyseData from '../operations/analyse.js';
 import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js';
 import axiosInstance from '../config/axios.config.js';
 import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
@@ -113,64 +112,52 @@ const ProtectedRouteWrapper = ({ children }) => {
       let dashboardData = null;
 
       try {
-        const response = await axiosInstance.get('/app/analyse/getData');
+        // NEW: Fetch pre-calculated dashboard data from the backend page-wise endpoint
+        // This replaces the old flow of fetching raw data and calculating in frontend
+        const response = await axiosInstance.get('/api/pagewise/dashboard');
 
         // Check if component is still mounted
         if (!isMountedRef.current) return;
 
-        console.log("=== ProtectedRouteWrapper: Data fetch response ===");
+        console.log("=== ProtectedRouteWrapper: Dashboard data fetch response ===");
         console.log("Response status:", response?.status);
         console.log("Response data:", response?.data);
 
         // Handle different response scenarios gracefully
         if (response?.status === 200) {
-          // Set available account and brand data if present
-          if (response.data?.data?.AllSellerAccounts) {
-            dispatch(setAllAccounts(response.data.data.AllSellerAccounts));
-          }
+          // Dashboard data is now pre-calculated by the backend
+          dashboardData = response.data?.data?.dashboardData;
           
-          if (response.data?.data?.Brand) {
-            dispatch(addBrand(response.data.data.Brand));
-          }
-          
-          // Process dashboard data - analyseData will now handle empty data gracefully
-          try {
-            console.log("userData in ProtectedRouteWrapper: ", freshUserData)
-            dashboardData = (await analyseData(response.data?.data || {}, freshUserData?.userId)).dashboardData;
-            console.log("dashboardData: ",dashboardData)
-            
-            // Check if we got empty data or actual data
-            if (isEmptyDashboardData(dashboardData)) {
-              console.log("⚠️ Account has no data available - showing zero data instead of error");
-              hasAnyData = false; // This will be used for loader logic but not redirect
-            } else {
-              console.log("✅ Account has data available");
-              hasAnyData = true;
-            }
-            
-            // Always dispatch the dashboard data (either real data or empty structure)
-            dispatch(setDashboardInfo(dashboardData));
-            
-            // Dispatch error details if available
-            if (dashboardData.totalProfitabilityErrors !== undefined) {
-              dispatch(setProfitabilityErrorDetails({
-                totalErrors: dashboardData.totalProfitabilityErrors || 0,
-                errorDetails: dashboardData.profitabilityErrorDetails || []
-              }));
-            }
-            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-              dispatch(setSponsoredAdsErrorDetails({
-                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-              }));
-            }
-          } catch (analyseError) {
-            console.error("❌ Error processing dashboard data:", analyseError);
-            // Create default data structure if analysis fails
-            console.log("⚠️ Analysis failed - providing default empty data structure");
-            dashboardData = createDefaultDashboardData();
-            dispatch(setDashboardInfo(dashboardData));
+          // Check if we got empty data or actual data
+          if (!dashboardData || isEmptyDashboardData(dashboardData)) {
+            console.log("⚠️ Account has no data available - showing zero data instead of error");
+            dashboardData = dashboardData || createDefaultDashboardData();
             hasAnyData = false;
+          } else {
+            console.log("✅ Account has data available");
+            hasAnyData = true;
+          }
+          
+          // Always dispatch the dashboard data (either real data or empty structure)
+          dispatch(setDashboardInfo(dashboardData));
+          
+          // Dispatch brand name if available
+          if (dashboardData.Brand) {
+            dispatch(addBrand(dashboardData.Brand));
+          }
+          
+          // Dispatch error details if available
+          if (dashboardData.totalProfitabilityErrors !== undefined) {
+            dispatch(setProfitabilityErrorDetails({
+              totalErrors: dashboardData.totalProfitabilityErrors || 0,
+              errorDetails: dashboardData.profitabilityErrorDetails || []
+            }));
+          }
+          if (dashboardData.totalSponsoredAdsErrors !== undefined) {
+            dispatch(setSponsoredAdsErrorDetails({
+              totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
+              errorDetails: dashboardData.sponsoredAdsErrorDetails || []
+            }));
           }
         } else if (response?.status && response.status !== 200) {
           console.warn(`⚠️ Non-200 response: ${response.status}`);
@@ -195,7 +182,8 @@ const ProtectedRouteWrapper = ({ children }) => {
           hasAnyData = false;
         }
 
-        // Try to fetch history data independently
+        // History is now recorded by the backend when dashboard data is calculated
+        // Fetch history data for display purposes
         try {
           const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
 

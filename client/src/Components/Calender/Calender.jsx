@@ -6,6 +6,7 @@ import './Calendar.css';
 import axios from 'axios'
 import {useDispatch, useSelector} from 'react-redux'
 import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode} from '../../redux/slices/DashboardSlice.js'
+import { addBrand } from '../../redux/slices/authSlice.js'
 import PulseLoader from "react-spinners/PulseLoader";
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -241,8 +242,9 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     setLoader(true);
     
     try {
-      // Call the default getData endpoint to get the original dashboard data
-      const response = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/analyse/getData`, {
+      // NEW: Fetch pre-calculated dashboard data from the page-wise endpoint
+      // The backend now handles all calculations
+      const response = await axios.get(`${import.meta.env.VITE_BASE_URI}/api/pagewise/dashboard`, {
         withCredentials: true
       });
 
@@ -251,12 +253,16 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         return;
       }
 
-      // Process the data the same way as in ProtectedRouteWrapper.jsx and AnalysingAccount.jsx
-      const analyseData = (await import('../../operations/analyse.js')).default;
-      const dashboardData = (await analyseData(response.data.data)).dashboardData;
+      // Dashboard data is now pre-calculated by the backend
+      const dashboardData = response.data?.data?.dashboardData;
 
-      // Update Redux store with the complete default dashboard data
+      // Update Redux store with the complete dashboard data
       dispatch(setDashboardInfo(dashboardData));
+      
+      // Dispatch brand name if available
+      if (dashboardData?.Brand) {
+        dispatch(addBrand(dashboardData.Brand));
+      }
 
     } catch (error) {
       console.error('Error fetching default dashboard data:', error);

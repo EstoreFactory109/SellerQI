@@ -59,13 +59,14 @@ export default function Tasks() {
         setLoading(true);
         setError(null);
         
+        // Updated to use the new page-wise endpoint in IBEX server
         const response = await axios.get(
-          `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/${userData.userId}`,
+          `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks`,
           { withCredentials: true }
         );
 
         if (response.status === 200 && response.data?.data) {
-          setTasks(response.data.data);
+          setTasks(response.data.data.tasks || []);
         } else {
           setError('Failed to fetch tasks data');
         }
@@ -217,12 +218,11 @@ export default function Tasks() {
       return newSet;
     });
 
-    // Send request to backend to persist the change
+    // Send request to backend to persist the change - updated to use IBEX server
     try {
       const response = await axios.put(
-        `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/update-status`,
+        `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks/status`,
         {
-          userId: userData?.userId,
           taskId: taskId,
           status: newStatus
         },
@@ -264,13 +264,14 @@ export default function Tasks() {
       setLoading(true);
       setError(null);
       
+      // Updated to use the new page-wise endpoint in IBEX server
       const response = await axios.get(
-        `${import.meta.env.VITE_CALCULATION_API_URI}/api/tasks/${userData.userId}`,
+        `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks`,
         { withCredentials: true }
       );
 
       if (response.status === 200 && response.data?.data) {
-        setTasks(response.data.data);
+        setTasks(response.data.data.tasks || []);
       } else {
         setError('Failed to refresh tasks data');
       }
