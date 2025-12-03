@@ -126,7 +126,30 @@ const asinWiseSalesSchema = new mongoose.Schema({
             required: true,
             default: 'USD'
         }
-    }
+    },
+    totalFees: {
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    },
+    feeBreakdown: [{
+        feeType: {
+            type: String,
+            required: true
+        },
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        }
+    }]
 }, {
     _id: false
 });
@@ -198,6 +221,10 @@ const economicsMetricsSchema = new mongoose.Schema({
         type: monetaryAmountSchema,
         required: true
     },
+    totalFees: {
+        type: monetaryAmountSchema,
+        required: true
+    },
     refunds: {
         type: monetaryAmountSchema,
         required: true
@@ -252,6 +279,7 @@ economicsMetricsSchema.methods.getSummary = function() {
         ppcSpent: this.ppcSpent,
         fbaFees: this.fbaFees,
         storageFees: this.storageFees,
+        totalFees: this.totalFees,
         refunds: this.refunds,
         dateRange: this.dateRange,
         country: this.country // country = marketplace (US, UK, DE, etc.)

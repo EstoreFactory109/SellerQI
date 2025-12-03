@@ -19,18 +19,61 @@ axiosRetry(axios, {
 });
 
 const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country, Region) => {
-  logger.info("GetListingItemsIssues starting");
+  logger.info("GetListingItemsIssues starting", { sku, asin, Country, Region });
   
   const host = baseuri;
 
-  const queryParams = new URLSearchParams({
-    marketplaceIds: dataToReceive.marketplaceId,
-    issueLocale: dataToReceive.issueLocale,
-    includedData: dataToReceive.includedData
-  }).toString();
+  // URL encode the SKU to handle special characters (hyphens, spaces, etc.)
+  // Use encodeURIComponent but then replace %2F back to / if needed for path compatibility
+  const encodedSku = encodeURIComponent(sku);
 
-  const path = `/listings/2021-08-01/items/${dataToReceive.SellerId}/${sku}?${queryParams}`;
+  // Determine AWS region from SP-API region
+  // SP-API regions: NA (us-east-1), EU (eu-west-1), FE (us-west-2)
+  let awsRegion = 'us-east-1'; // Default for NA
+  if (Region === 'EU') {
+    awsRegion = 'eu-west-1';
+  } else if (Region === 'FE') {
+    awsRegion = 'us-west-2';
+  }
+
+  // Build query parameters
+  // For includedData, Amazon expects multiple query params OR comma-separated values
+  // Using URLSearchParams and appending each includedData value separately
+  const queryParamsObj = new URLSearchParams();
+  queryParamsObj.append('marketplaceIds', dataToReceive.marketplaceId);
+  queryParamsObj.append('issueLocale', dataToReceive.issueLocale);
+  
+  // Handle includedData - can be comma-separated string or array
+  const includedDataValues = typeof dataToReceive.includedData === 'string' 
+    ? dataToReceive.includedData.split(',').map(v => v.trim())
+    : dataToReceive.includedData;
+  
+  // Append each includedData value as a separate parameter
+  includedDataValues.forEach(value => {
+    queryParamsObj.append('includedData', value);
+  });
+  
+  const queryParams = queryParamsObj.toString();
+
+  // Build the path with encoded SKU
+  const path = `/listings/2021-08-01/items/${dataToReceive.SellerId}/${encodedSku}?${queryParams}`;
   const fullUrl = `https://${host}${path}`;
+
+  // Validate issueLocale format - Amazon expects formats like "en_US", "en_AU", "en_GB"
+  // But some regions might need different handling
+  let issueLocale = dataToReceive.issueLocale;
+  
+  // Log all request parameters for debugging
+  logger.info("GetListingItemsIssues request details", {
+    host,
+    encodedSku,
+    originalSku: sku,
+    awsRegion,
+    sellerId: dataToReceive.SellerId,
+    marketplaceId: dataToReceive.marketplaceId,
+    issueLocale,
+    includedData: dataToReceive.includedData
+  });
 
   let request = {
     host: host,
@@ -48,8 +91,10 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     secretAccessKey: dataToReceive.SecretKey,
     sessionToken: dataToReceive.SessionToken,
     service: 'execute-api',
-    region: 'us-east-1'
+    region: awsRegion
   });
+  
+  logger.info("GetListingItemsIssues full URL", { fullUrl });
 
   try {
     const response = await axios.get(fullUrl, {

@@ -61,6 +61,7 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
             ppcSpent: metrics.ppcSpent,
             fbaFees: metrics.fbaFees,
             storageFees: metrics.storageFees,
+            totalFees: metrics.totalFees,
             refunds: metrics.refunds,
             datewiseSales: metrics.datewiseSales || [],
             datewiseGrossProfit: metrics.datewiseGrossProfit || [],

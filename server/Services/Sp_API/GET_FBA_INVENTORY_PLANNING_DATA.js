@@ -163,27 +163,86 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
             };
         }
 
+        // Log the first item's keys to debug field mapping issues
+        if (refinedData.length > 0) {
+            logger.info("FBA Inventory Planning - Available fields in report:", {
+                fields: Object.keys(refinedData[0]),
+                sampleItem: refinedData[0],
+                totalRecords: refinedData.length
+            });
+        }
+
         const result = [];
 
         refinedData.forEach((item) => {
             // Helper function to convert empty strings to "0" for required fields
+            // Handles null, undefined, empty string, and missing fields
             const getValue = (value) => {
-                if (value === null || value === undefined || value === '') {
+                if (value === null || value === undefined || value === '' || value === 'undefined') {
                     return "0";
                 }
-                return String(value).trim();
+                const trimmed = String(value).trim();
+                return trimmed === '' ? "0" : trimmed;
             };
 
+            // Helper to find field with different possible names (Amazon uses different naming conventions)
+            const findField = (item, ...possibleNames) => {
+                for (const name of possibleNames) {
+                    if (item[name] !== undefined) {
+                        return item[name];
+                    }
+                }
+                return null;
+            };
+
+            // Skip items without ASIN
+            const asin = item.asin || item.ASIN || item['asin'] || "";
+            if (!asin) {
+                return; // Skip this item
+            }
+
             result.push({
-                asin: item.asin || "",
-                quantity_to_be_charged_ais_181_210_days: getValue(item["quantity-to-be-charged-ais-181-210-days"]),
-                quantity_to_be_charged_ais_211_240_days: getValue(item["quantity-to-be-charged-ais-211-240-days"]),
-                quantity_to_be_charged_ais_241_270_days: getValue(item["quantity-to-be-charged-ais-241-270-days"]),
-                quantity_to_be_charged_ais_271_300_days: getValue(item["quantity-to-be-charged-ais-271-300-days"]),
-                quantity_to_be_charged_ais_301_330_days: getValue(item["quantity-to-be-charged-ais-301-330-days"]),
-                quantity_to_be_charged_ais_331_365_days: getValue(item["quantity-to-be-charged-ais-331-365-days"]),
-                quantity_to_be_charged_ais_365_plus_days: getValue(item["quantity-to-be-charged-ais-365-plus-days"]),
-                unfulfillable_quantity: getValue(item["unfulfillable-quantity"]),
+                asin: asin,
+                quantity_to_be_charged_ais_181_210_days: getValue(findField(item, 
+                    "quantity-to-be-charged-ais-181-210-days",
+                    "quantity_to_be_charged_ais_181_210_days",
+                    "quantityToBeChargedAis181210Days"
+                )),
+                quantity_to_be_charged_ais_211_240_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-211-240-days",
+                    "quantity_to_be_charged_ais_211_240_days",
+                    "quantityToBeChargedAis211240Days"
+                )),
+                quantity_to_be_charged_ais_241_270_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-241-270-days",
+                    "quantity_to_be_charged_ais_241_270_days",
+                    "quantityToBeChargedAis241270Days"
+                )),
+                quantity_to_be_charged_ais_271_300_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-271-300-days",
+                    "quantity_to_be_charged_ais_271_300_days",
+                    "quantityToBeChargedAis271300Days"
+                )),
+                quantity_to_be_charged_ais_301_330_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-301-330-days",
+                    "quantity_to_be_charged_ais_301_330_days",
+                    "quantityToBeChargedAis301330Days"
+                )),
+                quantity_to_be_charged_ais_331_365_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-331-365-days",
+                    "quantity_to_be_charged_ais_331_365_days",
+                    "quantityToBeChargedAis331365Days"
+                )),
+                quantity_to_be_charged_ais_365_plus_days: getValue(findField(item,
+                    "quantity-to-be-charged-ais-365-plus-days",
+                    "quantity_to_be_charged_ais_365_plus_days",
+                    "quantityToBeChargedAis365PlusDays"
+                )),
+                unfulfillable_quantity: getValue(findField(item,
+                    "unfulfillable-quantity",
+                    "unfulfillable_quantity",
+                    "unfulfillableQuantity"
+                )),
             });
         });
 

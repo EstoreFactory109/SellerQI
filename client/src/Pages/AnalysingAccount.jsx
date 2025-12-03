@@ -172,37 +172,37 @@ const AnalysingAccount = () => {
                         // Dashboard data is now pre-calculated by the backend
                         dashboardData = response.data?.data?.dashboardData;
                         console.log("Pre-calculated dashboard data received:", dashboardData);
-                        
-                        // Check if we got empty data or actual data
+                            
+                            // Check if we got empty data or actual data
                         if (!dashboardData || isEmptyDashboardData(dashboardData)) {
-                            console.log("⚠️ Account has no data available - will show zero data instead of error");
+                                console.log("⚠️ Account has no data available - will show zero data instead of error");
                             dashboardData = dashboardData || createDefaultDashboardData();
-                            hasAnyData = false;
-                        } else {
-                            console.log("✅ Account has data available");
-                            hasAnyData = true;
-                        }
-                        
-                        // Always dispatch the dashboard data (either real data or empty structure)
-                        dispatch(setDashboardInfo(dashboardData));
+                                hasAnyData = false;
+                            } else {
+                                console.log("✅ Account has data available");
+                                hasAnyData = true;
+                            }
+                            
+                            // Always dispatch the dashboard data (either real data or empty structure)
+                            dispatch(setDashboardInfo(dashboardData));
                         
                         // Dispatch brand name if available
                         if (dashboardData.Brand) {
                             dispatch(addBrand(dashboardData.Brand));
                         }
-                        
-                        // Dispatch error details if available
-                        if (dashboardData.totalProfitabilityErrors !== undefined) {
-                            dispatch(setProfitabilityErrorDetails({
-                                totalErrors: dashboardData.totalProfitabilityErrors || 0,
-                                errorDetails: dashboardData.profitabilityErrorDetails || []
-                            }));
-                        }
-                        if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-                            dispatch(setSponsoredAdsErrorDetails({
-                                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-                                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-                            }));
+                            
+                            // Dispatch error details if available
+                            if (dashboardData.totalProfitabilityErrors !== undefined) {
+                                dispatch(setProfitabilityErrorDetails({
+                                    totalErrors: dashboardData.totalProfitabilityErrors || 0,
+                                    errorDetails: dashboardData.profitabilityErrorDetails || []
+                                }));
+                            }
+                            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
+                                dispatch(setSponsoredAdsErrorDetails({
+                                    totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
+                                    errorDetails: dashboardData.sponsoredAdsErrorDetails || []
+                                }));
                         }
                     } else if (response?.status === 404 || response?.status === 204) {
                         console.log("⚠️ Account not found or no content - providing empty data structure");

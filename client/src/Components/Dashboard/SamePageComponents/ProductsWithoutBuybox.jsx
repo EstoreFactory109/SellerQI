@@ -18,7 +18,7 @@ const ProductsWithoutBuybox = () => {
             <div className='space-y-4'>
                 <div className='text-center'>
                     <div className='text-3xl font-bold text-red-600 mb-1'>
-                        {info?.productsWithOutBuyboxError || 0}
+                        {info?.productsWithoutBuyBox || info?.productsWithOutBuyboxError || 0}
                     </div>
                     <p className='text-sm text-gray-500'>Products affected</p>
                 </div>

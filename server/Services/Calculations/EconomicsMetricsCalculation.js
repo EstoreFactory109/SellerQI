@@ -40,6 +40,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
     let totalPPCSpent = 0;
     let totalFBAFees = 0;
     let totalStorageFees = 0;
+    let totalFees = 0; // Total of all fees (all fee types combined)
     let totalRefunds = 0;
     let currencyCode = 'USD';
     
@@ -97,6 +98,8 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                     ppcSpent: 0,
                     fbaFees: 0,
                     storageFees: 0,
+                    totalFees: 0,
+                    feeBreakdown: {}, // { feeTypeName: amount }
                     asin: asin
                 };
             }
@@ -122,29 +125,53 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             asinWiseSales[asin].ppcSpent += itemPPCSpent;
         }
 
-        // Calculate FBA Fees and Storage Fees - track per ASIN
+        // Calculate ALL Fees - track per ASIN with breakdown
         let itemFBAFees = 0;
         let itemStorageFees = 0;
+        let itemTotalFees = 0;
+        
         if (item.fees && Array.isArray(item.fees)) {
             item.fees.forEach(fee => {
-                const feeTypeName = (fee.feeTypeName || '').toLowerCase();
-                // Handle charges array - get first charge's aggregatedDetail
-                const feeAmount = parseFloat(
-                    fee.charges?.[0]?.aggregatedDetail?.totalAmount?.amount || 
-                    fee.charges?.aggregatedDetail?.totalAmount?.amount || 
-                    0
-                );
+                const feeTypeName = fee.feeTypeName || 'Unknown';
+                const feeTypeNameLower = feeTypeName.toLowerCase();
+                
+                // Handle charges array - sum all charges for this fee type
+                let feeAmount = 0;
+                if (fee.charges && Array.isArray(fee.charges)) {
+                    fee.charges.forEach(charge => {
+                        const chargeAmount = parseFloat(
+                            charge?.aggregatedDetail?.totalAmount?.amount || 
+                            charge?.aggregatedDetail?.amount?.amount || 
+                            0
+                        );
+                        feeAmount += chargeAmount;
+                    });
+                } else if (fee.charges?.aggregatedDetail?.totalAmount?.amount) {
+                    feeAmount = parseFloat(fee.charges.aggregatedDetail.totalAmount.amount);
+                }
 
+                // Add to total fees (all fee types)
+                itemTotalFees += feeAmount;
+                totalFees += feeAmount; // Add to overall total fees
+
+                // Categorize specific fee types
                 // FBA Fulfillment Fee
-                if (feeTypeName.includes('fba') && (feeTypeName.includes('fulfillment') || feeTypeName.includes('fulfilment'))) {
+                if (feeTypeNameLower.includes('fba') && (feeTypeNameLower.includes('fulfillment') || feeTypeNameLower.includes('fulfilment'))) {
                     itemFBAFees += feeAmount;
                     totalFBAFees += feeAmount;
                 }
-
                 // Storage Fee
-                if (feeTypeName.includes('storage')) {
+                else if (feeTypeNameLower.includes('storage')) {
                     itemStorageFees += feeAmount;
                     totalStorageFees += feeAmount;
+                }
+
+                // Track fee breakdown per ASIN
+                if (asin && asin !== 'UNKNOWN' && feeAmount !== 0) {
+                    if (!asinWiseSales[asin].feeBreakdown[feeTypeName]) {
+                        asinWiseSales[asin].feeBreakdown[feeTypeName] = 0;
+                    }
+                    asinWiseSales[asin].feeBreakdown[feeTypeName] += feeAmount;
                 }
             });
         }
@@ -153,6 +180,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         if (asin && asin !== 'UNKNOWN') {
             asinWiseSales[asin].fbaFees += itemFBAFees;
             asinWiseSales[asin].storageFees += itemStorageFees;
+            asinWiseSales[asin].totalFees += itemTotalFees;
         }
 
         // Calculate Refunds
@@ -206,6 +234,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             ppcSpent: totalPPCSpent,
             fbaFees: totalFBAFees,
             storageFees: totalStorageFees,
+            totalFees: totalFees,
             refunds: totalRefunds
         },
         datewiseCount: Object.keys(datewiseSales).length,
@@ -239,7 +268,16 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
 
     // Convert ASIN-wise data to array and sort by sales (descending)
     const asinWiseSalesArray = Object.values(asinWiseSales)
-        .map(asinData => ({
+        .map(asinData => {
+            // Convert feeBreakdown object to array format
+            const feeBreakdownArray = Object.entries(asinData.feeBreakdown || {})
+                .map(([feeType, amount]) => ({
+                    feeType: feeType,
+                    amount: parseFloat(amount.toFixed(2))
+                }))
+                .filter(item => item.amount !== 0); // Remove zero amounts
+
+            return {
             asin: asinData.asin,
             sales: {
                 amount: parseFloat(asinData.sales.toFixed(2)),
@@ -261,8 +299,14 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             storageFees: {
                 amount: parseFloat(asinData.storageFees.toFixed(2)),
                 currencyCode
-            }
-        }))
+                },
+                totalFees: {
+                    amount: parseFloat(asinData.totalFees.toFixed(2)),
+                    currencyCode
+                },
+                feeBreakdown: feeBreakdownArray
+            };
+        })
         .sort((a, b) => b.sales.amount - a.sales.amount);
 
     // Build and return the metrics object
@@ -290,6 +334,10 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         },
         storageFees: {
             amount: parseFloat(totalStorageFees.toFixed(2)),
+            currencyCode
+        },
+        totalFees: {
+            amount: parseFloat(totalFees.toFixed(2)),
             currencyCode
         },
         refunds: {

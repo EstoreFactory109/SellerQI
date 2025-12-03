@@ -6,12 +6,18 @@ const V1_Model = require('../../models/seller-performance/V1_Seller_Performance_
 const numberofproductreviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const ListingAllItems = require('../../models/products/GetListingItemsModel.js');
 const APlusContentModel = require('../../models/seller-performance/APlusContentModel.js');
-const financeModel = require('../../models/finance/listFinancialEventsModel.js');
+// Deprecated: financeModel - replaced by EconomicsMetrics
+// const financeModel = require('../../models/finance/listFinancialEventsModel.js');
 const competitivePricingModel = require('../../models/seller-performance/CompetitivePricingModel.js');
 const restockInventoryRecommendationsModel = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
-const TotalSalesModel = require('../../models/products/TotalSalesModel.js');
+// Deprecated: TotalSalesModel - replaced by EconomicsMetrics
+// const TotalSalesModel = require('../../models/products/TotalSalesModel.js');
 const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const ProductWiseSalesModel = require('../../models/products/ProductWiseSalesModel.js');
+// New: EconomicsMetrics model for sales, finance and profitability data
+const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+// New: BuyBoxData model for buybox metrics
+const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const { 
     replenishmentQty,
     inventoryPlanningData: processInventoryPlanningData,
@@ -282,6 +288,7 @@ class AnalyseService {
 
     /**
      * Fetch all data models in parallel
+     * Note: financeData and TotalSales are now fetched from EconomicsMetrics model
      */
     static async fetchAllDataModels(userId, country, region) {
         const createdDate = new Date();
@@ -291,13 +298,13 @@ class AnalyseService {
         const [
             v2Data,
             v1Data,
-            financeData,
+            economicsMetricsData, // Replaces financeData and TotalSales
+            buyBoxData, // BuyBox data from MCP
             restockInventoryRecommendationsData,
             numberOfProductReviews,
             GetlistingAllItems,
             getCompetitiveData,
             aplusResponse,
-            TotalSales,
             shipmentdata,
             saleByProduct,
             ProductWiseSponsoredAds,
@@ -317,14 +324,16 @@ class AnalyseService {
         ] = await Promise.all([
             V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            financeModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+            // Use EconomicsMetrics instead of financeModel and TotalSalesModel
+            EconomicsMetrics.findLatest(userId, region, country),
+            // Fetch BuyBox data
+            BuyBoxData.findLatest(userId, region, country),
             restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             // NOTE: Competitive pricing feature is disabled, using empty default data
             Promise.resolve({ Products: [] }), // Default empty competitive pricing data
             APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            TotalSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ProductWiseSponsoredAdsData.find({
@@ -352,12 +361,26 @@ class AnalyseService {
         ]);
 
         console.log("v2Data: ", v2Data);
+        console.log("economicsMetricsData: ", economicsMetricsData ? 'Found' : 'Not Found');
+        console.log("buyBoxData: ", buyBoxData ? {
+            found: true,
+            totalProducts: buyBoxData.totalProducts,
+            productsWithoutBuyBox: buyBoxData.productsWithoutBuyBox,
+            asinBuyBoxDataCount: buyBoxData.asinBuyBoxData?.length || 0,
+            hasAsinBuyBoxData: !!buyBoxData.asinBuyBoxData
+        } : 'Not Found');
+
+        // Convert EconomicsMetrics to legacy financeData format for backward compatibility
+        const financeData = this.convertEconomicsToFinanceFormat(economicsMetricsData);
+        
+        // Convert EconomicsMetrics to legacy TotalSales format for backward compatibility
+        const TotalSales = this.convertEconomicsToTotalSalesFormat(economicsMetricsData);
 
         // Log missing data warnings
         const missingDataWarnings = [];
         if (!v2Data) missingDataWarnings.push('v2Data');
         if (!v1Data) missingDataWarnings.push('v1Data');
-        if (!financeData) missingDataWarnings.push('financeData');
+        if (!economicsMetricsData) missingDataWarnings.push('economicsMetricsData');
         // ... add other checks as needed
 
         if (missingDataWarnings.length > 0) {
@@ -373,10 +396,15 @@ class AnalyseService {
             console.log('[DEBUG] No KeywordTrackingData found for userId:', userId, 'country:', country, 'region:', region);
         }
 
+        // Convert Mongoose documents to plain objects if needed
+        const buyBoxDataPlain = buyBoxData ? (buyBoxData.toObject ? buyBoxData.toObject() : buyBoxData) : null;
+        
         return {
             v2Data,
             v1Data,
             financeData,
+            economicsMetricsData, // New: raw economics data for profitability calculations
+            buyBoxData: buyBoxDataPlain, // Convert to plain object for easier access
             restockInventoryRecommendationsData,
             numberOfProductReviews,
             GetlistingAllItems,
@@ -400,6 +428,57 @@ class AnalyseService {
             AdsGroupData,
             keywordTrackingData
         };
+    }
+
+    /**
+     * Convert EconomicsMetrics data to legacy financeData format
+     * @param {Object} economicsMetrics - EconomicsMetrics document
+     * @returns {Object} Finance data in legacy format
+     */
+    static convertEconomicsToFinanceFormat(economicsMetrics) {
+        if (!economicsMetrics) {
+            return {
+                createdAt: new Date(),
+                Gross_Profit: 0,
+                Total_Sales: 0,
+                ProductAdsPayment: 0,
+                FBA_Fees: 0,
+                Storage: 0,
+                Amazon_Charges: 0,
+                Refunds: 0
+            };
+        }
+
+        return {
+            createdAt: economicsMetrics.createdAt || new Date(),
+            Gross_Profit: economicsMetrics.grossProfit?.amount || 0,
+            Total_Sales: economicsMetrics.totalSales?.amount || 0,
+            ProductAdsPayment: economicsMetrics.ppcSpent?.amount || 0,
+            FBA_Fees: economicsMetrics.fbaFees?.amount || 0,
+            Storage: economicsMetrics.storageFees?.amount || 0,
+            Amazon_Charges: (economicsMetrics.fbaFees?.amount || 0) + (economicsMetrics.storageFees?.amount || 0),
+            Refunds: economicsMetrics.refunds?.amount || 0
+        };
+    }
+
+    /**
+     * Convert EconomicsMetrics data to legacy TotalSales format
+     * @param {Object} economicsMetrics - EconomicsMetrics document
+     * @returns {Object} TotalSales data in legacy format
+     */
+    static convertEconomicsToTotalSalesFormat(economicsMetrics) {
+        if (!economicsMetrics) {
+            return { totalSales: [] };
+        }
+
+        // Convert datewiseSales to the legacy totalSales format
+        const totalSales = (economicsMetrics.datewiseSales || []).map(day => ({
+            interval: day.date,
+            TotalAmount: day.sales?.amount || 0,
+            Profit: day.grossProfit?.amount || 0
+        }));
+
+        return { totalSales };
     }
 
     /**
@@ -541,6 +620,7 @@ class AnalyseService {
         const safeFinanceData = allData.financeData || {
             createdAt: new Date(),
             Gross_Profit: 0,
+            Total_Sales: 0,
             ProductAdsPayment: 0,
             FBA_Fees: 0,
             Storage: 0,
@@ -551,6 +631,9 @@ class AnalyseService {
         const financeCreatedDate = safeFinanceData.createdAt;
         const financeThirtyDaysAgo = new Date(financeCreatedDate);
         financeThirtyDaysAgo.setDate(financeThirtyDaysAgo.getDate() - 30);
+
+        // Get economics metrics for ASIN-wise data (profitability, ACOS/TACOS calculations)
+        const economicsMetrics = allData.economicsMetricsData;
 
         return {
             createdAccountDate: createdAccountDate,
@@ -568,6 +651,28 @@ class AnalyseService {
             },
             FinanceData: safeFinanceData,
             TotalSales: (allData.TotalSales || { totalSales: [] }).totalSales,
+            // New: EconomicsMetrics data for dashboard and profitability
+            EconomicsMetrics: economicsMetrics ? {
+                totalSales: economicsMetrics.totalSales,
+                grossProfit: economicsMetrics.grossProfit,
+                ppcSpent: economicsMetrics.ppcSpent,
+                fbaFees: economicsMetrics.fbaFees,
+                storageFees: economicsMetrics.storageFees,
+                refunds: economicsMetrics.refunds,
+                datewiseSales: economicsMetrics.datewiseSales,
+                datewiseGrossProfit: economicsMetrics.datewiseGrossProfit,
+                asinWiseSales: economicsMetrics.asinWiseSales,
+                dateRange: economicsMetrics.dateRange
+            } : null,
+            // New: BuyBox data for dashboard
+            BuyBoxData: allData.buyBoxData ? {
+                totalProducts: allData.buyBoxData.totalProducts,
+                productsWithBuyBox: allData.buyBoxData.productsWithBuyBox,
+                productsWithoutBuyBox: allData.buyBoxData.productsWithoutBuyBox,
+                productsWithLowBuyBox: allData.buyBoxData.productsWithLowBuyBox,
+                asinBuyBoxData: allData.buyBoxData.asinBuyBoxData,
+                dateRange: allData.buyBoxData.dateRange
+            } : null,
             ProductWiseSponsoredAds: sponsoredAdsData.mostRecentSponsoredAds,
             ProductWiseSponsoredAdsGraphData: sponsoredAdsData.sponsoredAdsGraphData,
             negetiveKeywords: (allData.negetiveKeywords || { negativeKeywordsData: [] }).negativeKeywordsData,

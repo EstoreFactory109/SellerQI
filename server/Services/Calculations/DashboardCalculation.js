@@ -4,6 +4,9 @@
  * This service handles all dashboard calculations that were previously done
  * in the separate calculation server. All calculations are now performed
  * in the IBEX backend.
+ * 
+ * Note: Sales and PPC data are now fetched from EconomicsMetrics model
+ * for accurate ACOS/TACOS calculations.
  */
 
 const Profitability = require('./ProfitabilityCalculation.js');
@@ -11,6 +14,69 @@ const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = requi
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
+
+/**
+ * Get PPC sales from EconomicsMetrics for ACOS/TACOS calculations
+ * @param {Object} economicsMetrics - EconomicsMetrics data
+ * @returns {Object} PPC sales data with total and per-ASIN breakdown
+ */
+const getPpcSalesFromEconomics = (economicsMetrics) => {
+    if (!economicsMetrics) {
+        return { totalPpcSales: 0, asinPpcSales: {} };
+    }
+    
+    // Get total PPC spent from economics (this is used for ACOS/TACOS)
+    const totalPpcSpent = economicsMetrics.ppcSpent?.amount || 0;
+    const totalSales = economicsMetrics.totalSales?.amount || 0;
+    
+    // Get ASIN-wise PPC data
+    const asinPpcSales = {};
+    if (Array.isArray(economicsMetrics.asinWiseSales)) {
+        economicsMetrics.asinWiseSales.forEach(item => {
+            if (item.asin) {
+                asinPpcSales[item.asin] = {
+                    sales: item.sales?.amount || 0,
+                    ppcSpent: item.ppcSpent?.amount || 0,
+                    grossProfit: item.grossProfit?.amount || 0,
+                    fbaFees: item.fbaFees?.amount || 0,
+                    storageFees: item.storageFees?.amount || 0,
+                    totalFees: item.totalFees?.amount || 0, // Include totalFees (all fee types)
+                    unitsSold: item.unitsSold || 0
+                };
+            }
+        });
+    }
+    
+    return { 
+        totalPpcSpent, 
+        totalSales, 
+        asinPpcSales 
+    };
+};
+
+/**
+ * Calculate ACOS (Advertising Cost of Sales) using EconomicsMetrics PPC data
+ * ACOS = (Ad Spend / Ad Sales) * 100
+ * @param {number} adSpend - Total advertising spend
+ * @param {number} adSales - Total sales from advertising (PPC sales)
+ * @returns {number} ACOS percentage
+ */
+const calculateAcos = (adSpend, adSales) => {
+    if (!adSales || adSales === 0) return 0;
+    return Math.round((adSpend / adSales) * 100 * 100) / 100; // Round to 2 decimal places
+};
+
+/**
+ * Calculate TACOS (Total Advertising Cost of Sales) using EconomicsMetrics data
+ * TACOS = (Ad Spend / Total Sales) * 100
+ * @param {number} adSpend - Total advertising spend
+ * @param {number} totalSales - Total sales (all sales, not just from ads)
+ * @returns {number} TACOS percentage
+ */
+const calculateTacos = (adSpend, totalSales) => {
+    if (!totalSales || totalSales === 0) return 0;
+    return Math.round((adSpend / totalSales) * 100 * 100) / 100; // Round to 2 decimal places
+};
 
 /**
  * Calculate date-wise total costs from PPC spend data
@@ -220,7 +286,8 @@ const analyseData = async (data, userId = null) => {
         (Array.isArray(data.TotalProducts) && data.TotalProducts.length > 0) ||
         (data.SalesByProducts && Array.isArray(data.SalesByProducts) && data.SalesByProducts.length > 0) ||
         (data.ProductWiseSponsoredAds && Array.isArray(data.ProductWiseSponsoredAds) && data.ProductWiseSponsoredAds.length > 0) ||
-        (data.FinanceData && Object.keys(data.FinanceData).length > 0)
+        (data.FinanceData && Object.keys(data.FinanceData).length > 0) ||
+        (data.EconomicsMetrics && Object.keys(data.EconomicsMetrics).length > 0)
     );
 
     // If no meaningful data is available, return default empty data structure
@@ -238,6 +305,28 @@ const analyseData = async (data, userId = null) => {
     }
 
     logger.info("Valid data found, proceeding with analysis");
+    
+    // Get PPC and sales data from EconomicsMetrics for ACOS/TACOS calculations
+    const economicsData = getPpcSalesFromEconomics(data.EconomicsMetrics);
+    logger.info("EconomicsMetrics data extracted", {
+        totalPpcSpent: economicsData.totalPpcSpent,
+        totalSales: economicsData.totalSales,
+        asinCount: Object.keys(economicsData.asinPpcSales).length
+    });
+
+    // Get BuyBox data from MCP BuyBox service
+    let productsWithoutBuyBox = 0;
+    if (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined) {
+        productsWithoutBuyBox = data.BuyBoxData.productsWithoutBuyBox;
+        logger.info("BuyBox data extracted from MCP", {
+            totalProducts: data.BuyBoxData.totalProducts,
+            productsWithoutBuyBox: productsWithoutBuyBox,
+            productsWithBuyBox: data.BuyBoxData.productsWithBuyBox,
+            productsWithLowBuyBox: data.BuyBoxData.productsWithLowBuyBox
+        });
+    } else {
+        logger.warn("BuyBox data not available, using legacy calculation");
+    }
     
     // Calculate and log date-wise total costs
     const dateWiseTotalCosts = calculateDateWiseTotalCosts(data.GetDateWisePPCspendData || []);
@@ -278,11 +367,18 @@ const analyseData = async (data, userId = null) => {
 
     // Only calculate profitability for active products with error handling
     let profitibilityData = [];
-    let sponsoredAdsMetrics = { totalCost: 0, totalSalesIn30Days: 0, totalProductsPurchased: 0 };
+    let sponsoredAdsMetrics = { totalCost: 0, totalSalesIn30Days: 0, totalProductsPurchased: 0, acos: 0, tacos: 0 };
     let negativeKeywordsMetrics = [];
     
     try {
-        profitibilityData = Profitability(activeSalesByProducts, activeProductWiseSponsoredAds, activeProductWiseFBAData, activeFBAFeesData);
+        // Pass EconomicsMetrics asinWiseSales data to profitability calculation
+        profitibilityData = Profitability(
+            activeSalesByProducts, 
+            activeProductWiseSponsoredAds, 
+            activeProductWiseFBAData, 
+            activeFBAFeesData,
+            economicsData.asinPpcSales // New: Pass economics data for accurate fee calculations
+        );
     } catch (error) {
         logger.error("Error calculating profitability data:", error);
         profitibilityData = [];
@@ -290,9 +386,31 @@ const analyseData = async (data, userId = null) => {
     
     try {
         sponsoredAdsMetrics = calculateSponsoredAdsMetrics(activeProductWiseSponsoredAds);
+        
+        // Calculate ACOS and TACOS using EconomicsMetrics PPC data
+        // Use EconomicsMetrics ppcSpent for accurate calculations
+        const totalPpcSpent = economicsData.totalPpcSpent || sponsoredAdsMetrics.totalCost;
+        const totalSales = economicsData.totalSales || (data.FinanceData?.Total_Sales || 0);
+        
+        // ACOS = Ad Spend / PPC Sales * 100 (PPC sales = sales attributed to ads)
+        sponsoredAdsMetrics.acos = calculateAcos(totalPpcSpent, sponsoredAdsMetrics.totalSalesIn30Days);
+        
+        // TACOS = Ad Spend / Total Sales * 100 (all sales, not just from ads)
+        sponsoredAdsMetrics.tacos = calculateTacos(totalPpcSpent, totalSales);
+        
+        // Add economics-based PPC spend
+        sponsoredAdsMetrics.economicsPpcSpent = economicsData.totalPpcSpent;
+        
+        logger.info("ACOS/TACOS calculated from EconomicsMetrics", {
+            acos: sponsoredAdsMetrics.acos,
+            tacos: sponsoredAdsMetrics.tacos,
+            totalPpcSpent,
+            ppcSales: sponsoredAdsMetrics.totalSalesIn30Days,
+            totalSales
+        });
     } catch (error) {
         logger.error("Error calculating sponsored ads metrics:", error);
-        sponsoredAdsMetrics = { totalCost: 0, totalSalesIn30Days: 0, totalProductsPurchased: 0 };
+        sponsoredAdsMetrics = { totalCost: 0, totalSalesIn30Days: 0, totalProductsPurchased: 0, acos: 0, tacos: 0 };
     }
     
     try {
@@ -343,11 +461,53 @@ const analyseData = async (data, userId = null) => {
     const productStarRatingResultError = Array.isArray(data.ConversionData?.productStarRatingResult) ? 
         data.ConversionData.productStarRatingResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
 
-    // FIXED: wrap each product without buybox error with a `.data` property to match the structure (filter for active products)
-    const productsWithOutBuyboxError = Array.isArray(data.ConversionData?.ProductWithOutBuybox) ? 
-        data.ConversionData.ProductWithOutBuybox
-            .filter((p) => p && p.status === "Error" && p.asin && activeProductSet.has(p.asin))
-            .map((p) => ({ asin: p.asin, data: p })) : [];
+    // Get products without buybox - prioritize MCP BuyBox data, fallback to legacy ConversionData
+    let productsWithOutBuyboxError = [];
+    if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
+        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
+        productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
+            .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
+            .map((p) => ({ 
+                asin: p.childAsin, 
+                data: { 
+                    status: "Error", 
+                    asin: p.childAsin,
+                    buyBoxPercentage: p.buyBoxPercentage,
+                    pageViews: p.pageViews,
+                    sessions: p.sessions
+                } 
+            }));
+        logger.info("Using MCP BuyBox data for products without buybox", {
+            count: productsWithOutBuyboxError.length,
+            totalProducts: data.BuyBoxData.totalProducts,
+            productsWithoutBuyBox: data.BuyBoxData.productsWithoutBuyBox,
+            asinBuyBoxDataLength: data.BuyBoxData.asinBuyBoxData.length,
+            activeProductSetSize: activeProductSet.size
+        });
+    } else {
+        // Fallback to legacy ConversionData
+        productsWithOutBuyboxError = Array.isArray(data.ConversionData?.ProductWithOutBuybox) ? 
+            data.ConversionData.ProductWithOutBuybox
+                .filter((p) => p && p.status === "Error" && p.asin && activeProductSet.has(p.asin))
+                .map((p) => ({ asin: p.asin, data: p })) : [];
+        logger.info("Using legacy ConversionData for products without buybox", {
+            count: productsWithOutBuyboxError.length,
+            hasBuyBoxData: !!data.BuyBoxData,
+            buyBoxDataKeys: data.BuyBoxData ? Object.keys(data.BuyBoxData) : []
+        });
+    }
+    
+    // Override count with MCP data if available (for dashboard display)
+    // Use the stored count from database, which is more accurate than filtering
+    const productsWithoutBuyBoxCount = (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined && data.BuyBoxData.productsWithoutBuyBox !== null) 
+        ? data.BuyBoxData.productsWithoutBuyBox 
+        : productsWithOutBuyboxError.length;
+    
+    logger.info("Final productsWithoutBuyBoxCount", {
+        count: productsWithoutBuyBoxCount,
+        fromBuyBoxData: data.BuyBoxData?.productsWithoutBuyBox,
+        fromFilteredArray: productsWithOutBuyboxError.length
+    });
 
     const totalErrorInConversion =
         aplusError.length +
@@ -663,11 +823,15 @@ const analyseData = async (data, userId = null) => {
         second,
         third,
         fourth,
-        productsWithOutBuyboxError: productsWithOutBuyboxError.length,
+        productsWithOutBuyboxError: productsWithoutBuyBoxCount, // Use MCP BuyBox count if available
+        productsWithoutBuyBox: productsWithoutBuyBoxCount, // Also set this for frontend compatibility
+        productsWithoutBuyBox: productsWithoutBuyBoxCount, // Add explicit field for frontend
+        buyBoxData: data.BuyBoxData || null, // Include full BuyBox data for frontend
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
-        TotalWeeklySale: data.FinanceData?.Total_Sales || 0,
+        // Use EconomicsMetrics total sales if available, fallback to legacy
+        TotalWeeklySale: economicsData.totalSales || data.FinanceData?.Total_Sales || 0,
         TotalSales: data.TotalSales || [],
         reimbustment: data.Reimburstment || { totalReimbursement: 0 },
         productWiseError: productWiseError,
@@ -699,7 +863,23 @@ const analyseData = async (data, userId = null) => {
         keywordTrackingData: data.keywordTrackingData || {},
         isEmptyData: false,
         dataAvailabilityStatus: 'DATA_AVAILABLE',
-        DifferenceData: data.DifferenceData || 0
+        DifferenceData: data.DifferenceData || 0,
+        // New: EconomicsMetrics data for dashboard boxes and profitability page
+        economicsMetrics: data.EconomicsMetrics ? {
+            totalSales: data.EconomicsMetrics.totalSales,
+            grossProfit: data.EconomicsMetrics.grossProfit,
+            ppcSpent: data.EconomicsMetrics.ppcSpent,
+            fbaFees: data.EconomicsMetrics.fbaFees,
+            storageFees: data.EconomicsMetrics.storageFees,
+            refunds: data.EconomicsMetrics.refunds,
+            datewiseSales: data.EconomicsMetrics.datewiseSales,
+            datewiseGrossProfit: data.EconomicsMetrics.datewiseGrossProfit,
+            asinWiseSales: data.EconomicsMetrics.asinWiseSales,
+            dateRange: data.EconomicsMetrics.dateRange
+        } : null,
+        // New: ACOS and TACOS calculated from EconomicsMetrics PPC data
+        acos: sponsoredAdsMetrics.acos || 0,
+        tacos: sponsoredAdsMetrics.tacos || 0
     };
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
@@ -735,6 +915,9 @@ module.exports = {
     calculateDateWiseTotalCosts,
     calculateCampaignWiseTotalSalesAndCost,
     calculateProfitabilityErrors,
-    calculateSponsoredAdsErrors
+    calculateSponsoredAdsErrors,
+    getPpcSalesFromEconomics,
+    calculateAcos,
+    calculateTacos
 };
 

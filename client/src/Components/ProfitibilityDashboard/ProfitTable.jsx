@@ -15,6 +15,22 @@ const ProfitTable = ({ setSuggestionsData }) => {
     const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
     const totalProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
     
+    // Get EconomicsMetrics data from Redux store (preferred source for fees and gross profit)
+    const economicsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.EconomicsMetrics);
+    
+    // Create a map of ASIN to EconomicsMetrics data for quick lookup
+    const economicsAsinMap = useMemo(() => {
+        const map = new Map();
+        if (economicsMetrics?.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
+            economicsMetrics.asinWiseSales.forEach(item => {
+                if (item.asin) {
+                    map.set(item.asin, item);
+                }
+            });
+        }
+        return map;
+    }, [economicsMetrics]);
+    
     // Calculate total active products
     const totalActiveProducts = totalProducts.filter(product => product.status === "Active").length;
     
@@ -95,11 +111,34 @@ const ProfitTable = ({ setSuggestionsData }) => {
         // Calculate total COGS (COGS per unit * quantity)
         const totalCogs = cogsPerUnit * (item.quantity || 0);
         
-        // Calculate total fees (fee per unit * quantity)
-        const totalFees = (item.amzFee || 0) * (item.quantity || 0);
+        // Get EconomicsMetrics data for this ASIN (preferred source)
+        const economicsData = economicsAsinMap.get(item.asin);
         
-        // Calculate gross profit: sales - ads - total fees (no COGS deducted)
-        const grossProfit = (item.sales || 0) - (item.ads || 0) - totalFees;
+        // Use EconomicsMetrics totalFees if available, otherwise check profitibilityData, then fallback to legacy calculation
+        let totalFees = 0;
+        if (economicsData?.totalFees?.amount !== undefined) {
+            // Use totalFees from EconomicsMetrics (sum of all fee types) - MOST ACCURATE
+            totalFees = economicsData.totalFees.amount || 0;
+        } else if (item.totalFees !== undefined) {
+            // Use totalFees from profitibilityData (calculated from EconomicsMetrics in backend)
+            totalFees = item.totalFees || 0;
+        } else {
+            // Fallback to legacy calculation (fee per unit * quantity)
+            totalFees = (item.amzFee || 0) * (item.quantity || 0);
+        }
+        
+        // Use EconomicsMetrics grossProfit if available, otherwise check profitibilityData, then calculate
+        let grossProfit = 0;
+        if (economicsData?.grossProfit?.amount !== undefined) {
+            // Use grossProfit from EconomicsMetrics - MOST ACCURATE
+            grossProfit = economicsData.grossProfit.amount || 0;
+        } else if (item.grossProfit !== undefined) {
+            // Use grossProfit from profitibilityData (calculated from EconomicsMetrics in backend)
+            grossProfit = item.grossProfit || 0;
+        } else {
+            // Fallback to legacy calculation: sales - ads - total fees (no COGS deducted)
+            grossProfit = (item.sales || 0) - (item.ads || 0) - totalFees;
+        }
         
         // Calculate net profit: gross profit - COGS
         const netProfit = grossProfit - totalCogs;
@@ -129,7 +168,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
         
         return productData;
       });
-    }, [profitibilityData, cogsValues, totalProducts]);
+    }, [profitibilityData, cogsValues, totalProducts, economicsAsinMap]);
     
     // Update profitability errors in Redux when products change
     useEffect(() => {

@@ -127,37 +127,37 @@ const ProtectedRouteWrapper = ({ children }) => {
         if (response?.status === 200) {
           // Dashboard data is now pre-calculated by the backend
           dashboardData = response.data?.data?.dashboardData;
-          
-          // Check if we got empty data or actual data
+            
+            // Check if we got empty data or actual data
           if (!dashboardData || isEmptyDashboardData(dashboardData)) {
-            console.log("⚠️ Account has no data available - showing zero data instead of error");
+              console.log("⚠️ Account has no data available - showing zero data instead of error");
             dashboardData = dashboardData || createDefaultDashboardData();
             hasAnyData = false;
-          } else {
-            console.log("✅ Account has data available");
-            hasAnyData = true;
-          }
-          
-          // Always dispatch the dashboard data (either real data or empty structure)
-          dispatch(setDashboardInfo(dashboardData));
+            } else {
+              console.log("✅ Account has data available");
+              hasAnyData = true;
+            }
+            
+            // Always dispatch the dashboard data (either real data or empty structure)
+            dispatch(setDashboardInfo(dashboardData));
           
           // Dispatch brand name if available
           if (dashboardData.Brand) {
             dispatch(addBrand(dashboardData.Brand));
           }
-          
-          // Dispatch error details if available
-          if (dashboardData.totalProfitabilityErrors !== undefined) {
-            dispatch(setProfitabilityErrorDetails({
-              totalErrors: dashboardData.totalProfitabilityErrors || 0,
-              errorDetails: dashboardData.profitabilityErrorDetails || []
-            }));
-          }
-          if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-            dispatch(setSponsoredAdsErrorDetails({
-              totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-              errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-            }));
+            
+            // Dispatch error details if available
+            if (dashboardData.totalProfitabilityErrors !== undefined) {
+              dispatch(setProfitabilityErrorDetails({
+                totalErrors: dashboardData.totalProfitabilityErrors || 0,
+                errorDetails: dashboardData.profitabilityErrorDetails || []
+              }));
+            }
+            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
+              dispatch(setSponsoredAdsErrorDetails({
+                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
+                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
+              }));
           }
         } else if (response?.status && response.status !== 200) {
           console.warn(`⚠️ Non-200 response: ${response.status}`);

@@ -5,7 +5,7 @@
  * Based on MCP seller-server query builders
  */
 
-const { MARKETPLACES } = require('./constants.js');
+const { MARKETPLACES, SCHEMA_NAMES } = require('./constants.js');
 
 /**
  * Build Sales and Traffic query by date
@@ -19,9 +19,11 @@ const { MARKETPLACES } = require('./constants.js');
  */
 function buildSalesAndTrafficByDateQuery({ startDate, endDate, granularity, marketplace, includeB2B = false }) {
     const marketplaceId = MARKETPLACES[marketplace] || MARKETPLACES.US;
+    const schemaName = SCHEMA_NAMES.SALES_AND_TRAFFIC;
 
     return `
-query {
+query ${schemaName} {
+  ${schemaName} {
   salesAndTrafficByDate(
     aggregateBy: ${granularity}
     startDate: "${startDate}"
@@ -79,6 +81,7 @@ query {
       unitSessionPercentage
       unitSessionPercentageB2B
     }
+    }
   }
 }`.trim();
 }
@@ -95,9 +98,11 @@ query {
  */
 function buildSalesAndTrafficByAsinQuery({ startDate, endDate, granularity, marketplace, includeB2B = false }) {
     const marketplaceId = MARKETPLACES[marketplace] || MARKETPLACES.US;
+    const schemaName = SCHEMA_NAMES.SALES_AND_TRAFFIC;
 
     return `
-query {
+query ${schemaName} {
+  ${schemaName} {
   salesAndTrafficByAsin(
     aggregateBy: ${granularity}
     startDate: "${startDate}"
@@ -120,18 +125,10 @@ query {
         amount
         currencyCode
       }` : ''}
-      averageSalesPerOrderItem {
-        amount
-        currencyCode
-      }
-      averageSellingPrice {
-        amount
-        currencyCode
-      }
       unitsOrdered
-      unitsOrderedB2B
+      ${includeB2B ? `unitsOrderedB2B` : ''}
       totalOrderItems
-      totalOrderItemsB2B
+      ${includeB2B ? `totalOrderItemsB2B` : ''}
     }
     traffic {
       browserPageViews
@@ -141,8 +138,8 @@ query {
       mobileAppSessions
       sessions
       buyBoxPercentage
-      orderItemSessionPercentage
       unitSessionPercentage
+    }
     }
   }
 }`.trim();
@@ -170,6 +167,7 @@ function buildEconomicsQuery({
     feeTypesForComponents = []
 }) {
     const marketplaceId = MARKETPLACES[marketplace] || MARKETPLACES.US;
+    const schemaName = SCHEMA_NAMES.ECONOMICS;
 
     let feeComponentsSection = '';
     if (includeFeeComponents && feeTypesForComponents.length > 0) {
@@ -178,8 +176,12 @@ function buildEconomicsQuery({
       includeComponentsForFeeTypes: [${feeTypesList}]`;
     }
 
+    // Note: The economics schema uses nested structure for fees:
+    // fees { feeTypeName, charges { aggregatedDetail { totalAmount { amount, currencyCode } } } }
+    // NOT: fees { totalFees { amount } }
     return `
-query {
+query ${schemaName} {
+  ${schemaName} {
   economics(
     startDate: "${startDate}"
     endDate: "${endDate}"
@@ -214,54 +216,49 @@ query {
       netUnitsSold
     }
     fees {
-      totalFees {
+        feeTypeName
+        charges {
+          aggregatedDetail {
+            amount {
         amount
         currencyCode
       }
-      fbaFulfillmentFee {
+            totalAmount {
         amount
         currencyCode
       }
-      fbaStorageFee {
+            quantity
+            amountPerUnit {
         amount
         currencyCode
       }
-      referralFee {
-        amount
-        currencyCode
-      }
-      perItemSellingFee {
-        amount
-        currencyCode
       }
       ${includeFeeComponents ? `
-      feeComponents {
-        feeType
+          components {
+            name
+            aggregatedDetail {
         amount {
           amount
           currencyCode
         }
-      }` : ''}
-    }
-    advertising {
-      advertisingSpend {
+              totalAmount {
         amount
         currencyCode
       }
     }
-    sellerProvidedCosts {
-      costOfGoods {
+          }` : ''}
+        }
+      }
+      netProceeds {
+        total {
         amount
         currencyCode
       }
-      shippingCost {
+        perUnit {
         amount
         currencyCode
       }
     }
-    netProceeds {
-      amount
-      currencyCode
     }
   }
 }`.trim();
@@ -278,10 +275,13 @@ query {
  */
 function buildEconomicsPreviewQuery({ startDate, endDate, marketplace, feeTypes = [] }) {
     const marketplaceId = MARKETPLACES[marketplace] || MARKETPLACES.US;
+    const schemaName = SCHEMA_NAMES.ECONOMICS;
     const feeTypesList = feeTypes.map(type => type).join(', ');
 
+    // Note: economicsPreview uses same fee structure as economics
     return `
-query {
+query ${schemaName} {
+  ${schemaName} {
   economicsPreview(
     startDate: "${startDate}"
     endDate: "${endDate}"
@@ -307,26 +307,22 @@ query {
       unitsOrdered
     }
     fees {
-      totalFees {
+        feeTypeName
+        charges {
+          aggregatedDetail {
+            totalAmount {
         amount
         currencyCode
       }
-      fbaFulfillmentFee {
-        amount
-        currencyCode
+          }
       }
-      fbaStorageFee {
-        amount
-        currencyCode
       }
-      referralFee {
+      netProceeds {
+        total {
         amount
         currencyCode
       }
     }
-    netProceeds {
-      amount
-      currencyCode
     }
   }
 }`.trim();

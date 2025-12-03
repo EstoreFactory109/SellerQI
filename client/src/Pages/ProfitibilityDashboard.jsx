@@ -294,7 +294,11 @@ const ProfitabilityDashboard = () => {
          if (!product || typeof product !== 'object') return false;
          const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
          const totalCogs = cogsPerUnit * (product.quantity || 0);
-         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
+         // Use totalFees from EconomicsMetrics if available
+         const totalFees = product.totalFees !== undefined ? product.totalFees : 
+                          ((product.amzFee || 0) * (product.quantity || 0));
+         const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
+                            ((product.sales || 0) - (product.ads || 0) - totalFees);
          const netProfit = grossProfit - totalCogs;
          const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
          return profitMargin < 0;
@@ -304,7 +308,11 @@ const ProfitabilityDashboard = () => {
          if (!product || typeof product !== 'object') return false;
          const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
          const totalCogs = cogsPerUnit * (product.quantity || 0);
-         const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
+         // Use totalFees from EconomicsMetrics if available
+         const totalFees = product.totalFees !== undefined ? product.totalFees : 
+                          ((product.amzFee || 0) * (product.quantity || 0));
+         const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
+                            ((product.sales || 0) - (product.ads || 0) - totalFees);
          const netProfit = grossProfit - totalCogs;
          const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
          return profitMargin >= 0 && profitMargin < 10;
@@ -475,13 +483,23 @@ const ProfitabilityDashboard = () => {
         const productDetails = productDetailsMap.get(product.asin) || {};
         const cogsPerUnit = cogsValues[product.asin] || 0;
         const totalCogs = cogsPerUnit * (product.quantity || 0);
-        const grossProfit = (product.sales || 0) - (product.ads || 0) - (product.amzFee || 0);
+        
+        // Use totalFees from EconomicsMetrics if available, otherwise use amzFee
+        const totalFees = product.totalFees !== undefined ? product.totalFees : 
+                         ((product.amzFee || 0) * (product.quantity || 0));
+        
+        // Use grossProfit from EconomicsMetrics if available, otherwise calculate
+        const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
+                           ((product.sales || 0) - (product.ads || 0) - totalFees);
+        
         const netProfit = grossProfit - totalCogs;
         const profitMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
         const revenuePerUnit = product.quantity > 0 ? (product.sales / product.quantity) : 0;
         const cogsPercent = product.sales > 0 ? (totalCogs / product.sales) * 100 : 0;
         const adSpendPercent = product.sales > 0 ? ((product.ads || 0) / product.sales) * 100 : 0;
-        const feesPercent = product.sales > 0 ? ((product.amzFee || 0) / product.sales) * 100 : 0;
+        
+        // Use totalFees for fees percentage calculation
+        const feesPercent = product.sales > 0 ? (totalFees / product.sales) * 100 : 0;
         
         // Determine status and issues
         let status = 'Good';
@@ -526,10 +544,10 @@ const ProfitabilityDashboard = () => {
           `$${totalCogs.toFixed(2)}`,
           `${currency}${(product.ads || 0).toFixed(2)}`,
           `${adSpendPercent.toFixed(1)}%`,
-          `${currency}${(product.amzFee || 0).toFixed(2)}`,
+          `${currency}${totalFees.toFixed(2)}`,
           `${feesPercent.toFixed(1)}%`,
-          `$${grossProfit.toFixed(2)}`,
-          `$${netProfit.toFixed(2)}`,
+          `${currency}${grossProfit.toFixed(2)}`,
+          `${currency}${netProfit.toFixed(2)}`,
           `${profitMargin.toFixed(2)}%`,
           status,
           issues || 'None',
