@@ -74,14 +74,33 @@ app.get('*',(req,res)=>{
 })
 
 
-dbConnect()
-.then(()=>{
-    logger.info('Connection to database established');
-})
-.catch((err)=>{
-    logger.error(`Error in connecting to database: ${err}`);
-})
-
+// Initialize all services in proper order
+const initializeServices = async () => {
+    try {
+        // Step 1: Connect to MongoDB first
+        await dbConnect();
+        logger.info('Connection to database established');
+        
+        // Step 2: Wait a moment to ensure MongoDB connection is fully ready
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 3: Connect to Redis
+        try {
+            await connectRedis();
+            logger.info('Redis initialized successfully');
+        } catch (error) {
+            logger.error('Failed to initialize redis:', error);
+            process.exit(1);
+        }
+        
+        // Step 4: Initialize background jobs (after DB is connected)
+        await initializeBackgroundJobs();
+        
+    } catch (err) {
+        logger.error(`Error in connecting to database: ${err}`);
+        // Don't exit - let the app continue, but background jobs won't work
+    }
+};
 
 const redisConnection = async () => {
     try {
@@ -119,6 +138,24 @@ const initializeBackgroundJobs = async () => {
 
         // Keep other background jobs (cache cleanup, health check, etc.)
         // Initialize background job scheduler for non-daily-update jobs
+        // Check if MongoDB is connected before initializing
+        const mongoose = require('mongoose');
+        if (mongoose.connection.readyState !== 1) {
+            logger.warn('MongoDB not ready, waiting before initializing job scheduler...');
+            await new Promise((resolve) => {
+                if (mongoose.connection.readyState === 1) {
+                    resolve();
+                } else {
+                    mongoose.connection.once('connected', resolve);
+                    // Timeout after 10 seconds
+                    setTimeout(() => {
+                        logger.warn('MongoDB connection timeout, proceeding anyway...');
+                        resolve();
+                    }, 10000);
+                }
+            });
+        }
+        
         await jobScheduler.initialize();
         logger.info('Background job scheduler initialized successfully');
        
@@ -136,8 +173,8 @@ const initializeBackgroundJobs = async () => {
     }
 };
  
-redisConnection();
-initializeBackgroundJobs();
+// Initialize all services in proper order
+initializeServices();
 
 // Log status based on config
 if (config.backgroundJobs?.enabled !== false) {

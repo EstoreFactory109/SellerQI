@@ -11,8 +11,10 @@ const dbConnect = async () => {
         if (connect) {
             logger.info('Connected to DB');
         }
+        return connect;
     } catch (error) {
         logger.error(`Error in connecting to DB: ${error}`);
+        throw error; // Re-throw to allow caller to handle
     }
 }
 
