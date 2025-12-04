@@ -99,13 +99,15 @@ const Dashboard = () => {
     return 0;
   };
 
-  // Calculate PPC Spend using actual ProductAdsPayment data from finance
+  // Calculate PPC Spend using Amazon Ads API data (PRIMARY source)
   const calculatePPCSpend = () => {
-    // Use actual PPC spend from accountFinance ProductAdsPayment (official data)
-    const actualPPCSpend = Number(dashboardInfo?.accountFinance?.ProductAdsPayment || 0);
+    // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
+    // This is the authoritative source for PPC spend
+    const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
     
-    // Fall back to sponsored ads metrics if no finance data available
-    const spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+    // Fallback to accountFinance.ProductAdsPayment if Ads API data not available
+    // (Note: Backend now also uses Ads API for ProductAdsPayment, so they should match)
+    const spend = adsPPCSpend > 0 ? adsPPCSpend : Number(dashboardInfo?.accountFinance?.ProductAdsPayment || 0);
     return spend;
   };
 

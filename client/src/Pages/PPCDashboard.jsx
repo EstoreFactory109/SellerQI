@@ -386,22 +386,6 @@ const PPCDashboard = () => {
     avgSpend: chartData.reduce((sum, item) => sum + (item.spend || 0), 0) / chartData.length
   });
   
-  // Tab configuration
-  const tabs = [
-    { id: 0, label: 'High ACOS Campaigns' },
-    { id: 1, label: 'Wasted Spend Keywords' },
-    { id: 2, label: 'Campaigns Without Negative Keywords' },
-    { id: 3, label: 'Top Performing Keywords' },
-    { id: 4, label: 'Search Terms with Zero Sales' },
-    { id: 5, label: 'Auto Campaign Insights' }
-  ];
-  
-  // Get animation direction based on tab order
-  const getDirection = () => {
-    return selectedTab > prevTab ? 1 : -1;
-  };
-  
-  const direction = getDirection();
   
   // Animation variants for page transitions
   const pageVariants = {
@@ -705,6 +689,65 @@ const PPCDashboard = () => {
   // Sort by sales descending
   autoCampaignInsights.sort((a, b) => b.sales - a.sales);
   
+  // Define all possible tabs with their data sources
+  const allTabs = [
+    { id: 0, label: 'High ACOS Campaigns', data: highAcosCampaigns },
+    { id: 1, label: 'Wasted Spend Keywords', data: wastedSpendKeywords },
+    { id: 2, label: 'Campaigns Without Negative Keywords', data: campaignsWithoutNegativeKeywords },
+    { id: 3, label: 'Top Performing Keywords', data: topPerformingKeywords },
+    { id: 4, label: 'Search Terms with Zero Sales', data: filteredSearchTerms },
+    { id: 5, label: 'Auto Campaign Insights', data: autoCampaignInsights }
+  ];
+  
+  // Filter tabs to only show those with data
+  const tabs = useMemo(() => {
+    return allTabs.filter(tab => tab.data && tab.data.length > 0);
+  }, [highAcosCampaigns, wastedSpendKeywords, campaignsWithoutNegativeKeywords, topPerformingKeywords, filteredSearchTerms, autoCampaignInsights]);
+  
+  // Create a mapping from original tab ID to filtered tab index
+  const tabIdToIndexMap = useMemo(() => {
+    const map = new Map();
+    tabs.forEach((tab, index) => {
+      map.set(tab.id, index);
+    });
+    return map;
+  }, [tabs]);
+  
+  // Create a mapping from filtered tab index to original tab ID
+  const indexToTabIdMap = useMemo(() => {
+    const map = new Map();
+    tabs.forEach((tab, index) => {
+      map.set(index, tab.id);
+    });
+    return map;
+  }, [tabs]);
+  
+  // Convert selectedTab (original ID) to filtered index for rendering
+  const selectedTabIndex = useMemo(() => {
+    const mappedIndex = tabIdToIndexMap.get(selectedTab);
+    return mappedIndex !== undefined ? mappedIndex : (tabs.length > 0 ? 0 : -1);
+  }, [selectedTab, tabIdToIndexMap, tabs]);
+  
+  // Get animation direction based on tab order
+  const getDirection = () => {
+    const currentIndex = selectedTabIndex;
+    const prevIndex = tabIdToIndexMap.get(prevTab) ?? 0;
+    return currentIndex > prevIndex ? 1 : -1;
+  };
+  
+  const direction = getDirection();
+  
+  // Effect to reset selectedTab if current tab has no data
+  useEffect(() => {
+    if (tabs.length > 0 && selectedTabIndex === -1) {
+      // Current tab has no data, switch to first available tab
+      setSelectedTab(tabs[0].id);
+    } else if (tabs.length === 0) {
+      // No tabs have data, keep selectedTab as is but it won't render
+      setSelectedTab(0);
+    }
+  }, [tabs, selectedTabIndex]);
+  
   // Use Redux data for KPI values - prioritize actual finance data over estimates, with date filtering
   const kpiData = useMemo(() => {
     // Check if date range is selected to determine which data to use
@@ -719,12 +762,13 @@ const PPCDashboard = () => {
       console.log('Using filtered spend data:', spend);
       console.log('Filtered data points:', filteredDateWiseTotalCosts.length);
     } else {
-      // Use same logic as main dashboard - prioritize ProductAdsPayment, fallback to sponsoredAds
-      const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-      spend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
-      console.log('=== KPI Calculation (Default - Matching Main Dashboard) ===');
-      console.log('ProductAdsPayment:', actualPPCSpend);
-      console.log('sponsoredAdsMetrics?.totalCost:', sponsoredAdsMetrics?.totalCost || 0);
+      // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
+      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+      // Fallback to ProductAdsPayment if Ads API data not available
+      spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+      console.log('=== KPI Calculation (Default - Amazon Ads API Primary) ===');
+      console.log('sponsoredAdsMetrics?.totalCost (PRIMARY):', adsPPCSpend);
+      console.log('ProductAdsPayment (fallback):', info?.accountFinance?.ProductAdsPayment || 0);
       console.log('Final spend used:', spend);
     }
     
@@ -1450,49 +1494,56 @@ const PPCDashboard = () => {
                 </div>
               </div>
               
-              {/* Tabs */}
-              <div className="flex gap-6 relative overflow-x-auto">
-                {tabs.map((tab) => (
-                  <div
-                    key={tab.id}
-                    className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
-                    onClick={() => handleTabClick(tab.id)}
-                  >
-                    <p
-                      className={`text-sm font-medium transition-colors ${
-                        selectedTab === tab.id 
-                          ? 'text-blue-600 font-semibold' 
-                          : 'text-gray-500 hover:text-gray-700'
-                      }`}
+              {/* Tabs - Only show tabs with data */}
+              {tabs.length > 0 ? (
+                <div className="flex gap-6 relative overflow-x-auto">
+                  {tabs.map((tab, index) => (
+                    <div
+                      key={tab.id}
+                      className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
+                      onClick={() => handleTabClick(tab.id)}
                     >
-                      {tab.label}
-                    </p>
-                    
-                    {/* Animated underline */}
-                    {selectedTab === tab.id && (
-                      <motion.div
-                        layoutId="ppcUnderline"
-                        className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
-                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
+                      <p
+                        className={`text-sm font-medium transition-colors ${
+                          selectedTab === tab.id 
+                            ? 'text-blue-600 font-semibold' 
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {tab.label}
+                      </p>
+                      
+                      {/* Animated underline */}
+                      {selectedTab === tab.id && (
+                        <motion.div
+                          layoutId="ppcUnderline"
+                          className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
+                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500 py-2">
+                  No data available for any tabs
+                </div>
+              )}
             </div>
             
             {/* Tab Content */}
             <div className="p-6 relative overflow-hidden" style={{ minHeight: '400px' }}>
-              <AnimatePresence custom={direction} mode="sync">
-                <motion.div
-                  key={selectedTab}
-                  custom={direction}
-                  variants={pageVariants}
-                  initial={hasInteracted ? "enter" : false}
-                  animate="center"
-                  exit="exit"
-                  className="w-full"
-                >
+              {tabs.length > 0 && selectedTabIndex >= 0 ? (
+                <AnimatePresence custom={direction} mode="sync">
+                  <motion.div
+                    key={selectedTab}
+                    custom={direction}
+                    variants={pageVariants}
+                    initial={hasInteracted ? "enter" : false}
+                    animate="center"
+                    exit="exit"
+                    className="w-full"
+                  >
                   {/* High ACOS Campaigns Tab */}
                   {selectedTab === 0 && (
                     <>
@@ -1870,6 +1921,14 @@ const PPCDashboard = () => {
                   )}
                 </motion.div>
               </AnimatePresence>
+              ) : (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <div className="text-center">
+                    <p className="text-lg font-medium mb-2">No data available</p>
+                    <p className="text-sm">Please sync your data to view campaign analysis</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         

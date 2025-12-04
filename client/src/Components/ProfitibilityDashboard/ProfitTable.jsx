@@ -127,17 +127,23 @@ const ProfitTable = ({ setSuggestionsData }) => {
             totalFees = (item.amzFee || 0) * (item.quantity || 0);
         }
         
-        // Use EconomicsMetrics grossProfit if available, otherwise check profitibilityData, then calculate
+        // PRIMARY: Use ads from profitibilityData (from Amazon Ads API - GetPPCProductWise)
+        // This is the authoritative source for ASIN-wise PPC spend
+        let adSpend = item.ads || 0;
+        
+        // Use grossProfit from profitibilityData (calculated with Ads API spend in backend)
+        // Fallback to EconomicsMetrics grossProfit if profitibilityData doesn't have it
         let grossProfit = 0;
-        if (economicsData?.grossProfit?.amount !== undefined) {
-            // Use grossProfit from EconomicsMetrics - MOST ACCURATE
-            grossProfit = economicsData.grossProfit.amount || 0;
-        } else if (item.grossProfit !== undefined) {
-            // Use grossProfit from profitibilityData (calculated from EconomicsMetrics in backend)
+        if (item.grossProfit !== undefined) {
+            // PRIMARY: Use grossProfit from profitibilityData (calculated with Ads API spend)
             grossProfit = item.grossProfit || 0;
+        } else if (economicsData?.grossProfit?.amount !== undefined) {
+            // Fallback: Use EconomicsMetrics grossProfit (uses MCP ppcSpent)
+            // Note: This may differ from Ads API calculation
+            grossProfit = economicsData.grossProfit.amount || 0;
         } else {
-            // Fallback to legacy calculation: sales - ads - total fees (no COGS deducted)
-            grossProfit = (item.sales || 0) - (item.ads || 0) - totalFees;
+            // Final fallback: Calculate manually using sales - ads - fees
+            grossProfit = (item.sales || 0) - adSpend - totalFees;
         }
         
         // Calculate net profit: gross profit - COGS
@@ -156,7 +162,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
           sales: item.sales || 0,
           cogsPerUnit: cogsPerUnit,
           totalCogs: totalCogs,
-          adSpend: item.ads || 0,
+          adSpend: adSpend,
           fees: totalFees,
           grossProfit: grossProfit,
           netProfit: netProfit,

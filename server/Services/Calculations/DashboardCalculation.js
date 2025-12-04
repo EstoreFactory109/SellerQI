@@ -387,9 +387,9 @@ const analyseData = async (data, userId = null) => {
     try {
         sponsoredAdsMetrics = calculateSponsoredAdsMetrics(activeProductWiseSponsoredAds);
         
-        // Calculate ACOS and TACOS using EconomicsMetrics PPC data
-        // Use EconomicsMetrics ppcSpent for accurate calculations
-        const totalPpcSpent = economicsData.totalPpcSpent || sponsoredAdsMetrics.totalCost;
+        // Calculate ACOS and TACOS using Amazon Ads API PPC data as PRIMARY source
+        // Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise.js)
+        const totalPpcSpent = sponsoredAdsMetrics.totalCost || 0;
         const totalSales = economicsData.totalSales || (data.FinanceData?.Total_Sales || 0);
         
         // ACOS = Ad Spend / PPC Sales * 100 (PPC sales = sales attributed to ads)
@@ -398,15 +398,17 @@ const analyseData = async (data, userId = null) => {
         // TACOS = Ad Spend / Total Sales * 100 (all sales, not just from ads)
         sponsoredAdsMetrics.tacos = calculateTacos(totalPpcSpent, totalSales);
         
-        // Add economics-based PPC spend
-        sponsoredAdsMetrics.economicsPpcSpent = economicsData.totalPpcSpent;
+        // Store both for reference (Ads API is primary)
+        sponsoredAdsMetrics.adsPpcSpent = totalPpcSpent; // PRIMARY: Amazon Ads API
+        sponsoredAdsMetrics.economicsPpcSpent = economicsData.totalPpcSpent; // Reference only
         
-        logger.info("ACOS/TACOS calculated from EconomicsMetrics", {
+        logger.info("ACOS/TACOS calculated from Amazon Ads API", {
             acos: sponsoredAdsMetrics.acos,
             tacos: sponsoredAdsMetrics.tacos,
             totalPpcSpent,
             ppcSales: sponsoredAdsMetrics.totalSalesIn30Days,
-            totalSales
+            totalSales,
+            source: 'Amazon Ads API (GetPPCProductWise)'
         });
     } catch (error) {
         logger.error("Error calculating sponsored ads metrics:", error);

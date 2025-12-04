@@ -1,5 +1,4 @@
 const getReport = require('../../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
-const TotalSales = require('../../Services/Sp_API/WeeklySales.js');
 const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../../Services/Sp_API/shipment.js');
 const puppeteer = require("puppeteer");
@@ -12,13 +11,13 @@ const {getCampaign} = require('../../Services/AmazonAds/GetCampaigns.js');
 const {getNegativeKeywords} = require('../../Services/AmazonAds/NegetiveKeywords.js');
 const {getSearchKeywords} = require('../../Services/AmazonAds/GetSearchKeywords.js');
 const GET_FBA_INVENTORY_PLANNING_DATA = require('../../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
-const {listFinancialEventsMethod} = require('../../Services/Test/TestFinance.js');
 const {getBrand} = require('../../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../../Services/AmazonAds/AdGroups.js');
 const {getKeywordRecommendations} = require('../../Services/AmazonAds/KeyWordsRecommendations.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 const getLedgerSummaryReport = require('../../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
 const getProductWiseFBAData = require('../../Services/Sp_API/GetProductWiseFBAData.js');
+const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 
 const testReport = async (req, res) => {
     const {accessToken}=req.body
@@ -350,7 +349,10 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
 
   const testGetWastedSpendKeywords = async (req, res) => {
     try {
-      const { accessToken, profileId, userId, country, region } = req.body;
+      const { accessToken, profileId, userId, country, region, refreshToken, testMode: requestedTestMode } = req.body;
+      
+      // Default to 'full' if testMode is not provided
+      const testMode = requestedTestMode || 'full';
 
       // Validate required parameters
       if (!accessToken) {
@@ -402,40 +404,203 @@ const testPPCSpendsSalesUnitsSold = async (req, res) => {
         userId,
         country,
         region,
-        hasAccessToken: !!accessToken
+        hasAccessToken: !!accessToken,
+        hasRefreshToken: !!refreshToken,
+        testMode: testMode || 'full'
       });
 
-      const result = await getKeywordPerformanceReport(
-        accessToken,
-        profileId,
-        userId,
-        country,
-        region
-      );
+      // Test Mode: 'api' - Only test API call
+      // Test Mode: 'database' - Only test database retrieval
+      // Test Mode: 'calculation' - Only test calculation logic
+      // Test Mode: 'full' - Test everything (default)
 
-      return res.status(200).json({
-        success: true,
-        message: 'Keyword performance report generated successfully',
-        data: result
+      const testResults = {
+        apiTest: null,
+        databaseTest: null,
+        calculationTest: null,
+        wastedKeywords: []
+      };
+
+      // 1. Test API Call (if not database-only or calculation-only mode)
+      if (testMode !== 'database' && testMode !== 'calculation') {
+        try {
+          console.log('📡 Step 1: Testing API call...');
+          console.log('Calling getKeywordPerformanceReport with:', {
+            profileId,
+            userId,
+            country,
+            region,
+            hasAccessToken: !!accessToken,
+            hasRefreshToken: !!refreshToken,
+            testMode
+          });
+          
+          const apiResult = await getKeywordPerformanceReport(
+            accessToken,
+            profileId,
+            userId,
+            country,
+            region,
+            refreshToken
+          );
+          
+          console.log('API call completed, result:', {
+            success: apiResult.success,
+            hasData: !!apiResult.data,
+            dataLength: apiResult.data?.length || 0
+          });
+
+          testResults.apiTest = {
+            success: apiResult.success,
+            reportId: apiResult.reportId,
+            keywordsCount: apiResult.data?.length || 0,
+            message: apiResult.success 
+              ? `Successfully fetched ${apiResult.data?.length || 0} keywords from API`
+              : `API call failed: ${apiResult.error}`
+          };
+
+          console.log('✅ API Test Result:', testResults.apiTest);
+        } catch (apiError) {
+          testResults.apiTest = {
+            success: false,
+            error: apiError.message,
+            stack: process.env.NODE_ENV === 'development' ? apiError.stack : undefined
+          };
+          console.error('❌ API Test Failed:', apiError.message);
+        }
+      } else {
+        testResults.apiTest = {
+          skipped: true,
+          reason: `API test skipped because testMode is '${testMode}'. Use testMode: 'full' or 'api' to run API test.`
+        };
+        console.log(`⏭️  API test skipped (testMode: ${testMode})`);
+      }
+
+      // 2. Test Database Retrieval
+      if (testMode !== 'api') {
+        try {
+          console.log('💾 Step 2: Testing database retrieval...');
+          const dbData = await adsKeywordsPerformanceModel
+            .findOne({ userId, country, region })
+            .sort({ createdAt: -1 })
+            .lean();
+
+          if (dbData) {
+            testResults.databaseTest = {
+              success: true,
+              keywordsCount: dbData.keywordsData?.length || 0,
+              createdAt: dbData.createdAt,
+              message: `Found ${dbData.keywordsData?.length || 0} keywords in database`
+            };
+            console.log('✅ Database Test Result:', testResults.databaseTest);
+
+            // 3. Test Calculation Logic
+            if (testMode !== 'api' && testMode !== 'database') {
+              try {
+                console.log('🧮 Step 3: Testing wasted spend calculation...');
+                const keywordsData = dbData.keywordsData || [];
+
+                // Calculate wasted spend keywords: cost > 5 && attributedSales30d < 1
+                const wastedKeywords = keywordsData
+                  .filter(keyword => {
+                    const cost = parseFloat(keyword.cost) || 0;
+                    const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+                    return cost > 5 && attributedSales30d < 1;
+                  })
+                  .map(keyword => {
+                    const cost = parseFloat(keyword.cost) || 0;
+                    const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+                    
+                    return {
+                      keyword: keyword.keyword,
+                      keywordId: keyword.keywordId,
+                      campaignName: keyword.campaignName,
+                      campaignId: keyword.campaignId,
+                      adGroupName: keyword.adGroupName,
+                      matchType: keyword.matchType,
+                      spend: cost,
+                      sales: attributedSales30d,
+                      clicks: keyword.clicks,
+                      impressions: keyword.impressions,
+                      acos: attributedSales30d > 0 ? (cost / attributedSales30d) * 100 : null
+                    };
+                  })
+                  .sort((a, b) => b.spend - a.spend);
+
+                const totalWastedSpend = wastedKeywords.reduce((sum, kw) => sum + kw.spend, 0);
+                const totalKeywords = keywordsData.length;
+                const wastedPercentage = totalKeywords > 0 ? (wastedKeywords.length / totalKeywords) * 100 : 0;
+
+                testResults.calculationTest = {
+                  success: true,
+                  totalKeywords: totalKeywords,
+                  wastedKeywordsCount: wastedKeywords.length,
+                  totalWastedSpend: totalWastedSpend,
+                  wastedPercentage: wastedPercentage.toFixed(2),
+                  message: `Found ${wastedKeywords.length} wasted keywords (${wastedPercentage.toFixed(2)}% of total)`
+                };
+
+                testResults.wastedKeywords = wastedKeywords.slice(0, 20); // Return top 20
+
+                console.log('✅ Calculation Test Result:', testResults.calculationTest);
+              } catch (calcError) {
+                testResults.calculationTest = {
+                  success: false,
+                  error: calcError.message,
+                  stack: process.env.NODE_ENV === 'development' ? calcError.stack : undefined
+                };
+                console.error('❌ Calculation Test Failed:', calcError.message);
+              }
+            }
+          } else {
+            testResults.databaseTest = {
+              success: false,
+              message: 'No keyword performance data found in database for this user/country/region'
+            };
+            console.log('⚠️ Database Test: No data found');
+          }
+        } catch (dbError) {
+          testResults.databaseTest = {
+            success: false,
+            error: dbError.message,
+            stack: process.env.NODE_ENV === 'development' ? dbError.stack : undefined
+          };
+          console.error('❌ Database Test Failed:', dbError.message);
+        }
+      }
+
+      // Determine overall success
+      const overallSuccess = Object.values(testResults)
+        .filter(result => result && typeof result === 'object' && 'success' in result)
+        .every(result => result.success !== false);
+
+      return res.status(overallSuccess ? 200 : 207).json({
+        success: overallSuccess,
+        message: 'Wasted spend keywords test completed',
+        testMode: testMode,
+        results: testResults,
+        summary: {
+          apiTestPassed: testResults.apiTest?.success !== false && !testResults.apiTest?.skipped,
+          apiTestSkipped: testResults.apiTest?.skipped || false,
+          databaseTestPassed: testResults.databaseTest?.success !== false,
+          calculationTestPassed: testResults.calculationTest?.success !== false,
+          wastedKeywordsFound: testResults.wastedKeywords?.length || 0
+        },
+        note: testMode === 'calculation' || testMode === 'database' 
+          ? `⚠️ API test was skipped because testMode is '${testMode}'. To test the API call, use testMode: 'full' or 'api', or omit testMode (defaults to 'full').`
+          : null
       });
 
     } catch (error) {
       console.error('Error in testGetWastedSpendKeywords:', error);
       return res.status(500).json({
         success: false,
-        error: error.message || 'Failed to generate keyword performance report',
+        error: error.message || 'Failed to test wasted spend keywords',
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
   }
 
-  const testListFinancialEvents = async (req, res) => {
-   
-    const result = await listFinancialEventsMethod();
-    return res.status(200).json({
-        data: result
-    })
-  }
 
   const testGetBrand = async (req, res) => {
     const { asin, marketplaceId, accessToken } = req.body;
@@ -1411,5 +1576,5 @@ const testKeywordRecommendations = async (req, res) => {
 module.exports = { testReport, getTotalSales, 
    getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testListFinancialEvents,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations
+   testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations
    }

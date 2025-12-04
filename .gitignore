@@ -9,6 +9,7 @@ logs/
 .env
 .env.local
 .env.*.local
+README.md
 
 # Dependency directories
 /npm-debug.log

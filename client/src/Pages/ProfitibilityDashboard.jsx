@@ -222,12 +222,13 @@ const ProfitabilityDashboard = () => {
       console.log('=== Profitability Dashboard: Using filtered spend data ===');
       console.log('Filtered ad spend:', adSpend);
     } else {
-      // Use same logic as PPC Dashboard - prioritize ProductAdsPayment, fallback to sponsoredAds
-      const actualPPCSpend = Number(filteredAccountFinance?.ProductAdsPayment || 0);
-      adSpend = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
-      console.log('=== Profitability Dashboard: Using default spend data (matching PPC Dashboard) ===');
-      console.log('ProductAdsPayment:', actualPPCSpend);
-      console.log('sponsoredAdsMetrics?.totalCost:', sponsoredAdsMetrics?.totalCost || 0);
+      // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
+      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+      // Fallback to ProductAdsPayment if Ads API data not available
+      adSpend = adsPPCSpend > 0 ? adsPPCSpend : Number(filteredAccountFinance?.ProductAdsPayment || 0);
+      console.log('=== Profitability Dashboard: Using Amazon Ads API as PRIMARY ===');
+      console.log('sponsoredAdsMetrics?.totalCost (PRIMARY):', adsPPCSpend);
+      console.log('ProductAdsPayment (fallback):', filteredAccountFinance?.ProductAdsPayment || 0);
       console.log('Final ad spend used:', adSpend);
     }
     

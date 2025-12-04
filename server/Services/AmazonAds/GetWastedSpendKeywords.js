@@ -242,14 +242,26 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
     
     const startDate = formatDate(startDateObj);
     const endDate = formatDate(endDateObj);
+    
+    console.log('🚀 Starting keyword performance report generation', {
+        profileId,
+        userId,
+        country,
+        region,
+        startDate,
+        endDate,
+        hasRefreshToken: !!refreshToken
+    });
+    
     try {
+        console.log('📝 Step 1: Creating report request...');
         const reportData = await getKeywordReportId(accessToken, profileId, startDate, endDate, region);
 
         if (!reportData || !reportData.reportId) {
             throw new Error('Failed to get report ID');
         }
 
-        // console.log(`Report ID: ${reportData.reportId}`);
+        console.log(`✅ Report ID received: ${reportData.reportId}`);
 
         // Create token refresh callback for polling
         const tokenRefreshCallback = refreshToken ? async () => {
@@ -268,15 +280,45 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
             }
         } : null;
 
+        console.log('⏳ Step 2: Polling report status (this may take a few minutes)...');
         const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, tokenRefreshCallback);
+        console.log(`📊 Report status: ${reportStatus.status}`);
 
         if (reportStatus.status === 'SUCCESS') {
-            // console.log('Downloading report from:', reportStatus.location);
+            console.log('✅ Report completed successfully, downloading from:', reportStatus.location);
             // Use the latest token if refreshed
             const downloadToken = reportStatus.finalAccessToken || accessToken;
             const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId);
 
-            const data = reportContent
+            // Extract data from report - handle both array and object formats
+            let data = reportContent;
+            if (reportContent && typeof reportContent === 'object' && !Array.isArray(reportContent)) {
+                // If report has metadata, extract the data array
+                if (reportContent.metadata && reportContent.data) {
+                    data = reportContent.data;
+                } else if (reportContent.reportData) {
+                    data = reportContent.reportData;
+                } else if (Array.isArray(reportContent.rows)) {
+                    data = reportContent.rows;
+                } else {
+                    // If it's an object but not an array, try to find the data array
+                    const possibleKeys = ['data', 'rows', 'keywords', 'items', 'results'];
+                    for (const key of possibleKeys) {
+                        if (Array.isArray(reportContent[key])) {
+                            data = reportContent[key];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Ensure data is an array
+            if (!Array.isArray(data)) {
+                console.warn('⚠️ Report data is not an array, converting...', typeof data);
+                data = Array.isArray(reportContent) ? reportContent : (data ? [data] : []);
+            }
+
+            console.log(`📊 Processing ${data.length} keyword records for storage`);
 
             const adsKeywordsPerformanceData = await adsKeywordsPerformanceModel.create({
                 userId: userId,
@@ -284,6 +326,9 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
                 region: region,
                 keywordsData: data
             });
+            
+            console.log(`✅ Successfully stored ${data.length} keywords in database`);
+            
             return {
                 success: true,
                 reportId: reportStatus.reportId,
@@ -291,6 +336,7 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
                 data: adsKeywordsPerformanceData.keywordsData
             };
         } else {
+            console.error('❌ Report generation failed:', reportStatus.error);
             return {
                 success: false,
                 reportId: reportStatus.reportId,

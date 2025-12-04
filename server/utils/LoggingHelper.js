@@ -227,9 +227,6 @@ class LoggingHelper {
             'GET_MERCHANT_LISTINGS_ALL_DATA': 'merchantListings',
             'GET_V2_SELLER_PERFORMANCE_REPORT': 'sellerPerformanceV2',
             'GET_V1_SELLER_PERFORMANCE_REPORT': 'sellerPerformanceV1',
-            'listFinancialEventsMethod': 'financialEvents',
-            'getAmazonFees': 'amazonFees',
-            'getCompetitivePricing': 'competitivePricing',
             'getPPCSpendsBySKU': 'ppcSpends',
             'getCampaign': 'campaignData'
         };

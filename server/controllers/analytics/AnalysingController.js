@@ -211,9 +211,6 @@ const createSampleLoggingData = asyncHandler(async (req, res) => {
         loggingHelper.logFunctionStart('generateAccessTokens', { hasRefreshToken: true });
         loggingHelper.logFunctionSuccess('generateAccessTokens', null, { recordsProcessed: 2, recordsSuccessful: 2 });
         
-        loggingHelper.logFunctionStart('getCompetitivePricing_chunked', { totalAsins: 5 });
-        loggingHelper.logFunctionError('getCompetitivePricing_chunked', new Error('Rate limit exceeded'));
-        
         loggingHelper.logFunctionStart('listingItems_processing', { totalSkus: 8 });
         loggingHelper.logFunctionWarning('listingItems_processing', 'Some items failed to process');
         

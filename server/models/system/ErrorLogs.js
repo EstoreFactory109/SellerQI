@@ -212,12 +212,6 @@ const UserAccountLogsSchema = new mongoose.Schema({
             error: String,
             duration: Number
         },
-        competitivePricing: {
-            attempted: { type: Boolean, default: false },
-            successful: { type: Boolean, default: false },
-            error: String,
-            duration: Number
-        },
         ppcSpends: {
             attempted: { type: Boolean, default: false },
             successful: { type: Boolean, default: false },

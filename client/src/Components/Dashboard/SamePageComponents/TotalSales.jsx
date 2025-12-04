@@ -51,9 +51,10 @@ const TotalSales = () => {
   const grossProfit = Math.abs(grossProfitRaw);
   const totalSales = Number(info?.TotalWeeklySale || 0);
 
-  // Calculate PPC Spent using same logic as other dashboards - prioritize ProductAdsPayment, fallback to sponsoredAds
-  const actualPPCSpend = Number(info?.accountFinance?.ProductAdsPayment || 0);
-  const ppcSpent = actualPPCSpend > 0 ? actualPPCSpend : (sponsoredAdsMetrics?.totalCost || 0);
+  // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
+  const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+  // Fallback to ProductAdsPayment if Ads API data not available
+  const ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
 
   const saleValues = [
     grossProfit,

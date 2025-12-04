@@ -1,12 +1,8 @@
 /**
- * ⚠️ GETLISTINGITEMSISSUES TESTING MODE ⚠️
+ * Integration Service
  * 
- * This file is currently in GetListingItemsIssues testing mode.
- * All other API services have been commented out to isolate GetListingItemsIssues testing.
- * Only the GetListingItemsIssues service will run when Integration.getSpApiData() is called.
- * 
- * To restore full functionality, uncomment all sections marked with:
- * "COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING"
+ * Main service for fetching all SP-API and Amazon Ads data.
+ * Handles parallel batch processing of multiple API calls.
  */
 
 const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
@@ -33,19 +29,15 @@ const withTimeout = (promise, timeoutMs, operationName) => {
 
 // Models
 const ListingItemsModel = require('../../models/products/GetListingItemsModel.js');
-const CompetitivePricing = require('../../models/seller-performance/CompetitivePricingModel.js');
 const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 
 // SP-API Services
 const GET_MERCHANT_LISTINGS_ALL_DATA = require('../Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Sp_API/V2_Seller_Performance_Report.js');
 const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
-const { listFinancialEventsMethod } = require('../Sp_API/Finance.js');
-const { getCompetitivePricing } = require('../Sp_API/CompetitivePrices.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
 const { addReviewDataTODatabase } = require('../Sp_API/NumberOfProductReviews.js');
 const { GetListingItem } = require('../Sp_API/GetListingItemsIssues.js');
-const TotalSales = require('../Sp_API/WeeklySales.js');
 const getshipment = require('../Sp_API/shipment.js');
 
 // Amazon Ads Services
@@ -65,7 +57,6 @@ const { getBrand } = require('../Sp_API/GetBrand.js');
 const GET_FBA_INVENTORY_PLANNING_DATA = require('../Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
 const GET_STRANDED_INVENTORY_UI_DATA = require('../Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA = require('../Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js');
-const getAmazonFees = require('../Finance/AmazonFees.js');
 const { addAccountHistory } = require('../History/addAccountHistory.js');
 const { AnalyseService } = require('./Analyse.js');
 
@@ -189,7 +180,6 @@ class Integration {
             );
 
             // Fetch all API data in parallel batches
-            // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Only GetListingItemsIssues will run
             const apiData = await this.fetchAllApiData({
                 AccessToken,
                 AdsAccessToken,
@@ -206,8 +196,7 @@ class Integration {
                 loggingHelper
             });
 
-            // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Process and save data
-            // Only save GetListingItemsIssues data
+            // Process and save data
             await this.processAndSaveData({
                 userId,
                 Region,
@@ -699,14 +688,33 @@ class Integration {
         // Process API result helper
         const processApiResult = (result, serviceName) => {
             if (result.status === 'fulfilled') {
+                const value = result.value;
+                
+                // Check if the returned value indicates failure
+                // Some functions return false or { success: false, message: "..." } on failure
+                const isFailure = value === false || 
+                                 (value && typeof value === 'object' && value.success === false);
+                
+                if (isFailure) {
+                    const errorMsg = value?.message || value?.error || 'Function returned failure indicator';
+                    logger.error(`${serviceName} failed`, { error: errorMsg, userId });
+                    if (loggingHelper) {
+                        // Create an error-like object for logging
+                        const errorObj = value instanceof Error ? value : new Error(errorMsg);
+                        loggingHelper.logFunctionError(serviceName, errorObj);
+                    }
+                    return { success: false, data: null, error: errorMsg };
+                }
+                
+                // Success case
                 if (loggingHelper) {
-                    const recordCount = Array.isArray(result.value) ? result.value.length : (result.value ? 1 : 0);
-                    loggingHelper.logFunctionSuccess(serviceName, result.value, {
+                    const recordCount = Array.isArray(value) ? value.length : (value ? 1 : 0);
+                    loggingHelper.logFunctionSuccess(serviceName, value, {
                         recordsProcessed: recordCount,
                         recordsSuccessful: recordCount
                     });
                 }
-                return { success: true, data: result.value, error: null };
+                return { success: true, data: value, error: null };
             } else {
                 const errorMsg = result.reason?.message || 'Unknown error';
                 logger.error(`${serviceName} failed`, { error: errorMsg, userId });
@@ -717,265 +725,233 @@ class Integration {
             }
         };
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - First batch
-        // logger.info("First Batch Starts");
-        // const firstBatchPromises = [];
-        // const firstBatchServiceNames = [];
+        // First batch
+        logger.info("First Batch Starts");
+        const firstBatchPromises = [];
+        const firstBatchServiceNames = [];
 
-        // if (AccessToken) {
-        //     firstBatchPromises.push(
-        //         tokenManager.wrapSpApiFunction(GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        //         tokenManager.wrapSpApiFunction(GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
-        //     );
-        //     firstBatchServiceNames.push("V2 Seller Performance Report", "V1 Seller Performance Report");
-        // }
+        if (AccessToken) {
+            firstBatchPromises.push(
+                tokenManager.wrapSpApiFunction(GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+            );
+            firstBatchServiceNames.push("V2 Seller Performance Report", "V1 Seller Performance Report");
+        }
 
-        // if (AdsAccessToken) {
-        //     firstBatchPromises.push(
-        //         tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
-        //         tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
-        //         tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
-        //     );
-        //     firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise");
-        // }
+        if (AdsAccessToken) {
+            firstBatchPromises.push(
+                tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
+                tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
+                tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
+            );
+            firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise");
+        }
 
-        // const firstBatchResults = await Promise.allSettled(firstBatchPromises);
-        // let resultIndex = 0;
+        const firstBatchResults = await Promise.allSettled(firstBatchPromises);
+        let resultIndex = 0;
 
-        // if (AccessToken) {
-        //     apiData.v2data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-        //     apiData.v1data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-        // } else {
-        //     apiData.v2data = { success: false, data: null, error: "SP-API token not available" };
-        //     apiData.v1data = { success: false, data: null, error: "SP-API token not available" };
-        // }
+        if (AccessToken) {
+            apiData.v2data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+            apiData.v1data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+        } else {
+            apiData.v2data = { success: false, data: null, error: "SP-API token not available" };
+            apiData.v1data = { success: false, data: null, error: "SP-API token not available" };
+        }
 
-        // if (AdsAccessToken) {
-        //     apiData.ppcSpendsBySKU = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-        //     apiData.adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-        //     apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-        // } else {
-        //     apiData.ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
-        //     apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
-        //     apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
-        // }
-        // logger.info("First Batch Ends");
+        if (AdsAccessToken) {
+            apiData.ppcSpendsBySKU = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+            apiData.adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+            apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+        } else {
+            apiData.ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
+            apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
+            apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
+        }
+        logger.info("First Batch Ends");
 
-        // Set empty defaults for commented out services
-        apiData.v2data = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.v1data = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.ppcSpendsBySKU = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.ppcSpendsDateWise = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
+        // Second batch
+        logger.info("Second Batch Starts");
+        const secondBatchPromises = [];
+        const secondBatchServiceNames = [];
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Second batch
-        // logger.info("Second Batch Starts");
-        // const secondBatchPromises = [];
-        // const secondBatchServiceNames = [];
+        if (AccessToken) {
+            secondBatchPromises.push(
+                tokenManager.wrapSpApiFunction(GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+            );
+            secondBatchServiceNames.push(
+                "Restock Inventory Recommendations",
+                "FBA Inventory Planning",
+                "Stranded Inventory",
+                "Inbound Non-Compliance"
+            );
+        }
 
-        // if (AccessToken) {
-        //     secondBatchPromises.push(
-        //         tokenManager.wrapSpApiFunction(GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        //         tokenManager.wrapSpApiFunction(GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        //         tokenManager.wrapSpApiFunction(GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
-        //         tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken)
-        //             (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
-        //     );
-        //     secondBatchServiceNames.push(
-        //         "Restock Inventory Recommendations",
-        //         "FBA Inventory Planning",
-        //         "Stranded Inventory",
-        //         "Inbound Non-Compliance"
-        //     );
-        // }
+        secondBatchPromises.push(
+            addReviewDataTODatabase(Array.isArray(productData.asinArray) ? productData.asinArray : [], Country, userId, Region)
+        );
+        secondBatchServiceNames.push("Product Reviews");
 
-        // secondBatchPromises.push(
-        //     addReviewDataTODatabase(Array.isArray(productData.asinArray) ? productData.asinArray : [], Country, userId, Region)
-        // );
-        // secondBatchServiceNames.push("Product Reviews");
+        if (AdsAccessToken) {
+            secondBatchPromises.push(
+                tokenManager.wrapAdsFunction(getKeywords, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region),
+                tokenManager.wrapAdsFunction(getCampaign, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, Region, userId, Country)
+            );
+            secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
+        }
 
-        // if (AdsAccessToken) {
-        //     secondBatchPromises.push(
-        //         tokenManager.wrapAdsFunction(getKeywords, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region),
-        //         tokenManager.wrapAdsFunction(getCampaign, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, Region, userId, Country)
-        //     );
-        //     secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
-        // }
+        const secondBatchResults = await Promise.allSettled(secondBatchPromises);
+        let secondResultIndex = 0;
 
-        // const secondBatchResults = await Promise.allSettled(secondBatchPromises);
-        // let secondResultIndex = 0;
+        if (AccessToken) {
+            apiData.RestockinventoryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.fbaInventoryPlanningData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.strandedInventoryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.inboundNonComplianceData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+        } else {
+            apiData.RestockinventoryData = { success: false, data: null, error: "SP-API token not available" };
+            apiData.fbaInventoryPlanningData = { success: false, data: null, error: "SP-API token not available" };
+            apiData.strandedInventoryData = { success: false, data: null, error: "SP-API token not available" };
+            apiData.inboundNonComplianceData = { success: false, data: null, error: "SP-API token not available" };
+        }
 
-        // if (AccessToken) {
-        //     apiData.RestockinventoryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        //     apiData.fbaInventoryPlanningData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        //     apiData.strandedInventoryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        //     apiData.inboundNonComplianceData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        // } else {
-        //     apiData.RestockinventoryData = { success: false, data: null, error: "SP-API token not available" };
-        //     apiData.fbaInventoryPlanningData = { success: false, data: null, error: "SP-API token not available" };
-        //     apiData.strandedInventoryData = { success: false, data: null, error: "SP-API token not available" };
-        //     apiData.inboundNonComplianceData = { success: false, data: null, error: "SP-API token not available" };
-        // }
+        apiData.productReview = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
 
-        // apiData.productReview = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+        if (AdsAccessToken) {
+            apiData.adsKeywords = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.campaignData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+        } else {
+            apiData.adsKeywords = { success: false, data: null, error: "Ads token not available" };
+            apiData.campaignData = { success: false, data: null, error: "Ads token not available" };
+        }
+        logger.info("Second Batch Ends");
 
-        // if (AdsAccessToken) {
-        //     apiData.adsKeywords = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        //     apiData.campaignData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
-        // } else {
-        //     apiData.adsKeywords = { success: false, data: null, error: "Ads token not available" };
-        //     apiData.campaignData = { success: false, data: null, error: "Ads token not available" };
-        // }
-        // logger.info("Second Batch Ends");
+        // Get campaign and ad group IDs
+        const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
+            apiData.ppcSpendsBySKU, userId, Region, Country
+        );
 
-        // Set empty defaults for commented out services
-        apiData.RestockinventoryData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.fbaInventoryPlanningData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.strandedInventoryData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.inboundNonComplianceData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.productReview = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.adsKeywords = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.campaignData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
+        // Third batch
+        logger.info("Third Batch Starts");
+        const thirdBatchPromises = [];
+        const thirdBatchServiceNames = [];
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Get campaign and ad group IDs
-        // const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
-        //     apiData.ppcSpendsBySKU, userId, Region, Country
-        // );
+        if (AccessToken) {
+            thirdBatchPromises.push(
+                tokenManager.wrapDataToSendFunction(getshipment, userId, RefreshToken, AdsRefreshToken)
+                    (dataToSend, userId, Base_URI, Country, Region),
+                tokenManager.wrapDataToSendFunction(getBrand, userId, RefreshToken, AdsRefreshToken)
+                    (dataToSend, userId, Base_URI)
+            );
+            thirdBatchServiceNames.push("Shipment Data", "Brand Data");
+        }
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Process competitive pricing
-        // apiData.competitivePriceData = await this.processCompetitivePricing(
-        //     AccessToken, productData.asinArray, dataToSend, userId, Base_URI,
-        //     Country, Region, RefreshToken, AdsRefreshToken, loggingHelper
-        // );
+        if (AdsAccessToken) {
+            let campaignids = [];
+            if (apiData.campaignData.success && apiData.campaignData.data?.campaignData) {
+                if (Array.isArray(apiData.campaignData.data.campaignData)) {
+                    campaignids = apiData.campaignData.data.campaignData
+                        .filter(item => item && item.campaignId)
+                        .map(item => item.campaignId);
+                }
+            }
 
-        // Set empty defaults
-        apiData.competitivePriceData = [];
+            thirdBatchPromises.push(
+                tokenManager.wrapAdsFunction(getAdGroups, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, Region, userId, Country, campaignids)
+            );
+            thirdBatchServiceNames.push("Ad Groups Data");
+        }
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Third batch
-        // logger.info("Third Batch Starts");
-        // const thirdBatchPromises = [];
-        // const thirdBatchServiceNames = [];
+        // Add MCP Economics fetch to third batch (runs in parallel)
+        if (RefreshToken) {
+            thirdBatchPromises.push(
+                fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
+            );
+            thirdBatchServiceNames.push("MCP Economics Data");
+        }
 
-        // if (AccessToken) {
-        //     thirdBatchPromises.push(
-        //         tokenManager.wrapDataToSendFunction(getshipment, userId, RefreshToken, AdsRefreshToken)
-        //             (dataToSend, userId, Base_URI, Country, Region),
-        //         tokenManager.wrapDataToSendFunction(getBrand, userId, RefreshToken, AdsRefreshToken)
-        //             (dataToSend, userId, Base_URI)
-        //     );
-        //     thirdBatchServiceNames.push("Shipment Data", "Brand Data");
-        // }
+        const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
+        let thirdResultIndex = 0;
 
-        // if (AdsAccessToken) {
-        //     let campaignids = [];
-        //     if (apiData.campaignData.success && apiData.campaignData.data?.campaignData) {
-        //         if (Array.isArray(apiData.campaignData.data.campaignData)) {
-        //             campaignids = apiData.campaignData.data.campaignData
-        //                 .filter(item => item && item.campaignId)
-        //                 .map(item => item.campaignId);
-        //         }
-        //     }
+        if (AccessToken) {
+            apiData.shipment = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
+            apiData.brandData = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
+        } else {
+            apiData.shipment = { success: false, data: null, error: "SP-API token not available" };
+            apiData.brandData = { success: false, data: null, error: "SP-API token not available" };
+        }
 
-        //     thirdBatchPromises.push(
-        //         tokenManager.wrapAdsFunction(getAdGroups, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, Region, userId, Country, campaignids)
-        //     );
-        //     thirdBatchServiceNames.push("Ad Groups Data");
-        // }
+        if (AdsAccessToken) {
+            apiData.adGroupsData = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
+        } else {
+            apiData.adGroupsData = { success: false, data: null, error: "Ads token not available" };
+        }
 
-        // // Add MCP Economics fetch to third batch (runs in parallel)
-        // if (RefreshToken) {
-        //     thirdBatchPromises.push(
-        //         fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
-        //     );
-        //     thirdBatchServiceNames.push("MCP Economics Data");
-        // }
-
-        // const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
-        // let thirdResultIndex = 0;
-
-        // if (AccessToken) {
-        //     apiData.shipment = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
-        //     apiData.brandData = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
-        // } else {
-        //     apiData.shipment = { success: false, data: null, error: "SP-API token not available" };
-        //     apiData.brandData = { success: false, data: null, error: "SP-API token not available" };
-        // }
-
-        // if (AdsAccessToken) {
-        //     apiData.adGroupsData = processApiResult(thirdBatchResults[thirdResultIndex++], thirdBatchServiceNames[thirdResultIndex - 1]);
-        // } else {
-        //     apiData.adGroupsData = { success: false, data: null, error: "Ads token not available" };
-        // }
-
-        // Set empty defaults
-        apiData.shipment = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.brandData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.adGroupsData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.mcpEconomicsData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.mcpBuyBoxData = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Process MCP Economics and BuyBox results
-        // if (RefreshToken) {
-        //     try {
-        //         const mcpEconomicsResult = thirdBatchResults[thirdResultIndex++];
-        //         if (mcpEconomicsResult.status === 'fulfilled' && mcpEconomicsResult.value?.success) {
-        //             apiData.mcpEconomicsData = { 
-        //                 success: true, 
-        //                 data: mcpEconomicsResult.value.data, 
-        //                 error: null 
-        //             };
-        //             logger.info("MCP Economics data fetched successfully", {
-        //                 userId,
-        //                 region: Region,
-        //                 country: Country
-        //             });
-        //         } else {
-        //             const errorMsg = mcpEconomicsResult.status === 'rejected' 
-        //                 ? (mcpEconomicsResult.reason?.message || mcpEconomicsResult.reason?.toString() || 'Promise rejected')
-        //                 : (mcpEconomicsResult.value?.error || 'Unknown error');
-        //             apiData.mcpEconomicsData = { 
-        //                 success: false, 
-        //                 data: null, 
-        //                 error: errorMsg 
-        //             };
-        //             logger.warn("MCP Economics data fetch failed", { 
-        //                 error: errorMsg,
-        //                 userId,
-        //                 region: Region,
-        //                 country: Country,
-        //                 resultStatus: mcpEconomicsResult.status,
-        //                 hasValue: !!mcpEconomicsResult.value
-        //             });
-        //         }
-        //     } catch (mcpError) {
-        //         logger.error("Error processing MCP Economics result", {
-        //             error: mcpError.message,
-        //             stack: mcpError.stack,
-        //             userId,
-        //             region: Region,
-        //             country: Country
-        //         });
-        //         apiData.mcpEconomicsData = { 
-        //             success: false, 
-        //             data: null, 
-        //             error: `Error processing MCP Economics: ${mcpError.message}` 
-        //         };
-        //     }
-        // } else {
-        //     apiData.mcpEconomicsData = { success: false, data: null, error: "Refresh token not available" };
-        //     logger.info("MCP Economics skipped - no refresh token", { userId, region: Region, country: Country });
-        // }
+        // Process MCP Economics and BuyBox results
+        if (RefreshToken) {
+            try {
+                const mcpEconomicsResult = thirdBatchResults[thirdResultIndex++];
+                if (mcpEconomicsResult.status === 'fulfilled' && mcpEconomicsResult.value?.success) {
+                    apiData.mcpEconomicsData = { 
+                        success: true, 
+                        data: mcpEconomicsResult.value.data, 
+                        error: null 
+                    };
+                    logger.info("MCP Economics data fetched successfully", {
+                        userId,
+                        region: Region,
+                        country: Country
+                    });
+                } else {
+                    const errorMsg = mcpEconomicsResult.status === 'rejected' 
+                        ? (mcpEconomicsResult.reason?.message || mcpEconomicsResult.reason?.toString() || 'Promise rejected')
+                        : (mcpEconomicsResult.value?.error || 'Unknown error');
+                    apiData.mcpEconomicsData = { 
+                        success: false, 
+                        data: null, 
+                        error: errorMsg 
+                    };
+                    logger.warn("MCP Economics data fetch failed", { 
+                        error: errorMsg,
+                        userId,
+                        region: Region,
+                        country: Country,
+                        resultStatus: mcpEconomicsResult.status,
+                        hasValue: !!mcpEconomicsResult.value
+                    });
+                }
+            } catch (mcpError) {
+                logger.error("Error processing MCP Economics result", {
+                    error: mcpError.message,
+                    stack: mcpError.stack,
+                    userId,
+                    region: Region,
+                    country: Country
+                });
+                apiData.mcpEconomicsData = { 
+                    success: false, 
+                    data: null, 
+                    error: `Error processing MCP Economics: ${mcpError.message}` 
+                };
+            }
+        } else {
+            apiData.mcpEconomicsData = { success: false, data: null, error: "Refresh token not available" };
+            logger.info("MCP Economics skipped - no refresh token", { userId, region: Region, country: Country });
+        }
 
         // Fetch BuyBox data (runs after Economics)
         if (RefreshToken) {
@@ -1035,53 +1011,48 @@ class Integration {
         
         logger.info("Third Batch Ends");
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Fourth batch - Keywords
-        // logger.info("Fourth Batch Starts");
-        // if (AdsAccessToken) {
-        //     const fourthBatchPromises = [
-        //         tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region,
-        //                 Array.isArray(campaignIdArray) ? campaignIdArray : [],
-        //                 Array.isArray(adGroupIdArray) ? adGroupIdArray : []
-        //             ),
-        //         tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)
-        //             (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
-        //     ];
+        // Fourth batch - Keywords
+        logger.info("Fourth Batch Starts");
+        if (AdsAccessToken) {
+            const fourthBatchPromises = [
+                tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region,
+                        Array.isArray(campaignIdArray) ? campaignIdArray : [],
+                        Array.isArray(adGroupIdArray) ? adGroupIdArray : []
+                    ),
+                tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)
+                    (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
+            ];
 
-        //     // Add keyword recommendations if we have ASINs
-        //     const asinArray = Array.isArray(productData?.asinArray) ? productData.asinArray : [];
-        //     if (asinArray.length > 0) {
-        //         fourthBatchPromises.push(
-        //             tokenManager.wrapAdsFunction(getKeywordRecommendations, userId, RefreshToken, AdsRefreshToken)
-        //                 (AdsAccessToken, ProfileId, userId, Country, Region, asinArray)
-        //         );
-        //     }
+            // Add keyword recommendations if we have ASINs
+            const asinArray = Array.isArray(productData?.asinArray) ? productData.asinArray : [];
+            if (asinArray.length > 0) {
+                fourthBatchPromises.push(
+                    tokenManager.wrapAdsFunction(getKeywordRecommendations, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region, asinArray)
+                );
+            }
 
-        //     const fourthBatchResults = await Promise.allSettled(fourthBatchPromises);
+            const fourthBatchResults = await Promise.allSettled(fourthBatchPromises);
 
-        //     apiData.negativeKeywords = processApiResult(fourthBatchResults[0], "Negative Keywords");
-        //     apiData.searchKeywords = processApiResult(fourthBatchResults[1], "Search Keywords");
+            apiData.negativeKeywords = processApiResult(fourthBatchResults[0], "Negative Keywords");
+            apiData.searchKeywords = processApiResult(fourthBatchResults[1], "Search Keywords");
             
-        //     // Process keyword recommendations result if it was included
-        //     if (asinArray.length > 0) {
-        //         apiData.keywordRecommendations = processApiResult(fourthBatchResults[2], "Keyword Recommendations");
-        //     } else {
-        //         apiData.keywordRecommendations = { success: false, data: null, error: "No ASINs available" };
-        //     }
-        // } else {
-        //     apiData.negativeKeywords = { success: false, data: null, error: "Ads token not available" };
-        //     apiData.searchKeywords = { success: false, data: null, error: "Ads token not available" };
-        //     apiData.keywordRecommendations = { success: false, data: null, error: "Ads token not available" };
-        // }
-        // logger.info("Fourth Batch Ends");
+            // Process keyword recommendations result if it was included
+            if (asinArray.length > 0) {
+                apiData.keywordRecommendations = processApiResult(fourthBatchResults[2], "Keyword Recommendations");
+            } else {
+                apiData.keywordRecommendations = { success: false, data: null, error: "No ASINs available" };
+            }
+        } else {
+            apiData.negativeKeywords = { success: false, data: null, error: "Ads token not available" };
+            apiData.searchKeywords = { success: false, data: null, error: "Ads token not available" };
+            apiData.keywordRecommendations = { success: false, data: null, error: "Ads token not available" };
+        }
+        logger.info("Fourth Batch Ends");
 
-        // Set empty defaults
-        apiData.negativeKeywords = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.searchKeywords = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-        apiData.keywordRecommendations = { success: false, data: null, error: "Commented out for GetListingItemsIssues testing" };
-
-        // GETLISTINGITEMSISSUES TESTING MODE: Only process listing items
-        logger.info("Processing Listing Items - GETLISTINGITEMSISSUES TESTING MODE");
+        // Process listing items
+        logger.info("Processing Listing Items");
         apiData.genericKeyWordArray = await this.processListingItems(
             AccessToken, productData.skuArray, productData.asinArray, dataToSend,
             userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper
@@ -1135,74 +1106,6 @@ class Integration {
         }
 
         return { campaignIdArray, adGroupIdArray };
-    }
-
-    /**
-     * Process competitive pricing
-     */
-    static async processCompetitivePricing(AccessToken, asinArray, dataToSend, userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper) {
-        logger.info("processCompetitivePricing starting");
-        
-        const competitivePriceData = [];
-
-        if (!AccessToken || !Array.isArray(asinArray) || asinArray.length === 0) {
-            logger.info("processCompetitivePricing ended");
-            return competitivePriceData;
-        }
-
-        if (loggingHelper) {
-            loggingHelper.logFunctionStart('getCompetitivePricing_chunked', {
-                totalAsins: asinArray.length,
-                chunkSize: 20
-            });
-        }
-
-        try {
-            const CHUNK_SIZE = 20;
-            let start = 0;
-
-            while (start < asinArray.length) {
-                const end = Math.min(start + CHUNK_SIZE, asinArray.length);
-                const asinArrayChunk = asinArray.slice(start, end);
-
-                try {
-                    const competitiveResponseData = await tokenManager.wrapDataToSendFunction(
-                        getCompetitivePricing, userId, RefreshToken, AdsRefreshToken
-                    )(asinArrayChunk, dataToSend, userId, Base_URI, Country, Region);
-
-                    if (competitiveResponseData && Array.isArray(competitiveResponseData)) {
-                        competitivePriceData.push(...competitiveResponseData);
-                    }
-                } catch (chunkError) {
-                    logger.error(`Competitive pricing error for chunk ${start}-${end}`, {
-                        error: chunkError.message
-                    });
-                }
-
-                start = end;
-                if (start < asinArray.length) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-
-            if (loggingHelper) {
-                loggingHelper.logFunctionSuccess('getCompetitivePricing_chunked', competitivePriceData, {
-                    recordsProcessed: asinArray.length,
-                    recordsSuccessful: competitivePriceData.length
-                });
-            }
-            
-            logger.info("processCompetitivePricing ended");
-        } catch (overallError) {
-            logger.error("Overall competitive pricing processing failed", {
-                error: overallError.message
-            });
-            if (loggingHelper) {
-                loggingHelper.logFunctionError('getCompetitivePricing_chunked', overallError);
-            }
-        }
-
-        return competitivePriceData;
     }
 
     /**
@@ -1297,23 +1200,6 @@ class Integration {
         
         const { userId, Region, Country, apiData, productData, merchantListingsData, loggingHelper } = params;
 
-        // COMMENTED OUT FOR GETLISTINGITEMSISSUES TESTING - Save competitive pricing
-        // if (apiData.competitivePriceData.length > 0 || productData.asinArray.length === 0) {
-        //     try {
-        //         await CompetitivePricing.create({
-        //             User: userId,
-        //             region: Region,
-        //             country: Country,
-        //             Products: apiData.competitivePriceData
-        //         });
-        //     } catch (dbError) {
-        //         logger.error("Failed to save competitive pricing to database", {
-        //             error: dbError.message
-        //         });
-        //     }
-        // }
-
-
         // Save generic keywords - ACTIVE FOR GETLISTINGITEMSISSUES TESTING
         if (Array.isArray(apiData.genericKeyWordArray) && apiData.genericKeyWordArray.length > 0) {
             try {
@@ -1359,7 +1245,6 @@ class Integration {
             feesData: apiData.feesResult.success ? apiData.feesResult.data : null,
             v2data: apiData.v2data.success ? apiData.v2data.data : null,
             v1data: apiData.v1data.success ? apiData.v1data.data : null,
-            competitivePriceData: Array.isArray(apiData.competitivePriceData) ? apiData.competitivePriceData : [],
             RestockinventoryData: apiData.RestockinventoryData.success ? apiData.RestockinventoryData.data : null,
             productReview: apiData.productReview.success ? apiData.productReview.data : null,
             WeeklySales: apiData.WeeklySales.success ? apiData.WeeklySales.data : null,
@@ -1375,7 +1260,10 @@ class Integration {
             adGroupsData: apiData.adGroupsData.success ? apiData.adGroupsData.data : null,
             fbaInventoryPlanningData: apiData.fbaInventoryPlanningData.success ? apiData.fbaInventoryPlanningData.data : null,
             strandedInventoryData: apiData.strandedInventoryData.success ? apiData.strandedInventoryData.data : null,
-            inboundNonComplianceData: apiData.inboundNonComplianceData.success ? apiData.inboundNonComplianceData.data : null
+            inboundNonComplianceData: apiData.inboundNonComplianceData.success ? apiData.inboundNonComplianceData.data : null,
+            // MCP Economics and BuyBox data
+            mcpEconomicsData: apiData.mcpEconomicsData.success ? apiData.mcpEconomicsData.data : null,
+            mcpBuyBoxData: apiData.mcpBuyBoxData.success ? apiData.mcpBuyBoxData.data : null
         };
     }
 

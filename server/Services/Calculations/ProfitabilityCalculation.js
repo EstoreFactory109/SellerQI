@@ -3,8 +3,9 @@
  * 
  * Calculates profitability data by aggregating sales, ads spend, and Amazon fees by ASIN.
  * 
- * Note: Now uses EconomicsMetrics data as the primary source for accurate calculations.
- * Legacy data sources are used as fallbacks for backward compatibility.
+ * Data Sources:
+ * - Sales, Fees, Storage: EconomicsMetrics (MCP Data Kiosk API)
+ * - Ads Spend: productWiseSponsoredAds (Amazon Ads API - PRIMARY source for PPC)
  */
 
 const logger = require('../../utils/Logger.js');
@@ -12,40 +13,63 @@ const logger = require('../../utils/Logger.js');
 /**
  * Calculate profitability data from sales, ads, and fees data
  * @param {Array} totalSales - Array of sales data with asin, quantity, amount (legacy)
- * @param {Array} productWiseSponsoredAds - Array of sponsored ads data with asin, spend (legacy)
+ * @param {Array} productWiseSponsoredAds - Array of sponsored ads data with asin, spend (PRIMARY source for PPC)
  * @param {Array} productWiseFBAData - Array of FBA data (legacy format)
- * @param {Array} FBAFeesData - Array of FBA fees data (legacy format)
- * @param {Object} economicsAsinData - ASIN-wise data from EconomicsMetrics (preferred source)
+ * @param {Array} FBAFeesData - Deprecated: Array of FBA fees data (legacy format, replaced by EconomicsMetrics)
+ * @param {Object} economicsAsinData - ASIN-wise data from EconomicsMetrics (for sales, fees - NOT for ads)
  * @returns {Array} Array of profitability data by ASIN
  */
 const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, FBAFeesData, economicsAsinData = {}) => {
     // Create a map to aggregate data by ASIN
     const profitabilityMap = new Map();
+    
+    // Create a map of ASIN to ads spend from Amazon Ads API (PRIMARY source for PPC)
+    const adsSpendByAsin = new Map();
+    if (Array.isArray(productWiseSponsoredAds)) {
+        productWiseSponsoredAds.forEach(item => {
+            const asin = item.asin || item.ASIN;
+            const spend = parseFloat(item.spend) || 0;
+            if (asin) {
+                // Accumulate spend for each ASIN (in case of multiple entries)
+                adsSpendByAsin.set(asin, (adsSpendByAsin.get(asin) || 0) + spend);
+            }
+        });
+        logger.info('ASIN-wise ads spend calculated from Amazon Ads API', {
+            asinCount: adsSpendByAsin.size,
+            totalAdsSpend: Array.from(adsSpendByAsin.values()).reduce((sum, v) => sum + v, 0)
+        });
+    }
 
-    // First, process EconomicsMetrics ASIN-wise data if available (preferred source)
+    // First, process EconomicsMetrics ASIN-wise data if available (for sales, fees - NOT for ads)
     if (economicsAsinData && typeof economicsAsinData === 'object' && Object.keys(economicsAsinData).length > 0) {
-        logger.info('Using EconomicsMetrics ASIN data for profitability calculations', {
+        logger.info('Using EconomicsMetrics ASIN data for sales/fees (Ads from Amazon Ads API)', {
             asinCount: Object.keys(economicsAsinData).length
         });
         
         Object.entries(economicsAsinData).forEach(([asin, data]) => {
             // Use totalFees from EconomicsMetrics (sum of all fee types)
-            // Fallback to fbaFees + storageFees if totalFees not available
             const totalFees = data.totalFees !== undefined ? data.totalFees : 
                              ((data.fbaFees || 0) + (data.storageFees || 0));
+            
+            // Get ads spend from Amazon Ads API (PRIMARY source), NOT from economicsMetrics
+            const adsSpend = adsSpendByAsin.get(asin) || 0;
+            
+            // Calculate gross profit using Ads API spend
+            const sales = data.sales || 0;
+            const grossProfit = sales - adsSpend - totalFees;
             
             profitabilityMap.set(asin, {
                 asin: asin,
                 quantity: data.unitsSold || 0,
-                sales: data.sales || 0,
-                ads: data.ppcSpent || 0,
-                amzFee: totalFees, // Use totalFees (all fee types combined)
-                totalFees: totalFees, // Store totalFees separately for frontend
-                grossProfit: data.grossProfit || 0,
-                // New: detailed fee breakdown from EconomicsMetrics
+                sales: sales,
+                ads: adsSpend, // PRIMARY: Amazon Ads API spend (NOT MCP ppcSpent)
+                amzFee: totalFees,
+                totalFees: totalFees,
+                grossProfit: grossProfit, // Recalculated with Ads API spend
                 fbaFees: data.fbaFees || 0,
                 storageFees: data.storageFees || 0,
-                source: 'economicsMetrics'
+                source: 'economicsMetrics',
+                adsSource: 'amazonAdsAPI' // Track that ads came from Ads API
             });
         });
     }
@@ -56,20 +80,24 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
             const { asin, quantity, amount } = item;
             
             if (!profitabilityMap.has(asin)) {
+                // Get ads spend from Amazon Ads API for this ASIN
+                const adsSpend = adsSpendByAsin.get(asin) || 0;
+                
                 profitabilityMap.set(asin, {
                     asin: asin,
                     quantity: 0,
                     sales: 0,
-                    ads: 0,
+                    ads: adsSpend, // PRIMARY: Amazon Ads API spend
                     amzFee: 0,
                     fbaFees: 0,
                     storageFees: 0,
-                    source: 'legacy'
+                    source: 'legacy',
+                    adsSource: 'amazonAdsAPI'
                 });
             }
             
             const existing = profitabilityMap.get(asin);
-            // Only update if we don't have economicsMetrics data
+            // Only update sales/quantity if we don't have economicsMetrics data
             if (existing.source !== 'economicsMetrics') {
                 existing.quantity += quantity || 0;
                 existing.sales += amount || 0;
@@ -77,31 +105,22 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
         });
     }
 
-    // Process productWiseSponsoredAds data (fallback for legacy data)
-    if (Array.isArray(productWiseSponsoredAds)) {
-        productWiseSponsoredAds.forEach(item => {
-            const { asin, spend } = item;
-            
-            if (!profitabilityMap.has(asin)) {
-                profitabilityMap.set(asin, {
-                    asin: asin,
-                    quantity: 0,
-                    sales: 0,
-                    ads: 0,
-                    amzFee: 0,
-                    fbaFees: 0,
-                    storageFees: 0,
-                    source: 'legacy'
-                });
-            }
-            
-            const existing = profitabilityMap.get(asin);
-            // Only update if we don't have economicsMetrics data
-            if (existing.source !== 'economicsMetrics') {
-                existing.ads += spend || 0;
-            }
-        });
-    }
+    // Add any ASINs from Ads API that aren't in other data sources
+    adsSpendByAsin.forEach((spend, asin) => {
+        if (!profitabilityMap.has(asin)) {
+            profitabilityMap.set(asin, {
+                asin: asin,
+                quantity: 0,
+                sales: 0,
+                ads: spend,
+                amzFee: 0,
+                fbaFees: 0,
+                storageFees: 0,
+                source: 'adsOnly',
+                adsSource: 'amazonAdsAPI'
+            });
+        }
+    });
 
     // Process productWiseFBAData (legacy format - fallback)
     if (Array.isArray(productWiseFBAData)) {
@@ -134,8 +153,9 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
         });
     }
 
-    // Process FBAFeesData (legacy format - fallback)
-    // Note: Amazon fees are NOT compulsory - if data is missing for any ASIN, it defaults to 0
+    // Process FBAFeesData (legacy format - fallback, deprecated)
+    // Note: This is deprecated - use EconomicsMetrics.asinWiseSales for ASIN-wise fees instead
+    // Amazon fees are NOT compulsory - if data is missing for any ASIN, it defaults to 0
     if (Array.isArray(FBAFeesData) && FBAFeesData.length > 0) {
         FBAFeesData.forEach(item => {
             // Skip if item is invalid or missing ASIN

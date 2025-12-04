@@ -1,6 +1,7 @@
 const axios = require('axios');
 const aws4 = require('aws4');
-const listFinancialEvents = require('../../models/finance/listFinancialEventsModel.js');
+// Deprecated: listFinancialEventsModel removed - use EconomicsMetrics instead
+// const listFinancialEvents = require('../../models/finance/listFinancialEventsModel.js');
 const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
 const WeekLyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const UserModel = require('../../models/user-auth/userModel.js');

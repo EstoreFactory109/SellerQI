@@ -64,6 +64,7 @@ app.use('/app/getUserDetails',userDetailsRoute)
 app.use('/app/reimbursements',reimbursementRoute)
 app.use('/app/mcp',mcpRoute)
 app.use('/api/pagewise',pageWiseDataRoute)
+app.use('/api/test',testRoute)
 app.use('/api/test/buybox',buyboxTestRoute)
  
 app.use(express.static(path.join(_dirname,'/client/dist')))

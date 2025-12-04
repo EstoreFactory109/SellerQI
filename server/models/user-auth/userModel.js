@@ -111,11 +111,6 @@ const userSchema = new mongoose.Schema(
         ref: "ListFinancialEvents",
         required: false,
       },
-      competitivePricing: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "CompetitivePricing",
-        required: false,
-      },
       numberOfProductReviews: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "NumberOfProductReviews",

@@ -8,7 +8,6 @@ const ListingAllItems = require('../../models/products/GetListingItemsModel.js')
 const APlusContentModel = require('../../models/seller-performance/APlusContentModel.js');
 // Deprecated: financeModel - replaced by EconomicsMetrics
 // const financeModel = require('../../models/finance/listFinancialEventsModel.js');
-const competitivePricingModel = require('../../models/seller-performance/CompetitivePricingModel.js');
 const restockInventoryRecommendationsModel = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
 // Deprecated: TotalSalesModel - replaced by EconomicsMetrics
 // const TotalSalesModel = require('../../models/products/TotalSalesModel.js');
@@ -42,7 +41,8 @@ const Campaign = require('../../models/amazon-ads/CampaignModel.js');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../../models/inventory/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
 const GET_STRANDED_INVENTORY_UI_DATA_Model = require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
 const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
-const FBAFeesModel = require('../../models/finance/FBAFees.js');
+// Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP)
+// const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
@@ -303,7 +303,6 @@ class AnalyseService {
             restockInventoryRecommendationsData,
             numberOfProductReviews,
             GetlistingAllItems,
-            getCompetitiveData,
             aplusResponse,
             shipmentdata,
             saleByProduct,
@@ -331,8 +330,6 @@ class AnalyseService {
             restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            // NOTE: Competitive pricing feature is disabled, using empty default data
-            Promise.resolve({ Products: [] }), // Default empty competitive pricing data
             APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -352,7 +349,8 @@ class AnalyseService {
             GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            FBAFeesModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+            // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
+            Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead
             adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
             GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
@@ -370,8 +368,13 @@ class AnalyseService {
             hasAsinBuyBoxData: !!buyBoxData.asinBuyBoxData
         } : 'Not Found');
 
+        // Calculate total PPC spend from Amazon Ads API (PRIMARY source)
+        const adsPPCSpend = this.calculateTotalPPCSpendFromAdsAPI(ProductWiseSponsoredAds);
+        logger.info('PPC Spend calculated from Amazon Ads API:', { adsPPCSpend });
+        
         // Convert EconomicsMetrics to legacy financeData format for backward compatibility
-        const financeData = this.convertEconomicsToFinanceFormat(economicsMetricsData);
+        // Uses Ads API PPC spend as PRIMARY source (not MCP Economics ppcSpent)
+        const financeData = this.convertEconomicsToFinanceFormat(economicsMetricsData, adsPPCSpend);
         
         // Convert EconomicsMetrics to legacy TotalSales format for backward compatibility
         const TotalSales = this.convertEconomicsToTotalSalesFormat(economicsMetricsData);
@@ -408,7 +411,6 @@ class AnalyseService {
             restockInventoryRecommendationsData,
             numberOfProductReviews,
             GetlistingAllItems,
-            getCompetitiveData,
             aplusResponse,
             TotalSales,
             shipmentdata,
@@ -431,17 +433,43 @@ class AnalyseService {
     }
 
     /**
+     * Calculate total PPC spend from ProductWiseSponsoredAds (Amazon Ads API)
+     * @param {Array} ProductWiseSponsoredAds - Array of sponsored ads data from DB
+     * @returns {number} Total PPC spend
+     */
+    static calculateTotalPPCSpendFromAdsAPI(ProductWiseSponsoredAds) {
+        let totalPPCSpend = 0;
+        
+        if (!ProductWiseSponsoredAds || !Array.isArray(ProductWiseSponsoredAds) || ProductWiseSponsoredAds.length === 0) {
+            return 0;
+        }
+        
+        // Get the most recent sponsored ads data
+        const mostRecentData = ProductWiseSponsoredAds[0]?.sponsoredAds || [];
+        
+        mostRecentData.forEach(item => {
+            if (item && item.spend !== undefined && item.spend !== null) {
+                totalPPCSpend += parseFloat(item.spend) || 0;
+            }
+        });
+        
+        return parseFloat(totalPPCSpend.toFixed(2));
+    }
+
+    /**
      * Convert EconomicsMetrics data to legacy financeData format
+     * Uses EconomicsMetrics for sales, fees, refunds but Amazon Ads API for PPC spend
      * @param {Object} economicsMetrics - EconomicsMetrics document
+     * @param {number} adsPPCSpend - Total PPC spend from Amazon Ads API (primary source)
      * @returns {Object} Finance data in legacy format
      */
-    static convertEconomicsToFinanceFormat(economicsMetrics) {
+    static convertEconomicsToFinanceFormat(economicsMetrics, adsPPCSpend = 0) {
         if (!economicsMetrics) {
             return {
                 createdAt: new Date(),
                 Gross_Profit: 0,
                 Total_Sales: 0,
-                ProductAdsPayment: 0,
+                ProductAdsPayment: adsPPCSpend, // Use Ads API PPC spend even if no economics data
                 FBA_Fees: 0,
                 Storage: 0,
                 Amazon_Charges: 0,
@@ -449,15 +477,27 @@ class AnalyseService {
             };
         }
 
+        // Use Amazon Ads API PPC spend as PRIMARY source for ProductAdsPayment
+        const ppcSpend = adsPPCSpend || 0;
+        
+        // Calculate gross profit using: Sales - FBA Fees - Storage Fees - PPC Spend (from Ads API) - Refunds
+        const totalSales = economicsMetrics.totalSales?.amount || 0;
+        const fbaFees = economicsMetrics.fbaFees?.amount || 0;
+        const storageFees = economicsMetrics.storageFees?.amount || 0;
+        const refunds = economicsMetrics.refunds?.amount || 0;
+        
+        // Recalculate gross profit with Ads API PPC spend
+        const grossProfit = totalSales - fbaFees - storageFees - ppcSpend - refunds;
+
         return {
             createdAt: economicsMetrics.createdAt || new Date(),
-            Gross_Profit: economicsMetrics.grossProfit?.amount || 0,
-            Total_Sales: economicsMetrics.totalSales?.amount || 0,
-            ProductAdsPayment: economicsMetrics.ppcSpent?.amount || 0,
-            FBA_Fees: economicsMetrics.fbaFees?.amount || 0,
-            Storage: economicsMetrics.storageFees?.amount || 0,
-            Amazon_Charges: (economicsMetrics.fbaFees?.amount || 0) + (economicsMetrics.storageFees?.amount || 0),
-            Refunds: economicsMetrics.refunds?.amount || 0
+            Gross_Profit: parseFloat(grossProfit.toFixed(2)),
+            Total_Sales: totalSales,
+            ProductAdsPayment: ppcSpend, // PRIMARY: Amazon Ads API PPC spend
+            FBA_Fees: fbaFees,
+            Storage: storageFees,
+            Amazon_Charges: fbaFees + storageFees,
+            Refunds: refunds
         };
     }
 
@@ -679,7 +719,8 @@ class AnalyseService {
             keywords: (allData.keywords || { keywordData: [] }).keywordData,
             searchTerms: (allData.searchTerms || { searchTermData: [] }).searchTermData,
             campaignData: (allData.campaignData || { campaignData: [] }).campaignData,
-            FBAFeesData: (allData.FBAFeesData || { FbaData: [] }).FbaData,
+            // Deprecated: FBAFeesData - replaced by EconomicsMetrics.asinWiseSales (MCP provides ASIN-wise fees)
+            FBAFeesData: [], // Use EconomicsMetrics.asinWiseSales for ASIN-wise fees data
             adsKeywordsPerformanceData: (allData.adsKeywordsPerformanceData || { keywordsData: [] }).keywordsData,
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
@@ -696,11 +737,19 @@ class AnalyseService {
     static processConversionData(SellerAccount, allData) {
         const safeProductReviews = allData.numberOfProductReviews || { Products: [] };
         const safeListingItems = allData.GetlistingAllItems || { GenericKeyword: [] };
-        const safeCompetitiveData = allData.getCompetitiveData || { Products: [] };
         const safeAplusResponse = allData.aplusResponse || { ApiContentDetails: [] };
+        
+        // Use BuyBox data from MCP instead of competitive pricing
+        // Convert BuyBox data to format expected by checkProductWithOutBuyBox
+        const buyBoxData = allData.buyBoxData || {};
+        const asinBuyBoxData = buyBoxData.asinBuyBoxData || [];
+        const buyBoxProducts = asinBuyBoxData.map(item => ({
+            asin: item.childAsin || item.asin,
+            belongsToRequester: (item.buyBoxPercentage || 0) > 0
+        }));
 
         const asinSet = new Set(SellerAccount.products.map(p => p.asin));
-        const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(safeCompetitiveData.Products).presentAsin);
+        const presentBuyBoxAsins = new Set(checkProductWithOutBuyBox(buyBoxProducts).presentAsin);
         const productReviewsAsins = new Set(safeProductReviews.Products.map(p => p.asin));
         const listingAllAsins = new Set((safeListingItems.GenericKeyword || []).map(p => p.asin));
 
@@ -766,7 +815,7 @@ class AnalyseService {
                 productReviewResult: productReviewResultArray,
                 productStarRatingResult: productStarRatingResultArray,
                 aPlusResult: aPlusArray,
-                ProductWithOutBuybox: checkProductWithOutBuyBox(safeCompetitiveData.Products).buyboxResult,
+                ProductWithOutBuybox: checkProductWithOutBuyBox(buyBoxProducts).buyboxResult,
                 AmazonReadyproducts: Array.from(AmazonReadyProductsSet)
             },
             defaulters: DefaulterList
