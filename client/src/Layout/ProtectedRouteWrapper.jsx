@@ -145,6 +145,11 @@ const ProtectedRouteWrapper = ({ children }) => {
           if (dashboardData.Brand) {
             dispatch(addBrand(dashboardData.Brand));
           }
+          
+          // Dispatch all seller accounts for account switching
+          if (dashboardData.AllSellerAccounts && dashboardData.AllSellerAccounts.length > 0) {
+            dispatch(setAllAccounts(dashboardData.AllSellerAccounts));
+          }
             
             // Dispatch error details if available
             if (dashboardData.totalProfitabilityErrors !== undefined) {

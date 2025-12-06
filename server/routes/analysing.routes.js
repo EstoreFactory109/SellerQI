@@ -10,7 +10,9 @@ const {
     getUserErrorLogs,
     getUserEmailLogs,
     createSampleLoggingData,
-    getKeywordRecommendations
+    getKeywordRecommendations,
+    getKeywordRecommendationsAsins,
+    getKeywordRecommendationsByAsin
 } = require('../controllers/analytics/AnalysingController.js')
 const auth=require('../middlewares/Auth/auth.js')
 const {getLocation}=require('../middlewares/Auth/getLocation.js')
@@ -27,7 +29,9 @@ router.get('/logging/errors', auth, getUserErrorLogs)
 router.get('/logging/emails', auth, getUserEmailLogs)
 router.post('/logging/create-sample', auth, createSampleLoggingData)
 
-// ===== KEYWORD RECOMMENDATIONS ROUTE =====
+// ===== KEYWORD RECOMMENDATIONS ROUTES =====
 router.get('/keywordRecommendations', auth, getLocation, getKeywordRecommendations)
+router.get('/keywordRecommendations/asins', auth, getLocation, getKeywordRecommendationsAsins)
+router.get('/keywordRecommendations/byAsin', auth, getLocation, getKeywordRecommendationsByAsin)
 
 module.exports=router;

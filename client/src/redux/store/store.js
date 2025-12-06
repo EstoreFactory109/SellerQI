@@ -11,6 +11,8 @@ import errorsSlice from '../slices/errorsSlice.js'
 import notificationsSlice from '../slices/notificationsSlice.js'
 import currencySlice from '../slices/currencySlice.js'
 import pageDataSlice from '../slices/PageDataSlice.js'
+import keywordRecommendationsSlice from '../slices/KeywordRecommendationsSlice.js'
+import tasksSlice from '../slices/TasksSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -24,6 +26,8 @@ export const store = configureStore({
     errors: errorsSlice,
     notifications: notificationsSlice,
     currency: currencySlice,
-    pageData: pageDataSlice
+    pageData: pageDataSlice,
+    keywordRecommendations: keywordRecommendationsSlice,
+    tasks: tasksSlice
   },
 });

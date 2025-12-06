@@ -64,7 +64,9 @@ const createDefaultDashboardData = () => {
         keywordTrackingData: {},
         isEmptyData: true,
         dataAvailabilityStatus: 'NO_DATA',
-        DifferenceData: 0
+        DifferenceData: 0,
+        // All seller accounts for account switching
+        AllSellerAccounts: []
     };
 };
 

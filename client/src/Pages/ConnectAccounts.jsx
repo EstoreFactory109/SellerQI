@@ -35,7 +35,17 @@ const MARKETPLACE_CONFIG = {
   },
   
   // Europe
-  'GB': { 
+  'UK': { 
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.co.uk',
+    region: 'EU'
+  },
+  'GB': {  // Alias for UK (ISO code)
+    sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
+    adsUrl: 'https://advertising.amazon.co.uk',
+    region: 'EU'
+  },
+  'IE': {  // Ireland
     sellerCentralUrl: 'https://sellercentral-europe.amazon.com',
     adsUrl: 'https://advertising.amazon.co.uk',
     region: 'EU'

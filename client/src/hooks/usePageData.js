@@ -160,9 +160,52 @@ export const useKeywordAnalysisData = (autoFetch = true) => {
 
 /**
  * Hook specifically for reimbursement data
+ * Note: Reimbursement has a different state structure (summary, reimbursements) instead of data
  */
 export const useReimbursementData = (autoFetch = true) => {
-    return usePageData('reimbursement', autoFetch);
+    const dispatch = useDispatch();
+    
+    // Select reimbursement-specific state from Redux
+    const reimbursementState = useSelector(state => state.pageData?.reimbursement || {
+        summary: null,
+        reimbursements: [],
+        loading: false,
+        error: null,
+        lastFetched: null
+    });
+
+    const { summary, reimbursements, loading, error, lastFetched } = reimbursementState;
+    
+    // Check if data exists (summary is the primary indicator)
+    const hasData = summary !== null || (reimbursements && reimbursements.length > 0);
+
+    // Fetch data function
+    const fetchData = useCallback(() => {
+        dispatch(fetchReimbursementData());
+    }, [dispatch]);
+
+    // Force refresh function
+    const forceRefreshData = useCallback(() => {
+        dispatch(forceRefresh('reimbursement'));
+        fetchData();
+    }, [dispatch, fetchData]);
+
+    // Auto fetch on mount if enabled and data is not cached
+    useEffect(() => {
+        if (autoFetch && !hasData && !loading) {
+            fetchData();
+        }
+    }, [autoFetch, hasData, loading, fetchData]);
+
+    return {
+        data: { summary, reimbursements },
+        loading,
+        error,
+        lastFetched,
+        refetch: fetchData,
+        forceRefresh: forceRefreshData,
+        isStale: lastFetched ? (Date.now() - lastFetched) > 5 * 60 * 1000 : true
+    };
 };
 
 /**

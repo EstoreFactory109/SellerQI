@@ -51,6 +51,9 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
             const totalFees = data.totalFees !== undefined ? data.totalFees : 
                              ((data.fbaFees || 0) + (data.storageFees || 0));
             
+            // Get Amazon fees
+            const amazonFees = data.amazonFees || totalFees; // Fallback to totalFees for backward compatibility
+            
             // Get ads spend from Amazon Ads API (PRIMARY source), NOT from economicsMetrics
             const adsSpend = adsSpendByAsin.get(asin) || 0;
             
@@ -65,6 +68,7 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
                 ads: adsSpend, // PRIMARY: Amazon Ads API spend (NOT MCP ppcSpent)
                 amzFee: totalFees,
                 totalFees: totalFees,
+                amazonFees: amazonFees, // Amazon-specific fees (FBA, storage, referral, etc.)
                 grossProfit: grossProfit, // Recalculated with Ads API spend
                 fbaFees: data.fbaFees || 0,
                 storageFees: data.storageFees || 0,
@@ -89,6 +93,7 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
                     sales: 0,
                     ads: adsSpend, // PRIMARY: Amazon Ads API spend
                     amzFee: 0,
+                    amazonFees: 0,
                     fbaFees: 0,
                     storageFees: 0,
                     source: 'legacy',
@@ -114,6 +119,7 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
                 sales: 0,
                 ads: spend,
                 amzFee: 0,
+                amazonFees: 0,
                 fbaFees: 0,
                 storageFees: 0,
                 source: 'adsOnly',
@@ -134,6 +140,7 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
                     sales: 0,
                     ads: 0,
                     amzFee: 0,
+                    amazonFees: 0,
                     fbaFees: 0,
                     storageFees: 0,
                     source: 'legacy'
@@ -172,6 +179,7 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
                     sales: 0,
                     ads: 0,
                     amzFee: 0,
+                    amazonFees: 0,
                     fbaFees: 0,
                     storageFees: 0,
                     source: 'legacy'
@@ -216,6 +224,11 @@ const Profitability = (totalSales, productWiseSponsoredAds, productWiseFBAData, 
         // Ensure totalFees is set (use amzFee if totalFees not set)
         if (value.totalFees === null || value.totalFees === undefined || isNaN(value.totalFees)) {
             value.totalFees = value.amzFee || 0;
+        }
+        
+        // Ensure amazonFees is set (fallback to totalFees for backward compatibility)
+        if (value.amazonFees === null || value.amazonFees === undefined || isNaN(value.amazonFees)) {
+            value.amazonFees = value.totalFees || 0;
         }
         
         // Calculate gross profit if not already set

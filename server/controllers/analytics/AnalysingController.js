@@ -5,7 +5,7 @@ const { ApiResponse } = require('../../utils/ApiResponse.js');
 const { AnalyseService } = require('../../Services/main/Analyse.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
-const KeywordRecommendations = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
+const { KeywordRecommendations, AsinKeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
 
 // Export the Analyse function from the service for backward compatibility
 const Analyse = AnalyseService.Analyse;
@@ -524,6 +524,114 @@ const getKeywordRecommendations = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get list of ASINs that have keyword recommendations stored
+ */
+const getKeywordRecommendationsAsins = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    try {
+        const allAsinKeywords = await AsinKeywordRecommendations.findAllForUser(userId, country, region);
+        
+        // Extract unique ASINs with their metadata
+        const asinsList = allAsinKeywords.map(item => ({
+            asin: item.asin,
+            keywordCount: item.totalKeywords,
+            fetchedAt: item.fetchedAt
+        }));
+
+        return res.status(200).json(new ApiResponse(200, {
+            asins: asinsList,
+            totalAsins: asinsList.length
+        }, "ASINs list fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error fetching ASINs list", {
+            error: error.message,
+            userId,
+            country,
+            region
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch ASINs list"));
+    }
+});
+
+/**
+ * Get keyword recommendations for a specific ASIN
+ */
+const getKeywordRecommendationsByAsin = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { asin } = req.query;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    if (!asin) {
+        logger.error("ASIN is missing from request");
+        return res.status(400).json(new ApiError(400, "ASIN is required"));
+    }
+
+    try {
+        const asinKeywordData = await AsinKeywordRecommendations.findByAsin(userId, country, region, asin);
+
+        if (!asinKeywordData) {
+            return res.status(200).json(new ApiResponse(200, {
+                keywordRecommendationData: {
+                    keywordTargetList: []
+                },
+                totalKeywords: 0,
+                asin: asin,
+                message: `No keyword recommendations found for ASIN: ${asin}`
+            }, "Keyword recommendations data fetched successfully"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, {
+            keywordRecommendationData: {
+                keywordTargetList: asinKeywordData.keywordTargetList || []
+            },
+            totalKeywords: asinKeywordData.totalKeywords || 0,
+            asin: asinKeywordData.asin,
+            userId: asinKeywordData.userId,
+            country: asinKeywordData.country,
+            region: asinKeywordData.region,
+            fetchedAt: asinKeywordData.fetchedAt,
+            createdAt: asinKeywordData.createdAt,
+            updatedAt: asinKeywordData.updatedAt
+        }, "Keyword recommendations data fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error fetching keyword recommendations by ASIN", {
+            error: error.message,
+            userId,
+            country,
+            region,
+            asin
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch keyword recommendations data"));
+    }
+});
+
 module.exports = { 
     analysingController, 
     getDataFromDate, 
@@ -535,5 +643,7 @@ module.exports = {
     getUserEmailLogs,
     createSampleLoggingData,
     getKeywordTrackingData,
-    getKeywordRecommendations
+    getKeywordRecommendations,
+    getKeywordRecommendationsAsins,
+    getKeywordRecommendationsByAsin
 };

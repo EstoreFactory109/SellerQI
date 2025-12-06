@@ -116,15 +116,28 @@ const ProfitTable = ({ setSuggestionsData }) => {
         
         // Use EconomicsMetrics totalFees if available, otherwise check profitibilityData, then fallback to legacy calculation
         let totalFees = 0;
-        if (economicsData?.totalFees?.amount !== undefined) {
-            // Use totalFees from EconomicsMetrics (sum of all fee types) - MOST ACCURATE
+        let amazonFees = 0;
+        
+        if (economicsData?.amazonFees?.amount !== undefined) {
+            // Use amazonFees from EconomicsMetrics - MOST ACCURATE
+            amazonFees = economicsData.amazonFees?.amount || 0;
+            totalFees = amazonFees;
+        } else if (item.amazonFees !== undefined) {
+            // Use amazonFees from profitibilityData (calculated from EconomicsMetrics in backend)
+            amazonFees = item.amazonFees || 0;
+            totalFees = amazonFees;
+        } else if (economicsData?.totalFees?.amount !== undefined) {
+            // Fallback to totalFees from EconomicsMetrics (for backward compatibility)
             totalFees = economicsData.totalFees.amount || 0;
+            amazonFees = totalFees;
         } else if (item.totalFees !== undefined) {
             // Use totalFees from profitibilityData (calculated from EconomicsMetrics in backend)
             totalFees = item.totalFees || 0;
+            amazonFees = totalFees;
         } else {
             // Fallback to legacy calculation (fee per unit * quantity)
             totalFees = (item.amzFee || 0) * (item.quantity || 0);
+            amazonFees = totalFees;
         }
         
         // PRIMARY: Use ads from profitibilityData (from Amazon Ads API - GetPPCProductWise)
@@ -164,6 +177,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
           totalCogs: totalCogs,
           adSpend: adSpend,
           fees: totalFees,
+          amazonFees: amazonFees,
           grossProfit: grossProfit,
           netProfit: netProfit,
           status: status
@@ -317,16 +331,16 @@ const ProfitTable = ({ setSuggestionsData }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200">
-                <th className="w-1/4 px-3 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>
-                <th className="w-28 px-2 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
-                <th className="w-16 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Units Sold</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Fees</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Net</th>
-                <th className="w-20 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                <th className="w-1/5 px-3 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>
+                <th className="w-24 px-2 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
+                <th className="w-14 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Units</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
+                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Net</th>
+                <th className="w-16 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -382,8 +396,8 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.adSpend, currency)}</span>
                        </td>
                        <td className="px-2 py-8 text-center align-top">
-                         <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.fees, currency)}</span>
-                       </td>
+                        <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.amazonFees, currency)}</span>
+                      </td>
                        <td className="px-2 py-8 text-center align-top">
                          <span className={`text-xs font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                            {formatCurrencyWithLocale(product.grossProfit, currency)}
@@ -420,7 +434,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   ))
                                  ) : (
                    <tr>
-                     <td colSpan="10" className="px-3 py-12 text-center">
+                    <td colSpan="11" className="px-3 py-12 text-center">
                        <div className="flex flex-col items-center gap-3">
                          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                            <Package className="w-8 h-8 text-gray-400" />

@@ -113,11 +113,11 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
         let reportDocumentId = null;
-        
-        const maxRetries = 30;
         const retryInterval = 10000;
+        let attempt = 0;
         
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        while (true) {
+            attempt++;
             logger.info(`Checking report status... (Attempt ${attempt})`);
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
             
@@ -130,14 +130,8 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 break;
             }
             
-            if (attempt < maxRetries) {
-                await new Promise(resolve => setTimeout(resolve, retryInterval));
-            }
-        }
-        
-        if (!reportDocumentId) {
-            logger.error(`Report is still processing after ${maxRetries} attempts (${maxRetries * retryInterval / 1000} seconds)`);
-            return false;
+            // Wait before next check
+            await new Promise(resolve => setTimeout(resolve, retryInterval));
         }
 
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseURI);

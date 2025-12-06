@@ -63,6 +63,8 @@ export const createDefaultDashboardData = () => {
     dateWiseTotalCosts: [],
     negetiveKeywords: [],
     AdsGroupData: [],
+    // All seller accounts for account switching
+    AllSellerAccounts: [],
     // Flag to indicate this is empty data
     isEmptyData: true,
     dataAvailabilityStatus: 'NO_DATA'

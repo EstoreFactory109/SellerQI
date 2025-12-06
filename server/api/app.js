@@ -131,7 +131,6 @@ const initializeBackgroundJobs = async () => {
         if (config.backgroundJobs?.jobs?.dailyUpdates !== false) {
             setupDailyUpdateCron({ enabled: true });
             logger.info('✅ Queue-based daily update cron producer initialized (enqueues users only)');
-            logger.info('⚠️  IMPORTANT: Workers must be running separately (via PM2) to process jobs');
         } else {
             logger.warn('⚠️  Daily updates cron is disabled in config');
         }

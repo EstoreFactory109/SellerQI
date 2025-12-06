@@ -118,10 +118,11 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         }
 
         let reportDocumentId = null;
-        const maxRetries = 30;
         const retryInterval = 10000;
+        let attempt = 0;
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        while (true) {
+            attempt++;
             logger.info(`Checking report status... (Attempt ${attempt})`);
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             
@@ -136,17 +137,8 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
                 break;
             }
             
-            if (attempt < maxRetries) {
-                await new Promise(resolve => setTimeout(resolve, retryInterval));
-            }
-        }
-
-        if (!reportDocumentId) {
-            logger.error(new ApiError(408, "Report did not complete within the time limit"));
-            return {
-                success: false,
-                message: "Report did not complete within the time limit",
-            };
+            // Wait before next check
+            await new Promise(resolve => setTimeout(resolve, retryInterval));
         }
 
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);

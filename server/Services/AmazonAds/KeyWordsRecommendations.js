@@ -1,6 +1,6 @@
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
-const KeywordRecommendations = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
+const { AsinKeywordRecommendations, KeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
 
 // Base URIs for different regions (same as other Amazon Ads services)
 const BASE_URIS = {
@@ -11,27 +11,35 @@ const BASE_URIS = {
 
 // Map country codes to locale strings
 const COUNTRY_TO_LOCALE = {
+  // North America
   'US': 'en_US',
   'CA': 'en_CA',
   'MX': 'es_MX',
   'BR': 'pt_BR',
+  
+  // Europe
+  'IE': 'en_IE',  // Ireland
+  'ES': 'es_ES',  // Spain
   'GB': 'en_GB',
-  'UK': 'en_GB',
-  'DE': 'de_DE',
-  'FR': 'fr_FR',
-  'IT': 'it_IT',
-  'ES': 'es_ES',
-  'NL': 'nl_NL',
-  'SE': 'sv_SE',
-  'PL': 'pl_PL',
-  'JP': 'ja_JP',
-  'AU': 'en_AU',
-  'IN': 'en_IN',
-  'SG': 'en_SG',
-  'AE': 'ar_AE',
-  'SA': 'ar_SA',
-  'EG': 'ar_EG',
-  'TR': 'tr_TR'
+  'UK': 'en_GB',  // United Kingdom
+  'FR': 'fr_FR',  // France
+  'BE': 'nl_BE',  // Belgium (Dutch locale)
+  'NL': 'nl_NL',  // Netherlands
+  'DE': 'de_DE',  // Germany
+  'IT': 'it_IT',  // Italy
+  'SE': 'sv_SE',  // Sweden
+  'ZA': 'en_ZA',  // South Africa
+  'PL': 'pl_PL',  // Poland
+  'EG': 'ar_EG',  // Egypt
+  'TR': 'tr_TR',  // Turkey
+  'SA': 'ar_SA',  // Saudi Arabia
+  'AE': 'ar_AE',  // United Arab Emirates
+  'IN': 'en_IN',  // India
+  
+  // Far East
+  'SG': 'en_SG',  // Singapore
+  'AU': 'en_AU',  // Australia
+  'JP': 'ja_JP'   // Japan
 };
 
 /**
@@ -72,19 +80,19 @@ function delay(ms) {
 }
 
 /**
- * Make a single API request for keyword recommendations
+ * Make a single API request for keyword recommendations for ONE ASIN
  * @param {string} url - API endpoint URL
  * @param {Object} headers - Request headers
- * @param {Array<string>} asins - Array of ASINs for this request
+ * @param {string} asin - Single ASIN for this request
  * @param {string} locale - Locale string
- * @returns {Promise<Object>} - API response data
+ * @returns {Promise<Object>} - API response data with ASIN included
  */
-async function makeKeywordRecommendationRequest(url, headers, asins, locale) {
+async function makeKeywordRecommendationRequestForAsin(url, headers, asin, locale) {
   const requestBody = {
     recommendationType: 'KEYWORDS_FOR_ASINS',
     biddingStrategy: 'AUTO_FOR_SALES',
     sortDimension: 'CLICKS',
-    asins: asins,
+    asins: [asin], // Single ASIN in array
     bidsEnabled: true,
     locale: locale,
     maxRecommendations: '200'
@@ -96,11 +104,66 @@ async function makeKeywordRecommendationRequest(url, headers, asins, locale) {
     throw new Error('Invalid response from Amazon Ads API - no data received');
   }
 
-  return response.data;
+  return {
+    asin: asin,
+    keywordTargetList: response.data.keywordTargetList || []
+  };
 }
 
 /**
- * Get keyword recommendations for given ASINs
+ * Process a single ASIN - fetch keywords and save to database
+ * @param {string} url - API endpoint URL
+ * @param {Object} headers - Request headers
+ * @param {string} asin - Single ASIN
+ * @param {string} locale - Locale string
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region code
+ * @returns {Promise<Object>} - Result with ASIN and status
+ */
+async function processAsin(url, headers, asin, locale, userId, country, region) {
+  try {
+    // Fetch keywords for this ASIN
+    const result = await makeKeywordRecommendationRequestForAsin(url, headers, asin, locale);
+    
+    // Save to database using upsert
+    const savedData = await AsinKeywordRecommendations.upsertAsinKeywords(
+      userId,
+      country,
+      region,
+      asin,
+      result.keywordTargetList
+    );
+
+    logger.info(`✅ ASIN ${asin}: ${result.keywordTargetList.length} keywords saved`);
+
+    return {
+      asin: asin,
+      success: true,
+      keywordCount: result.keywordTargetList.length,
+      savedId: savedData._id
+    };
+
+  } catch (error) {
+    logger.error(`❌ ASIN ${asin}: Error - ${error.message}`);
+    
+    // Re-throw auth errors for TokenManager
+    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+      throw error;
+    }
+
+    return {
+      asin: asin,
+      success: false,
+      error: error.message,
+      keywordCount: 0
+    };
+  }
+}
+
+/**
+ * Get keyword recommendations for given ASINs - processes ONE ASIN at a time
+ * Uses Promise.all to process 5 ASINs concurrently in batches
  * @param {string} accessToken - Access token for authentication
  * @param {string} profileId - Amazon Ads profile ID
  * @param {string} userId - User ID
@@ -110,7 +173,7 @@ async function makeKeywordRecommendationRequest(url, headers, asins, locale) {
  * @returns {Promise<Object>} - API response with keyword recommendations
  */
 async function getKeywordRecommendations(accessToken, profileId, userId, country, region, asins) {
-  logger.info("getKeywordRecommendations starting");
+  logger.info("getKeywordRecommendations starting (ASIN-wise approach)");
   
   try {
     // ===== INPUT VALIDATION =====
@@ -164,171 +227,84 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
       'Content-Type': 'application/vnd.spkeywordsrecommendation.v5+json'
     };
 
-    // ===== CHUNK ASINS IF MORE THAN 20 =====
-    const MAX_ASINS_PER_REQUEST = 20;
-    const RATE_LIMIT_DELAY_MS = 500; // 2 requests per second = 500ms delay
+    // ===== PROCESS ASINS IN BATCHES OF 5 =====
+    const BATCH_SIZE = 5; // Process 5 ASINs concurrently
+    const BATCH_DELAY_MS = 1000; // 1 second delay between batches
 
-    let asinChunks;
-    if (asins.length > MAX_ASINS_PER_REQUEST) {
-      asinChunks = chunkArray(asins, MAX_ASINS_PER_REQUEST);
-    } else {
-      asinChunks = [asins];
-    }
+    const asinBatches = chunkArray(asins, BATCH_SIZE);
+    const allResults = [];
+    let totalKeywordsFound = 0;
+    let successCount = 0;
+    let failCount = 0;
 
-    // ===== MAKE REQUESTS SEQUENTIALLY WITH RATE LIMITING =====
-    const allResponses = [];
-    let combinedKeywordTargetList = [];
+    logger.info(`Processing ${asins.length} ASINs in ${asinBatches.length} batches of ${BATCH_SIZE}`);
 
-    for (let i = 0; i < asinChunks.length; i++) {
-      const chunk = asinChunks[i];
-      const chunkNumber = i + 1;
+    for (let batchIndex = 0; batchIndex < asinBatches.length; batchIndex++) {
+      const batch = asinBatches[batchIndex];
+      const batchNumber = batchIndex + 1;
       
+      logger.info(`📦 Batch ${batchNumber}/${asinBatches.length}: Processing ${batch.length} ASINs`);
+
+      // Process all ASINs in this batch concurrently using Promise.all
+      const batchPromises = batch.map(asin => 
+        processAsin(url, headers, asin, locale, userId, country, region)
+      );
+
       try {
-        const responseData = await makeKeywordRecommendationRequest(url, headers, chunk, locale);
+        const batchResults = await Promise.all(batchPromises);
         
-        // Combine keywordTargetList from all responses
-        if (responseData && responseData.keywordTargetList && Array.isArray(responseData.keywordTargetList)) {
-          combinedKeywordTargetList = combinedKeywordTargetList.concat(responseData.keywordTargetList);
+        // Collect results
+        for (const result of batchResults) {
+          allResults.push(result);
+          if (result.success) {
+            successCount++;
+            totalKeywordsFound += result.keywordCount;
+          } else {
+            failCount++;
+          }
         }
 
-        // Rate limiting: wait 500ms between requests (except for the last one)
-        if (i < asinChunks.length - 1) {
-          await delay(RATE_LIMIT_DELAY_MS);
-        }
+        logger.info(`✅ Batch ${batchNumber} completed: ${batchResults.filter(r => r.success).length}/${batch.length} successful`);
 
-      } catch (chunkError) {
-        logger.error(`❌ Error in request ${chunkNumber}/${asinChunks.length}:`, {
-          error: chunkError.message,
-          asinChunk: chunk,
-          userId,
-          region,
-          country
-        });
+      } catch (batchError) {
+        logger.error(`❌ Batch ${batchNumber} error: ${batchError.message}`);
         
-        // If it's an API error (401, 403), throw it to be handled by outer catch
-        if (chunkError.response && (chunkError.response.status === 401 || chunkError.response.status === 403)) {
-          throw chunkError;
+        // If it's an auth error, stop processing and throw
+        if (batchError.response && (batchError.response.status === 401 || batchError.response.status === 403)) {
+          throw batchError;
         }
-        
-        // For other errors, continue with next chunk
+      }
+
+      // Rate limiting: wait between batches (except for the last one)
+      if (batchIndex < asinBatches.length - 1) {
+        logger.info(`⏳ Waiting ${BATCH_DELAY_MS}ms before next batch...`);
+        await delay(BATCH_DELAY_MS);
       }
     }
 
-    // ===== COMBINE ALL RESPONSES =====
-    const combinedResponse = {
-      keywordTargetList: combinedKeywordTargetList
+    // ===== SUMMARY =====
+    const summary = {
+      totalAsins: asins.length,
+      successfulAsins: successCount,
+      failedAsins: failCount,
+      totalKeywordsFound: totalKeywordsFound,
+      results: allResults
     };
 
-    // ===== SAVE TO DATABASE WITH VALIDATION =====
-    let savedData;
-    try {
-      // Validate data structure before saving
-      if (!Array.isArray(combinedKeywordTargetList)) {
-        throw new Error(`keywordTargetList must be an array, got: ${typeof combinedKeywordTargetList}`);
-      }
+    logger.info(`🏁 getKeywordRecommendations completed`, {
+      userId,
+      country,
+      region,
+      ...summary
+    });
 
-      savedData = await KeywordRecommendations.create({
-        userId,
-        country,
-        region,
-        keywordRecommendationData: combinedResponse
-      });
+    logger.info("getKeywordRecommendations ended");
 
-      // Verify the document was actually created
-      if (!savedData || !savedData._id) {
-        logger.error('Failed to save keyword recommendations data to database - no document ID returned', { 
-          userId, 
-          region, 
-          country,
-          keywordCount: combinedKeywordTargetList.length,
-          savedData: savedData ? 'exists but no _id' : 'null/undefined'
-        });
-        
-        // Return a mock object with the data for consistency
-        return {
-          userId,
-          country,
-          region,
-          keywordRecommendationData: combinedResponse,
-          _isTemporary: true // Flag to indicate this wasn't saved to DB
-        };
-      }
-
-      // Verify the document exists in the database
-      const verifyDoc = await KeywordRecommendations.findById(savedData._id);
-      if (!verifyDoc) {
-        logger.error('Document was created but cannot be found in database', {
-          documentId: savedData._id,
-          userId,
-          country,
-          region
-        });
-      } else {
-        // Also verify by querying with the same criteria used in the controller
-        const queryDoc = await KeywordRecommendations.findOne({
-          userId: userId,
-          country: country,
-          region: region
-        }).sort({ createdAt: -1 });
-        
-        if (!queryDoc || queryDoc._id.toString() !== savedData._id.toString()) {
-          logger.error('Document saved but not found with controller query criteria', {
-            savedDocumentId: savedData._id,
-            queryDocumentId: queryDoc?._id || 'not found',
-            userId,
-            country,
-            region,
-            savedUserId: savedData.userId,
-            savedCountry: savedData.country,
-            savedRegion: savedData.region
-          });
-        }
-      }
-
-      logger.info("Data saved successfully");
-      logger.info("getKeywordRecommendations ended");
-      return savedData;
-
-    } catch (dbError) {
-      // Enhanced error logging
-      logger.error('Database error while saving keyword recommendations data', { 
-        error: dbError.message, 
-        errorName: dbError.name,
-        errorStack: dbError.stack,
-        validationErrors: dbError.errors ? Object.keys(dbError.errors).map(key => ({
-          field: key,
-          message: dbError.errors[key].message,
-          value: dbError.errors[key].value
-        })) : null,
-        userId, 
-        region, 
-        country,
-        keywordCount: combinedKeywordTargetList.length,
-        sampleData: {
-          userId,
-          country,
-          region,
-          keywordCount: combinedKeywordTargetList.length,
-          firstKeyword: combinedKeywordTargetList[0] || null
-        }
-      });
-      
-      // Return the data anyway, even if DB save failed
-      return {
-        userId,
-        country,
-        region,
-        keywordRecommendationData: combinedResponse,
-        _isTemporary: true,
-        _dbError: dbError.message
-      };
-    }
+    return summary;
 
   } catch (error) {
     // ===== ENHANCED ERROR HANDLING FOR TOKEN MANAGER =====
     if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
       logger.error('Keyword Recommendations API Error Response:', {
         status: error.response.status,
         data: error.response.data,
@@ -338,20 +314,17 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
         country
       });
 
-      // Create enhanced error for TokenManager compatibility
       const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
       enhancedError.response = error.response;
       enhancedError.status = error.response.status;
       enhancedError.statusCode = error.response.status;
       
-      // Flag for TokenManager to detect Amazon API errors
       if (error.response.status === 401 || error.response.status === 403) {
         enhancedError.amazonApiError = true;
       }
       
       throw enhancedError;
     } else if (error.request) {
-      // The request was made but no response was received
       logger.error('No response received from Keyword Recommendations API:', {
         request: error.request,
         userId,
@@ -360,7 +333,6 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
       });
       throw new Error('No response received from Amazon Ads API');
     } else {
-      // Something happened in setting up the request that triggered an Error
       logger.error('Keyword Recommendations API request setup error:', {
         message: error.message,
         userId,
@@ -372,7 +344,52 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
   }
 }
 
-module.exports = {
-  getKeywordRecommendations
-};
+/**
+ * Get keyword recommendations for a specific ASIN from database
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region code
+ * @param {string} asin - ASIN to get recommendations for
+ * @returns {Promise<Object|null>} - Stored keyword recommendations or null
+ */
+async function getStoredKeywordsForAsin(userId, country, region, asin) {
+  try {
+    return await AsinKeywordRecommendations.findByAsin(userId, country, region, asin);
+  } catch (error) {
+    logger.error('Error fetching stored keywords for ASIN:', {
+      error: error.message,
+      userId,
+      country,
+      region,
+      asin
+    });
+    return null;
+  }
+}
 
+/**
+ * Get all keyword recommendations for a user from database
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region code
+ * @returns {Promise<Array>} - Array of stored keyword recommendations
+ */
+async function getAllStoredKeywordsForUser(userId, country, region) {
+  try {
+    return await AsinKeywordRecommendations.findAllForUser(userId, country, region);
+  } catch (error) {
+    logger.error('Error fetching all stored keywords for user:', {
+      error: error.message,
+      userId,
+      country,
+      region
+    });
+    return [];
+  }
+}
+
+module.exports = {
+  getKeywordRecommendations,
+  getStoredKeywordsForAsin,
+  getAllStoredKeywordsForUser
+};

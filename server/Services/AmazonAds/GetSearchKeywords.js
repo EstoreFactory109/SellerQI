@@ -12,92 +12,116 @@ const BASE_URIS = {
     'FE': 'https://advertising-api-fe.amazon.com'
 };
 
-async function getReportId(accessToken, profileId, region) {
-    try {
-        // Validate region and get base URI
-        const baseUri = BASE_URIS[region];
-        if (!baseUri) {
-            throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
-        }
+async function getReportId(accessToken, profileId, region, tokenRefreshCallback = null) {
+    let currentAccessToken = accessToken;
+    let hasRetried = false;
 
-        // Construct the endpoint URL
-        const url = `${baseUri}/reporting/reports`;
-
-        // Set up headers
-        const headers = {
-            'Authorization': `Bearer ${accessToken}`,
-            'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
-            'Amazon-Advertising-API-Scope': profileId,
-            'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
-        };
-
-        // Calculate dynamic dates
-        const now = new Date();
-        const endDate = new Date(now.getTime() - (72 * 60 * 60 * 1000)); // 72 hours before now
-        const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
-        
-        // Format dates as YYYY-MM-DD strings
-        const formatDate = (date) => {
-            return date.toISOString().split('T')[0];
-        };
-
-        // Generate unique report name to prevent duplicate requests
-        const timestamp = Date.now();
-        const uniqueReportName = `Search Terms With Zero Sales - ${timestamp}`;
-
-        // Set up request body for ASIN/SKU level data
-        const body = {
-            "name": uniqueReportName,
-            "startDate": formatDate(startDate),
-            "endDate": formatDate(endDate),
-            "configuration": {
-                "adProduct": "SPONSORED_PRODUCTS",
-                "reportTypeId": "spSearchTerm",
-                "timeUnit": "SUMMARY",
-                "format": "GZIP_JSON",
-                "groupBy": ["searchTerm"],
-                "columns": [
-                    "campaignId",
-                    "campaignName",
-                    "searchTerm",
-                    "keyword",
-                    "clicks",
-                    "sales30d",
-                    "cost"
-                ]
+    while (true) {
+        try {
+            // Validate region and get base URI
+            const baseUri = BASE_URIS[region];
+            if (!baseUri) {
+                throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
             }
-        }
 
-        // Make the API request
-        const response = await axios.post(url, body, { headers });
+            // Construct the endpoint URL
+            const url = `${baseUri}/reporting/reports`;
 
-        // Return the response data
-        return response.data;
+            // Set up headers
+            const headers = {
+                'Authorization': `Bearer ${currentAccessToken}`,
+                'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+                'Amazon-Advertising-API-Scope': profileId,
+                'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+            };
 
-    } catch (error) {
-        // Handle different types of errors
-        if (error.response) {
-            console.error('API Error Response:', {
-                status: error.response.status,
-                data: error.response.data,
-                headers: error.response.headers
-            });
-            // Preserve the original error structure for TokenManager to detect 401s
-            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-            enhancedError.response = error.response;
-            enhancedError.status = error.response.status;
-            enhancedError.statusCode = error.response.status;
-            // Flag for TokenManager to detect Amazon API errors
-            if (error.response.status === 401 || error.response.status === 403) {
-                enhancedError.amazonApiError = true;
+            // Calculate dynamic dates
+            const now = new Date();
+            const endDate = new Date(now.getTime() - (72 * 60 * 60 * 1000)); // 72 hours before now
+            const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
+            
+            // Format dates as YYYY-MM-DD strings
+            const formatDate = (date) => {
+                return date.toISOString().split('T')[0];
+            };
+
+            // Generate unique report name to prevent duplicate requests
+            const timestamp = Date.now();
+            const uniqueReportName = `Search Terms With Zero Sales - ${timestamp}`;
+
+            // Set up request body for ASIN/SKU level data
+            const body = {
+                "name": uniqueReportName,
+                "startDate": formatDate(startDate),
+                "endDate": formatDate(endDate),
+                "configuration": {
+                    "adProduct": "SPONSORED_PRODUCTS",
+                    "reportTypeId": "spSearchTerm",
+                    "timeUnit": "SUMMARY",
+                    "format": "GZIP_JSON",
+                    "groupBy": ["searchTerm"],
+                    "columns": [
+                        "campaignId",
+                        "campaignName",
+                        "searchTerm",
+                        "keyword",
+                        "clicks",
+                        "sales30d",
+                        "cost"
+                    ]
+                }
             }
-            throw enhancedError;
-        } else if (error.request) {
-            console.error('No response received:', error.request);
-            throw new Error('No response received from Amazon Ads API');
-        } else {
-            console.error('Request setup error:', error.message);
-            throw error;
+
+            // Make the API request
+            const response = await axios.post(url, body, { headers });
+
+            // Return the response data with the current token
+            return { ...response.data, currentAccessToken };
+
+        } catch (error) {
+            // Handle 401 Unauthorized - refresh token and retry once
+            if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
+                console.log(`⚠️ [GetSearchKeywords] Token expired during getReportId, refreshing token...`);
+                hasRetried = true;
+                try {
+                    const newToken = await tokenRefreshCallback();
+                    if (newToken) {
+                        currentAccessToken = newToken;
+                        console.log(`✅ [GetSearchKeywords] Token refreshed successfully, retrying getReportId...`);
+                        continue;
+                    } else {
+                        throw new Error('Token refresh callback returned null/undefined');
+                    }
+                } catch (refreshError) {
+                    console.error('❌ [GetSearchKeywords] Failed to refresh token:', refreshError.message);
+                    throw new Error(`Token refresh failed: ${refreshError.message}`);
+                }
+            }
+
+            // Handle different types of errors
+            if (error.response) {
+                console.error('API Error Response:', {
+                    status: error.response.status,
+                    data: error.response.data,
+                    headers: error.response.headers
+                });
+                // Preserve the original error structure for TokenManager to detect 401s
+                const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+                enhancedError.response = error.response;
+                enhancedError.status = error.response.status;
+                enhancedError.statusCode = error.response.status;
+                // Flag for TokenManager to detect Amazon API errors
+                if (error.response.status === 401 || error.response.status === 403) {
+                    enhancedError.amazonApiError = true;
+                }
+                throw enhancedError;
+            } else if (error.request) {
+                console.error('No response received:', error.request);
+                throw new Error('No response received from Amazon Ads API');
+            } else {
+                console.error('Request setup error:', error.message);
+                throw error;
+            }
         }
     }
 }
@@ -115,7 +139,6 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
         // Poll for report status
         let attempts = 0;
-        const maxAttempts = 30; // Maximum 30 minutes (30 * 60 seconds)
         let currentAccessToken = accessToken; // Use a mutable token variable
 
         while (true) {
@@ -198,9 +221,6 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
             }
         }
 
-        // If we've exceeded max attempts
-        throw new Error(`Report status check timed out after ${maxAttempts} attempts`);
-
     } catch (error) {
         // Handle different types of errors
         if (error.response) {
@@ -229,57 +249,81 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
     }
 }
 
-async function downloadReportData(location, accessToken, profileId) {
-    try {
-        // 1) Always ask for binary so we can gunzip ourselves
-        const response = await axios.get(location, {
-            responseType: 'arraybuffer',  // get raw bytes
-            decompress: false             // turn off axios's auto-inflate
-        });
+async function downloadReportData(location, accessToken, profileId, tokenRefreshCallback = null) {
+    let currentAccessToken = accessToken;
+    let hasRetried = false;
 
-        // 2) Inflate the GZIP buffer
-        const inflatedBuffer = await gunzip(response.data);
-        const payloadText = inflatedBuffer.toString('utf8');
+    while (true) {
+        try {
+            // 1) Always ask for binary so we can gunzip ourselves
+            const response = await axios.get(location, {
+                responseType: 'arraybuffer',  // get raw bytes
+                decompress: false             // turn off axios's auto-inflate
+            });
 
-        // 3) Parse JSON
-        const reportJson = JSON.parse(payloadText);
+            // 2) Inflate the GZIP buffer
+            const inflatedBuffer = await gunzip(response.data);
+            const payloadText = inflatedBuffer.toString('utf8');
 
-        if (!reportJson) {
-            return {
-                success: false,
-                message: "Error in downloading report",
-            };
+            // 3) Parse JSON
+            const reportJson = JSON.parse(payloadText);
+
+            if (!reportJson) {
+                return {
+                    success: false,
+                    message: "Error in downloading report",
+                };
+            }
+
+            console.log(`Downloaded report with ${Array.isArray(reportJson) ? reportJson.length : 'unknown number of'} items`);
+
+            // 4) Format the data to match the model schema
+            const sponsoredAdsData = [];
+
+            reportJson.forEach(item => {
+                sponsoredAdsData.push({
+                    campaignId: item.campaignId || '',
+                    campaignName: item.campaignName || '',
+                    searchTerm: item.searchTerm || '',
+                    keyword: item.keyword || '',
+                    clicks: item.clicks || 0,
+                    sales: item.sales30d || 0,
+                    spend: item.cost || 0
+                })
+            });
+
+            console.log(`Formatted ${sponsoredAdsData.length} search terms for database storage`);
+            return sponsoredAdsData;
+
+        } catch (err) {
+            // Handle 401 Unauthorized - refresh token and retry once
+            if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
+                console.log(`⚠️ [GetSearchKeywords] Token expired during download, refreshing token...`);
+                hasRetried = true;
+                try {
+                    const newToken = await tokenRefreshCallback();
+                    if (newToken) {
+                        currentAccessToken = newToken;
+                        console.log(`✅ [GetSearchKeywords] Token refreshed successfully, retrying download...`);
+                        continue;
+                    } else {
+                        throw new Error('Token refresh callback returned null/undefined');
+                    }
+                } catch (refreshError) {
+                    console.error('❌ [GetSearchKeywords] Failed to refresh token during download:', refreshError.message);
+                    throw new Error(`Token refresh failed during download: ${refreshError.message}`);
+                }
+            }
+
+            // Better error logging
+            if (err.response) {
+                console.error('Status:', err.response.status);
+                console.error('Body:', err.response.data.toString?.() ?? err.response.data);
+                throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
+            }
+            console.error('Error downloading report:', err);
+            throw err;
         }
-
-        console.log(`Downloaded report with ${Array.isArray(reportJson) ? reportJson.length : 'unknown number of'} items`);
-
-        // 4) Format the data to match the model schema
-        const sponsoredAdsData = [];
-
-        reportJson.forEach(item => {
-            sponsoredAdsData.push({
-                campaignId: item.campaignId || '',
-                campaignName: item.campaignName || '',
-                searchTerm: item.searchTerm || '',
-                keyword: item.keyword || '',
-                clicks: item.clicks || 0,
-                sales: item.sales30d || 0,
-                spend: item.cost || 0
-            })
-        });
-
-        console.log(`Formatted ${sponsoredAdsData.length} search terms for database storage`);
-        return sponsoredAdsData;
-
-    } catch (err) {
-        // 4) Better error logging
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Body:', err.response.data.toString?.() ?? err.response.data);
-            throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
-        }
-        console.error('Error downloading report:', err);
-        throw err;
     }
 }
 
@@ -316,39 +360,44 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Get the report ID first
-        const reportData = await getReportId(accessToken, profileId, region);
-
-        if (!reportData || !reportData.reportId) {
-            throw new Error('Failed to get report ID');
-        }
-
-        console.log(`✅ Search keywords report ID generated: ${reportData.reportId}`);
-
-        // Create token refresh callback for polling
+        // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 Refreshing Amazon Ads token during polling...');
+                console.log('🔄 [GetSearchKeywords] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ Token refreshed successfully for polling');
+                    console.log('✅ [GetSearchKeywords] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ Token refresh failed during polling:', error.message);
+                console.error('❌ [GetSearchKeywords] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
 
+        // Get the report ID first (with token refresh support)
+        const reportData = await getReportId(accessToken, profileId, region, tokenRefreshCallback);
+
+        if (!reportData || !reportData.reportId) {
+            throw new Error('Failed to get report ID');
+        }
+
+        // Use the token from getReportId if it was refreshed
+        let currentToken = reportData.currentAccessToken || accessToken;
+
+        console.log(`✅ Search keywords report ID generated: ${reportData.reportId}`);
+
         // Check report status until completion with token refresh support
-        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, userId, tokenRefreshCallback);
+        const reportStatus = await checkReportStatus(reportData.reportId, currentToken, profileId, region, userId, tokenRefreshCallback);
 
         if (reportStatus.status === 'COMPLETED') {
-            // Download and parse the report data using the latest token if refreshed
-            const downloadToken = reportStatus.finalAccessToken || accessToken;
-            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId);
+            // Use the latest token if refreshed during polling
+            const downloadToken = reportStatus.finalAccessToken || currentToken;
+            
+            // Download and parse the report data (with token refresh support)
+            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
             // Add validation and logging
             console.log(`✅ Processing ${reportContent.length} search terms for user ${userId}`);

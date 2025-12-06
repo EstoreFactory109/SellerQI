@@ -23,6 +23,10 @@ const shipmentSchema=new mongoose.Schema({
             type:String,
             require:true
         },
+        shipmentDate:{
+            type:Date,
+            require:false
+        },
         itemDetails:[{
             SellerSKU:{
                 type:String,

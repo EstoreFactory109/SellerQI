@@ -13,8 +13,10 @@ const MainPagesLayout = () => {
         <section className='w-full h-[100vh] flex flex-col'>
             <TopNav/>
             <TrialBanner/>
-            <div className="flex-1 overflow-y-auto">
-                <Outlet/>
+            <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ overscrollBehavior: 'contain' }}>
+                <div className="lg:pt-0 pt-[8vh]">
+                    <Outlet/>
+                </div>
             </div>
         </section>
     </div>

@@ -12,6 +12,12 @@
  * - Automatic retries with exponential backoff
  * - Progress tracking enabled
  * - Proper key namespacing to avoid conflicts with cache keys
+ * - Optimized job retention to minimize memory usage (reduces eviction risk)
+ * 
+ * Note: Job retention is optimized for Redis Cloud with volatile-lru policy.
+ * Completed jobs: 2 hours / 100 jobs max
+ * Failed jobs: 1 day / 500 jobs max
+ * Job history is stored in MongoDB (JobStatusModel) for long-term tracking.
  */
 
 const { Queue } = require('bullmq');
@@ -39,15 +45,16 @@ const queueConfig = {
     // Queue keys will use format: 'bullmq:user-data-processing:...'
     prefix: 'bullmq',
     defaultJobOptions: {
-        // Remove job after completion (keep for 24 hours for monitoring)
+        // Remove job after completion (optimized for memory efficiency)
+        // Reduced retention to minimize memory usage and eviction risk
         removeOnComplete: {
-            age: 24 * 3600, // 24 hours in seconds
-            count: 1000 // Keep last 1000 completed jobs
+            age: 2 * 3600, // 2 hours (reduced from 24 hours) - enough for monitoring
+            count: 100 // Keep last 100 completed jobs (reduced from 1000)
         },
-        // Remove failed jobs after 7 days
+        // Remove failed jobs after shorter period
         removeOnFail: {
-            age: 7 * 24 * 3600, // 7 days in seconds
-            count: 5000 // Keep last 5000 failed jobs
+            age: 24 * 3600, // 1 day (reduced from 7 days) - enough for debugging
+            count: 500 // Keep last 500 failed jobs (reduced from 5000)
         },
         // Retry configuration
         attempts: 3, // Retry up to 3 times

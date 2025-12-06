@@ -1,7 +1,10 @@
 const calculateAccountHealthPercentage=(data)=>{
-    // Return empty result if data is empty
-    if (!data || Object.keys(data).length === 0) {
-        return {};
+    // Return default result if data is empty or doesn't have ahrScore
+    if (!data || Object.keys(data).length === 0 || (data.ahrScore === undefined || data.ahrScore === null)) {
+        return {
+            status: "Data Not Available",
+            Percentage: 0
+        };
     }
 
     let status="";

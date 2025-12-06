@@ -5,26 +5,34 @@ const URIs = {
   };
 
   const marketplaceConfig = {
-    "US": "ATVPDKIKX0DER",  // United States
+    // North America
+    "US": "ATVPDKIKX0DER",  // United States of America
     "CA": "A2EUQ1WTGCTBG2", // Canada
     "MX": "A1AM78C64UM0Y8", // Mexico
     "BR": "A2Q3Y263D00KWC", // Brazil
-    "UK": "A1F83G8C2ARO7P", // United Kingdom
-    "DE": "A1PA6795UKMFR9", // Germany
-    "FR": "A13V1IB3VIYZZH", // France
-    "IT": "APJ6JRA9NG5V4",  // Italy
+    
+    // Europe
+    "IE": "A28R8C7NBKEWEA", // Ireland
     "ES": "A1RKKUPIHCS9HS", // Spain
-    "NL": "A1805IZSGTT6HS", // Netherlands
-    "SE": "A2NODRKZP88ZB9", // Sweden
-    "PL": "A1C3SOZRARQ6R3", // Poland
+    "UK": "A1F83G8C2ARO7P", // United Kingdom
+    "FR": "A13V1IB3VIYZZH", // France
     "BE": "AMEN7PMS3EDWL",  // Belgium
+    "NL": "A1805IZSGTT6HS", // Netherlands
+    "DE": "A1PA6795UKMFR9", // Germany
+    "IT": "APJ6JRA9NG5V4",  // Italy
+    "SE": "A2NODRKZP88ZB9", // Sweden
+    "ZA": "AE08WJ6YKNBMC",  // South Africa
+    "PL": "A1C3SOZRARQ6R3", // Poland
+    "EG": "ARBP9OOSHTCHU",  // Egypt
     "TR": "A33AVAJ2PDY3EV", // Turkey
-    "EG": "ARBP9OOSHTCHU", // Egypt
-    "AE": "A2VIGQ35RCS4UG", // United Arab Emirates
     "SA": "A17E79C6D8DWNP", // Saudi Arabia
-    "JP": "A1VC38T7YXB528", // Japan
+    "AE": "A2VIGQ35RCS4UG", // United Arab Emirates
+    "IN": "A21TJRUUN4KGV",  // India
+    
+    // Far East
+    "SG": "A19VAU5U5O7RUS", // Singapore
     "AU": "A39IBJ37TRP1C6", // Australia
-    "IN": "A21TJRUUN4KGV"   // India
+    "JP": "A1VC38T7YXB528"  // Japan
   };
 
   const spapiRegions = {

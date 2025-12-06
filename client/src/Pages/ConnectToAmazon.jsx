@@ -231,6 +231,7 @@ const AmazonConnect = () => {
                       {/* Europe */}
                       {region === "EU" && (
                         <>
+                          <option value="IE">🇮🇪 Ireland</option>
                           <option value="UK">🇬🇧 United Kingdom</option>
                           <option value="DE">🇩🇪 Germany</option>
                           <option value="FR">🇫🇷 France</option>
@@ -240,11 +241,11 @@ const AmazonConnect = () => {
                           <option value="BE">🇧🇪 Belgium</option>
                           <option value="SE">🇸🇪 Sweden</option>
                           <option value="PL">🇵🇱 Poland</option>
+                          <option value="ZA">🇿🇦 South Africa</option>
                           <option value="TR">🇹🇷 Turkey</option>
                           <option value="SA">🇸🇦 Saudi Arabia</option>
                           <option value="AE">🇦🇪 United Arab Emirates</option>
                           <option value="EG">🇪🇬 Egypt</option>
-                          <option value="ZA">🇿🇦 South Africa</option>
                           <option value="IN">🇮🇳 India</option>
                         </>
                       )}

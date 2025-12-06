@@ -48,67 +48,94 @@ const BASE_URIS = {
 };
 
 // Create keyword report
-async function getKeywordReportId(accessToken, profileId, startDate, endDate, region) {
-    const baseUri = BASE_URIS[region];
-    if (!baseUri) {
-        throw new Error(`Invalid region: ${region}`);
-    }
+async function getKeywordReportId(accessToken, profileId, startDate, endDate, region, tokenRefreshCallback = null) {
+    let currentAccessToken = accessToken;
+    let hasRetried = false;
 
-    const url = `${baseUri}/reporting/reports`;
+    while (true) {
+        try {
+            const baseUri = BASE_URIS[region];
+            if (!baseUri) {
+                throw new Error(`Invalid region: ${region}`);
+            }
 
-    const headers = {
-        'Authorization': `Bearer ${accessToken}`,
-        'Amazon-Advertising-API-Scope': profileId,
-        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
-        'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
-    };
+            const url = `${baseUri}/reporting/reports`;
 
-    const body = {
-        name: "Keyword Performance for Wasted Spend Analysis",
-        startDate,
-        endDate,
-        configuration: {
-            adProduct: "SPONSORED_PRODUCTS",
-            reportTypeId: "spKeywords",
-            timeUnit: "SUMMARY",
-            format: "GZIP_JSON",
-            groupBy: ["adGroup"],
-            columns: [
-                "keywordId",
-                "keyword",
-                "campaignName",
-                "adGroupName",
-                "matchType",
-                "clicks",
-                "cost",
-                "attributedSales30d",
-                "impressions",
-                "campaignId",
-                "adGroupId"
-            ]
-        }
-    };
+            const headers = {
+                'Authorization': `Bearer ${currentAccessToken}`,
+                'Amazon-Advertising-API-Scope': profileId,
+                'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+                'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+            };
 
-    try {
-        const response = await axios.post(url, body, { headers });
-        return response.data;
-    } catch (error) {
-        if (error.response) {
-            console.error('API Error Response:', {
-                status: error.response.status,
-                data: error.response.data,
-                headers: error.response.headers
-            });
-            // Preserve the original error structure for TokenManager to detect 401s
-            const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-            enhancedError.response = error.response;
-            enhancedError.status = error.response.status;
-            enhancedError.statusCode = error.response.status;
-            throw enhancedError;
-        } else if (error.request) {
-            throw new Error('No response received from Amazon Ads API');
-        } else {
-            throw error;
+            const body = {
+                name: "Keyword Performance for Wasted Spend Analysis",
+                startDate,
+                endDate,
+                configuration: {
+                    adProduct: "SPONSORED_PRODUCTS",
+                    reportTypeId: "spKeywords",
+                    timeUnit: "SUMMARY",
+                    format: "GZIP_JSON",
+                    groupBy: ["adGroup"],
+                    columns: [
+                        "keywordId",
+                        "keyword",
+                        "campaignName",
+                        "adGroupName",
+                        "matchType",
+                        "clicks",
+                        "cost",
+                        "attributedSales30d",
+                        "impressions",
+                        "campaignId",
+                        "adGroupId"
+                    ]
+                }
+            };
+
+            const response = await axios.post(url, body, { headers });
+            
+            // Return the response data with the current token
+            return { ...response.data, currentAccessToken };
+            
+        } catch (error) {
+            // Handle 401 Unauthorized - refresh token and retry once
+            if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
+                console.log(`⚠️ [GetWastedSpendKeywords] Token expired during getKeywordReportId, refreshing token...`);
+                hasRetried = true;
+                try {
+                    const newToken = await tokenRefreshCallback();
+                    if (newToken) {
+                        currentAccessToken = newToken;
+                        console.log(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying getKeywordReportId...`);
+                        continue;
+                    } else {
+                        throw new Error('Token refresh callback returned null/undefined');
+                    }
+                } catch (refreshError) {
+                    console.error('❌ [GetWastedSpendKeywords] Failed to refresh token:', refreshError.message);
+                    throw new Error(`Token refresh failed: ${refreshError.message}`);
+                }
+            }
+
+            if (error.response) {
+                console.error('API Error Response:', {
+                    status: error.response.status,
+                    data: error.response.data,
+                    headers: error.response.headers
+                });
+                // Preserve the original error structure for TokenManager to detect 401s
+                const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+                enhancedError.response = error.response;
+                enhancedError.status = error.response.status;
+                enhancedError.statusCode = error.response.status;
+                throw enhancedError;
+            } else if (error.request) {
+                throw new Error('No response received from Amazon Ads API');
+            } else {
+                throw error;
+            }
         }
     }
 }
@@ -196,30 +223,54 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
 }
 
 // Download and parse report data
-async function downloadReportData(location, accessToken, profileId) {
-    try {
-        const response = await axios.get(location, {
-            responseType: 'arraybuffer',
-            decompress: false
-        });
+async function downloadReportData(location, accessToken, profileId, tokenRefreshCallback = null) {
+    let currentAccessToken = accessToken;
+    let hasRetried = false;
 
-        const inflatedBuffer = await gunzip(response.data);
-        const payloadText = inflatedBuffer.toString('utf8');
-        const reportJson = JSON.parse(payloadText);
+    while (true) {
+        try {
+            const response = await axios.get(location, {
+                responseType: 'arraybuffer',
+                decompress: false
+            });
 
-        // console.log('Successfully downloaded report:', {
-        //     totalRows: reportJson.metadata?.totalRows ?? reportJson.length
-        // });
+            const inflatedBuffer = await gunzip(response.data);
+            const payloadText = inflatedBuffer.toString('utf8');
+            const reportJson = JSON.parse(payloadText);
 
-        return reportJson;
-    } catch (err) {
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Body:', err.response.data?.toString?.() ?? err.response.data);
-            throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
+            // console.log('Successfully downloaded report:', {
+            //     totalRows: reportJson.metadata?.totalRows ?? reportJson.length
+            // });
+
+            return reportJson;
+        } catch (err) {
+            // Handle 401 Unauthorized - refresh token and retry once
+            if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
+                console.log(`⚠️ [GetWastedSpendKeywords] Token expired during download, refreshing token...`);
+                hasRetried = true;
+                try {
+                    const newToken = await tokenRefreshCallback();
+                    if (newToken) {
+                        currentAccessToken = newToken;
+                        console.log(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying download...`);
+                        continue;
+                    } else {
+                        throw new Error('Token refresh callback returned null/undefined');
+                    }
+                } catch (refreshError) {
+                    console.error('❌ [GetWastedSpendKeywords] Failed to refresh token during download:', refreshError.message);
+                    throw new Error(`Token refresh failed during download: ${refreshError.message}`);
+                }
+            }
+
+            if (err.response) {
+                console.error('Status:', err.response.status);
+                console.error('Body:', err.response.data?.toString?.() ?? err.response.data);
+                throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
+            }
+            console.error('Download error:', err);
+            throw err;
         }
-        console.error('Download error:', err);
-        throw err;
     }
 }
 
@@ -254,41 +305,46 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
     });
     
     try {
-        console.log('📝 Step 1: Creating report request...');
-        const reportData = await getKeywordReportId(accessToken, profileId, startDate, endDate, region);
-
-        if (!reportData || !reportData.reportId) {
-            throw new Error('Failed to get report ID');
-        }
-
-        console.log(`✅ Report ID received: ${reportData.reportId}`);
-
-        // Create token refresh callback for polling
+        // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 Refreshing Amazon Ads token during polling...');
+                console.log('🔄 [GetWastedSpendKeywords] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ Token refreshed successfully for polling');
+                    console.log('✅ [GetWastedSpendKeywords] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ Token refresh failed during polling:', error.message);
+                console.error('❌ [GetWastedSpendKeywords] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
 
+        console.log('📝 Step 1: Creating report request...');
+        const reportData = await getKeywordReportId(accessToken, profileId, startDate, endDate, region, tokenRefreshCallback);
+
+        if (!reportData || !reportData.reportId) {
+            throw new Error('Failed to get report ID');
+        }
+
+        // Use the token from getKeywordReportId if it was refreshed
+        let currentToken = reportData.currentAccessToken || accessToken;
+
+        console.log(`✅ Report ID received: ${reportData.reportId}`);
+
         console.log('⏳ Step 2: Polling report status (this may take a few minutes)...');
-        const reportStatus = await checkReportStatus(reportData.reportId, accessToken, profileId, region, tokenRefreshCallback);
+        const reportStatus = await checkReportStatus(reportData.reportId, currentToken, profileId, region, tokenRefreshCallback);
         console.log(`📊 Report status: ${reportStatus.status}`);
 
         if (reportStatus.status === 'SUCCESS') {
             console.log('✅ Report completed successfully, downloading from:', reportStatus.location);
-            // Use the latest token if refreshed
-            const downloadToken = reportStatus.finalAccessToken || accessToken;
-            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId);
+            // Use the latest token if refreshed during polling
+            const downloadToken = reportStatus.finalAccessToken || currentToken;
+            
+            // Download report data (with token refresh support)
+            const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
             // Extract data from report - handle both array and object formats
             let data = reportContent;

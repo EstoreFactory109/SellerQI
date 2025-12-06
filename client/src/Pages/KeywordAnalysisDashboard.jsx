@@ -1,47 +1,128 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
+import {
+  setAsinsList,
+  setLoadingAsins,
+  setKeywordsForAsin,
+  setLoadingKeywordsForAsin,
+  setErrorForAsin,
+  setError
+} from '../redux/slices/KeywordRecommendationsSlice.js';
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
-  const [keywordRecommendationsData, setKeywordRecommendationsData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const dispatch = useDispatch();
   const [activeTab, setActiveTab] = useState('all');
   const [selectedKeywords, setSelectedKeywords] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'keyword', direction: 'desc' });
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedAsin, setSelectedAsin] = useState('');
+  const [isSwitchingAsin, setIsSwitchingAsin] = useState(false);
   const itemsPerPage = 10;
-  // Only show BROAD match type keywords - no filter needed
+
+  // Get data from Redux
+  const asinsList = useSelector((state) => state.keywordRecommendations?.asinsList || []);
+  const loadingAsins = useSelector((state) => state.keywordRecommendations?.loadingAsins || false);
+  const keywordsByAsin = useSelector((state) => state.keywordRecommendations?.keywordsByAsin || {});
+  const reduxError = useSelector((state) => state.keywordRecommendations?.error);
 
   // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
 
-  // Fetch keyword recommendations data
+  // Get data for selected ASIN from Redux
+  const selectedAsinData = keywordsByAsin[selectedAsin] || null;
+  const keywordRecommendationsData = selectedAsinData?.data || null;
+  const loading = selectedAsinData?.loading || false;
+  const error = selectedAsinData?.error || reduxError;
+
+  // Fetch ASINs list (only if not in Redux)
+  useEffect(() => {
+    const fetchAsinsList = async () => {
+      // If ASINs list already exists in Redux, use it
+      if (asinsList.length > 0) {
+        // Auto-select first ASIN if available and none selected
+        if (!selectedAsin) {
+          setSelectedAsin(asinsList[0].asin);
+        }
+        return;
+      }
+
+      dispatch(setLoadingAsins(true));
+      try {
+        const response = await axiosInstance.get('/app/analyse/keywordRecommendations/asins');
+        
+        if (response.data && response.data.data && response.data.data.asins) {
+          const asins = response.data.data.asins;
+          dispatch(setAsinsList(asins));
+          
+          // Auto-select first ASIN if available
+          if (asins.length > 0 && !selectedAsin) {
+            setSelectedAsin(asins[0].asin);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching ASINs list:', err);
+        dispatch(setError(err.response?.data?.message || 'Failed to fetch ASINs list'));
+      } finally {
+        dispatch(setLoadingAsins(false));
+      }
+    };
+
+    fetchAsinsList();
+  }, [asinsList.length, selectedAsin, dispatch]);
+
+  // Fetch keyword recommendations data for selected ASIN (only if not in Redux)
   useEffect(() => {
     const fetchKeywordRecommendations = async () => {
-      setLoading(true);
-      setError(null);
+      if (!selectedAsin) {
+        setIsSwitchingAsin(false);
+        return;
+      }
+
+      // Show loader immediately when switching ASINs
+      setIsSwitchingAsin(true);
+
+      // Check if data already exists in Redux
+      const existingData = keywordsByAsin[selectedAsin];
+      if (existingData && existingData.data) {
+        // Data already exists, hide loader after a brief moment for smooth UX
+        setTimeout(() => {
+          setIsSwitchingAsin(false);
+        }, 150);
+        return;
+      }
+
+      // Data doesn't exist, fetch it
+      dispatch(setLoadingKeywordsForAsin({ asin: selectedAsin, loading: true }));
+      dispatch(setErrorForAsin({ asin: selectedAsin, error: null }));
+      
       try {
-        const response = await axiosInstance.get('/app/analyse/keywordRecommendations');
+        const response = await axiosInstance.get(`/app/analyse/keywordRecommendations/byAsin?asin=${selectedAsin}`);
         
         if (response.data && response.data.data) {
-          setKeywordRecommendationsData(response.data.data);
+          dispatch(setKeywordsForAsin({ asin: selectedAsin, data: response.data.data }));
         } else {
-          setError('No data received from server');
+          dispatch(setErrorForAsin({ asin: selectedAsin, error: 'No data received from server' }));
         }
       } catch (err) {
         console.error('Error fetching keyword recommendations:', err);
-        setError(err.response?.data?.message || 'Failed to fetch keyword recommendations');
+        dispatch(setErrorForAsin({ 
+          asin: selectedAsin, 
+          error: err.response?.data?.message || 'Failed to fetch keyword recommendations' 
+        }));
       } finally {
-        setLoading(false);
+        // Hide loader after data is loaded
+        setTimeout(() => {
+          setIsSwitchingAsin(false);
+        }, 200);
       }
     };
 
     fetchKeywordRecommendations();
-  }, []);
+  }, [selectedAsin, keywordsByAsin, dispatch]);
 
   // Transform keywordTargetList data to flat structure for table display
   const keywords = useMemo(() => {
@@ -136,7 +217,7 @@ const KeywordAnalysisDashboard = () => {
   // Reset to page 1 when tabs or sorting changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, sortConfig.key]);
+  }, [activeTab, sortConfig.key, selectedAsin]);
 
   // Metrics calculation - only for BROAD match type keywords
   const metrics = useMemo(() => {
@@ -249,13 +330,49 @@ const KeywordAnalysisDashboard = () => {
     const url = URL.createObjectURL(blob);
     
     link.setAttribute('href', url);
-    link.setAttribute('download', `keyword-recommendations-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `keyword-recommendations-${selectedAsin || 'all'}-${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
+
+  if (loadingAsins) {
+    return (
+      <div className="dashboard-container">
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '100vh',
+          flexDirection: 'column',
+          gap: '20px'
+        }}>
+          <div className="loading" style={{ width: '40px', height: '40px' }}></div>
+          <p style={{ color: '#64748b', fontSize: '16px' }}>Loading ASINs list...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (asinsList.length === 0) {
+    return (
+      <div className="dashboard-container">
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '100vh',
+          flexDirection: 'column',
+          gap: '20px'
+        }}>
+          <AlertCircle size={48} color="#ef4444" />
+          <p style={{ color: '#ef4444', fontSize: '16px' }}>No ASINs with keyword recommendations found. Please ensure keyword data has been processed.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -293,6 +410,9 @@ const KeywordAnalysisDashboard = () => {
     );
   }
 
+  // Get selected ASIN info
+  const selectedAsinInfo = asinsList.find(a => a.asin === selectedAsin);
+
   return (
     <div className="dashboard-container">
       <style>{`
@@ -326,6 +446,56 @@ const KeywordAnalysisDashboard = () => {
           display: flex;
           align-items: center;
           gap: 10px;
+        }
+        
+        .asin-filter-container {
+          background: white;
+          padding: 16px 24px;
+          border-radius: 12px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          margin-bottom: 24px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+        
+        .asin-filter-label {
+          font-size: 14px;
+          font-weight: 600;
+          color: #475569;
+          white-space: nowrap;
+        }
+        
+        .asin-filter-select {
+          flex: 1;
+          max-width: 300px;
+          padding: 10px 14px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: white;
+          font-size: 14px;
+          font-weight: 500;
+          color: #1e293b;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .asin-filter-select:hover {
+          border-color: #3b82f6;
+        }
+        
+        .asin-filter-select:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .asin-info {
+          font-size: 13px;
+          color: #64748b;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
         
         .metrics-grid {
@@ -512,8 +682,53 @@ const KeywordAnalysisDashboard = () => {
           animation: spin 0.8s linear infinite;
         }
         
+        .table-loading-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(4px);
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 20px;
+          z-index: 100;
+          animation: fadeIn 0.2s ease-in;
+          border-radius: 0 0 12px 12px;
+        }
+        
+        .table-container-wrapper {
+          position: relative;
+        }
+        
+        .loading-spinner {
+          width: 50px;
+          height: 50px;
+          border: 4px solid #e2e8f0;
+          border-top-color: #3b82f6;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+        
+        .loading-text {
+          font-size: 16px;
+          font-weight: 500;
+          color: #475569;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
         @keyframes spin {
           to { transform: rotate(360deg); }
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
       `}</style>
 
@@ -550,6 +765,28 @@ const KeywordAnalysisDashboard = () => {
               {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'Amazon Ads'}
             </div>
           </div>
+        </div>
+
+        {/* ASIN Filter */}
+        <div className="asin-filter-container">
+          <div className="asin-filter-label">Filter by ASIN:</div>
+          <select
+            className="asin-filter-select"
+            value={selectedAsin}
+            onChange={(e) => setSelectedAsin(e.target.value)}
+          >
+            {asinsList.map((asinItem) => (
+              <option key={asinItem.asin} value={asinItem.asin}>
+                {asinItem.asin} ({asinItem.keywordCount} keywords)
+              </option>
+            ))}
+          </select>
+          {selectedAsinInfo && (
+            <div className="asin-info">
+              <CheckCircle size={16} />
+              <span>{selectedAsinInfo.keywordCount} keywords available</span>
+            </div>
+          )}
         </div>
 
         {/* Metrics Grid */}
@@ -638,7 +875,17 @@ const KeywordAnalysisDashboard = () => {
         </div>
 
         {/* Keywords Table */}
-        <div className="table-container">
+        <div className="table-container-wrapper">
+          {(isSwitchingAsin || loading) && selectedAsin && (
+            <div className="table-loading-overlay">
+              <div className="loading-spinner"></div>
+              <div className="loading-text">
+                <Search size={20} />
+                {loading ? 'Loading keywords for ASIN:' : 'Switching to ASIN:'} <strong>{selectedAsin}</strong>
+              </div>
+            </div>
+          )}
+          <div className="table-container">
           <table>
             <thead>
               <tr>
@@ -727,7 +974,7 @@ const KeywordAnalysisDashboard = () => {
                 <tr>
                   <td colSpan={8} className="empty-state">
                     {keywords.length === 0 
-                      ? 'No keyword recommendations available. Please ensure data is loaded.'
+                      ? `No keyword recommendations available for ASIN: ${selectedAsin}. Please ensure data is loaded.`
                       : 'No keywords found matching your filters'}
                   </td>
                 </tr>
@@ -828,6 +1075,7 @@ const KeywordAnalysisDashboard = () => {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

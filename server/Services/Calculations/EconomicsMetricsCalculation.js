@@ -6,14 +6,38 @@
  * - Total Sales
  * - Gross Profit
  * - PPC Spent
- * - FBA Fees
- * - Storage Fees
+ * - Amazon Fees (FBA fulfillment, storage, referral, closing, per-item fees)
  * - Refunds
  * - Datewise breakdowns
  * - ASIN-wise breakdowns
  */
 
 const logger = require('../../utils/Logger');
+
+/**
+ * List of Amazon fee types (fees charged by Amazon for their services)
+ * These include: FBA fulfillment, storage, referral, closing, per-item, etc.
+ */
+const AMAZON_FEE_TYPES = [
+    'fba', 'fulfillment', 'fulfilment', 'storage', 'referral', 
+    'closing', 'per_item', 'per-item', 'peritem', 'variable_closing',
+    'high_volume', 'subscription', 'refund_administration',
+    'disposal', 'removal', 'return', 'label', 'prep', 'inbound',
+    'inventory_placement', 'oversize', 'media', 'gift_wrap'
+];
+
+/**
+ * Check if a fee type name is an Amazon fee
+ * @param {string} feeTypeName - The fee type name to check
+ * @returns {boolean} True if it's an Amazon fee
+ */
+function isAmazonFee(feeTypeName) {
+    if (!feeTypeName) return false;
+    const feeTypeNameLower = feeTypeName.toLowerCase().replace(/[_-]/g, '');
+    return AMAZON_FEE_TYPES.some(amazonFee => 
+        feeTypeNameLower.includes(amazonFee.replace(/[_-]/g, ''))
+    );
+}
 
 /**
  * Process economics data from JSONL format and calculate all metrics
@@ -41,13 +65,14 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
     let totalFBAFees = 0;
     let totalStorageFees = 0;
     let totalFees = 0; // Total of all fees (all fee types combined)
+    let totalAmazonFees = 0; // Amazon-specific fees (FBA, storage, referral, etc.)
     let totalRefunds = 0;
     let currencyCode = 'USD';
     
     // Data structures for datewise and ASIN-wise breakdowns
     const datewiseSales = {}; // { date: { sales, grossProfit } }
     const datewiseGrossProfit = {}; // { date: amount }
-    const asinWiseSales = {}; // { asin: { sales, grossProfit, unitsSold, ppcSpent, fbaFees, storageFees } }
+    const asinWiseSales = {}; // { asin: { sales, grossProfit, unitsSold, ppcSpent, fbaFees, storageFees, amazonFees } }
 
     /**
      * Process a single economics item
@@ -99,6 +124,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                     fbaFees: 0,
                     storageFees: 0,
                     totalFees: 0,
+                    amazonFees: 0, // Amazon-specific fees (FBA, storage, referral, etc.)
                     feeBreakdown: {}, // { feeTypeName: amount }
                     asin: asin
                 };
@@ -129,6 +155,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         let itemFBAFees = 0;
         let itemStorageFees = 0;
         let itemTotalFees = 0;
+        let itemAmazonFees = 0;
         
         if (item.fees && Array.isArray(item.fees)) {
             item.fees.forEach(fee => {
@@ -154,7 +181,13 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 itemTotalFees += feeAmount;
                 totalFees += feeAmount; // Add to overall total fees
 
-                // Categorize specific fee types
+                // Categorize as Amazon fee (all fees are now considered Amazon fees)
+                if (isAmazonFee(feeTypeName)) {
+                    itemAmazonFees += feeAmount;
+                    totalAmazonFees += feeAmount;
+                }
+
+                // Categorize specific fee types for backward compatibility
                 // FBA Fulfillment Fee
                 if (feeTypeNameLower.includes('fba') && (feeTypeNameLower.includes('fulfillment') || feeTypeNameLower.includes('fulfilment'))) {
                     itemFBAFees += feeAmount;
@@ -181,6 +214,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             asinWiseSales[asin].fbaFees += itemFBAFees;
             asinWiseSales[asin].storageFees += itemStorageFees;
             asinWiseSales[asin].totalFees += itemTotalFees;
+            asinWiseSales[asin].amazonFees += itemAmazonFees;
         }
 
         // Calculate Refunds
@@ -235,6 +269,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             fbaFees: totalFBAFees,
             storageFees: totalStorageFees,
             totalFees: totalFees,
+            amazonFees: totalAmazonFees,
             refunds: totalRefunds
         },
         datewiseCount: Object.keys(datewiseSales).length,
@@ -304,6 +339,10 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                     amount: parseFloat(asinData.totalFees.toFixed(2)),
                     currencyCode
                 },
+                amazonFees: {
+                    amount: parseFloat(asinData.amazonFees.toFixed(2)),
+                    currencyCode
+                },
                 feeBreakdown: feeBreakdownArray
             };
         })
@@ -338,6 +377,10 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         },
         totalFees: {
             amount: parseFloat(totalFees.toFixed(2)),
+            currencyCode
+        },
+        amazonFees: {
+            amount: parseFloat(totalAmazonFees.toFixed(2)),
             currencyCode
         },
         refunds: {

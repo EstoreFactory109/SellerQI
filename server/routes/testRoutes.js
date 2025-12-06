@@ -3,7 +3,8 @@ const router=express.Router();
 const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testPPCSpendsSalesUnitsSold,testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
-    testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations}=require('../controllers/test/TestController.js')
+    testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations}=require('../controllers/test/TestController.js')
 
     
 router.post('/testreport',testReport);
@@ -23,5 +24,9 @@ router.post('/testGetWastedSpendKeywords',testGetWastedSpendKeywords)
 router.post('/testSearchKeywords',testSearchKeywords)
 router.post('/testFbaInventoryPlanningData',testFbaInventoryPlanningData)
 router.post('/testKeywordRecommendations',testKeywordRecommendations)
+
+// NEW: ASIN-wise keyword recommendations routes
+router.post('/testKeywordRecommendationsFromDB',testKeywordRecommendationsFromDB)  // Fetch ASINs from DB and process
+router.get('/getStoredKeywordRecommendations',getStoredKeywordRecommendations)      // Get stored keywords
 
 module.exports=router

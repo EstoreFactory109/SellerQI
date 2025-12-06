@@ -1573,8 +1573,289 @@ const testKeywordRecommendations = async (req, res) => {
   }
 };
 
+/**
+ * NEW: Test Keyword Recommendations with ASINs fetched from Seller Model
+ * Accepts userId, country, and region - fetches ASINs automatically from database
+ * Uses the new ASIN-wise approach (one ASIN at a time, batches of 5)
+ */
+const testKeywordRecommendationsFromDB = async (req, res) => {
+  try {
+    const { userId, country, region } = req.body;
+    
+    // Import required modules
+    const mongoose = require('mongoose');
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const tokenManager = require('../../utils/TokenManager.js');
+    const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+    const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
+    const { getAllStoredKeywordsForUser } = require('../../Services/AmazonAds/KeyWordsRecommendations.js');
+    
+    // Validate required parameters
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required'
+      });
+    }
+    
+    if (!country) {
+      return res.status(400).json({
+        success: false,
+        error: 'country is required (e.g., US, UK, DE)'
+      });
+    }
+    
+    if (!region) {
+      return res.status(400).json({
+        success: false,
+        error: 'region is required (NA, EU, or FE)'
+      });
+    }
+    
+    // Validate region
+    const validRegions = ['NA', 'EU', 'FE'];
+    if (!validRegions.includes(region)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
+      });
+    }
+    
+    console.log('🔍 Fetching seller account and ASINs from database...');
+    
+    // Convert userId to ObjectId if needed
+    let userIdQuery = userId;
+    if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+      userIdQuery = new mongoose.Types.ObjectId(userId);
+    }
+    
+    // Find the Seller document
+    const sellerCentral = await Seller.findOne({ User: userIdQuery });
+    
+    if (!sellerCentral) {
+      return res.status(404).json({
+        success: false,
+        error: 'Seller account not found for the provided userId'
+      });
+    }
+    
+    // Find the specific seller account for this country/region
+    const sellerAccount = sellerCentral.sellerAccount?.find(
+      acc => acc.country === country && acc.region === region
+    );
+    
+    if (!sellerAccount) {
+      return res.status(404).json({
+        success: false,
+        error: `No seller account found for country: ${country}, region: ${region}`,
+        availableAccounts: sellerCentral.sellerAccount?.map(acc => ({
+          country: acc.country,
+          region: acc.region
+        })) || []
+      });
+    }
+    
+    // Check for required tokens
+    if (!sellerAccount.adsRefreshToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Ads refresh token not found for this seller account',
+        suggestion: 'Please connect Amazon Ads account first.'
+      });
+    }
+    
+    // Extract ASINs from the seller account products
+    const products = sellerAccount.products || [];
+    const asins = products
+      .map(p => p.asin)
+      .filter(asin => asin && typeof asin === 'string' && asin.trim().length > 0);
+    
+    if (asins.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No ASINs found in the seller account products',
+        suggestion: 'Please ensure the seller account has products with ASINs'
+      });
+    }
+    
+    console.log(`✅ Found ${asins.length} ASINs for processing`);
+    
+    // Generate access token
+    const adsAccessToken = await generateAdsAccessToken(sellerAccount.adsRefreshToken);
+    
+    if (!adsAccessToken) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate Ads access token',
+        suggestion: 'Please check if the refresh token is valid.'
+      });
+    }
+    
+    // Get profile ID
+    let profileId = sellerAccount.ProfileId;
+    if (!profileId) {
+      const profiles = await getProfileById(adsAccessToken, region, country, userId);
+      if (profiles && Array.isArray(profiles) && profiles.length > 0) {
+        profileId = profiles[0].profileId;
+        console.log('✅ Auto-selected profile ID:', profileId);
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not find profile ID for this account'
+        });
+      }
+    }
+    
+    console.log('🧪 Starting Keyword Recommendations API (ASIN-wise):', {
+      userId,
+      country,
+      region,
+      profileId,
+      asinCount: asins.length,
+      sampleAsins: asins.slice(0, 5)
+    });
+    
+    // Call the keyword recommendations function using TokenManager
+    const result = await tokenManager.wrapAdsFunction(
+      getKeywordRecommendations,
+      userId,
+      sellerAccount.spiRefreshToken,
+      sellerAccount.adsRefreshToken
+    )(adsAccessToken, profileId, userId, country, region, asins);
+    
+    // Get all stored keywords for this user after processing
+    const storedKeywords = await getAllStoredKeywordsForUser(userId, country, region);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Keyword recommendations processed successfully (ASIN-wise)',
+      summary: {
+        totalAsins: result.totalAsins,
+        successfulAsins: result.successfulAsins,
+        failedAsins: result.failedAsins,
+        totalKeywordsFound: result.totalKeywordsFound
+      },
+      results: result.results,
+      storedData: {
+        totalRecords: storedKeywords.length,
+        asins: storedKeywords.map(sk => ({
+          asin: sk.asin,
+          keywordCount: sk.totalKeywords,
+          fetchedAt: sk.fetchedAt
+        }))
+      },
+      metadata: {
+        userId,
+        country,
+        region,
+        processedAt: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in testKeywordRecommendationsFromDB:', error);
+    
+    if (error.response) {
+      const status = error.response.status;
+      const errorData = error.response.data;
+      
+      if (status === 401 || status === 403) {
+        return res.status(status).json({
+          success: false,
+          error: 'Authentication Error',
+          message: error.message,
+          details: errorData,
+          suggestion: 'Please reconnect your Amazon Ads account.'
+        });
+      }
+      
+      return res.status(status).json({
+        success: false,
+        error: 'Amazon Ads API Error',
+        status: status,
+        message: error.message,
+        details: errorData
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred'
+    });
+  }
+};
+
+/**
+ * Get stored keyword recommendations for a user (from database)
+ */
+const getStoredKeywordRecommendations = async (req, res) => {
+  try {
+    const { userId, country, region, asin } = req.query;
+    
+    const { AsinKeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
+    
+    if (!userId || !country || !region) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId, country, and region are required query parameters'
+      });
+    }
+    
+    let result;
+    
+    if (asin) {
+      // Get keywords for specific ASIN
+      result = await AsinKeywordRecommendations.findByAsin(userId, country, region, asin);
+      
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          error: `No keyword recommendations found for ASIN: ${asin}`
+        });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        data: result,
+        metadata: {
+          asin: result.asin,
+          keywordCount: result.totalKeywords,
+          fetchedAt: result.fetchedAt
+        }
+      });
+      
+    } else {
+      // Get all keywords for user
+      result = await AsinKeywordRecommendations.findAllForUser(userId, country, region);
+      
+      return res.status(200).json({
+        success: true,
+        totalAsins: result.length,
+        totalKeywords: result.reduce((sum, item) => sum + item.totalKeywords, 0),
+        data: result.map(item => ({
+          asin: item.asin,
+          keywordCount: item.totalKeywords,
+          keywords: item.keywordTargetList,
+          fetchedAt: item.fetchedAt
+        }))
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in getStoredKeywordRecommendations:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
    getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations
+   testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
+   testKeywordRecommendationsFromDB,
+   getStoredKeywordRecommendations
    }

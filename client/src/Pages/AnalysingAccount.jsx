@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { setDashboardInfo } from '../redux/slices/DashboardSlice.js'
 import { setHistoryInfo } from '../redux/slices/HistorySlice.js'
+import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js'
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js'
 import { addBrand } from '../redux/slices/authSlice.js'
 import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js'
@@ -189,6 +190,11 @@ const AnalysingAccount = () => {
                         // Dispatch brand name if available
                         if (dashboardData.Brand) {
                             dispatch(addBrand(dashboardData.Brand));
+                        }
+                        
+                        // Dispatch all seller accounts for account switching
+                        if (dashboardData.AllSellerAccounts && dashboardData.AllSellerAccounts.length > 0) {
+                            dispatch(setAllAccounts(dashboardData.AllSellerAccounts));
                         }
                             
                             // Dispatch error details if available

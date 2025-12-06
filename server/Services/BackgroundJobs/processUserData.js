@@ -10,7 +10,7 @@
  * @returns {Object} Result object with success status and details
  */
 
-const { Integration } = require('../main/Integration.js');
+const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const { AnalyseService } = require('../main/Analyse.js');
 const { getRedisClient } = require('../../config/redisConn.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
@@ -86,38 +86,39 @@ async function processUserData(userId) {
                     });
                 }
 
-                // Step 1: Fetch fresh data from all APIs using Integration service
+                // Step 1: Fetch fresh data from all APIs using ScheduledIntegration service
+                // This only calls functions scheduled for the current day of week
                 try {
                     if (loggingHelper) {
-                        loggingHelper.logFunctionStart('Integration.getSpApiData', {
+                        loggingHelper.logFunctionStart('ScheduledIntegration.getScheduledApiData', {
                             userId,
                             region,
                             country
                         });
                     }
 
-                    logger.info(`[processUserData] Fetching API data for user ${userId}, ${country}-${region}`);
-                    const integrationResult = await Integration.getSpApiData(userId, region, country);
+                    logger.info(`[processUserData] Fetching scheduled API data for user ${userId}, ${country}-${region}`);
+                    const integrationResult = await ScheduledIntegration.getScheduledApiData(userId, region, country);
 
                     if (integrationResult.success) {
-                        logger.info(`[processUserData] API data fetched successfully for user ${userId}, ${country}-${region}`);
+                        logger.info(`[processUserData] Scheduled API data fetched successfully for user ${userId}, ${country}-${region}`);
                         if (loggingHelper) {
-                            loggingHelper.logFunctionSuccess('Integration.getSpApiData', integrationResult.data, {
+                            loggingHelper.logFunctionSuccess('ScheduledIntegration.getScheduledApiData', integrationResult.data, {
                                 recordsProcessed: 1,
                                 recordsSuccessful: 1
                             });
                         }
                     } else {
-                        logger.warn(`[processUserData] API data fetch failed for user ${userId}, ${country}-${region}. Error: ${integrationResult.error}`);
+                        logger.warn(`[processUserData] Scheduled API data fetch failed for user ${userId}, ${country}-${region}. Error: ${integrationResult.error}`);
                         if (loggingHelper) {
-                            loggingHelper.logFunctionError('Integration.getSpApiData', new Error(integrationResult.error || 'Unknown error'));
+                            loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', new Error(integrationResult.error || 'Unknown error'));
                         }
                         // Continue with analysis using existing data if API fetch fails
                     }
                 } catch (apiError) {
-                    logger.error(`[processUserData] Error fetching API data for user ${userId}, ${country}-${region}:`, apiError);
+                    logger.error(`[processUserData] Error fetching scheduled API data for user ${userId}, ${country}-${region}:`, apiError);
                     if (loggingHelper) {
-                        loggingHelper.logFunctionError('Integration.getSpApiData', apiError);
+                        loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', apiError);
                     }
                     // Continue with analysis using existing data if API fetch fails
                 }

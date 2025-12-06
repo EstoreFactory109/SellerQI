@@ -180,15 +180,15 @@ async function startWorker() {
                 max: 10, // Max 10 jobs
                 duration: 60000 // Per minute
             },
-            // Remove completed jobs after 24 hours
+            // Remove completed jobs after shorter period (optimized for memory)
             removeOnComplete: {
-                age: 24 * 3600,
-                count: 1000
+                age: 2 * 3600, // 2 hours (matches queue config)
+                count: 100 // Keep last 100 (matches queue config)
             },
-            // Remove failed jobs after 7 days
+            // Remove failed jobs after shorter period
             removeOnFail: {
-                age: 7 * 24 * 3600,
-                count: 5000
+                age: 24 * 3600, // 1 day (matches queue config)
+                count: 500 // Keep last 500 (matches queue config)
             }
         }
     );

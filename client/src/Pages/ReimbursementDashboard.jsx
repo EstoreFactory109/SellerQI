@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   DollarSign, AlertCircle, Package, 
@@ -6,18 +6,17 @@ import {
   FileText, CheckCircle, XCircle, HelpCircle, ExternalLink
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
-import { 
-  getAllReimbursements,
-  getReimbursementSummary
-} from '../services/reimbursementService';
+import { useReimbursementData } from '../hooks/usePageData';
 
 const ReimbursementDashboard = () => {
   const currency = useSelector(state => state.currency?.currency) || '$';
   
-  // State management
-  const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState(null);
-  const [reimbursements, setReimbursements] = useState([]);
+  // Use Redux hook to fetch and get reimbursement data
+  const { data, loading, error } = useReimbursementData(true);
+  
+  // Extract summary and reimbursements from Redux data
+  const summary = data?.summary || null;
+  const reimbursements = Array.isArray(data?.reimbursements) ? data.reimbursements : [];
   
   // Filter state
   const [filterStatus, setFilterStatus] = useState('all');
@@ -33,43 +32,6 @@ const ReimbursementDashboard = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-
-  // Fetch data on component mount
-  useEffect(() => {
-    fetchAllData();
-  }, []);
-
-  const fetchAllData = async () => {
-    try {
-      setLoading(true);
-      
-      const [summaryRes, reimbursementsRes] = await Promise.all([
-        getReimbursementSummary(),
-        getAllReimbursements()
-      ]);
-
-      // Debug logging
-      console.log('Summary Response:', summaryRes);
-      console.log('Reimbursements Response:', reimbursementsRes);
-
-      // ApiResponse structure: { statusCode, data, message }
-      // Service already returns response.data, so summaryRes is the ApiResponse object
-      const summaryData = summaryRes?.data || summaryRes;
-      const reimbursementsData = reimbursementsRes?.data || reimbursementsRes || [];
-      
-      console.log('Processed Summary Data:', summaryData);
-      console.log('Processed Reimbursements Data:', reimbursementsData);
-      console.log('Backend Damaged Inventory:', summaryData?.backendDamagedInventory);
-      console.log('Reimbursements Count:', reimbursementsData?.length || 0);
-      
-      setSummary(summaryData);
-      setReimbursements(Array.isArray(reimbursementsData) ? reimbursementsData : []);
-    } catch (error) {
-      console.error('Error fetching reimbursement data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Format currency
   const formatCurrency = (value) => {
@@ -381,8 +343,21 @@ const ReimbursementDashboard = () => {
     );
   }
 
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-gray-900 font-semibold mb-2">Error loading reimbursement data</p>
+          <p className="text-gray-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100 lg:mt-0 mt-[12vh]">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
       <div className="h-[90vh] overflow-y-auto">
         <div className="p-6 lg:p-8">
           {/* Header */}

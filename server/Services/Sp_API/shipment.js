@@ -5,6 +5,58 @@ const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError');
 
+/**
+ * Extract date from shipment name
+ * Shipment names follow patterns like: "Think Tank - SH2 - FBA STA (05/02/2025 16:43)-SBD1"
+ * The date is in format (MM/DD/YYYY HH:mm)
+ * @param {string} shipmentName - The shipment name containing the date
+ * @returns {Date|null} - Parsed date or null if not found
+ */
+const extractDateFromShipmentName = (shipmentName) => {
+    if (!shipmentName) return null;
+    
+    // Regex to match date pattern (MM/DD/YYYY HH:mm) in parentheses
+    const datePattern = /\((\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\)/;
+    const match = shipmentName.match(datePattern);
+    
+    if (match) {
+        const [, month, day, year, hour, minute] = match;
+        // Create date object (month is 0-indexed in JavaScript)
+        const parsedDate = new Date(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(hour),
+            parseInt(minute)
+        );
+        
+        // Validate the date is valid
+        if (!isNaN(parsedDate.getTime())) {
+            return parsedDate;
+        }
+    }
+    
+    return null;
+};
+
+/**
+ * Check if a date is within the last N days from today
+ * @param {Date} date - The date to check
+ * @param {number} days - Number of days to look back (default 30)
+ * @returns {boolean} - True if date is within the range
+ */
+const isWithinLastNDays = (date, days = 30) => {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+        return false;
+    }
+    
+    const now = new Date();
+    const cutoffDate = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+    
+    // Date should be between cutoffDate and now (inclusive)
+    return date >= cutoffDate && date <= now;
+};
+
 // Helper function to fetch shipment item details
 const getShipmentDetails = async (shipmentId, SessionToken, baseURI, AccessToken) => {
     const host = baseURI;
@@ -82,9 +134,29 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
 
         const limit = promiseLimit(3); // Limit to 3 concurrent getShipmentDetails requests
 
-        const closedShipments = response.data.payload.ShipmentData.filter(
-            shipment => shipment.ShipmentStatus === "CLOSED"
-        );
+        // Filter for CLOSED shipments that are within the last 30 days
+        const closedShipments = response.data.payload.ShipmentData.filter(shipment => {
+            if (shipment.ShipmentStatus !== "CLOSED") {
+                return false;
+            }
+            
+            // Extract date from shipment name and check if within last 30 days
+            const shipmentDate = extractDateFromShipmentName(shipment.ShipmentName);
+            
+            if (shipmentDate) {
+                const isRecent = isWithinLastNDays(shipmentDate, 30);
+                if (!isRecent) {
+                    logger.info(`Skipping shipment ${shipment.ShipmentId} - date ${shipmentDate.toISOString()} is older than 30 days`);
+                }
+                return isRecent;
+            } else {
+                // If no date found in name, log warning but still include (fallback behavior)
+                logger.warn(`Could not extract date from shipment name: ${shipment.ShipmentName}. Including shipment anyway.`);
+                return true;
+            }
+        });
+
+        logger.info(`Filtered ${closedShipments.length} shipments from last 30 days out of ${response.data.payload.ShipmentData.filter(s => s.ShipmentStatus === "CLOSED").length} total CLOSED shipments`);
 
         const result = await Promise.all(
             closedShipments.map(shipment =>
@@ -97,9 +169,13 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
                     );
 
                     if (details) {
+                        // Extract and store the shipment date for reference
+                        const shipmentDate = extractDateFromShipmentName(shipment.ShipmentName);
+                        
                         return {
                             shipmentId: shipment.ShipmentId,
                             shipmentName: shipment.ShipmentName,
+                            shipmentDate: shipmentDate ? shipmentDate.toISOString() : null,
                             itemDetails: details
                         };
                     }
@@ -123,6 +199,7 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
             return false;
         }
 
+        logger.info(`Successfully stored ${filteredResult.length} shipments from last 30 days for user ${UserId}`);
         return createShipping;
     } catch (error) {
         console.error("❌ Error fetching shipment list:", error.response?.data || error.message);

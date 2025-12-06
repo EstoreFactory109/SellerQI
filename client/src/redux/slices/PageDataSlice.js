@@ -55,7 +55,8 @@ const initialState = {
     },
     // Reimbursement Data
     reimbursement: {
-        data: null,
+        summary: null,
+        reimbursements: [],
         loading: false,
         error: null,
         lastFetched: null
@@ -192,12 +193,24 @@ export const fetchReimbursementData = createAsyncThunk(
         try {
             const state = getState();
             const lastFetched = state.pageData?.reimbursement?.lastFetched;
+            // Check if data exists and is less than 5 minutes old
             if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
-                return state.pageData.reimbursement.data;
+                return {
+                    summary: state.pageData.reimbursement.summary,
+                    reimbursements: state.pageData.reimbursement.reimbursements
+                };
             }
             
-            const response = await axiosInstance.get('/api/pagewise/reimbursement');
-            return response.data.data;
+            // Fetch both summary and reimbursements in parallel
+            const [summaryRes, reimbursementsRes] = await Promise.all([
+                axiosInstance.get('/app/reimbursements/summary'),
+                axiosInstance.get('/app/reimbursements')
+            ]);
+            
+            return {
+                summary: summaryRes.data?.data || summaryRes.data,
+                reimbursements: reimbursementsRes.data?.data || reimbursementsRes.data || []
+            };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch reimbursement data');
         }
@@ -391,7 +404,8 @@ const pageDataSlice = createSlice({
             })
             .addCase(fetchReimbursementData.fulfilled, (state, action) => {
                 state.reimbursement.loading = false;
-                state.reimbursement.data = action.payload;
+                state.reimbursement.summary = action.payload.summary;
+                state.reimbursement.reimbursements = action.payload.reimbursements;
                 state.reimbursement.lastFetched = Date.now();
             })
             .addCase(fetchReimbursementData.rejected, (state, action) => {

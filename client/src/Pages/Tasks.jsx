@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { motion } from "framer-motion";
 import { 
   AlertTriangle, 
@@ -10,18 +10,24 @@ import {
   TrendingUp,
   TrendingDown
 } from 'lucide-react';
-import axios from 'axios';
+import { fetchTasks, updateTaskStatus } from '../redux/slices/TasksSlice.js';
 
 export default function Tasks() {
+  const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState('taskId');
   const [sortOrder, setSortOrder] = useState('asc');
-  const [completedTasks, setCompletedTasks] = useState(new Set());
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+
+  // Get tasks data from Redux store
+  const tasks = useSelector(state => state.tasks?.tasks || []);
+  const loading = useSelector(state => state.tasks?.loading || false);
+  const error = useSelector(state => state.tasks?.error);
+  const completedTasksArray = useSelector(state => state.tasks?.completedTasks || []);
+  
+  // Convert array to Set for easier checking
+  const completedTasks = useMemo(() => new Set(completedTasksArray), [completedTasksArray]);
 
   // Get user data from Redux store
   const userData = useSelector(state => state.Auth?.user);
@@ -46,40 +52,17 @@ export default function Tasks() {
     }
   };
 
-  // Fetch tasks data from API
+  // Fetch tasks data from Redux (only if not already loaded)
   useEffect(() => {
-    const fetchTasks = async () => {
-      if (!userData?.userId) {
-        setError('User ID not available');
-        setLoading(false);
-        return;
-      }
+    if (!userData?.userId) {
+      return;
+    }
 
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Updated to use the new page-wise endpoint in IBEX server
-        const response = await axios.get(
-          `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks`,
-          { withCredentials: true }
-        );
-
-        if (response.status === 200 && response.data?.data) {
-          setTasks(response.data.data.tasks || []);
-        } else {
-          setError('Failed to fetch tasks data');
-        }
-      } catch (err) {
-        console.error('Error fetching tasks:', err);
-        setError(err.response?.data?.message || 'Failed to fetch tasks');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTasks();
-  }, [userData?.userId]);
+    // Only fetch if tasks are empty or haven't been fetched recently
+    if (tasks.length === 0) {
+      dispatch(fetchTasks());
+    }
+  }, [userData?.userId, tasks.length, dispatch]);
 
   // Transform API data to match table structure
   const transformedTasks = useMemo(() => {
@@ -98,16 +81,7 @@ export default function Tasks() {
     }));
   }, [tasks]);
 
-  // Initialize completedTasks based on API data when tasks are loaded
-  useEffect(() => {
-    const completedTaskIds = new Set();
-    tasks.forEach(task => {
-      if (task.status === 'completed') {
-        completedTaskIds.add(task.taskId);
-      }
-    });
-    setCompletedTasks(completedTaskIds);
-  }, [tasks]);
+  // completedTasks is now managed by Redux, no need for this effect
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
@@ -204,83 +178,16 @@ export default function Tasks() {
   };
 
   const toggleTaskStatus = async (taskId) => {
-    // Optimistically update the frontend state first for better UX
     const isCurrentlyCompleted = completedTasks.has(taskId);
     const newStatus = isCurrentlyCompleted ? 'pending' : 'completed';
     
-    setCompletedTasks(prev => {
-      const newSet = new Set(prev);
-      if (isCurrentlyCompleted) {
-        newSet.delete(taskId);
-      } else {
-        newSet.add(taskId);
-      }
-      return newSet;
-    });
-
-    // Send request to backend to persist the change - updated to use IBEX server
-    try {
-      const response = await axios.put(
-        `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks/status`,
-        {
-          taskId: taskId,
-          status: newStatus
-        },
-        { withCredentials: true }
-      );
-
-      if (response.status !== 200) {
-        // If the request fails, revert the frontend state
-        console.error('Failed to update task status');
-        setCompletedTasks(prev => {
-          const newSet = new Set(prev);
-          if (isCurrentlyCompleted) {
-            newSet.add(taskId);
-          } else {
-            newSet.delete(taskId);
-          }
-          return newSet;
-        });
-      }
-    } catch (error) {
-      console.error('Error updating task status:', error);
-      // Revert the frontend state on error
-      setCompletedTasks(prev => {
-        const newSet = new Set(prev);
-        if (isCurrentlyCompleted) {
-          newSet.add(taskId);
-        } else {
-          newSet.delete(taskId);
-        }
-        return newSet;
-      });
-    }
+    // Optimistically update Redux state
+    dispatch(updateTaskStatus({ taskId, status: newStatus }));
   };
 
-  const refreshTasks = async () => {
+  const refreshTasks = () => {
     if (!userData?.userId) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Updated to use the new page-wise endpoint in IBEX server
-      const response = await axios.get(
-        `${import.meta.env.VITE_BASE_URI}/api/pagewise/tasks`,
-        { withCredentials: true }
-      );
-
-      if (response.status === 200 && response.data?.data) {
-        setTasks(response.data.data.tasks || []);
-      } else {
-        setError('Failed to refresh tasks data');
-      }
-    } catch (err) {
-      console.error('Error refreshing tasks:', err);
-      setError(err.response?.data?.message || 'Failed to refresh tasks');
-    } finally {
-      setLoading(false);
-    }
+    dispatch(fetchTasks());
   };
 
   const getSeverityColor = (severity) => {
@@ -324,7 +231,7 @@ export default function Tasks() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           <p className="text-gray-600">Loading tasks...</p>
@@ -335,7 +242,7 @@ export default function Tasks() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <AlertTriangle className="w-12 h-12 text-red-500" />
           <p className="text-red-600">{error}</p>
@@ -351,7 +258,7 @@ export default function Tasks() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 lg:mt-0 mt-[12vh] overflow-x-hidden w-full">
+    <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full">
       {/* Header Section */}
       <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40 w-full'>
         <div className='px-4 lg:px-6 py-4 w-full'>

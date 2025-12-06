@@ -245,7 +245,26 @@ const ProfitabilityDashboard = () => {
     
     // Adjust gross profit by subtracting total COGS (only for profitability page)
     const adjustedGrossProfit = originalGrossProfit - totalCOGS;
-    const amazonFees = (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0) + Number(filteredAccountFinance?.Amazon_Charges || 0));
+    
+    // Use Amazon_Fees if available (from EconomicsMetrics), otherwise calculate from FBA + Storage
+    // Final fallback: sum from product-wise data if all else fails
+    let amazonFees = Number(filteredAccountFinance?.Amazon_Fees || 0) || 
+                     (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0));
+    
+    // If account-level fees is 0, calculate from product-wise data as fallback
+    if (amazonFees === 0 && profitibilityData.length > 0) {
+      let productAmazonFees = 0;
+      
+      profitibilityData.forEach(product => {
+        productAmazonFees += Number(product.amazonFees || product.totalFees || product.amzFee || 0);
+      });
+      
+      if (productAmazonFees > 0) {
+        amazonFees = productAmazonFees;
+        console.log('=== Profitability Dashboard: Using product-wise fees fallback ===');
+        console.log('Product Amazon Fees:', amazonFees);
+      }
+    }
     
     // Calculate adjusted profit margin using COGS-adjusted gross profit
     const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
@@ -254,7 +273,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Gross Profit', value: `${currency}${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Total Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
+      { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
   }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate]);
 
@@ -485,9 +504,11 @@ const ProfitabilityDashboard = () => {
         const cogsPerUnit = cogsValues[product.asin] || 0;
         const totalCogs = cogsPerUnit * (product.quantity || 0);
         
-        // Use totalFees from EconomicsMetrics if available, otherwise use amzFee
-        const totalFees = product.totalFees !== undefined ? product.totalFees : 
-                         ((product.amzFee || 0) * (product.quantity || 0));
+        // Use amazonFees from EconomicsMetrics if available
+        const amazonFees = product.amazonFees !== undefined ? product.amazonFees : 
+                          (product.totalFees !== undefined ? product.totalFees : 
+                          ((product.amzFee || 0) * (product.quantity || 0)));
+        const totalFees = amazonFees;
         
         // Use grossProfit from EconomicsMetrics if available, otherwise calculate
         const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
@@ -545,7 +566,7 @@ const ProfitabilityDashboard = () => {
           `$${totalCogs.toFixed(2)}`,
           `${currency}${(product.ads || 0).toFixed(2)}`,
           `${adSpendPercent.toFixed(1)}%`,
-          `${currency}${totalFees.toFixed(2)}`,
+          `${currency}${amazonFees.toFixed(2)}`,
           `${feesPercent.toFixed(1)}%`,
           `${currency}${grossProfit.toFixed(2)}`,
           `${currency}${netProfit.toFixed(2)}`,
@@ -1063,7 +1084,7 @@ const ProfitabilityDashboard = () => {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="mb-8"
             >
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {metrics.map((metric, index) => (
                   <motion.div
                     key={metric.label}

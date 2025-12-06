@@ -13,6 +13,14 @@
  * 
  * To scale workers:
  *   pm2 scale worker 5  (runs 5 worker instances)
+ * 
+ * Multi-Instance Deployment:
+ * =========================
+ * For deploying across multiple EC2 instances:
+ * - Main Instance: Use ecosystem.api.config.js (API server only)
+ * - Worker Instances: Use ecosystem.worker.config.js (workers only)
+ * 
+ * See MULTI_INSTANCE_DEPLOYMENT.md for detailed setup instructions.
  */
 
 // Load environment variables from .env file (root folder)

@@ -34,16 +34,16 @@ const MetricCard = ({ label, value, icon }) => {
       <motion.div 
         whileHover={{ y: -2, scale: 1.02 }}
         transition={{ duration: 0.2 }}
-        className="group bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-lg hover:border-gray-300 transition-all duration-300 h-40 flex flex-col"
+        className="group bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg hover:border-gray-300 transition-all duration-300 h-36 flex flex-col w-full"
       >
-        <div className="flex items-center justify-between mb-4">
-          <div className={`w-12 h-12 bg-gradient-to-br ${getIconColor(icon)} rounded-xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-shadow duration-300`}>
-            <IconComponent className="w-6 h-6 text-white" />
+        <div className="flex items-center justify-between mb-2">
+          <div className={`w-10 h-10 bg-gradient-to-br ${getIconColor(icon)} rounded-lg flex items-center justify-center shadow-md group-hover:shadow-lg transition-shadow duration-300`}>
+            <IconComponent className="w-5 h-5 text-white" />
           </div>
           
           {/* Trend indicator based on label */}
           {label.toLowerCase().includes('profit') && (
-            <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+            <div className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
               isNegative 
                 ? 'bg-red-100 text-red-700' 
                 : 'bg-green-100 text-green-700'
@@ -53,13 +53,13 @@ const MetricCard = ({ label, value, icon }) => {
           )}
         </div>
         
-        <div className="space-y-2 flex-1 flex flex-col justify-between">
+        <div className="space-y-1 flex-1 flex flex-col justify-between">
           <div>
-            <h3 className="text-sm font-medium text-gray-600 uppercase tracking-wide">
+            <h3 className="text-[11px] font-medium text-gray-600 uppercase tracking-wide leading-tight">
               {label}
             </h3>
-            <div className="flex items-baseline justify-between mt-2">
-              <p className={`text-2xl font-bold transition-colors duration-200 ${
+            <div className="flex items-baseline justify-between mt-1">
+              <p className={`text-lg font-bold transition-colors duration-200 truncate ${
                 isNegative 
                   ? 'text-red-600' 
                   : label.toLowerCase().includes('profit') || label.toLowerCase().includes('sales')
@@ -72,20 +72,20 @@ const MetricCard = ({ label, value, icon }) => {
               {/* Optional percentage change indicator */}
               {label.toLowerCase().includes('margin') && (
                 <div className="text-right">
-                  <div className="text-xs text-gray-500">Target: 15%+</div>
+                  <div className="text-[10px] text-gray-500">Target: 15%+</div>
                 </div>
               )}
             </div>
           </div>
           
           {/* Bottom section for additional elements */}
-          <div className="space-y-2">
+          <div className="space-y-1">
             {/* Progress bar for margin percentage */}
             {label.toLowerCase().includes('margin') && value && (
               <div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
                   <div 
-                    className={`h-2 rounded-full transition-all duration-500 ${
+                    className={`h-1.5 rounded-full transition-all duration-500 ${
                       parseFloat(value) >= 15 
                         ? 'bg-gradient-to-r from-green-400 to-green-500' 
                         : parseFloat(value) >= 5 
@@ -97,19 +97,6 @@ const MetricCard = ({ label, value, icon }) => {
                     }}
                   />
                 </div>
-              </div>
-            )}
-            
-            {/* Additional context for specific metrics */}
-            {label.toLowerCase().includes('fees') && (
-              <div className="text-xs text-gray-500">
-                <span>Optimize to reduce costs</span>
-              </div>
-            )}
-            
-            {label.toLowerCase().includes('spend') && (
-              <div className="text-xs text-gray-500">
-                <span>Monitor ACOS efficiency</span>
               </div>
             )}
           </div>

@@ -473,6 +473,7 @@ class AnalyseService {
                 FBA_Fees: 0,
                 Storage: 0,
                 Amazon_Charges: 0,
+                Amazon_Fees: 0,
                 Refunds: 0
             };
         }
@@ -486,6 +487,26 @@ class AnalyseService {
         const storageFees = economicsMetrics.storageFees?.amount || 0;
         const refunds = economicsMetrics.refunds?.amount || 0;
         
+        // Get Amazon fees
+        // First try to get from summary level
+        let amazonFees = economicsMetrics.amazonFees?.amount || 0;
+        
+        // If summary-level amazonFees is 0, calculate from ASIN-wise data
+        if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
+            economicsMetrics.asinWiseSales.forEach(item => {
+                amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+            });
+            logger.info('Calculated amazonFees from ASIN-wise data', {
+                amazonFees,
+                asinCount: economicsMetrics.asinWiseSales.length
+            });
+        }
+        
+        // Final fallback: use fbaFees + storageFees if still 0
+        if (amazonFees === 0) {
+            amazonFees = fbaFees + storageFees;
+        }
+        
         // Recalculate gross profit with Ads API PPC spend
         const grossProfit = totalSales - fbaFees - storageFees - ppcSpend - refunds;
 
@@ -497,6 +518,7 @@ class AnalyseService {
             FBA_Fees: fbaFees,
             Storage: storageFees,
             Amazon_Charges: fbaFees + storageFees,
+            Amazon_Fees: amazonFees, // Total Amazon fees (FBA, storage, referral, etc.)
             Refunds: refunds
         };
     }
@@ -684,7 +706,7 @@ class AnalyseService {
             Country: country,
             TotalProducts: SellerAccount.products,
             AccountData: {
-                getAccountHealthPercentge: allData.v2Data === null
+                getAccountHealthPercentge: (!allData.v2Data || allData.v2Data === null || (typeof allData.v2Data === 'object' && Object.keys(allData.v2Data).length === 0) || (!allData.v2Data.ahrScore && allData.v2Data.ahrScore !== 0))
                     ? { status: "Data Not Found", Percentage: 0 }
                     : calculateAccountHealthPercentage(allData.v2Data),
                 accountHealth: checkAccountHealth(allData.v2Data, allData.v1Data)
@@ -698,6 +720,8 @@ class AnalyseService {
                 ppcSpent: economicsMetrics.ppcSpent,
                 fbaFees: economicsMetrics.fbaFees,
                 storageFees: economicsMetrics.storageFees,
+                totalFees: economicsMetrics.totalFees,
+                amazonFees: economicsMetrics.amazonFees,
                 refunds: economicsMetrics.refunds,
                 datewiseSales: economicsMetrics.datewiseSales,
                 datewiseGrossProfit: economicsMetrics.datewiseGrossProfit,

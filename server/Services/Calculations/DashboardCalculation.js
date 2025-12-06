@@ -34,13 +34,20 @@ const getPpcSalesFromEconomics = (economicsMetrics) => {
     if (Array.isArray(economicsMetrics.asinWiseSales)) {
         economicsMetrics.asinWiseSales.forEach(item => {
             if (item.asin) {
+                // Extract fees - amazonFees for display
+                const fbaFees = item.fbaFees?.amount || 0;
+                const storageFees = item.storageFees?.amount || 0;
+                const totalFees = item.totalFees?.amount || 0;
+                const amazonFees = item.amazonFees?.amount || totalFees; // Fallback to totalFees
+                
                 asinPpcSales[item.asin] = {
                     sales: item.sales?.amount || 0,
                     ppcSpent: item.ppcSpent?.amount || 0,
                     grossProfit: item.grossProfit?.amount || 0,
-                    fbaFees: item.fbaFees?.amount || 0,
-                    storageFees: item.storageFees?.amount || 0,
-                    totalFees: item.totalFees?.amount || 0, // Include totalFees (all fee types)
+                    fbaFees: fbaFees,
+                    storageFees: storageFees,
+                    totalFees: totalFees,
+                    amazonFees: amazonFees, // Amazon-specific fees (FBA, storage, referral, etc.)
                     unitsSold: item.unitsSold || 0
                 };
             }
@@ -873,6 +880,8 @@ const analyseData = async (data, userId = null) => {
             ppcSpent: data.EconomicsMetrics.ppcSpent,
             fbaFees: data.EconomicsMetrics.fbaFees,
             storageFees: data.EconomicsMetrics.storageFees,
+            totalFees: data.EconomicsMetrics.totalFees,
+            amazonFees: data.EconomicsMetrics.amazonFees,
             refunds: data.EconomicsMetrics.refunds,
             datewiseSales: data.EconomicsMetrics.datewiseSales,
             datewiseGrossProfit: data.EconomicsMetrics.datewiseGrossProfit,
@@ -881,7 +890,9 @@ const analyseData = async (data, userId = null) => {
         } : null,
         // New: ACOS and TACOS calculated from EconomicsMetrics PPC data
         acos: sponsoredAdsMetrics.acos || 0,
-        tacos: sponsoredAdsMetrics.tacos || 0
+        tacos: sponsoredAdsMetrics.tacos || 0,
+        // All seller accounts for account switching
+        AllSellerAccounts: data.AllSellerAccounts || []
     };
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
