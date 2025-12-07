@@ -75,7 +75,7 @@ const buyBoxDataSchema = new mongoose.Schema({
     country: {
         type: String,
         required: true,
-        enum: ['US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU'],
+        enum: ['US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU', 'IN', 'SG', 'SA', 'ZA', 'BE'],
         index: true
     },
     dateRange: {

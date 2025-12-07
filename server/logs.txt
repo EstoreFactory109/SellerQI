@@ -47639,3 +47639,33 @@
 [2025-12-05 22:42:59] [INFO] Email reminder cron job initialized - will run every 48 hours
 [2025-12-05 22:42:59] [INFO] Email reminder job initialized successfully
 [2025-12-05 22:52:19] [INFO] [Worker:worker-64050] Received SIGINT, closing worker gracefully...
+[2025-12-06 09:12:37] [INFO] [QueueRedis] Connecting to Redis Cloud at redis-13335.c267.us-east-1-4.ec2.redns.redis-cloud.com:13335
+[2025-12-06 09:12:38] [INFO] Connected to DB
+[2025-12-06 09:12:39] [INFO] [Queue] User data processing queue initialized successfully
+[2025-12-06 09:12:42] [INFO] [Queue] Job user-685b98b5eb88b39ffb2f4758-1765012361519 (userId: 685b98b5eb88b39ffb2f4758) is waiting
+[2025-12-06 09:12:42] [INFO] [Producer] Enqueued user 685b98b5eb88b39ffb2f4758 for processing (jobId: user-685b98b5eb88b39ffb2f4758-1765012361519)
+[2025-12-06 09:22:10] [INFO] [QueueRedis] Connecting to Redis Cloud at redis-13335.c267.us-east-1-4.ec2.redns.redis-cloud.com:13335
+[2025-12-06 09:22:11] [INFO] Connected to DB
+[2025-12-06 09:22:12] [INFO] [Queue] User data processing queue initialized successfully
+[2025-12-06 09:22:14] [INFO] [Queue] Job user-685b98b5eb88b39ffb2f4758-1765012934259 (userId: 685b98b5eb88b39ffb2f4758) is waiting
+[2025-12-06 09:22:14] [INFO] [Producer] Enqueued user 685b98b5eb88b39ffb2f4758 for processing (jobId: user-685b98b5eb88b39ffb2f4758-1765012934259)
+[2025-12-07 18:41:32] [INFO] [QueueRedis] Connecting to Redis Cloud at redis-13335.c267.us-east-1-4.ec2.redns.redis-cloud.com:13335
+[2025-12-07 18:41:33] [INFO] ✅ Background jobs enabled - automatic data fetching active
+[2025-12-07 18:41:33] [INFO] Server started on port 4000
+[2025-12-07 18:41:34] [INFO] Connected to DB
+[2025-12-07 18:41:34] [INFO] Connection to database established
+[2025-12-07 18:41:35] [INFO] ✅ Connected to Redis Cloud!
+[2025-12-07 18:41:36] [INFO] Redis initialized successfully
+[2025-12-07 18:41:36] [INFO] [CronProducer] Daily update cron job scheduled (runs every hour, enqueues users only)
+[2025-12-07 18:41:36] [INFO] ✅ Queue-based daily update cron producer initialized (enqueues users only)
+[2025-12-07 18:41:36] [INFO] Initializing background job scheduler...
+[2025-12-07 18:41:46] [INFO] Initialized daily schedules for 0 users
+[2025-12-07 18:41:46] [INFO] ✅ Daily updates handled by queue-based system (cronProducer.js)
+[2025-12-07 18:41:46] [INFO] Cache cleanup job scheduled (runs every 6 hours)
+[2025-12-07 18:41:46] [INFO] Health check job scheduled (runs every 30 minutes)
+[2025-12-07 18:41:46] [INFO] Weekly email job scheduled (runs every Saturday at 9:00 AM)
+[2025-12-07 18:41:46] [INFO] Trial reminder email job scheduled (runs daily at 12:00 PM)
+[2025-12-07 18:41:46] [INFO] Background job scheduler initialized successfully
+[2025-12-07 18:41:46] [INFO] Background job scheduler initialized successfully
+[2025-12-07 18:41:46] [INFO] Email reminder cron job initialized - will run every 48 hours
+[2025-12-07 18:41:46] [INFO] Email reminder job initialized successfully

@@ -151,38 +151,43 @@ const DAILY_FUNCTIONS = {
     },
     'RestockinventoryData': {
         service: require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js'),
-        functionName: 'GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT',
+        functionName: null, // Default export, use service directly
         description: 'Restock Inventory Recommendations',
         requiresAccessToken: true,
-        apiDataKey: 'RestockinventoryData'
+        apiDataKey: 'RestockinventoryData',
+        isDefaultExport: true
     },
     'fbaInventoryPlanningData': {
         service: require('../Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js'),
-        functionName: 'GET_FBA_INVENTORY_PLANNING_DATA',
+        functionName: null, // Default export, use service directly
         description: 'FBA Inventory Planning',
         requiresAccessToken: true,
-        apiDataKey: 'fbaInventoryPlanningData'
+        apiDataKey: 'fbaInventoryPlanningData',
+        isDefaultExport: true
     },
     'strandedInventoryData': {
         service: require('../Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js'),
-        functionName: 'GET_STRANDED_INVENTORY_UI_DATA',
+        functionName: null, // Default export, use service directly
         description: 'Stranded Inventory',
         requiresAccessToken: true,
-        apiDataKey: 'strandedInventoryData'
+        apiDataKey: 'strandedInventoryData',
+        isDefaultExport: true
     },
     'inboundNonComplianceData': {
         service: require('../Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js'),
-        functionName: 'GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA',
+        functionName: null, // Default export, use service directly
         description: 'Inbound Non-Compliance',
         requiresAccessToken: true,
-        apiDataKey: 'inboundNonComplianceData'
+        apiDataKey: 'inboundNonComplianceData',
+        isDefaultExport: true
     },
     'shipment': {
         service: require('../Sp_API/shipment.js'),
-        functionName: 'getshipment',
+        functionName: null, // Default export, use service directly
         description: 'Shipment Data',
         requiresAccessToken: true,
-        apiDataKey: 'shipment'
+        apiDataKey: 'shipment',
+        isDefaultExport: true
     },
     'brandData': {
         service: require('../Sp_API/GetBrand.js'),

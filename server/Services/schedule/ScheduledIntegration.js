@@ -725,6 +725,31 @@ class ScheduledIntegration {
         const fourthBatchPromises = [];
         const fourthBatchServiceNames = [];
 
+        // Helper function to determine batch number for a function key
+        const getBatchNumber = (functionKey) => {
+            // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise
+            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise'].includes(functionKey)) {
+                return 1;
+            }
+            // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursements
+            if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
+                 'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement', 
+                 'calculateDisposedInventoryReimbursement', 'calculateFeeReimbursement'].includes(functionKey)) {
+                return 2;
+            }
+            // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP Economics, MCP BuyBox
+            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'].includes(functionKey)) {
+                return 3;
+            }
+            // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
+            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations'].includes(functionKey)) {
+                return 4;
+            }
+            // Default to batch 2 if function key is not recognized
+            logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
+            return 2;
+        };
+
         // Helper function to add function to appropriate batch
         const addToBatch = (functionKey, functionConfig, promise, batchNumber) => {
             const { description } = functionConfig;
@@ -817,45 +842,89 @@ class ScheduledIntegration {
                     // Need campaign IDs first - will be available after batch 1
                     // Create a promise that resolves campaign IDs when needed
                     promise = Promise.resolve().then(async () => {
-                        const { campaignIdArray } = await this.getCampaignAndAdGroupIds(
-                            apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
-                        );
-                        return tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
-                            AdsAccessToken, ProfileId, Region, userId, Country, campaignIdArray || []
-                        );
+                        try {
+                            const { campaignIdArray } = await this.getCampaignAndAdGroupIds(
+                                apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
+                            );
+                            return tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
+                                AdsAccessToken, ProfileId, Region, userId, Country, campaignIdArray || []
+                            );
+                        } catch (error) {
+                            logger.error(`Error in adGroupsData setup for ${functionKey}`, { error: error.message, userId });
+                            throw error;
+                        }
+                    }).catch(error => {
+                        logger.error(`Error in adGroupsData promise chain for ${functionKey}`, { error: error.message, userId });
+                        return { success: false, error: error.message || 'Ad Groups data fetch failed', data: null };
                     });
                 } else if (functionKey === 'negativeKeywords') {
                     // Need campaign and ad group IDs - will be available after batch 1
                     promise = Promise.resolve().then(async () => {
-                        const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
-                            apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
-                        );
-                        return tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
-                            AdsAccessToken, ProfileId, userId, Country, Region,
-                            campaignIdArray || [],
-                            adGroupIdArray || []
-                        );
+                        try {
+                            const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
+                                apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
+                            );
+                            return tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
+                                AdsAccessToken, ProfileId, userId, Country, Region,
+                                campaignIdArray || [],
+                                adGroupIdArray || []
+                            );
+                        } catch (error) {
+                            logger.error(`Error in negativeKeywords setup for ${functionKey}`, { error: error.message, userId });
+                            throw error;
+                        }
+                    }).catch(error => {
+                        logger.error(`Error in negativeKeywords promise chain for ${functionKey}`, { error: error.message, userId });
+                        return { success: false, error: error.message || 'Negative Keywords fetch failed', data: null };
                     });
                 } else if (functionKey === 'mcpEconomicsData') {
                     // MCP Economics returns { success, data, error } structure
-                    promise = serviceFunction(userId, RefreshToken, Region, Country).then(result => {
-                        // Convert to standard format
-                        if (result && result.success) {
-                            return result.data || result;
-                        } else {
-                            throw new Error(result?.error || 'MCP Economics fetch failed');
-                        }
-                    });
+                    promise = serviceFunction(userId, RefreshToken, Region, Country)
+                        .then(result => {
+                            // Convert to standard format
+                            if (result && result.success) {
+                                return result.data || result;
+                            } else {
+                                // Don't throw - return error object instead to be handled by Promise.allSettled
+                                const errorMsg = result?.error || 'MCP Economics fetch failed';
+                                logger.warn('MCP Economics returned failure', { error: errorMsg, userId, region: Region, country: Country });
+                                return { success: false, error: errorMsg, data: null };
+                            }
+                        })
+                        .catch(error => {
+                            logger.error('Error in MCP Economics promise chain', { 
+                                error: error.message, 
+                                stack: error.stack,
+                                userId, 
+                                region: Region, 
+                                country: Country 
+                            });
+                            return { success: false, error: error.message || 'MCP Economics fetch failed', data: null };
+                        });
                 } else if (functionKey === 'mcpBuyBoxData') {
                     // MCP BuyBox returns { success, data, error } structure
-                    promise = serviceFunction(userId, RefreshToken, Region, Country).then(result => {
-                        // Convert to standard format
-                        if (result && result.success) {
-                            return result.data || result;
-                        } else {
-                            throw new Error(result?.error || 'MCP BuyBox fetch failed');
-                        }
-                    });
+                    promise = serviceFunction(userId, RefreshToken, Region, Country)
+                        .then(result => {
+                            // Convert to standard format
+                            if (result && result.success) {
+                                return result.data || result;
+                            } else {
+                                // Don't throw - return error object instead to be handled by Promise.allSettled
+                                const errorMsg = result?.error || 'MCP BuyBox fetch failed';
+                                logger.warn('MCP BuyBox returned failure', { error: errorMsg, userId, region: Region, country: Country });
+                                return { success: false, error: errorMsg, data: null };
+                            }
+                        })
+                        .catch(error => {
+                            logger.error('Error in MCP BuyBox promise chain', { 
+                                error: error.message, 
+                                stack: error.stack,
+                                userId, 
+                                region: Region, 
+                                country: Country 
+                            });
+                            return { success: false, error: error.message || 'MCP BuyBox fetch failed', data: null };
+                        });
                 } else if (requiresAdsToken) {
                     // Standard Ads function
                     if (functionKey === 'campaignData') {
@@ -939,9 +1008,22 @@ class ScheduledIntegration {
         logger.info("First Batch Ends");
 
         // Get campaign and ad group IDs (needed for batch 3 and 4)
-        const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
-            apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
-        );
+        let campaignIdArray = [];
+        let adGroupIdArray = [];
+        try {
+            const idsResult = await this.getCampaignAndAdGroupIds(
+                apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
+            );
+            campaignIdArray = idsResult.campaignIdArray || [];
+            adGroupIdArray = idsResult.adGroupIdArray || [];
+        } catch (error) {
+            logger.warn('Failed to get campaign and ad group IDs, continuing with empty arrays', {
+                error: error.message,
+                userId,
+                region: Region,
+                country: Country
+            });
+        }
 
         // Second Batch
         if (secondBatchPromises.length > 0) {
@@ -983,12 +1065,19 @@ class ScheduledIntegration {
                         // Special handling for MCP functions
                         if (functionKey === 'mcpEconomicsData' || functionKey === 'mcpBuyBoxData') {
                             const result = thirdBatchResults[resultIndex];
-                            if (result.status === 'fulfilled' && result.value?.success) {
-                                apiData[dataKey] = { success: true, data: result.value.data, error: null };
+                            if (result.status === 'fulfilled') {
+                                const value = result.value;
+                                // Check if it's already in the error format we return from catch handlers
+                                if (value && typeof value === 'object' && 'success' in value) {
+                                    apiData[dataKey] = value;
+                                } else if (value && value.success) {
+                                    apiData[dataKey] = { success: true, data: value.data || value, error: null };
+                                } else {
+                                    const errorMsg = value?.error || 'Unknown error';
+                                    apiData[dataKey] = { success: false, data: null, error: errorMsg };
+                                }
                             } else {
-                                const errorMsg = result.status === 'rejected' 
-                                    ? (result.reason?.message || 'Promise rejected')
-                                    : (result.value?.error || 'Unknown error');
+                                const errorMsg = result.reason?.message || 'Promise rejected';
                                 apiData[dataKey] = { success: false, data: null, error: errorMsg };
                             }
                         } else {
