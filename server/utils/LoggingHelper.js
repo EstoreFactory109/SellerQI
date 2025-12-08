@@ -131,13 +131,31 @@ class LoggingHelper {
         const startTime = this.functionTimers.get(functionName);
         const duration = startTime ? endTime - startTime : null;
         
+        // Handle different error types - ensure we always have a message
+        let errorMessage = 'Unknown error';
+        let errorStack = null;
+        
+        if (error) {
+            if (typeof error === 'string') {
+                errorMessage = error;
+            } else if (error instanceof Error) {
+                errorMessage = error.message || 'Unknown error';
+                errorStack = error.stack;
+            } else if (typeof error === 'object') {
+                errorMessage = error.message || error.error || error.toString() || 'Unknown error';
+                errorStack = error.stack;
+            } else {
+                errorMessage = String(error) || 'Unknown error';
+            }
+        }
+        
         const errorDetails = {
-            errorMessage: error.message || 'Unknown error',
-            stackTrace: error.stack,
-            httpStatus: error.status || error.statusCode,
-            amazonApiError: error.amazonApiError || false,
-            tokenRefreshNeeded: error.tokenRefreshNeeded || false,
-            errorCode: error.code
+            errorMessage: errorMessage,
+            stackTrace: errorStack || error?.stack,
+            httpStatus: error?.status || error?.statusCode,
+            amazonApiError: error?.amazonApiError || false,
+            tokenRefreshNeeded: error?.tokenRefreshNeeded || false,
+            errorCode: error?.code
         };
 
         if (this.session) {
@@ -145,7 +163,7 @@ class LoggingHelper {
                 functionName,
                 logType: 'error',
                 status: 'failed',
-                message: `Function ${functionName} failed: ${error.message}`,
+                message: `Function ${functionName} failed: ${errorMessage}`,
                 errorDetails,
                 executionTime: {
                     startTime,

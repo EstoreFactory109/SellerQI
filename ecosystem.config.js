@@ -67,7 +67,8 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '3', // Jobs per worker
-                WORKER_NAME: 'worker'
+                // WORKER_NAME is not set here - worker.js will use `worker-${process.pid}` as fallback
+                // This ensures each worker instance has a unique identifier in merged logs
             },
             // Logging
             error_file: './logs/pm2-worker-error.log',

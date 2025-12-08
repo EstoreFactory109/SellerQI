@@ -211,10 +211,24 @@ class ScheduledIntegration {
                 // Don't fail the entire process if history fails
             }
 
+            // Build error message if there are failures
+            let errorMessage = null;
+            if (!serviceSummary.overallSuccess) {
+                if (serviceSummary.criticalFailures.length > 0) {
+                    errorMessage = `Critical services failed: ${serviceSummary.criticalFailures.map(f => f.service).join(', ')}`;
+                } else if (serviceSummary.failed.length > 0) {
+                    const failedServices = serviceSummary.failed.map(f => f.service).join(', ');
+                    errorMessage = `Some services failed: ${failedServices}`;
+                } else {
+                    errorMessage = 'Some services failed (unknown reason)';
+                }
+            }
+
             return {
                 success: serviceSummary.overallSuccess,
                 statusCode: serviceSummary.overallSuccess ? 200 : 207,
                 data: result,
+                error: errorMessage, // Always include error property, even if null
                 summary: {
                     success: serviceSummary.overallSuccess,
                     successRate: `${serviceSummary.successPercentage}%`,
@@ -227,21 +241,33 @@ class ScheduledIntegration {
             };
 
         } catch (unexpectedError) {
+            // Ensure we have a proper error message
+            const errorMessage = unexpectedError?.message || 
+                                (typeof unexpectedError === 'string' ? unexpectedError : 
+                                (unexpectedError?.error || 'Unknown error occurred'));
+            
             logger.error("Unexpected error in ScheduledIntegration.getScheduledApiData", {
-                error: unexpectedError.message,
-                stack: unexpectedError.stack,
-                userId
+                error: errorMessage,
+                stack: unexpectedError?.stack,
+                userId,
+                errorType: typeof unexpectedError,
+                errorString: String(unexpectedError)
             });
 
+            // Create a proper Error object if it's not already one
+            const errorToLog = unexpectedError instanceof Error 
+                ? unexpectedError 
+                : new Error(errorMessage);
+
             if (loggingHelper) {
-                loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', unexpectedError);
+                loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', errorToLog);
                 await loggingHelper.endSession('failed');
             }
 
             return {
                 success: false,
                 statusCode: 500,
-                error: `Unexpected error: ${unexpectedError.message}`
+                error: `Unexpected error: ${errorMessage}`
             };
         }
     }
@@ -1229,14 +1255,18 @@ class ScheduledIntegration {
     }
 
     /**
-     * Generate service summary (same as Integration)
+     * Generate service summary based on scheduled functions only
+     * Only counts services that were scheduled for the current day
      */
     static generateServiceSummary(apiData) {
         const services = [];
         
-        // Add all services that were attempted
+        // Add all services that were attempted (only scheduled functions have success property)
+        // Note: genericKeyWordArray is an array, not an object with success, so it's excluded
         for (const [key, value] of Object.entries(apiData)) {
-            if (value && typeof value === 'object' && 'success' in value) {
+            // Only count objects with 'success' property (scheduled functions)
+            // Exclude arrays and other non-service entries
+            if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
                 services.push({
                     name: key,
                     result: value
@@ -1263,7 +1293,16 @@ class ScheduledIntegration {
         const criticalFailures = failed.filter(f => criticalServices.includes(f.service));
 
         const overallSuccess = criticalFailures.length === 0;
+        // Calculate success percentage based on scheduled functions only
         const successPercentage = services.length > 0 ? Math.round((successful.length / services.length) * 100) : 0;
+
+        logger.info('Service summary calculated', {
+            totalScheduledServices: services.length,
+            successful: successful.length,
+            failed: failed.length,
+            successPercentage: `${successPercentage}%`,
+            criticalFailures: criticalFailures.length
+        });
 
         return {
             successful,
@@ -1272,7 +1311,7 @@ class ScheduledIntegration {
             criticalFailures,
             overallSuccess,
             successPercentage,
-            totalServices: services.length
+            totalServices: services.length // Only scheduled services are counted
         };
     }
 

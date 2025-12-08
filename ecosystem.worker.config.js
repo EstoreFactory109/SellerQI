@@ -59,7 +59,9 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '15', // 15 jobs per worker (optimized for 10k users/day)
-                WORKER_NAME: process.env.WORKER_NAME || `worker-${process.env.INSTANCE_ID || 'default'}`
+                // WORKER_NAME: If set via env var, use it; otherwise worker.js will use `worker-${process.pid}`
+                // This ensures each worker instance has a unique identifier in merged logs
+                // For multi-instance deployments, set WORKER_NAME env var with INSTANCE_ID
             },
             // Logging
             error_file: './logs/pm2-worker-error.log',

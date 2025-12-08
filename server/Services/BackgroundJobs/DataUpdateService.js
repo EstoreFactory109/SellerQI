@@ -65,9 +65,14 @@ class DataUpdateService {
                         });
                     }
                 } else {
-                    logger.warn(`Scheduled API data fetch failed for user ${userId}, ${country}-${region}. Error: ${integrationResult.error}`);
+                    const errorMsg = integrationResult.error || 'Scheduled API data fetch failed';
+                    logger.warn(`Scheduled API data fetch failed for user ${userId}, ${country}-${region}. Error: ${errorMsg}`);
                     if (loggingHelper) {
-                        loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', new Error(integrationResult.error || 'Unknown error'));
+                        const error = new Error(errorMsg);
+                        if (integrationResult.statusCode) {
+                            error.statusCode = integrationResult.statusCode;
+                        }
+                        loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', error);
                     }
                 }
             } catch (apiError) {
