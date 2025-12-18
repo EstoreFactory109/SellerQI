@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const zlib = require('zlib');
@@ -210,6 +211,10 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
     }
 };
 
+/**
+ * Convert TSV buffer to JSON using csv-parse library
+ * Handles gzip decompression if needed
+ */
 function convertTSVToJson(tsvBuffer) {
     try {
         // First try to decompress if it's gzipped
@@ -222,12 +227,54 @@ function convertTSVToJson(tsvBuffer) {
         }
         
         const tsv = decompressedData.toString("utf-8");
-    const rows = tsv.split("\n").filter(row => row.trim() !== "");
         
-        if (rows.length === 0) {
+        if (!tsv || tsv.trim().length === 0) {
+            logger.warn('[GetProductWiseFBAData] TSV buffer is empty');
             return [];
         }
-        
+
+        const records = parse(tsv, {
+            columns: true,
+            delimiter: '\t',
+            skip_empty_lines: true,
+            relax_column_count: true,
+            trim: true,
+            skip_records_with_error: true
+        });
+
+        logger.info('[GetProductWiseFBAData] TSV parsed successfully', { 
+            totalRecords: records.length 
+        });
+
+        return records;
+
+    } catch (error) {
+        logger.error('[GetProductWiseFBAData] TSV parsing failed', { 
+            error: error.message 
+        });
+
+        // Fallback to legacy parsing
+        try {
+            return convertTSVToJsonLegacy(tsvBuffer);
+        } catch (fallbackError) {
+            logger.error('[GetProductWiseFBAData] Fallback parsing also failed', { 
+                error: fallbackError.message 
+            });
+            return [];
+        }
+    }
+}
+
+function convertTSVToJsonLegacy(tsvBuffer) {
+    let decompressedData;
+    try {
+        decompressedData = zlib.gunzipSync(tsvBuffer);
+    } catch (decompressError) {
+        decompressedData = tsvBuffer;
+    }
+    const tsv = decompressedData.toString("utf-8");
+    const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    if (rows.length === 0) return [];
     const headers = rows[0].split("\t");
     return rows.slice(1).map(row => {
         const values = row.split("\t");
@@ -236,10 +283,6 @@ function convertTSVToJson(tsvBuffer) {
             return obj;
         }, {});
     });
-    } catch (error) {
-        logger.error("Error converting TSV to JSON:", error);
-        return [];
-    }
 }
 
 module.exports = getReport;

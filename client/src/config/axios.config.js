@@ -24,13 +24,26 @@ axiosInstance.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Handle 401 Unauthorized errors
-    if (error.response?.status === 401) {
-      // Clear auth data
+    const errorMessage = error.response?.data?.message || error.response?.data?.error || '';
+    const statusCode = error.response?.status;
+    const currentPath = window.location.pathname;
+    const requestUrl = error.config?.url || '';
+    
+    // Skip redirects for logout calls - let them handle their own navigation
+    const isLogoutRequest = requestUrl.includes('/app/logout') || requestUrl.includes('/logout');
+    
+    // Check if we're already on connect-accounts page
+    const isFromConnectAccounts = currentPath.includes('/connect-accounts') || 
+                                  currentPath.includes('/connect-to-amazon');
+    
+    // Handle 401 Unauthorized errors - only for actual auth failures
+    // NOT for seller account errors (those are handled by ProtectedRouteWrapper)
+    if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts) {
+      // Clear auth data and redirect to login
       localStorage.removeItem("isAuth");
       
       // Redirect to login only if we're not already on the login page
-      if (window.location.pathname !== '/') {
+      if (currentPath !== '/' && !currentPath.includes('/log-in')) {
         window.location.href = '/';
       }
     }

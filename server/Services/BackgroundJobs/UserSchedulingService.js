@@ -57,13 +57,21 @@ class UserSchedulingService {
             // Use UTC timezone for consistency across servers
             const now = new Date();
             const currentHour = now.getUTCHours();
-            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            
+            // Calculate start of today (00:00:00 UTC) to check if user was updated today
+            // Since different services run on different days, users should be processed EVERY day
+            const startOfToday = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
+                0, 0, 0, 0
+            ));
 
             const users = await UserUpdateSchedule.find({
                 dailyUpdateHour: currentHour,
                 $or: [
                     { lastDailyUpdate: null },
-                    { lastDailyUpdate: { $lt: twentyFourHoursAgo } }
+                    { lastDailyUpdate: { $lt: startOfToday } } // Not updated today
                 ]
             }).populate('userId');
 

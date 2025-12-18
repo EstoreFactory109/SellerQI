@@ -549,13 +549,25 @@ const Dashboard = () => {
             });
         }
         if (product.inventoryErrors?.replenishmentErrorData) {
-            exportData.push({
-                Category: 'Inventory Issues',
-                Type: 'Replenishment',
-                Issue: 'Low Inventory Risk',
-                Message: product.inventoryErrors?.replenishmentErrorData.Message,
-                Solution: product.inventoryErrors?.replenishmentErrorData.HowToSolve
-            });
+            if (Array.isArray(product.inventoryErrors.replenishmentErrorData)) {
+                product.inventoryErrors.replenishmentErrorData.forEach(error => {
+                    exportData.push({
+                        Category: 'Inventory Issues',
+                        Type: 'Replenishment',
+                        Issue: `Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
+                        Message: error.Message,
+                        Solution: error.HowToSolve
+                    });
+                });
+            } else {
+                exportData.push({
+                    Category: 'Inventory Issues',
+                    Type: 'Replenishment',
+                    Issue: `Low Inventory Risk ${product.inventoryErrors.replenishmentErrorData.sku ? `(SKU: ${product.inventoryErrors.replenishmentErrorData.sku})` : ''}`,
+                    Message: product.inventoryErrors?.replenishmentErrorData.Message,
+                    Solution: product.inventoryErrors?.replenishmentErrorData.HowToSolve
+                });
+            }
         }
 
         return exportData;
@@ -1217,16 +1229,32 @@ const Dashboard = () => {
                                     />
                                 )}
 
-                                {/* Replenishment/Restock Issues */}
+                                {/* Replenishment/Restock Issues - handles single or multiple errors */}
                                 {product.inventoryErrors?.replenishmentErrorData && (
-                                    <IssueItem
-                                        label="Low Inventory Risk"
-                                        message={product.inventoryErrors?.replenishmentErrorData.Message}
-                                        solutionKey="Replenishment"
-                                        solutionContent={product.inventoryErrors?.replenishmentErrorData.HowToSolve}
-                                        stateValue={replenishmentSolution}
-                                        toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
-                                    />
+                                    Array.isArray(product.inventoryErrors.replenishmentErrorData) ? (
+                                        // Multiple errors for same ASIN (different SKUs)
+                                        product.inventoryErrors.replenishmentErrorData.map((error, idx) => (
+                                            <IssueItem
+                                                key={`replenishment-${idx}`}
+                                                label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
+                                                message={error.Message}
+                                                solutionKey={`Replenishment-${idx}`}
+                                                solutionContent={error.HowToSolve}
+                                                stateValue={replenishmentSolution}
+                                                toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
+                                            />
+                                        ))
+                                    ) : (
+                                        // Single error
+                                        <IssueItem
+                                            label={`Low Inventory Risk ${product.inventoryErrors.replenishmentErrorData.sku ? `(SKU: ${product.inventoryErrors.replenishmentErrorData.sku})` : ''}`}
+                                            message={product.inventoryErrors?.replenishmentErrorData.Message}
+                                            solutionKey="Replenishment"
+                                            solutionContent={product.inventoryErrors?.replenishmentErrorData.HowToSolve}
+                                            stateValue={replenishmentSolution}
+                                            toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
+                                        />
+                                    )
                                 )}
                             </ul>
                             </div>

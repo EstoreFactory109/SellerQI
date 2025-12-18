@@ -26,7 +26,7 @@ const logger = require('../../utils/Logger.js');
  * 
  * This function:
  * 1. Gets users whose scheduled hour matches current hour
- * 2. Filters users who haven't been updated in 24 hours
+ * 2. Filters users who haven't been updated today (ensures daily processing since different services run on different days)
  * 3. Enqueues each user ID (one job per user)
  * 4. Returns summary statistics
  * 

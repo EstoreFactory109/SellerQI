@@ -26,7 +26,7 @@ const dbConsts= {
  * Individual job controls are optional - if not specified, they follow the 'enabled' setting.
  */
 const backgroundJobsConfig = {
-    enabled: true,  // ← Change to false to disable all background jobs
+    enabled: false,  // ← Change to false to disable all background jobs
     // Individual job controls (optional - if not specified, follows 'enabled' setting)
     jobs: {
         dailyUpdates: true,      // Hourly comprehensive data updates

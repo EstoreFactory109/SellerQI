@@ -33,6 +33,13 @@ export const createDefaultDashboardData = () => {
     rankingProductWiseErrors: [],
     conversionProductWiseErrors: [],
     inventoryProductWiseErrors: [],
+    buyBoxData: {
+      totalProducts: 0,
+      productsWithBuyBox: 0,
+      productsWithoutBuyBox: 0,
+      productsWithLowBuyBox: 0,
+      asinBuyBoxData: []
+    },
     InventoryAnalysis: {
       inventoryPlanning: [],
       strandedInventory: [],

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
-import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers, ShoppingCart } from 'lucide-react';
 import dropdown from '../../assets/Icons/Arrow.png'
 
 const RankingTableSection = ({ title, data }) => {
@@ -95,10 +95,10 @@ const RankingTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -106,29 +106,29 @@ const RankingTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
+                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-8 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top">
+                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-5 h-5 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-2.5 h-2.5 text-blue-600" />
+                      <div className="w-6 h-6 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-3 h-3 text-blue-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800 truncate w-full">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
-                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-5 px-4 align-top">
+                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}
@@ -151,7 +151,7 @@ const RankingTableSection = ({ title, data }) => {
   );
 };
 
-const ConversionTableSection = ({ title, data }) => {
+const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -175,7 +175,49 @@ const ConversionTableSection = ({ title, data }) => {
       }));
   };
 
-  const flattenData = data.flatMap((item) =>
+  // Extract buybox errors from buyBoxData (products with 0% or <50% buybox)
+  const getBuyboxErrors = () => {
+    if (!buyBoxData || !Array.isArray(buyBoxData)) return [];
+    
+    const buyboxErrors = [];
+    
+    buyBoxData.forEach((item) => {
+      // Only show products with buybox issues (0% or low buybox < 50%)
+      if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
+        const asin = item.childAsin || item.parentAsin;
+        
+        // Find product title from productInfo
+        const productDetails = productInfo?.find(p => p.asin === asin);
+        const productTitle = productDetails?.name || productDetails?.itemName || 'N/A';
+        
+        // Determine issue type and generate appropriate message/solution
+        let issueHeading, message, solution;
+        
+        if (item.buyBoxPercentage === 0) {
+          issueHeading = 'Buy Box | No Buy Box';
+          message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
+          solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.';
+        } else {
+          issueHeading = 'Buy Box | Low Buy Box Percentage';
+          message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`;
+          solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
+        }
+        
+        buyboxErrors.push({
+          asin,
+          title: productTitle,
+          issueHeading,
+          message,
+          solution
+        });
+      }
+    });
+    
+    return buyboxErrors;
+  };
+
+  // Get conversion errors from data
+  const conversionErrors = data.flatMap((item) =>
     getFormattedErrors(item).map((err) => ({
       asin: item.asin,
       title: item.Title || 'N/A',
@@ -184,6 +226,17 @@ const ConversionTableSection = ({ title, data }) => {
       solution: err.solution
     }))
   );
+
+  // Get buybox errors and combine with conversion errors
+  const buyboxErrors = getBuyboxErrors();
+  
+  // Filter out buybox errors from conversionErrors that are already in buyboxErrors (avoid duplicates)
+  const filteredConversionErrors = conversionErrors.filter(
+    err => !err.issueHeading.includes('Buy Box')
+  );
+  
+  // Combine conversion errors with buybox errors
+  const flattenData = [...filteredConversionErrors, ...buyboxErrors];
 
   const displayedData = flattenData.slice(0, page * itemsPerPage);
   const hasMore = flattenData.length > displayedData.length;
@@ -212,10 +265,10 @@ const ConversionTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -223,29 +276,29 @@ const ConversionTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
+                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-8 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top">
+                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-5 h-5 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-2.5 h-2.5 text-green-600" />
+                      <div className="w-6 h-6 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-3 h-3 text-green-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 truncate w-full">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
-                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-5 px-4 align-top">
+                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}
@@ -321,15 +374,29 @@ const InventoryTableSection = ({ title, data }) => {
       });
     }
 
-    // Process replenishment/restock errors
+    // Process replenishment/restock errors - handles single or multiple
     if (item.replenishmentErrorData) {
-      errorRows.push({
-        asin: item.asin,
-        title: item.Title || 'N/A',
-        issueHeading: 'Replenishment | Low Inventory Risk',
-        message: item.replenishmentErrorData.Message,
-        solution: item.replenishmentErrorData.HowToSolve
-      });
+      if (Array.isArray(item.replenishmentErrorData)) {
+        // Multiple errors for same ASIN (different SKUs)
+        item.replenishmentErrorData.forEach(error => {
+          errorRows.push({
+            asin: item.asin,
+            title: item.Title || 'N/A',
+            issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
+            message: error.Message,
+            solution: error.HowToSolve
+          });
+        });
+      } else {
+        // Single error
+        errorRows.push({
+          asin: item.asin,
+          title: item.Title || 'N/A',
+          issueHeading: `Replenishment | Low Inventory Risk ${item.replenishmentErrorData.sku ? `(SKU: ${item.replenishmentErrorData.sku})` : ''}`,
+          message: item.replenishmentErrorData.Message,
+          solution: item.replenishmentErrorData.HowToSolve
+        });
+      }
     }
 
     return errorRows;
@@ -363,10 +430,10 @@ const InventoryTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">ASIN</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-6 px-3 text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -374,29 +441,29 @@ const InventoryTableSection = ({ title, data }) => {
                 <motion.tr 
                   key={idx} 
                   whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-xs text-gray-700 hover:shadow-sm transition-all duration-200"
+                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-8 px-3 align-top">
-                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top">
+                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
-                      <div className="w-5 h-5 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-2.5 h-2.5 text-yellow-600" />
+                      <div className="w-6 h-6 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Package className="w-3 h-3 text-yellow-600" />
                       </div>
-                      <span className="font-medium text-gray-900 text-[10px] leading-relaxed break-words">{row.title}</span>
+                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
+                  <td className="py-5 px-4 align-top">
                     <div className="space-y-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-800 truncate w-full">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-[10px] text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
                     </div>
                   </td>
-                  <td className="py-8 px-3 align-top">
-                    <p className="text-[10px] text-green-700 bg-green-50 p-2 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-5 px-4 align-top">
+                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </motion.tr>
               ))}
@@ -408,6 +475,138 @@ const InventoryTableSection = ({ title, data }) => {
           <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
             <button
               className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-3 rounded-xl hover:from-green-600 hover:to-green-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+              onClick={() => setPage((prev) => prev + 1)}
+            >
+              Load More ({flattenedData.length - displayedData.length} remaining)
+            </button>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+const BuyboxTableSection = ({ title, data, productInfo }) => {
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 10;
+
+  const extractBuyboxErrors = (buyboxData) => {
+    if (!buyboxData || !Array.isArray(buyboxData)) return [];
+    
+    const errorRows = [];
+    
+    buyboxData.forEach((item) => {
+      // Only show products with buybox issues (0% or low buybox < 50%)
+      if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
+        const asin = item.childAsin || item.parentAsin;
+        
+        // Find product title from productInfo
+        const productDetails = productInfo?.find(p => p.asin === asin);
+        const productTitle = productDetails?.name || productDetails?.itemName || 'N/A';
+        
+        // Determine issue type and generate appropriate message/solution
+        let issueHeading, message, solution;
+        
+        if (item.buyBoxPercentage === 0) {
+          issueHeading = 'Buy Box | No Buy Box';
+          message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
+          solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.';
+        } else {
+          issueHeading = 'Buy Box | Low Buy Box Percentage';
+          message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`;
+          solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
+        }
+        
+        errorRows.push({
+          asin,
+          title: productTitle,
+          issueHeading,
+          message,
+          solution,
+          buyBoxPercentage: item.buyBoxPercentage,
+          pageViews: item.pageViews,
+          sessions: item.sessions
+        });
+      }
+    });
+    
+    // Sort by buybox percentage (lowest first)
+    return errorRows.sort((a, b) => a.buyBoxPercentage - b.buyBoxPercentage);
+  };
+
+  const flattenedData = extractBuyboxErrors(data);
+  const displayedData = flattenedData.slice(0, page * itemsPerPage);
+  const hasMore = flattenedData.length > displayedData.length;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, delay: 0.3 }}
+      className="mb-8"
+    >
+      <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
+        <div className="bg-gradient-to-r from-purple-50 via-purple-50 to-indigo-50 px-6 py-4 border-b border-purple-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md">
+              <ShoppingCart className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+              <p className="text-sm text-gray-600">Products losing sales due to Buy Box issues</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="w-full">
+          <table className="w-full table-fixed">
+            <thead>
+              <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {displayedData.map((row, idx) => (
+                <motion.tr 
+                  key={idx} 
+                  whileHover={{ backgroundColor: '#f8fafc' }}
+                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
+                >
+                  <td className="py-5 px-4 align-top">
+                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  </td>
+                  <td className="py-5 px-4 align-top">
+                    <div className="flex items-start gap-2">
+                      <div className="w-6 h-6 bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <ShoppingCart className="w-3 h-3 text-purple-600" />
+                      </div>
+                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
+                    </div>
+                  </td>
+                  <td className="py-5 px-4 align-top">
+                    <div className="space-y-2">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        {row.issueHeading}
+                      </span>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
+                    </div>
+                  </td>
+                  <td className="py-5 px-4 align-top">
+                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        
+        {hasMore && (
+          <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+            <button
+              className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-purple-600 hover:to-purple-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
               onClick={() => setPage((prev) => prev + 1)}
             >
               Load More ({flattenedData.length - displayedData.length} remaining)
@@ -471,42 +670,21 @@ const OptimizationDashboard = () => {
 
   // Calculate issue counts for summary cards
   const rankingIssues = info?.rankingProductWiseErrors?.length || 0;
-  const conversionIssues = info?.conversionProductWiseErrors?.length || 0;
+  const baseConversionIssues = info?.conversionProductWiseErrors?.length || 0;
   const inventoryIssues = info?.inventoryProductWiseErrors?.length || 0;
+  
+  // Calculate buybox issues count (now part of conversion errors)
+  const buyboxIssues = (() => {
+    if (!info?.buyBoxData?.asinBuyBoxData) return 0;
+    return info.buyBoxData.asinBuyBoxData.filter(
+      item => item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50
+    ).length;
+  })();
+  
+  // Conversion issues now include buybox issues
+  const conversionIssues = baseConversionIssues + buyboxIssues;
+  
   const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
-
-  const categories = [
-    {
-      id: 'ranking',
-      name: 'Ranking Issues',
-      count: rankingIssues,
-      description: 'SEO and search visibility problems',
-      color: 'from-red-500 to-red-600',
-      bgColor: 'from-red-50 to-red-100',
-      textColor: 'text-red-700',
-      icon: TrendingUp
-    },
-    {
-      id: 'conversion',
-      name: 'Conversion Issues',
-      count: conversionIssues,
-      description: 'Product appeal and customer experience',
-      color: 'from-blue-500 to-blue-600',
-      bgColor: 'from-blue-50 to-blue-100',
-      textColor: 'text-blue-700',
-      icon: BarChart3
-    },
-    {
-      id: 'inventory',
-      name: 'Inventory Issues',
-      count: inventoryIssues,
-      description: 'Stock levels and warehouse management',
-      color: 'from-green-500 to-green-600',
-      bgColor: 'from-green-50 to-green-100',
-      textColor: 'text-green-700',
-      icon: Package
-    }
-  ];
 
   return (
     <div className="min-h-screen bg-gray-50/50">
@@ -556,46 +734,6 @@ const OptimizationDashboard = () => {
 
       {/* Main Content */}
       <div className="px-6 py-8">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {categories.map((category, index) => {
-            const IconComponent = category.icon;
-            return (
-              <motion.div
-                key={category.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
-                whileHover={{ scale: 1.02, y: -2 }}
-                className={`bg-gradient-to-br ${category.bgColor} border-2 border-gray-200 rounded-2xl p-6 cursor-pointer transition-all duration-300 hover:shadow-xl group`}
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className={`w-14 h-14 bg-gradient-to-br ${category.color} rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-200`}>
-                    <IconComponent className="w-7 h-7 text-white" />
-                  </div>
-                  <div className="text-right">
-                    <div className={`text-3xl font-bold ${category.textColor} mb-1`}>
-                      {category.count}
-                    </div>
-                    <div className="text-xs text-gray-500 font-medium">
-                      {category.count === 1 ? 'Issue' : 'Issues'}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <h3 className={`font-bold text-lg ${category.textColor}`}>
-                    {category.name}
-                  </h3>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    {category.description}
-                  </p>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-
         {/* Filter Section */}
         <div className="mb-8">
           <div className="bg-white rounded-2xl shadow-lg border-0 p-6 hover:shadow-xl transition-all duration-300">
@@ -630,7 +768,7 @@ const OptimizationDashboard = () => {
                         <div className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
                           Issue Categories
                         </div>
-                        {["All", "Ranking", "Conversion", "Inventory"].map((option) => (
+                        {["All", "Ranking", "Conversion", "Inventory", "Buybox"].map((option) => (
                           <button
                             key={option}
                             className={`w-full text-left px-4 py-3 text-sm hover:bg-blue-50 transition-all duration-150 ${
@@ -660,7 +798,7 @@ const OptimizationDashboard = () => {
           {issuesSelectedOption === "All" ? (
             <>
               {rankingIssues > 0 && <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />}
-              {conversionIssues > 0 && <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />}
+              {conversionIssues > 0 && <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />}
               {inventoryIssues > 0 && <InventoryTableSection title="Inventory Management" data={info.inventoryProductWiseErrors || []} />}
               {totalIssues === 0 && (
                 <motion.div 
@@ -694,7 +832,7 @@ const OptimizationDashboard = () => {
             )
           ) : issuesSelectedOption === "Conversion" ? (
             conversionIssues > 0 ? (
-              <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />
+              <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
             ) : (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -724,8 +862,31 @@ const OptimizationDashboard = () => {
                 <p className="text-gray-600">Your inventory management is performing perfectly!</p>
               </motion.div>
             )
+          ) : issuesSelectedOption === "Buybox" ? (
+            buyboxIssues > 0 ? (
+              <>
+                <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-sm text-blue-700">
+                    <span className="font-semibold">Note:</span> Buy Box issues are also included in the Conversion category for comprehensive analysis.
+                  </p>
+                </div>
+                <BuyboxTableSection title="Buy Box Optimization" data={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
+              </>
+            ) : (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
+              >
+                <div className="w-20 h-20 bg-gradient-to-br from-purple-400 to-purple-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
+                  <ShoppingCart className="w-10 h-10 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">No Buy Box Issues</h3>
+                <p className="text-gray-600">All your products have excellent Buy Box ownership!</p>
+              </motion.div>
+            )
           ) : (
-            <ConversionTableSection title="Conversion Optimization" data={info.conversionProductWiseErrors} />
+            <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
           )}
         </div>
       </div>

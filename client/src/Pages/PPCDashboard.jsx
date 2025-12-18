@@ -273,6 +273,34 @@ const PPCDashboard = () => {
   // console.log('AdsGroupData Length:', AdsGroupData.length);
   // console.log('campaignsWithoutNegativeKeywords:', campaignsWithoutNegativeKeywords);
   
+  // Helper function to get adGroup name for a search term
+  const getAdGroupName = (searchTerm) => {
+    if (!searchTerm) return 'N/A';
+    
+    // First, check if adGroupName is already in the search term data (from API)
+    // This is the primary source since the API returns adGroupName directly
+    if (searchTerm.adGroupName && typeof searchTerm.adGroupName === 'string' && searchTerm.adGroupName.trim() !== '') {
+      return searchTerm.adGroupName;
+    }
+    
+    // If not available, try to find from AdsGroupData
+    if (!AdsGroupData || !AdsGroupData.length) return 'N/A';
+    
+    // Try to find by adGroupId if available
+    if (searchTerm.adGroupId) {
+      const adGroup = AdsGroupData.find(ag => ag.adGroupId === searchTerm.adGroupId);
+      if (adGroup && adGroup.name) return adGroup.name;
+    }
+    
+    // Then try to find by campaignId (get first adGroup for that campaign)
+    if (searchTerm.campaignId) {
+      const adGroup = AdsGroupData.find(ag => ag.campaignId === searchTerm.campaignId);
+      if (adGroup && adGroup.name) return adGroup.name;
+    }
+    
+    return 'N/A';
+  };
+
   // Filter search terms where clicks >= 10 and sales = 0
   const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
@@ -1227,12 +1255,13 @@ const PPCDashboard = () => {
     // Add Search Terms Data - ALL DATA (not paginated)
     if (searchTerms.length > 0) {
       csvData.push([`All Search Terms - Total: ${searchTerms.length} terms`]);
-      csvData.push(['Search Term', 'Campaign Name', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
+      csvData.push(['Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
       searchTerms.forEach(term => {
         const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
         csvData.push([
           term.searchTerm,
           term.campaignName,
+          getAdGroupName(term),
           `$${term.sales.toFixed(2)}`,
           `$${term.spend.toFixed(2)}`,
           term.clicks || 0,
@@ -1818,6 +1847,7 @@ const PPCDashboard = () => {
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Matched Keyword</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Ad Group</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Clicks</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
@@ -1826,7 +1856,7 @@ const PPCDashboard = () => {
                         <tbody>
                           {filteredSearchTerms.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="text-center py-12 text-gray-400">
+                              <td colSpan={6} className="text-center py-12 text-gray-400">
                                 No data available
                               </td>
                             </tr>
@@ -1838,6 +1868,7 @@ const PPCDashboard = () => {
                                 <tr key={idx} className="border-b border-gray-200">
                                   <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
                                   <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
+                                  <td className="py-4 text-sm text-gray-600">{getAdGroupName(term)}</td>
                                   <td className="py-4 text-sm text-center">{term.clicks}</td>
                                   <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
                                   <td className="py-4 text-sm text-center font-medium text-red-600">
@@ -1875,6 +1906,7 @@ const PPCDashboard = () => {
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
+                            <th className="text-left py-3 text-sm font-medium text-gray-700">Ad Group</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
                           </tr>
@@ -1882,7 +1914,7 @@ const PPCDashboard = () => {
                         <tbody>
                           {autoCampaignInsights.length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="text-center py-12 text-gray-400">
+                              <td colSpan={5} className="text-center py-12 text-gray-400">
                                 No data available
                               </td>
                             </tr>
@@ -1890,18 +1922,23 @@ const PPCDashboard = () => {
                             (() => {
                               const startIndex = (autoCampaignPage - 1) * itemsPerPage;
                               const endIndex = startIndex + itemsPerPage;
-                              return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
-                                  <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
-                                  <td className="py-4 text-sm text-center font-medium text-green-600">
-                                    ${insight.sales.toFixed(2)}
-                                  </td>
-                                  <td className="py-4 text-sm text-center font-medium">
-                                    {insight.acos.toFixed(2)}%
-                                  </td>
-                                </tr>
-                              ));
+                              return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => {
+                                // Find the original search term to get adGroup
+                                const originalTerm = searchTerms.find(st => st.searchTerm === insight.searchTerm && st.campaignId === insight.campaignId);
+                                return (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
+                                    <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
+                                    <td className="py-4 text-sm text-gray-600">{originalTerm ? getAdGroupName(originalTerm) : 'N/A'}</td>
+                                    <td className="py-4 text-sm text-center font-medium text-green-600">
+                                      ${insight.sales.toFixed(2)}
+                                    </td>
+                                    <td className="py-4 text-sm text-center font-medium">
+                                      {insight.acos.toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                );
+                              });
                             })()
                           )}
                         </tbody>
@@ -2081,15 +2118,6 @@ const PPCDashboard = () => {
                                       </div>
                                     )}
                                     
-                                    {/* Action buttons */}
-                                    <div className="flex gap-2 pt-2">
-                                      <button className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors">
-                                        Apply Suggestion
-                                      </button>
-                                      <button className="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 transition-colors">
-                                        Ignore
-                                      </button>
-                                    </div>
                                   </div>
                                 </td>
                               </tr>

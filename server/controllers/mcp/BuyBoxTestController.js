@@ -57,6 +57,10 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
         // Use refreshToken from request body, or fetch from seller account
         let finalRefreshToken = refreshToken;
         
+        // Track effective region/country (may be updated if fallback is used)
+        let effectiveRegion = Region;
+        let effectiveCountry = Country;
+
         if (!finalRefreshToken) {
             logger.info('RefreshToken not provided in body, fetching from Seller account', {
                 userId,
@@ -64,20 +68,12 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
                 country: Country
             });
             
-            // Get refresh token from seller account
-            const sellerAccount = await Seller.findOne({ 
-                User: userId, 
-                country: Country, 
-                region: Region 
-            }).sort({ createdAt: -1 });
+            // Get seller document for this user
+            const sellerDoc = await Seller.findOne({ User: userId }).lean();
 
-            if (!sellerAccount || !sellerAccount.RefreshToken) {
-                logger.error('Seller account or refresh token not found', {
-                    userId,
-                    region: Region,
-                    country: Country
-                });
-                const error = new ApiError(404, 'Refresh token not found. Please provide refreshToken in request body or ensure seller account exists.');
+            if (!sellerDoc) {
+                logger.error('Seller document not found', { userId });
+                const error = new ApiError(404, 'No seller account found for this user.');
                 return res.status(404).json({
                     statusCode: error.statusCode,
                     message: error.message,
@@ -85,13 +81,73 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
                 });
             }
 
-            finalRefreshToken = sellerAccount.RefreshToken;
+            const accounts = Array.isArray(sellerDoc.sellerAccount) 
+                ? sellerDoc.sellerAccount 
+                : [];
+
+            // Try to find matching region + country
+            let matchedAccount = accounts.find(
+                (acc) => acc && acc.country === Country && acc.region === Region
+            );
+
+            // Track if we used fallback
+            let usedFallback = false;
+
+            // If not found, fall back to first available account
+            if (!matchedAccount && accounts.length > 0) {
+                logger.warn(
+                    'No sellerAccount entry found for exact region/country; falling back to first sellerAccount',
+                    {
+                        userId,
+                        requestedRegion: Region,
+                        requestedCountry: Country,
+                        availableAccounts: accounts.map((a) => ({
+                            country: a.country,
+                            region: a.region,
+                            hasSpApiToken: !!a.spiRefreshToken
+                        }))
+                    }
+                );
+                matchedAccount = accounts[0];
+                usedFallback = true;
+            }
+
+            if (!matchedAccount || !matchedAccount.spiRefreshToken) {
+                logger.error('Seller account or refresh token not found', {
+                    userId,
+                    region: Region,
+                    country: Country
+                });
+                const error = new ApiError(404, 'spiRefreshToken not found. Please provide refreshToken in request body or ensure seller account has spiRefreshToken.');
+                return res.status(404).json({
+                    statusCode: error.statusCode,
+                    message: error.message,
+                    errors: error.errors || []
+                });
+            }
+
+            finalRefreshToken = matchedAccount.spiRefreshToken;
+
+            // IMPORTANT: If we used fallback, use the matched account's region/country
+            if (usedFallback) {
+                logger.warn(
+                    'Using matched account region/country instead of requested values',
+                    {
+                        requestedRegion: Region,
+                        requestedCountry: Country,
+                        actualRegion: matchedAccount.region,
+                        actualCountry: matchedAccount.country
+                    }
+                );
+                effectiveRegion = matchedAccount.region;
+                effectiveCountry = matchedAccount.country;
+            }
         }
 
         logger.info('Testing BuyBox data fetch', {
             userId,
-            region: Region,
-            country: Country,
+            region: effectiveRegion,
+            country: effectiveCountry,
             startDate,
             endDate
         });
@@ -100,8 +156,8 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
         const result = await fetchAndStoreBuyBoxData(
             userId,
             finalRefreshToken,
-            Region,
-            Country,
+            effectiveRegion,
+            effectiveCountry,
             startDate,
             endDate
         );
@@ -109,8 +165,8 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
         if (!result.success) {
             logger.error('Failed to fetch and store BuyBox data', {
                 userId,
-                region: Region,
-                country: Country,
+                region: effectiveRegion,
+                country: effectiveCountry,
                 error: result.error,
                 queryId: result.queryId,
                 documentId: result.documentId
@@ -126,20 +182,20 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
         }
 
         // Verify data was stored in database
-        const storedData = await getLatestBuyBoxData(userId, Region, Country);
+        const storedData = await getLatestBuyBoxData(userId, effectiveRegion, effectiveCountry);
         
         if (!storedData) {
             logger.warn('BuyBox data fetched but not found in database after storage', {
                 userId,
-                region: Region,
-                country: Country,
+                region: effectiveRegion,
+                country: effectiveCountry,
                 buyBoxDataId: result.data?.buyBoxDataId
             });
         } else {
             logger.info('BuyBox data verified in database', {
                 userId,
-                region: Region,
-                country: Country,
+                region: effectiveRegion,
+                country: effectiveCountry,
                 buyBoxDataId: storedData._id,
                 productsWithoutBuyBox: storedData.productsWithoutBuyBox,
                 totalProducts: storedData.totalProducts
@@ -150,7 +206,9 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
             new ApiResponse(200, {
                 ...result.data,
                 storedInDatabase: !!storedData,
-                databaseId: storedData?._id || null
+                databaseId: storedData?._id || null,
+                effectiveRegion,
+                effectiveCountry
             }, 'BuyBox data fetched and stored successfully in database', {
                 queryId: result.queryId,
                 documentId: result.documentId,
@@ -161,8 +219,8 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error in testFetchBuyBoxData', {
             userId,
-            region: Region,
-            country: Country,
+            region: effectiveRegion || Region,
+            country: effectiveCountry || Country,
             error: error.message,
             stack: error.stack
         });

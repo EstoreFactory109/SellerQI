@@ -24,6 +24,10 @@ const TaskItemSchema = new mongoose.Schema({
         enum: ['ranking', 'conversion', 'inventory', 'profitability', 'sponsoredAds'],
         required: true
     },
+    errorType: {
+        type: String,
+        required: true
+    },
     error: {
         type: String,
         required: true

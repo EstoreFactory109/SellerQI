@@ -1,18 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target } from 'lucide-react'
+import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target, RefreshCw } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
-import ExpectedReimbursement from '../Components/Dashboard/SamePageComponents/ExpectedReimbursement.jsx'
-import ProductsToReplinish from '../Components/Dashboard/SamePageComponents/ProductsToReplinish.jsx'
-import ProductsWithoutBuybox from '../Components/Dashboard/SamePageComponents/ProductsWithoutBuybox.jsx'
-import AmazonReadyProducts from '../Components/Dashboard/SamePageComponents/AmazonReadyProducts.jsx'
 import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
 import Calender from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
 import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
+import { useNavigate } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
+import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -20,12 +18,23 @@ const Dashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
   const ExportRef = useRef(null)
+  const navigate = useNavigate()
+  const dispatch = useDispatch()
+  
+  // Get reimbursement data from Redux (cached)
+  const reimbursementData = useSelector(state => state.reimbursement)
+  const expectedReimbursement = reimbursementData?.summary?.totalReimbursement || 0
+  const reimbursementLoading = reimbursementData?.loading || false
+  const reimbursementLastFetched = reimbursementData?.lastFetched
 
   // Get dashboard data from Redux
   const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
   
   // Get sponsored ads metrics from Redux (same as sponsored ads page)
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  
+  // Get search terms from Redux for "Amazon Owes You" calculation
+  const searchTerms = useSelector((state) => state.Dashboard.DashBoardInfo?.searchTerms) || [];
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -73,6 +82,21 @@ const Dashboard = () => {
     inventoryAnalysis: dashboardInfo?.InventoryAnalysis
   });
 
+  // Fetch reimbursement data from Redux (cached for 5 minutes)
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const now = Date.now();
+    
+    // Only fetch if:
+    // 1. Data has never been fetched (lastFetched is null)
+    // 2. Cache has expired (more than 5 minutes old)
+    const shouldFetch = !reimbursementLastFetched || (now - reimbursementLastFetched) > CACHE_DURATION;
+    
+    if (shouldFetch && !reimbursementLoading) {
+      dispatch(fetchReimbursementSummary());
+    }
+  }, [dispatch, reimbursementLastFetched, reimbursementLoading])
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
@@ -113,12 +137,12 @@ const Dashboard = () => {
 
   const handleDownloadCSV = () => {
     // Use actual dashboard data for CSV export
-    const ppcSales = calculatePPCSales();
     const ppcSpend = calculatePPCSpend();
     const csvData = [
       ['Metric', 'Value', 'Change'],
       ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
+      ['Amazon Owes You', formatCurrencyWithLocale(expectedReimbursement, currency), 'N/A'],
+      ['Money Wasted in Ads', formatCurrencyWithLocale(amazonOwesYou, currency), 'N/A'],
       ['ACOS', `${acos}%`, 'N/A'],
       ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
@@ -140,12 +164,12 @@ const Dashboard = () => {
   const handleDownloadExcel = () => {
     // For Excel export, we'll create a simple tab-separated values file
     // In a real implementation, you might want to use a library like xlsx
-    const ppcSales = calculatePPCSales();
     const ppcSpend = calculatePPCSpend();
     const excelData = [
       ['Metric', 'Value', 'Change'],
       ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['PPC Sales', formatCurrencyWithLocale(ppcSales, currency), 'N/A'],
+      ['Amazon Owes You', formatCurrencyWithLocale(expectedReimbursement, currency), 'N/A'],
+      ['Money Wasted in Ads', formatCurrencyWithLocale(amazonOwesYou, currency), 'N/A'],
       ['ACOS', `${acos}%`, 'N/A'],
       ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
       ['Period', selectedPeriod, '']
@@ -201,11 +225,38 @@ const Dashboard = () => {
     return formatCurrency(value, currency);
   };
 
+  // Calculate "Amazon Owes You" - total spend of search terms with zero sales
+  // Use the same filter as PPC Dashboard: clicks >= 10 && sales === 0
+  const calculateAmazonOwesYou = () => {
+    if (!Array.isArray(searchTerms) || searchTerms.length === 0) {
+      return 0;
+    }
+    
+    // Filter search terms with zero sales (same logic as PPC Dashboard)
+    const zeroSalesSearchTerms = searchTerms.filter(term => {
+      if (!term) return false;
+      // Match the frontend filter: clicks >= 10 && sales === 0
+      const clicks = term.clicks || 0;
+      const sales = term.sales || 0;
+      return clicks >= 10 && sales === 0;
+    });
+    
+    // Sum the spend for all zero sales search terms
+    const totalSpend = zeroSalesSearchTerms.reduce((total, term) => {
+      const spend = term.spend || term.cost || 0;
+      return total + (typeof spend === 'number' ? spend : parseFloat(spend) || 0);
+    }, 0);
+    
+    return Math.round(totalSpend * 100) / 100; // Round to 2 decimal places
+  };
+
+  const amazonOwesYou = calculateAmazonOwesYou();
+
   const quickStats = [
-    { icon: BarChart3, label: 'Sales', value: formatCurrencyWithLocale(totalSales, currency), change: 'N/A', trend: 'neutral', color: 'emerald' },
-    { icon: Zap, label: 'PPC Sales', value: formatCurrencyWithLocale(ppcSales, currency), change: 'N/A', trend: 'neutral', color: 'blue' },
-    { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple' },
-    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange' }
+    { icon: RefreshCw, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
+    { icon: DollarSign, label: 'Money Wasted in Ads', value: formatCurrencyWithLocale(amazonOwesYou, currency), change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
   ]
 
   return (
@@ -367,8 +418,11 @@ const Dashboard = () => {
                   key={stat.label}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
-                  className={`bg-gradient-to-br ${colors.gradient} rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-xl hover:scale-105 transform shadow-lg`}
+                  whileHover={{ scale: 1.05, y: -4 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                  onClick={() => navigate(stat.link)}
+                  className={`bg-gradient-to-br ${colors.gradient} rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-colors duration-300 hover:shadow-xl shadow-lg cursor-pointer`}
                   style={{
                     boxShadow: `
                       0 10px 15px -3px rgba(0, 0, 0, 0.1),
@@ -437,7 +491,7 @@ const Dashboard = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
-                className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8'
+                className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
               >
                 <ErrorBoundary
                   title="Product Analysis Unavailable"
@@ -445,102 +499,6 @@ const Dashboard = () => {
                 >
                   <ProductChecker />
                 </ErrorBoundary>
-              </motion.div>
-
-              {/* Third Row - Small Cards */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.5 }}
-                className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'
-              >
-                {/* Expected Reimbursement - Green Theme */}
-                <motion.div 
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  transition={{ duration: 0.2 }}
-                  className='bg-gradient-to-br from-emerald-50 via-emerald-25 to-emerald-100 rounded-xl border border-emerald-200/60 hover:border-emerald-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
-                  style={{
-                    boxShadow: `
-                      0 8px 25px -5px rgba(16, 185, 129, 0.15),
-                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
-                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
-                    `
-                  }}
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-emerald-200/30 to-emerald-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
-                  <ErrorBoundary
-                    title="Reimbursement Data Unavailable"
-                    message="Unable to load reimbursement data."
-                  >
-                    <ExpectedReimbursement />
-                  </ErrorBoundary>
-                </motion.div>
-
-                {/* Amazon Ready Products - Blue Theme */}
-                <motion.div 
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  transition={{ duration: 0.2 }}
-                  className='bg-gradient-to-br from-blue-50 via-blue-25 to-blue-100 rounded-xl border border-blue-200/60 hover:border-blue-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
-                  style={{
-                    boxShadow: `
-                      0 8px 25px -5px rgba(59, 130, 246, 0.15),
-                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
-                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
-                    `
-                  }}
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-200/30 to-blue-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
-                  <ErrorBoundary
-                    title="Product Data Unavailable"
-                    message="Unable to load Amazon ready products data."
-                  >
-                    <AmazonReadyProducts />
-                  </ErrorBoundary>
-                </motion.div>
-
-                {/* Products to Replenish - Orange Theme */}
-                <motion.div 
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  transition={{ duration: 0.2 }}
-                  className='bg-gradient-to-br from-orange-50 via-orange-25 to-orange-100 rounded-xl border border-orange-200/60 hover:border-orange-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
-                  style={{
-                    boxShadow: `
-                      0 8px 25px -5px rgba(251, 146, 60, 0.15),
-                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
-                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
-                    `
-                  }}
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-orange-200/30 to-orange-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
-                  <ErrorBoundary
-                    title="Inventory Data Unavailable"
-                    message="Unable to load inventory replenishment data."
-                  >
-                    <ProductsToReplinish />
-                  </ErrorBoundary>
-                </motion.div>
-
-                {/* Products Without Buybox - Purple Theme */}
-                <motion.div 
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  transition={{ duration: 0.2 }}
-                  className='bg-gradient-to-br from-purple-50 via-purple-25 to-purple-100 rounded-xl border border-purple-200/60 hover:border-purple-300 transition-all duration-300 hover:shadow-xl overflow-hidden shadow-lg'
-                  style={{
-                    boxShadow: `
-                      0 8px 25px -5px rgba(147, 51, 234, 0.15),
-                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
-                      inset 0 1px 0 rgba(255, 255, 255, 0.4)
-                    `
-                  }}
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-purple-200/30 to-purple-300/20 rounded-full blur-xl transform translate-x-6 -translate-y-6"></div>
-                  <ErrorBoundary
-                    title="Buy Box Data Unavailable"
-                    message="Unable to load buy box data."
-                  >
-                    <ProductsWithoutBuybox />
-                  </ErrorBoundary>
-                </motion.div>
               </motion.div>
             </>
           )}

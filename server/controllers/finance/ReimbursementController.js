@@ -60,7 +60,7 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
         // Format shipment data for frontend
         const shipmentData = shipmentResult.data || [];
         const formattedShipmentData = shipmentData.map(item => ({
-            date: new Date().toISOString().split('T')[0], // Use current date or extract from shipment if available
+            date: item.date || new Date().toISOString().split('T')[0], // Use date extracted from shipment name
             shipmentId: item.shipmentId || '',
             shipmentName: item.shipmentName || '',
             asin: skuToAsinMap.get(item.sellerSKU) || '', // Get ASIN from SKU mapping

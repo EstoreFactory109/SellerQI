@@ -75,32 +75,47 @@ class CreateTaskService {
                 const currentDate = new Date();
                 const renewalDate = new Date(userTaskDocument.taskRenewalDate);
                 
+                // Helper function to get stable task identifier
+                const getTaskIdentifier = (task) => `${task.asin}-${task.errorCategory}-${task.errorType}`;
+                
                 if (currentDate >= renewalDate) {
                     logger.info(`Renewal period reached for user ${userId}. Clearing completed tasks and adding new ones.`);
                     
-                    // Remove completed tasks
+                    // Remove completed tasks, keep pending
                     const pendingTasks = userTaskDocument.tasks.filter(task => task.status === TaskStatus.PENDING);
-                    userTaskDocument.tasks = [...pendingTasks, ...tasks];
+                    
+                    // Get identifiers of existing pending tasks to avoid duplicates
+                    const existingPendingIdentifiers = new Set(
+                        pendingTasks.map(task => getTaskIdentifier(task))
+                    );
+                    
+                    // Filter out new tasks that already exist as pending
+                    const uniqueNewTasks = tasks.filter(task => 
+                        !existingPendingIdentifiers.has(getTaskIdentifier(task))
+                    );
+                    
+                    // Combine pending tasks with only unique new tasks
+                    userTaskDocument.tasks = [...pendingTasks, ...uniqueNewTasks];
                     
                     // Update renewal date to 7 days from current date
                     const newRenewalDate = new Date();
                     newRenewalDate.setDate(newRenewalDate.getDate() + 7);
                     userTaskDocument.taskRenewalDate = newRenewalDate;
                     
-                    logger.info(`Renewed tasks for user ${userId}. Kept ${pendingTasks.length} pending tasks, added ${tasks.length} new tasks.`);
+                    logger.info(`Renewed tasks for user ${userId}. Kept ${pendingTasks.length} pending tasks, added ${uniqueNewTasks.length} new unique tasks (${tasks.length - uniqueNewTasks.length} duplicates skipped).`);
                     await userTaskDocument.save();
                 } else {
                     // Not yet renewal time, but still add new tasks that don't already exist
                     logger.info(`Within renewal period for user ${userId}. Checking for new unique tasks to add.`);
                     
-                    // Get existing task identifiers (combination of ASIN and error category/type)
+                    // Get existing task identifiers using stable identifier (ASIN + errorCategory + errorType)
                     const existingTaskIdentifiers = new Set(
-                        userTaskDocument.tasks.map(task => `${task.asin}-${task.errorCategory}-${task.error}`)
+                        userTaskDocument.tasks.map(task => getTaskIdentifier(task))
                     );
                     
                     // Filter out tasks that already exist
                     const newUniqueTasks = tasks.filter(task => 
-                        !existingTaskIdentifiers.has(`${task.asin}-${task.errorCategory}-${task.error}`)
+                        !existingTaskIdentifiers.has(getTaskIdentifier(task))
                     );
                     
                     if (newUniqueTasks.length > 0) {
@@ -151,6 +166,7 @@ class CreateTaskService {
                         productName,
                         asin: error.asin,
                         errorCategory: 'ranking',
+                        errorType: 'title_char_limit',
                         error: 'Title character limit exceeded',
                         solution: 'Optimize product title to meet Amazon\'s character limit requirements. Keep it concise while maintaining keywords.',
                         status: TaskStatus.PENDING
@@ -164,6 +180,7 @@ class CreateTaskService {
                         productName,
                         asin: error.asin,
                         errorCategory: 'ranking',
+                        errorType: 'duplicate_words',
                         error: 'Title contains duplicate words',
                         solution: 'Remove duplicate words from the product title to improve search ranking and customer experience.',
                         status: TaskStatus.PENDING
@@ -181,6 +198,7 @@ class CreateTaskService {
                         productName,
                         asin: error.asin,
                         errorCategory: 'ranking',
+                        errorType: 'additional_ranking_issues',
                         error: `Additional ranking optimization needed (${remainingErrors} issues)`,
                         solution: 'Review and optimize product listing elements including keywords, backend search terms, and other ranking factors.',
                         status: TaskStatus.PENDING
@@ -210,6 +228,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'missing_aplus_content',
                     error: 'A+ Content missing or needs improvement',
                     solution: 'Create compelling A+ Content with high-quality images and detailed product information to improve conversion rates.',
                     status: TaskStatus.PENDING
@@ -223,6 +242,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'poor_images',
                     error: 'Product images need improvement',
                     solution: 'Upload high-quality product images that meet Amazon\'s requirements. Ensure main image has white background and shows the product clearly.',
                     status: TaskStatus.PENDING
@@ -236,6 +256,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'missing_video',
                     error: 'Product video missing or low quality',
                     solution: 'Add a professional product demonstration video to showcase features and benefits, improving customer engagement.',
                     status: TaskStatus.PENDING
@@ -249,6 +270,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'insufficient_reviews',
                     error: 'Insufficient reviews or poor review quality',
                     solution: 'Implement review acquisition strategy through follow-up emails and improve product quality to earn better reviews.',
                     status: TaskStatus.PENDING
@@ -262,6 +284,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'low_star_rating',
                     error: 'Star rating below optimal threshold',
                     solution: 'Focus on improving product quality and customer service to achieve higher star ratings.',
                     status: TaskStatus.PENDING
@@ -275,6 +298,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'conversion',
+                    errorType: 'no_buybox',
                     error: 'Not winning the Buy Box',
                     solution: 'Optimize pricing, improve seller metrics, and ensure fast shipping to win the Buy Box more frequently.',
                     status: TaskStatus.PENDING
@@ -303,6 +327,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'inventory',
+                    errorType: 'inventory_planning',
                     error: 'Inventory planning optimization required',
                     solution: 'Review inventory levels and adjust replenishment strategy to avoid stockouts while minimizing storage costs.',
                     status: TaskStatus.PENDING
@@ -316,6 +341,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'inventory',
+                    errorType: 'stranded_inventory',
                     error: 'Stranded inventory detected',
                     solution: 'Review and fix listing issues causing stranded inventory. Check for suppressed or incomplete listings.',
                     status: TaskStatus.PENDING
@@ -329,6 +355,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'inventory',
+                    errorType: 'inbound_non_compliance',
                     error: 'Inbound shipment non-compliance',
                     solution: 'Review and correct inbound shipment preparation to meet Amazon\'s requirements and avoid fees.',
                     status: TaskStatus.PENDING
@@ -342,6 +369,7 @@ class CreateTaskService {
                     productName,
                     asin: error.asin,
                     errorCategory: 'inventory',
+                    errorType: 'replenishment_needed',
                     error: 'Product restocking required',
                     solution: 'Create replenishment shipment to avoid stockout. Review sales velocity and adjust reorder points.',
                     status: TaskStatus.PENDING
@@ -363,11 +391,14 @@ class CreateTaskService {
         profitabilityErrors.forEach(error => {
             let errorMessage;
             let solution;
+            let errorType;
             
             if (error.errorType === 'negative_profit') {
+                errorType = 'negative_profit';
                 errorMessage = `Product has negative profit: $${error.netProfit.toFixed(2)}`;
                 solution = 'Review pricing strategy, reduce costs, or optimize advertising spend to achieve profitability.';
             } else {
+                errorType = 'low_profit_margin';
                 errorMessage = `Low profit margin: ${error.profitMargin.toFixed(1)}%`;
                 solution = 'Improve profit margins by optimizing pricing, reducing costs, or improving advertising efficiency.';
             }
@@ -377,6 +408,7 @@ class CreateTaskService {
                 productName: `Product ${error.asin}`,
                 asin: error.asin,
                 errorCategory: 'profitability',
+                errorType: errorType,
                 error: errorMessage,
                 solution: solution,
                 status: TaskStatus.PENDING
@@ -398,31 +430,38 @@ class CreateTaskService {
         sponsoredAdsErrors.forEach(error => {
             let errorMessage;
             let solution;
+            let errorType;
             const productName = error.asin ? `Product ${error.asin}` : `Keyword: ${error.keyword}`;
             
             // Each error type gets its own specific task
             switch (error.errorType) {
                 case 'high_acos':
+                    errorType = 'high_acos';
                     errorMessage = `High ACOS detected (${error.acos.toFixed(1)}%)`;
                     solution = 'Optimize keywords, improve product listing, or adjust bids to reduce ACOS and improve profitability.';
                     break;
                 case 'no_sales_high_spend':
+                    errorType = 'no_sales_high_spend';
                     errorMessage = `High spend with no sales ($${error.spend.toFixed(2)})`;
                     solution = 'Review keyword relevance, improve product listing, or pause underperforming keywords.';
                     break;
                 case 'marginal_profit':
+                    errorType = 'marginal_profit';
                     errorMessage = `Marginal profitability (ACOS: ${error.acos.toFixed(1)}%)`;
                     solution = 'Fine-tune bidding strategy and keyword targeting to improve campaign efficiency.';
                     break;
                 case 'extreme_high_acos':
+                    errorType = 'extreme_high_acos';
                     errorMessage = `Extremely high ACOS (${error.acos.toFixed(1)}%)`;
                     solution = 'Immediately review and optimize or pause this keyword to prevent further losses.';
                     break;
                 case 'keyword_no_sales':
+                    errorType = 'keyword_no_sales';
                     errorMessage = `Keyword with spend but no sales ($${error.spend.toFixed(2)})`;
                     solution = 'Consider adding as negative keyword or improving product listing relevance.';
                     break;
                 default:
+                    errorType = 'general_optimization';
                     errorMessage = `Sponsored ads optimization needed (ACOS: ${error.acos.toFixed(1)}%)`;
                     solution = 'Review and optimize sponsored ads performance.';
             }
@@ -433,6 +472,7 @@ class CreateTaskService {
                 productName,
                 asin: error.asin || 'N/A',
                 errorCategory: 'sponsoredAds',
+                errorType: errorType,
                 error: errorMessage,
                 solution: solution,
                 status: TaskStatus.PENDING

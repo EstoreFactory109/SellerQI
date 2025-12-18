@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL');
@@ -187,21 +188,63 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
     }
 };
 
+/**
+ * Convert TSV buffer to JSON using csv-parse library
+ * More robust handling of malformed data, encoding issues, and edge cases
+ */
 function convertTSVToJson(tsvBuffer) {
-    const tsv = tsvBuffer.toString("utf-8");  // Convert Buffer to string
+    try {
+        const tsv = tsvBuffer.toString("utf-8");
+        
+        if (!tsv || tsv.trim().length === 0) {
+            logger.warn('[GET_STRANDED_INVENTORY_UI_DATA] TSV buffer is empty');
+            return [];
+        }
 
+        const records = parse(tsv, {
+            columns: true,
+            delimiter: '\t',
+            skip_empty_lines: true,
+            relax_column_count: true,
+            trim: true,
+            skip_records_with_error: true
+        });
+
+        logger.info('[GET_STRANDED_INVENTORY_UI_DATA] TSV parsed successfully', { 
+            totalRecords: records.length 
+        });
+
+        return records;
+
+    } catch (error) {
+        logger.error('[GET_STRANDED_INVENTORY_UI_DATA] TSV parsing failed', { 
+            error: error.message 
+        });
+
+        // Fallback to legacy parsing
+        try {
+            return convertTSVToJsonLegacy(tsvBuffer);
+        } catch (fallbackError) {
+            logger.error('[GET_STRANDED_INVENTORY_UI_DATA] Fallback parsing also failed', { 
+                error: fallbackError.message 
+            });
+            return [];
+        }
+    }
+}
+
+function convertTSVToJsonLegacy(tsvBuffer) {
+    const tsv = tsvBuffer.toString("utf-8");
     const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    if (rows.length === 0) return [];
     const headers = rows[0].split("\t");
-
-    const jsonData = rows.slice(1).map(row => {
+    return rows.slice(1).map(row => {
         const values = row.split("\t");
         return headers.reduce((obj, header, index) => {
-            obj[header] = values[index] || ""; 
+            obj[header] = values[index] || "";
             return obj;
         }, {});
     });
-
-    return jsonData;
 }
 
 module.exports = getReport;

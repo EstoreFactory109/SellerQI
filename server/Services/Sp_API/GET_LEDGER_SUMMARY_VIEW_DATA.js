@@ -1,5 +1,6 @@
 const axios = require("axios");
 const zlib = require("zlib");
+const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel');
@@ -238,20 +239,22 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
     }
 };
 
+/**
+ * Convert TSV buffer to JSON using csv-parse library
+ * Handles gzip decompression and normalizes headers (lowercase, replace hyphens/spaces with underscores)
+ */
 function convertTSVToJson(tsvBuffer) {
     try {
         // First try to decompress if it's gzipped
         let decompressedData;
-        let isGzipped = false;
         
         // Check if data is gzipped by looking at magic bytes (1F 8B)
         const firstBytes = tsvBuffer.slice(0, 2);
         if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
-            isGzipped = true;
             try {
                 decompressedData = zlib.gunzipSync(tsvBuffer);
             } catch (decompressError) {
-                logger.error("Failed to decompress gzipped data:", decompressError.message);
+                logger.error("[GET_LEDGER_SUMMARY_VIEW_DATA] Failed to decompress gzipped data:", decompressError.message);
                 throw new Error(`Failed to decompress gzipped data: ${decompressError.message}`);
             }
         } else {
@@ -260,55 +263,93 @@ function convertTSVToJson(tsvBuffer) {
         
         const tsv = decompressedData.toString("utf-8");
         
-        // Log preview of decompressed data for debugging
+        if (!tsv || tsv.trim().length === 0) {
+            logger.warn('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV buffer is empty');
+            return [];
+        }
+
+        // Log preview for debugging
         if (tsv.length > 0) {
             const preview = tsv.substring(0, 500);
-            logger.info(`📄 Decompressed TSV Preview (first 500 chars): ${preview}`);
-        }
-        
-        const rows = tsv.split("\n").filter(row => row.trim() !== "");
-        
-        logger.info(`📊 TSV parsing: Found ${rows.length} total rows (including header)`);
-        
-        if (rows.length === 0) {
-            return [];
+            logger.info(`[GET_LEDGER_SUMMARY_VIEW_DATA] TSV Preview (first 500 chars): ${preview}`);
         }
 
-        if (rows.length === 1) {
-            return [];
-        }
-
-        const headers = rows[0].split("\t").map(h => {
-            let header = h.trim();
-            if (header.startsWith('"') && header.endsWith('"')) {
-                header = header.slice(1, -1);
-            }
-            return header;
-        });
-
-        const jsonData = rows.slice(1).map((row) => {
-            const values = row.split("\t");
-            const obj = {};
-            
-            headers.forEach((header, index) => {
-                let value = values[index] ? values[index].trim() : "";
-                
-                if (value.startsWith('"') && value.endsWith('"')) {
-                    value = value.slice(1, -1);
+        // Use csv-parse with custom column transformation to normalize headers
+        const records = parse(tsv, {
+            columns: (headers) => headers.map(h => {
+                let header = h.trim();
+                if (header.startsWith('"') && header.endsWith('"')) {
+                    header = header.slice(1, -1);
                 }
-                
-                const cleanHeader = header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
-                obj[cleanHeader] = value;
-            });
-            
-            return obj;
+                // Normalize: lowercase, replace hyphens and spaces with underscores
+                return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
+            }),
+            delimiter: '\t',
+            skip_empty_lines: true,
+            relax_column_count: true,
+            trim: true,
+            skip_records_with_error: true,
+            relax_quotes: true
         });
 
-        return jsonData;
+        logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV parsed successfully', { 
+            totalRecords: records.length 
+        });
+
+        return records;
+
     } catch (error) {
-        logger.error("Error converting TSV to JSON:", error.message);
-        throw error;
+        logger.error('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV parsing failed', { 
+            error: error.message 
+        });
+
+        // Fallback to legacy parsing
+        try {
+            return convertTSVToJsonLegacy(tsvBuffer);
+        } catch (fallbackError) {
+            logger.error('[GET_LEDGER_SUMMARY_VIEW_DATA] Fallback parsing also failed', { 
+                error: fallbackError.message 
+            });
+            throw error;
+        }
     }
+}
+
+function convertTSVToJsonLegacy(tsvBuffer) {
+    let decompressedData;
+    const firstBytes = tsvBuffer.slice(0, 2);
+    if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
+        decompressedData = zlib.gunzipSync(tsvBuffer);
+    } else {
+        decompressedData = tsvBuffer;
+    }
+    
+    const tsv = decompressedData.toString("utf-8");
+    const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    
+    if (rows.length <= 1) return [];
+
+    const headers = rows[0].split("\t").map(h => {
+        let header = h.trim();
+        if (header.startsWith('"') && header.endsWith('"')) {
+            header = header.slice(1, -1);
+        }
+        return header;
+    });
+
+    return rows.slice(1).map((row) => {
+        const values = row.split("\t");
+        const obj = {};
+        headers.forEach((header, index) => {
+            let value = values[index] ? values[index].trim() : "";
+            if (value.startsWith('"') && value.endsWith('"')) {
+                value = value.slice(1, -1);
+            }
+            const cleanHeader = header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
+            obj[cleanHeader] = value;
+        });
+        return obj;
+    });
 }
 
 module.exports = getReport;

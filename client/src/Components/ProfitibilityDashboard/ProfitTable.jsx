@@ -331,16 +331,15 @@ const ProfitTable = ({ setSuggestionsData }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200">
-                <th className="w-1/5 px-3 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>
-                <th className="w-24 px-2 py-6 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
-                <th className="w-14 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Units</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
-                <th className="w-18 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Net</th>
-                <th className="w-16 px-2 py-6 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                <th className="w-1/4 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">Product</th>
+                <th className="w-28 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
+                <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
+                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Net</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -355,29 +354,24 @@ const ProfitTable = ({ setSuggestionsData }) => {
                        transition={{ duration: 0.3, delay: index * 0.05 }}
                        className="hover:bg-gray-50 transition-colors duration-200"
                      >
-                       <td className="px-3 py-8">
-                         <div className="flex items-center gap-2">
-                           <div className="w-6 h-6 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                             <Package className="w-3 h-3 text-blue-600" />
+                       <td className="px-4 py-5 align-middle">
+                         <div className="min-w-0">
+                           <div className="text-sm font-medium text-gray-900 leading-relaxed break-words" title={product.name}>
+                             {product.name}
                            </div>
-                           <div className="min-w-0 flex-1">
-                             <div className="text-[10px] font-medium text-gray-900 leading-relaxed break-words" title={product.name}>
-                               {product.name}
-                             </div>
-                             <div className="text-[9px] text-gray-500">#{indexOfFirstProduct + index + 1}</div>
-                           </div>
+                           <div className="text-xs text-gray-500">#{indexOfFirstProduct + index + 1}</div>
                          </div>
                        </td>
-                       <td className="px-2 py-8 align-top">
-                         <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded block whitespace-nowrap" title={product.asin}>{product.asin}</span>
+                       <td className="px-4 py-5 align-middle">
+                         <span className="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={product.asin}>{product.asin}</span>
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
-                         <span className="text-xs font-semibold text-gray-900">{product.units.toLocaleString()}</span>
+                       <td className="px-3 py-5 text-center align-middle">
+                         <span className="text-sm font-semibold text-gray-900">{product.units.toLocaleString()}</span>
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
-                         <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.sales, currency)}</span>
+                       <td className="px-3 py-5 text-center align-middle">
+                         <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.sales, currency)}</span>
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
+                       <td className="px-3 py-5 text-center align-middle">
                          <div className="flex items-center justify-center">
                            <div className="relative">
                              <input
@@ -385,31 +379,31 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                value={cogsValues[product.asin] || ''}
                                onChange={(e) => handleCogsChange(product.asin, e.target.value)}
                                placeholder="0"
-                               className="w-14 px-1.5 py-1 text-[10px] text-center border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                               className="w-16 px-2 py-1.5 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                                step="0.01"
                                min="0"
                              />
                            </div>
                          </div>
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
-                         <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.adSpend, currency)}</span>
+                       <td className="px-3 py-5 text-center align-middle">
+                         <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.adSpend, currency)}</span>
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
-                        <span className="text-xs font-semibold text-gray-900">{formatCurrencyWithLocale(product.amazonFees, currency)}</span>
+                       <td className="px-3 py-5 text-center align-middle">
+                        <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.amazonFees, currency)}</span>
                       </td>
-                       <td className="px-2 py-8 text-center align-top">
-                         <span className={`text-xs font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                       <td className="px-3 py-5 text-center align-middle">
+                         <span className={`text-sm font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                            {formatCurrencyWithLocale(product.grossProfit, currency)}
                          </span>
                        </td>
-                       <td className="px-2 py-8 text-center relative align-top">
+                       <td className="px-3 py-5 text-center relative align-middle">
                          <div className={`${
                            !cogsValues[product.asin] || cogsValues[product.asin] === 0 
                              ? 'filter blur-sm' 
                              : ''
                          }`}>
-                           <span className={`text-xs font-bold ${
+                           <span className={`text-sm font-bold ${
                              !cogsValues[product.asin] || cogsValues[product.asin] === 0 
                                ? 'text-gray-400' 
                                : product.netProfit < 0 ? 'text-red-600' : 'text-emerald-600'
@@ -419,22 +413,17 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          </div>
                          {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
                            <div className="absolute inset-0 flex items-center justify-center">
-                             <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full border border-blue-200 shadow-sm">
+                             <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 shadow-sm">
                                +COGS
                              </span>
                            </div>
                          )}
                        </td>
-                       <td className="px-2 py-8 text-center align-top">
-                         <div className="flex justify-center">
-                           {getStatusIcon(product.status)}
-                         </div>
-                       </td>
                      </motion.tr>
                   ))
                                  ) : (
                    <tr>
-                    <td colSpan="11" className="px-3 py-12 text-center">
+                    <td colSpan="9" className="px-3 py-12 text-center">
                        <div className="flex flex-col items-center gap-3">
                          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                            <Package className="w-8 h-8 text-gray-400" />

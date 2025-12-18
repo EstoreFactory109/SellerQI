@@ -7,6 +7,48 @@ const { calculateFees } = require('./ActualFeesCalculations.js');
 const logger = require('../../utils/Logger.js');
 
 /**
+ * Extract date from shipment name
+ * Shipment names follow pattern: "FBA (29/06/2020, 04:07) - 1"
+ * The date is in format (DD/MM/YYYY, HH:mm)
+ * @param {string} shipmentName - The shipment name containing the date
+ * @returns {string} - Date string in YYYY-MM-DD format or today's date if not found
+ */
+const extractDateFromShipmentName = (shipmentName) => {
+    if (!shipmentName) {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    
+    // Regex to match date pattern (DD/MM/YYYY, HH:mm) in parentheses
+    // Example: "FBA (29/06/2020, 04:07) - 1"
+    const datePattern = /\((\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}):(\d{2})\)/;
+    const match = shipmentName.match(datePattern);
+    
+    if (match) {
+        const [, day, month, year] = match;
+        // Validate day, month, year are valid numbers
+        const dayNum = parseInt(day);
+        const monthNum = parseInt(month);
+        const yearNum = parseInt(year);
+        
+        if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12 && yearNum >= 1900) {
+            // Return date in YYYY-MM-DD format directly (avoids timezone issues)
+            return `${year}-${month}-${day}`;
+        }
+    }
+    
+    // Return today's date as fallback
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+/**
  * Calculate shipment discrepancy and reimbursement amounts
  * @param {string} userId - User ID
  * @param {string} country - Country code
@@ -173,6 +215,7 @@ const calculateShipmentDiscrepancy = async (userId, country, region) => {
                 // Only include items with discrepancy (discrepancy > 0)
                 if (discrepancy > 0) {
                     calculations.push({
+                        date: extractDateFromShipmentName(shipment.shipmentName),
                         shipmentId: shipment.shipmentId || '',
                         shipmentName: shipment.shipmentName || '',
                         sellerSKU: sellerSKU,

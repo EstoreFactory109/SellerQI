@@ -1,26 +1,123 @@
-const replenishmentQty = (productArr)=>{
+/**
+ * Map currency code to country code
+ */
+const currencyToCountry = {
+    'USD': 'US',
+    'CAD': 'CA',
+    'MXN': 'MX',
+    'GBP': 'UK',
+    'EUR': 'EU',
+    'JPY': 'JP',
+    'AUD': 'AU',
+    'INR': 'IN',
+    'BRL': 'BR',
+    'SGD': 'SG',
+    'AED': 'AE',
+    'SAR': 'SA',
+    'PLN': 'PL',
+    'SEK': 'SE',
+    'TRY': 'TR',
+    'EGP': 'EG'
+};
+
+/**
+ * Evaluate replenishment status for products based on Amazon's recommended replenishment quantity and alert status.
+ * 
+ * Logic (priority order):
+ * 1. If alert is "out_of_stock" → Critical Error (highest priority)
+ * 2. If Amazon recommends >30 units → Error (low inventory, urgent)
+ * 3. If Amazon recommends 11-30 units → Warning (monitor closely)
+ * 4. If Amazon recommends 0-10 units → Success (healthy inventory)
+ * 
+ * Note: Same ASIN can appear multiple times (different SKUs). Each is processed separately.
+ * 
+ * @param {Array} productArr - Array of products with replenishment data
+ * @returns {Array} - Array of products with status, message, and how to solve
+ */
+const replenishmentQty = (productArr) => {
     let replenishmentArr = [];
-    productArr.map(elm=>{
-        if(elm.RecommendedReplenishmentQty>30){
-            let data={
-                asin:elm.asin,
-                data:elm.RecommendedReplenishmentQty,
-                status:"Success",
-                Message:"Great job maintaining healthy inventory levels! Keeping your inventory well-stocked ensures that you can continuously meet customer demand and sustain your sales momentum on Amazon.",
-                HowToSolve:""
-            }
-            replenishmentArr.push(data);
-        }else{
-            let data={
-                asin:elm.asin,
-                data:elm.RecommendedReplenishmentQty,
-                status:"Error",
-                Message:"Your inventory levels for specific products are low, which risks stockouts that could lead to missed sales opportunities and potential damage to your ranking and Buy Box eligibility.",
-                HowToSolve:"Act quickly to replenish your inventory. Analyze your sales data to forecast demand more accurately and plan your inventory levels accordingly. Consider setting up automatic restocking alerts in Amazon Seller Central to maintain optimal inventory levels and prevent future stockouts. Evaluate your supply chain for any bottlenecks and seek to improve efficiency in areas like manufacturing lead times and shipping."
-            }
-            replenishmentArr.push(data);
+    
+    productArr.forEach(elm => {
+        const asin = elm.asin;
+        if (!asin) return;
+        
+        // Handle both old field name (RecommendedReplenishmentQty) and new field name (recommendedReplenishmentQty)
+        const qty = Number(elm.RecommendedReplenishmentQty || elm.recommendedReplenishmentQty) || 0;
+        
+        // Get alert field - stored as "out_of_stock" or ""
+        const alert = elm.alert || elm.Alert || "";
+        
+        // Get available quantity from the product data
+        const available = Number(elm.available || elm.Available || 0);
+        
+        // Get SKU for identification when same ASIN has multiple entries
+        const sku = elm.merchantSku || elm.MerchantSku || elm.sku || "";
+        
+        // Get currency code and derive country code
+        const currencyCode = elm.currencyCode || elm.CurrencyCode || "";
+        const countryCode = currencyToCountry[currencyCode.toUpperCase()] || "";
+        
+        // Helper to format ASIN with country code
+        const asinDisplay = countryCode ? `${asin} (${countryCode})` : asin;
+        
+        // PRIORITY 1: Check for out_of_stock alert (Critical)
+        if (alert === "out_of_stock") {
+            replenishmentArr.push({
+                asin: asin,
+                sku: sku,
+                countryCode: countryCode,
+                data: qty,
+                alert: alert,
+                available: available,
+                status: "Error",
+                Message: `CRITICAL: ${asinDisplay} (SKU: ${sku || 'N/A'}) is OUT OF STOCK! Currently ${available} units available. You are losing sales and your ranking/Buy Box eligibility is being damaged. Immediate action required.`,
+                HowToSolve: `Urgently create an FBA shipment to replenish this product with ${qty > 0 ? qty : 'recommended'} units. If you have inventory available, consider using Amazon's partnered carrier for faster inbound. Contact your supplier immediately if you need to reorder. In the meantime, pause advertising spend for this product to avoid wasted ad costs.`
+            });
         }
-    })
+        // PRIORITY 2: High replenishment qty (>30)
+        else if (qty > 30) {
+            replenishmentArr.push({
+                asin: asin,
+                sku: sku,
+                countryCode: countryCode,
+                data: qty,
+                alert: alert,
+                available: available,
+                status: "Error",
+                Message: `Urgent: ${asinDisplay} (SKU: ${sku || 'N/A'}) - Only ${available} units available. Amazon recommends replenishing ${qty} units. Risk of stockout is high.`,
+                HowToSolve: "Act quickly to replenish your inventory. Create an FBA shipment immediately with the recommended quantity. Analyze your sales data to forecast demand more accurately. Consider setting up automatic restocking alerts in Amazon Seller Central. Evaluate your supply chain for bottlenecks and improve efficiency in manufacturing lead times and shipping."
+            });
+        }
+        // PRIORITY 3: Moderate replenishment qty (11-30)
+        else if (qty > 10) {
+            replenishmentArr.push({
+                asin: asin,
+                sku: sku,
+                countryCode: countryCode,
+                data: qty,
+                alert: alert,
+                available: available,
+                status: "Warning",
+                Message: `${asinDisplay} (SKU: ${sku || 'N/A'}) - ${available} units available. Amazon recommends replenishing ${qty} units. Monitor inventory levels to avoid potential stockouts.`,
+                HowToSolve: "Plan your next replenishment shipment soon. Review your sales trends and lead times to ensure timely restocking. Consider creating an FBA shipment within the next 1-2 weeks."
+            });
+        }
+        // PRIORITY 4: Low/zero replenishment qty (0-10) - Healthy
+        else {
+            replenishmentArr.push({
+                asin: asin,
+                sku: sku,
+                countryCode: countryCode,
+                data: qty,
+                alert: alert,
+                available: available,
+                status: "Success",
+                Message: `Great job! ${asinDisplay} (SKU: ${sku || 'N/A'}) - ${available} units available. Your stock is sufficient to meet customer demand.`,
+                HowToSolve: ""
+            });
+        }
+    });
+    
     return replenishmentArr;
 }
 

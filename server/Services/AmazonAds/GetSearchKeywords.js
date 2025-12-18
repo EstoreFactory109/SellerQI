@@ -39,7 +39,7 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
             const now = new Date();
             const endDate = new Date(now.getTime() - (72 * 60 * 60 * 1000)); // 72 hours before now
             const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
-            
+
             // Format dates as YYYY-MM-DD strings
             const formatDate = (date) => {
                 return date.toISOString().split('T')[0];
@@ -63,6 +63,8 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                     "columns": [
                         "campaignId",
                         "campaignName",
+                        "adGroupId",
+                        "adGroupName",
                         "searchTerm",
                         "keyword",
                         "clicks",
@@ -187,7 +189,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 // Handle 401 Unauthorized - refresh token and continue polling
                 if (error.response && error.response.status === 401) {
                     console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
-                    
+
                     if (tokenRefreshCallback) {
                         try {
                             // Get a fresh token using the callback
@@ -209,7 +211,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                         throw new Error('Token expired during polling and no refresh callback provided');
                     }
                 }
-                
+
                 // If it's a network error, we might want to retry
                 if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
                     console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
@@ -284,11 +286,14 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                 sponsoredAdsData.push({
                     campaignId: item.campaignId || '',
                     campaignName: item.campaignName || '',
+                    adGroupId: item.adGroupId || '',
+                    adGroupName: item.adGroupName || item.adGroup || '',
                     searchTerm: item.searchTerm || '',
                     keyword: item.keyword || '',
                     clicks: item.clicks || 0,
                     sales: item.sales30d || 0,
-                    spend: item.cost || 0
+                    spend: item.cost || 0,
+                    impressions: item.impressions || 0
                 })
             });
 
@@ -395,16 +400,16 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         if (reportStatus.status === 'COMPLETED') {
             // Use the latest token if refreshed during polling
             const downloadToken = reportStatus.finalAccessToken || currentToken;
-            
+
             // Download and parse the report data (with token refresh support)
             const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
             // Add validation and logging
             console.log(`✅ Processing ${reportContent.length} search terms for user ${userId}`);
-            
+
             if (!reportContent || reportContent.length === 0) {
                 console.warn('No search terms data available for the specified period', { userId, region, country });
-                
+
                 // Save empty result for consistency
                 const createSearchTermsData = await SearchTerms.create({
                     userId: userId,
@@ -412,7 +417,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                     region: region,
                     searchTermsData: []
                 });
-                
+
                 return {
                     success: true,
                     message: "No search terms data available for the specified period",
@@ -429,13 +434,13 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                 });
 
                 if (!createSearchTermsData) {
-                    console.warn('Failed to save search terms data to database, but continuing with API data', { 
-                        userId, 
-                        region, 
+                    console.warn('Failed to save search terms data to database, but continuing with API data', {
+                        userId,
+                        region,
                         country,
-                        dataLength: reportContent.length 
+                        dataLength: reportContent.length
                     });
-                    
+
                     return {
                         success: true,
                         message: "Search terms data retrieved but not saved to database",
@@ -457,14 +462,14 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                 };
 
             } catch (dbError) {
-                console.error('Database error while saving search terms data', { 
-                    error: dbError.message, 
-                    userId, 
-                    region, 
+                console.error('Database error while saving search terms data', {
+                    error: dbError.message,
+                    userId,
+                    region,
                     country,
                     dataLength: reportContent.length
                 });
-                
+
                 // Return the data anyway, even if DB save failed
                 return {
                     success: true,

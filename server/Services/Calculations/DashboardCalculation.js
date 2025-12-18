@@ -579,11 +579,13 @@ const analyseData = async (data, userId = null) => {
             errorCount++;
         }
 
-        // Check replenishment/restock errors
-        const replenishmentError = activeInventoryAnalysis.replenishment?.find((item) => item && item.asin === asin && item.status === "Error");
-        if (replenishmentError) {
-            invData.replenishmentErrorData = replenishmentError;
-            errorCount++;
+        // Check replenishment/restock errors - get ALL errors for this ASIN (multiple SKUs possible)
+        const replenishmentErrors = activeInventoryAnalysis.replenishment?.filter((item) => item && item.asin === asin && item.status === "Error") || [];
+        if (replenishmentErrors.length > 0) {
+            // Store all errors as an array
+            invData.replenishmentErrorData = replenishmentErrors.length === 1 ? replenishmentErrors[0] : replenishmentErrors;
+            invData.replenishmentErrorCount = replenishmentErrors.length;
+            errorCount += replenishmentErrors.length;
         }
 
         return { data: invData, errorCount };

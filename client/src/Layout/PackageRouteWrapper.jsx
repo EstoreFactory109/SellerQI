@@ -140,7 +140,8 @@ const PackageRouteWrapper = ({ children }) => {
 
     // Define allowed routes for LITE users
     const liteAllowedRoutes = [
-      '/seller-central-checker/asin-analyzer',
+      '/seller-central-checker/tasks',
+      '/seller-central-checker/ecommerce-calendar',
       '/seller-central-checker/settings'
     ];
 
@@ -184,14 +185,14 @@ const PackageRouteWrapper = ({ children }) => {
 
     // Handle users who chose LITE plan (hide pages, redirect)
     if (choseLitePlan() && isRestrictedRoute) {
-      navigate('/seller-central-checker/asin-analyzer', { replace: true });
+      navigate('/seller-central-checker/tasks', { replace: true });
       return;
     }
 
-    // If user has LITE package and is on the base seller-central-checker route, redirect to asin-analyzer
+    // If user has LITE package and is on the base seller-central-checker route, redirect to tasks
     // But only if they chose LITE plan (not if they were downgraded from trial)
     if (choseLitePlan() && currentPath === '/seller-central-checker') {
-      navigate('/seller-central-checker/asin-analyzer', { replace: true });
+      navigate('/seller-central-checker/tasks', { replace: true });
       return;
     }
 

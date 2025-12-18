@@ -26,11 +26,17 @@ const logger = require('../../utils/Logger.js');
  * @returns {Promise<Object>} Result with success status and data
  */
 async function fetchAndStoreEconomicsData(userId, refreshToken, region, country) {
-    logger.info('Starting MCP Economics data fetch', { userId, region, country });
+    logger.info('Starting MCP Economics data fetch', { 
+        userId, 
+        region, 
+        country,
+        hasRefreshToken: !!refreshToken,
+        refreshTokenLength: refreshToken ? refreshToken.length : 0
+    });
 
     try {
         if (!refreshToken) {
-            logger.warn('No refresh token provided for MCP economics fetch', { userId, region, country });
+            logger.error('[MCP Economics] No refresh token provided', { userId, region, country });
             return {
                 success: false,
                 error: 'Refresh token not available',

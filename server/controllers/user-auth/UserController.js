@@ -240,6 +240,8 @@ const verifyUser = asyncHandler(async (req, res) => {
 
 const profileUser = asyncHandler(async (req, res) => {
     const userId = req.userId;
+    console.log('=== PROFILE ENDPOINT CALLED ===');
+    console.log('userId:', userId);
 
     if (!userId) {
         logger.error(new ApiError(400, "User id is missing"));
@@ -247,6 +249,7 @@ const profileUser = asyncHandler(async (req, res) => {
     }
 
     const userProfile = await getUserById(userId);
+    console.log('userProfile from getUserById:', JSON.stringify(userProfile, null, 2));
 
     if (!userProfile) {
         logger.error(new ApiError(404, "User not found"));

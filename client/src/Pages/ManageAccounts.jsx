@@ -15,10 +15,6 @@ import {
   Calendar,
   Mail,
   Phone,
-  MoreVertical,
-  Trash2,
-  Edit3,
-  Eye,
   CalendarDays,
   X,
   Download,
@@ -119,6 +115,8 @@ const ManageAccounts = () => {
   const [filterType, setFilterType] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [spApiFilter, setSpApiFilter] = useState('all'); // 'all', 'connected', 'not-connected'
+  const [adsFilter, setAdsFilter] = useState('all'); // 'all', 'connected', 'not-connected'
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -127,6 +125,35 @@ const ManageAccounts = () => {
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+
+  // Helper functions to check API connection status (defined before useMemo)
+  const getSpApiConnectionStatus = (user) => {
+    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
+      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+    }
+    
+    const hasSpApiToken = user.sellerCentral.sellerAccount.some(account => 
+      account.spiRefreshToken && account.spiRefreshToken.trim() !== ''
+    );
+    
+    return hasSpApiToken 
+      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
+      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+  };
+
+  const getAdsApiConnectionStatus = (user) => {
+    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
+      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+    }
+    
+    const hasAdsApiToken = user.sellerCentral.sellerAccount.some(account => 
+      account.adsRefreshToken && account.adsRefreshToken.trim() !== ''
+    );
+    
+    return hasAdsApiToken 
+      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
+      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
+  };
 
   // Filter and search users
   const filteredUsers = useMemo(() => {
@@ -183,8 +210,28 @@ const ManageAccounts = () => {
       });
     }
 
+    // Apply SP-API connection filter
+    if (spApiFilter !== 'all') {
+      filtered = filtered.filter(user => {
+        const spApiStatus = getSpApiConnectionStatus(user);
+        return spApiFilter === 'connected' 
+          ? spApiStatus.connected 
+          : !spApiStatus.connected;
+      });
+    }
+
+    // Apply Ads API connection filter
+    if (adsFilter !== 'all') {
+      filtered = filtered.filter(user => {
+        const adsApiStatus = getAdsApiConnectionStatus(user);
+        return adsFilter === 'connected' 
+          ? adsApiStatus.connected 
+          : !adsApiStatus.connected;
+      });
+    }
+
     return filtered;
-  }, [users, searchQuery, filterType, startDate, endDate, loading]);
+  }, [users, searchQuery, filterType, startDate, endDate, spApiFilter, adsFilter, loading]);
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / ITEMS_PER_PAGE));
 
@@ -318,34 +365,6 @@ const ManageAccounts = () => {
     });
   };
 
-  // Helper functions to check API connection status
-  const getSpApiConnectionStatus = (user) => {
-    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
-      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
-    }
-    
-    const hasSpApiToken = user.sellerCentral.sellerAccount.some(account => 
-      account.spiRefreshToken && account.spiRefreshToken.trim() !== ''
-    );
-    
-    return hasSpApiToken 
-      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
-      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
-  };
-
-  const getAdsApiConnectionStatus = (user) => {
-    if (!user.sellerCentral || !user.sellerCentral.sellerAccount || user.sellerCentral.sellerAccount.length === 0) {
-      return { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
-    }
-    
-    const hasAdsApiToken = user.sellerCentral.sellerAccount.some(account => 
-      account.adsRefreshToken && account.adsRefreshToken.trim() !== ''
-    );
-    
-    return hasAdsApiToken 
-      ? { connected: true, label: 'Connected', color: 'text-green-600', bg: 'bg-green-50' }
-      : { connected: false, label: 'Not Connected', color: 'text-red-600', bg: 'bg-red-50' };
-  };
 
   const clearDateFilters = () => {
     setStartDate('');
@@ -649,53 +668,111 @@ const ManageAccounts = () => {
               </div>
             </div>
 
-            {/* Second Row: Date Filters */}
-            <div className="flex flex-col sm:flex-row gap-4 items-start">
-              {/* Date Filter Label */}
-              <div className="flex items-center gap-2 text-sm font-medium text-gray-700 sm:w-24">
-                <CalendarDays className="w-4 h-4" />
-                Date Range:
+            {/* Second Row: Date Filters and API Connection Filters */}
+            <div className="flex flex-col gap-4">
+              {/* Date Range Row */}
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+                {/* Date Filter Label */}
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-700 sm:w-24">
+                  <CalendarDays className="w-4 h-4" />
+                  Date Range:
+                </div>
+                
+                {/* Date Inputs */}
+                <div className="flex flex-col sm:flex-row gap-3 flex-1">
+                  <div className="relative flex-1">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="date"
+                      placeholder="Start Date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-center text-gray-400 px-2">
+                    <span className="text-sm">to</span>
+                  </div>
+                  
+                  <div className="relative flex-1">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="date"
+                      placeholder="End Date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
+                    />
+                  </div>
+                  
+                  {/* Clear Date Filter Button */}
+                  {(startDate || endDate) && (
+                    <button
+                      onClick={clearDateFilters}
+                      className="flex items-center gap-1 px-3 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                      title="Clear date filters"
+                    >
+                      <X className="w-4 h-4" />
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
-              
-              {/* Date Inputs */}
-              <div className="flex flex-col sm:flex-row gap-3 flex-1">
-                <div className="relative flex-1">
-                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <input
-                    type="date"
-                    placeholder="Start Date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
-                  />
+
+              {/* API Connection Filters Row */}
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+                {/* API Filters Label */}
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-700 sm:w-24">
+                  <Link className="w-4 h-4" />
+                  API Status:
                 </div>
                 
-                <div className="flex items-center justify-center text-gray-400 px-2">
-                  <span className="text-sm">to</span>
+                {/* API Filter Dropdowns */}
+                <div className="flex flex-col sm:flex-row gap-3 flex-1">
+                  {/* SP-API Filter */}
+                  <div className="relative flex-1 sm:max-w-[200px]">
+                    <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <select
+                      value={spApiFilter}
+                      onChange={(e) => setSpApiFilter(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm appearance-none bg-white"
+                    >
+                      <option value="all">All SP-API</option>
+                      <option value="connected">SP-API Connected</option>
+                      <option value="not-connected">SP-API Not Connected</option>
+                    </select>
+                  </div>
+                  
+                  {/* Ads API Filter */}
+                  <div className="relative flex-1 sm:max-w-[200px]">
+                    <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <select
+                      value={adsFilter}
+                      onChange={(e) => setAdsFilter(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm appearance-none bg-white"
+                    >
+                      <option value="all">All Ads API</option>
+                      <option value="connected">Ads API Connected</option>
+                      <option value="not-connected">Ads API Not Connected</option>
+                    </select>
+                  </div>
+                  
+                  {/* Clear API Filters Button */}
+                  {(spApiFilter !== 'all' || adsFilter !== 'all') && (
+                    <button
+                      onClick={() => {
+                        setSpApiFilter('all');
+                        setAdsFilter('all');
+                      }}
+                      className="flex items-center gap-1 px-3 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                      title="Clear API filters"
+                    >
+                      <X className="w-4 h-4" />
+                      Clear API
+                    </button>
+                  )}
                 </div>
-                
-                <div className="relative flex-1">
-                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <input
-                    type="date"
-                    placeholder="End Date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 text-sm"
-                  />
-                </div>
-                
-                {/* Clear Date Filter Button */}
-                {(startDate || endDate) && (
-                  <button
-                    onClick={clearDateFilters}
-                    className="flex items-center gap-1 px-3 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
-                    title="Clear date filters"
-                  >
-                    <X className="w-4 h-4" />
-                    Clear
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -731,7 +808,7 @@ const ManageAccounts = () => {
             {filteredUsers.length > 0 && (
               <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
                 <div className="text-sm text-gray-600">
-                  {searchQuery || filterType !== 'all' || startDate || endDate ? (
+                  {searchQuery || filterType !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all' ? (
                     <span>
                       <span className="font-medium">{filteredUsers.length}</span> users match your filters
                     </span>
@@ -912,7 +989,7 @@ const ManageAccounts = () => {
 
                         {/* Actions */}
                         <td className="px-2 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center">
                             <button
                               onClick={() => handleLoginAsUser(user)}
                               disabled={loginLoadingUsers.has(user._id)}
@@ -931,25 +1008,6 @@ const ManageAccounts = () => {
                                 </>
                               )}
                             </button>
-                            <div className="relative group">
-                              <button className="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 transition-colors duration-200">
-                                <MoreVertical className="w-3 h-3" />
-                              </button>
-                              <div className="absolute right-0 top-6 w-32 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
-                                <button className="w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                                  <Eye className="w-3 h-3" />
-                                  View
-                                </button>
-                                <button className="w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                                  <Edit3 className="w-3 h-3" />
-                                  Edit
-                                </button>
-                                <button className="w-full px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 flex items-center gap-1">
-                                  <Trash2 className="w-3 h-3" />
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
                           </div>
                         </td>
                       </motion.tr>

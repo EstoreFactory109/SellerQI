@@ -7,26 +7,45 @@ const { ApiError } = require('../../utils/ApiError');
 
 /**
  * Extract date from shipment name
- * Shipment names follow patterns like: "Think Tank - SH2 - FBA STA (05/02/2025 16:43)-SBD1"
- * The date is in format (MM/DD/YYYY HH:mm)
+ * Shipment names follow patterns like: "FBA (10/12/18 2:17 PM) - 1"
+ * The date is in format (MM/DD/YY H:mm AM/PM)
  * @param {string} shipmentName - The shipment name containing the date
  * @returns {Date|null} - Parsed date or null if not found
  */
 const extractDateFromShipmentName = (shipmentName) => {
     if (!shipmentName) return null;
     
-    // Regex to match date pattern (MM/DD/YYYY HH:mm) in parentheses
-    const datePattern = /\((\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\)/;
+    // Regex to match date pattern (MM/DD/YY H:mm AM/PM) in parentheses
+    // Supports: 1 or 2 digit month/day, 2 or 4 digit year, 1 or 2 digit hour, AM/PM
+    const datePattern = /\((\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\)/i;
     const match = shipmentName.match(datePattern);
     
     if (match) {
-        const [, month, day, year, hour, minute] = match;
+        const [, month, day, year, hour, minute, ampm] = match;
+        
+        // Handle 2-digit year (assume 2000s)
+        let fullYear = parseInt(year);
+        if (fullYear < 100) {
+            fullYear = fullYear + 2000;
+        }
+        
+        // Handle 12-hour format with AM/PM
+        let hour24 = parseInt(hour);
+        if (ampm) {
+            const isPM = ampm.toUpperCase() === 'PM';
+            if (isPM && hour24 !== 12) {
+                hour24 += 12;
+            } else if (!isPM && hour24 === 12) {
+                hour24 = 0;
+            }
+        }
+        
         // Create date object (month is 0-indexed in JavaScript)
         const parsedDate = new Date(
-            parseInt(year),
+            fullYear,
             parseInt(month) - 1,
             parseInt(day),
-            parseInt(hour),
+            hour24,
             parseInt(minute)
         );
         

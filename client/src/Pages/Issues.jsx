@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSelector } from 'react-redux';
-import OverView from "../Components/Issues_pages/OverView.jsx";
 import Category from "../Components/Issues_pages/Category.jsx";
 import Products from "../Components/Issues_pages/Products.jsx";
 import Account from "../Components/Issues_pages/Account.jsx";
@@ -10,19 +9,17 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
-  const currentTab = searchParams.get('tab') || 'overview';
+  const currentTab = searchParams.get('tab') || 'category';
   const navigate = useNavigate();
 
   const renderComponent = () => {
     switch (currentTab) {
-      case "overview":
-        return <OverView />;
       case "category":
         return <Category />;
       case "account":
         return <Account />;
       default:
-        return <OverView />;
+        return <Category />;
     }
   };
 

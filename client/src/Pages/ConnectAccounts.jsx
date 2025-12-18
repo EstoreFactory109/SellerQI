@@ -9,6 +9,10 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSelector } from 'react-redux';
+import axiosInstance from '../config/axios.config.js';
+import { isSpApiConnected, isSpApiConnectedFromAccounts } from '../utils/spApiConnectionCheck.js';
+import { clearAuthCache } from '../utils/authCoordinator.js';
 
 // Marketplace configuration mapping
 const MARKETPLACE_CONFIG = {
@@ -146,16 +150,87 @@ const ConnectAccounts = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [marketplaceConfig, setMarketplaceConfig] = useState(null);
   const [isSellerCentralConnected, setIsSellerCentralConnected] = useState(false);
+  const [isSpApiConnectedState, setIsSpApiConnectedState] = useState(false);
+  const [checkingSpApi, setCheckingSpApi] = useState(true);
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const allAccounts = useSelector(state => state.AllAccounts?.AllAccounts) || [];
+  const userData = useSelector(state => state.Auth?.user);
   
   // Get country code and region from URL parameters
   const countryCode = searchParams.get('country') || searchParams.get('countryCode');
   const region = searchParams.get('region');
 
+  // Check SP-API connection status - ONLY run once on mount
+  useEffect(() => {
+    // Initial check from Redux state (no API call)
+    if (allAccounts && allAccounts.length > 0) {
+      const connected = isSpApiConnectedFromAccounts(allAccounts);
+      setIsSpApiConnectedState(connected);
+      setCheckingSpApi(false);
+      return;
+    }
+
+    if (userData && userData.sellerCentral) {
+      const connected = isSpApiConnected(userData);
+      setIsSpApiConnectedState(connected);
+      setCheckingSpApi(false);
+      return;
+    }
+
+    // If no user data in Redux, just set to false and finish
+    // Don't make API call - this page is for users who don't have accounts yet
+    setIsSpApiConnectedState(false);
+    setCheckingSpApi(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency - only run on mount
+
+  // Update SP-API connection state if Redux state changes (after successful connection)
+  useEffect(() => {
+    // Skip on first render (handled by initial useEffect)
+    if (checkingSpApi) return;
+    
+    if (allAccounts && allAccounts.length > 0) {
+      const connected = isSpApiConnectedFromAccounts(allAccounts);
+      setIsSpApiConnectedState(connected);
+    } else if (userData && userData.sellerCentral) {
+      const connected = isSpApiConnected(userData);
+      setIsSpApiConnectedState(connected);
+    }
+  }, [allAccounts, userData, checkingSpApi]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Clear browser history - replace current entry so user can't go back
+    window.history.replaceState(null, '', window.location.href);
+    
+    // Prevent back button navigation - always redirect back to connect-accounts if SP-API not connected
+    const handlePopState = (e) => {
+      // Check if SP-API is connected
+      let spApiConnected = false;
+      if (allAccounts && allAccounts.length > 0) {
+        spApiConnected = isSpApiConnectedFromAccounts(allAccounts);
+      } else if (userData && userData.sellerCentral) {
+        spApiConnected = isSpApiConnected(userData);
+      }
+      
+      // If SP-API is not connected, prevent navigation and stay on connect-accounts
+      if (!spApiConnected) {
+        // Push the current state again to prevent going back
+        window.history.pushState(null, '', window.location.href);
+        // Force navigation to connect-accounts if they somehow got away
+        setTimeout(() => {
+          if (!window.location.pathname.includes('/connect-accounts')) {
+            navigate('/connect-accounts', { replace: true });
+          }
+        }, 0);
+      }
+    };
+    
+    // Add event listener to prevent back navigation
+    window.addEventListener('popstate', handlePopState);
     
     // Set marketplace configuration based on country code or region
     if (countryCode && MARKETPLACE_CONFIG[countryCode.toUpperCase()]) {
@@ -181,9 +256,24 @@ const ConnectAccounts = () => {
       
       if (sellerId && wasSellerCentralLoading) {
         setIsSellerCentralConnected(true);
+        setIsSpApiConnectedState(true); // SP-API is now connected
         setSuccessMessage('Amazon Seller Central connected successfully!');
         // Clear the loading state from localStorage
         localStorage.removeItem('sellerCentralLoading');
+        
+        // Re-check SP-API connection status from API to ensure it's updated
+        setTimeout(async () => {
+          try {
+            const response = await axiosInstance.get('/app/profile');
+            if (response?.status === 200 && response.data?.data) {
+              const user = response.data.data;
+              const connected = isSpApiConnected(user);
+              setIsSpApiConnectedState(connected);
+            }
+          } catch (error) {
+            console.error('Error re-checking SP-API connection:', error);
+          }
+        }, 2000);
         
         // Clear success message after 5 seconds
         setTimeout(() => {
@@ -192,11 +282,17 @@ const ConnectAccounts = () => {
       } else if (sellerId) {
         // Already connected from previous session
         setIsSellerCentralConnected(true);
+        setIsSpApiConnectedState(true);
       }
     };
 
     checkConnectionStatus();
-  }, [countryCode, region]);
+    
+    // Cleanup: remove event listener when component unmounts
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [countryCode, region, allAccounts, userData, navigate]);
 
   const getDefaultMarketplaceForRegion = (region) => {
     switch (region) {
@@ -330,8 +426,29 @@ const ConnectAccounts = () => {
     }
   };
 
-  const navigateToLogin = () => {
-    navigate('/log-in');
+  const navigateToLogin = async () => {
+    try {
+      // Call logout API to clear server-side session and cookies
+      // The endpoint is GET /app/logout (requires authentication via cookies)
+      // Must call this BEFORE clearing localStorage so auth middleware works
+      await Promise.race([
+        axiosInstance.get('/app/logout', { withCredentials: true }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Logout timeout')), 3000))
+      ]);
+      console.log('Logout API call successful');
+    } catch (error) {
+      // Log error but continue with logout process
+      console.log('Logout API call result:', error.response?.status || error.message);
+      // Continue with logout even if API call fails
+    }
+    
+    // Clear local storage and auth cache AFTER API call
+    localStorage.removeItem('isAuth');
+    clearAuthCache();
+    
+    // Navigate to login page (home route)
+    // Use React Router navigate with replace to prevent back navigation
+    navigate('/', { replace: true });
   };
 
   const navigateToDashboard = () => {
@@ -441,19 +558,33 @@ const ConnectAccounts = () => {
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-gray-900">Amazon Ads</h3>
                     <p className="text-sm text-gray-600">Connect your advertising account to optimize campaigns and track ad performance</p>
+                    {!isSpApiConnectedState && !checkingSpApi && (
+                      <p className="text-xs text-orange-600 mt-1 font-medium">
+                        ⚠️ Please connect Amazon Seller Central first
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button
                   onClick={handleConnectAmazonAds}
-                  disabled={amazonAdsLoading || !marketplaceConfig}
+                  disabled={amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi}
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    amazonAdsLoading || !marketplaceConfig
+                    amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-lg hover:shadow-xl'
                   }`}
                 >
                   {amazonAdsLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : checkingSpApi ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Checking connection...
+                    </>
+                  ) : !isSpApiConnectedState ? (
+                    <>
+                      Connect SP-API First
+                    </>
                   ) : (
                     <>
                       Connect Amazon Ads
@@ -492,9 +623,14 @@ const ConnectAccounts = () => {
               <button
                 type="button"
                 onClick={()=>navigate('/analyse-account')}
-                className="text-sm text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors flex items-center gap-1"
+                disabled={!isSpApiConnectedState || checkingSpApi}
+                className={`text-sm font-semibold transition-colors flex items-center gap-1 ${
+                  !isSpApiConnectedState || checkingSpApi
+                    ? 'text-gray-400 cursor-not-allowed'
+                    : 'text-[#3B4A6B] hover:text-[#2d3a52] hover:underline'
+                }`}
               >
-                Skip for Now
+                {checkingSpApi ? 'Checking...' : 'Skip for Now'}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

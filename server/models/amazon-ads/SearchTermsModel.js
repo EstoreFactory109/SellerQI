@@ -22,6 +22,14 @@ const searchTermsSchema = new mongoose.Schema({
       type: String,
       required: true
     },
+    adGroupId: {
+      type: String,
+      required: false
+    },
+    adGroupName: {
+      type: String,
+      required: false
+    },
     searchTerm: {
       type: String,
       required: true
@@ -41,6 +49,11 @@ const searchTermsSchema = new mongoose.Schema({
     spend:{
         type: Number,
         required: true
+    },
+    impressions: {
+      type: Number,
+      required: false,
+      default: 0
     }
   }]
 },{timestamps: true});

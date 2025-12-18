@@ -6,6 +6,7 @@ import { useDispatch } from "react-redux";
 import { loginSuccess } from "../redux/slices/authSlice.js";
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from "../services/googleAuthService.js";
+import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -214,7 +215,8 @@ const GoogleInfoPage = () => {
             console.log('Google: Redirecting to pricing: Inactive paid subscription');
             window.location.href = "/pricing";
           } else {
-            // User has a plan and subscription is active (or LITE with any status), redirect to dashboard
+            // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
+            // using the profile API which has the full sellerCentral data
             console.log('Google: Redirecting to dashboard: Valid plan access');
             window.location.href = "/seller-central-checker/dashboard";
           }

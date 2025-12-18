@@ -1,4 +1,5 @@
 const UserModel = require('../../models/user-auth/userModel.js');
+const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js');
 const { ApiError } = require("../../utils/ApiError.js");
 const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
@@ -61,6 +62,9 @@ const getUserById =async(id)=>{
         return false;
     }
 
+    // Fetch seller central data for this user
+    const sellerCentral = await SellerCentralModel.findOne({ User: id });
+
     const userData = {
         userId:user._id,
         firstName : user.firstName,
@@ -70,7 +74,11 @@ const getUserById =async(id)=>{
         email:user.email ,
         profilePic:user.profilePic,
         packageType: user.packageType,
-        subscriptionStatus: user.subscriptionStatus
+        subscriptionStatus: user.subscriptionStatus,
+        // Include sellerCentral data for SP-API connection check
+        sellerCentral: sellerCentral ? {
+            sellerAccount: sellerCentral.sellerAccount || []
+        } : null
     };
     
     // Debug logging
@@ -80,6 +88,11 @@ const getUserById =async(id)=>{
         subscriptionStatus: user.subscriptionStatus,
         email: user.email
     });
+    console.log('sellerCentral found:', !!sellerCentral);
+    if (sellerCentral) {
+        console.log('sellerAccount count:', sellerCentral.sellerAccount?.length || 0);
+        console.log('Has spiRefreshToken:', sellerCentral.sellerAccount?.some(acc => acc.spiRefreshToken && acc.spiRefreshToken.trim() !== ''));
+    }
     console.log('Returned userData:', userData);
     
     return userData;

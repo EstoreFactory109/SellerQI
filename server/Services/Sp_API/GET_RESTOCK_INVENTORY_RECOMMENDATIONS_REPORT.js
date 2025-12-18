@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js'); 
@@ -161,13 +162,59 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
 
 
 
-        let products=[];
+        let products = [];
 
-        refinedData.forEach((data)=>{
+        refinedData.forEach((data) => {
             products.push({
-                asin:data.ASIN,
-                RecommendedReplenishmentQty:data["Recommended replenishment qty"]
-        })})
+                // Core identifiers
+                asin: data["ASIN"] || data["asin"] || "",
+                fnsku: data["FNSKU"] || data["fnsku"] || "",
+                merchantSku: data["Merchant SKU"] || data["merchant-sku"] || "",
+                
+                // Product info
+                productName: data["Product Name"] || data["product-name"] || "",
+                condition: data["Condition"] || data["condition"] || "",
+                
+                // Supplier info
+                supplier: data["Supplier"] || data["supplier"] || "",
+                supplierPartNo: data["Supplier part no."] || data["supplier-part-no"] || "",
+                
+                // Pricing
+                currencyCode: data["Currency code"] || data["currency-code"] || "",
+                price: data["Price"] || data["price"] || "0",
+                
+                // Sales metrics
+                salesLast30Days: data["Sales last 30 days"] || data["sales-last-30-days"] || "0",
+                unitsSoldLast30Days: data["Units Sold Last 30 Days"] || data["units-sold-last-30-days"] || "0",
+                
+                // Inventory quantities
+                totalUnits: data["Total Units"] || data["total-units"] || "0",
+                inbound: data["Inbound"] || data["inbound"] || "0",
+                available: data["Available"] || data["available"] || "0",
+                fcTransfer: data["FC transfer"] || data["fc-transfer"] || "0",
+                fcProcessing: data["FC Processing"] || data["fc-processing"] || "0",
+                customerOrder: data["Customer Order"] || data["customer-order"] || "0",
+                unfulfillable: data["Unfulfillable"] || data["unfulfillable"] || "0",
+                working: data["Working"] || data["working"] || "0",
+                shipped: data["Shipped"] || data["shipped"] || "0",
+                receiving: data["Receiving"] || data["receiving"] || "0",
+                
+                // Fulfillment
+                fulfilledBy: data["Fulfilled by"] || data["fulfilled-by"] || "",
+                
+                // Days of supply
+                totalDaysOfSupply: data["Total Days of Supply (including units from open shipments)"] || data["total-days-of-supply"] || "",
+                daysOfSupplyAtAmazon: data["Days of Supply at Amazon Fulfillment Network"] || data["days-of-supply-at-amazon"] || "",
+                
+                // Alerts and recommendations
+                alert: data["Alert"] || data["alert"] || "",
+                recommendedReplenishmentQty: data["Recommended replenishment qty"] || data["recommended-replenishment-qty"] || "0",
+                recommendedShipDate: data["Recommended ship date"] || data["recommended-ship-date"] || "",
+                
+                // Storage
+                unitStorageSize: data["Unit storage size"] || data["unit-storage-size"] || ""
+            });
+        })
 
         const createReport= await RestockInventoryRecommendations.create({
             User:userId,
@@ -194,21 +241,63 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
     }
 };
 
+/**
+ * Convert TSV buffer to JSON using csv-parse library
+ * More robust handling of malformed data, encoding issues, and edge cases
+ */
 function convertTSVToJson(tsvBuffer) {
-    const tsv = tsvBuffer.toString("utf-8");  // Convert Buffer to string
+    try {
+        const tsv = tsvBuffer.toString("utf-8");
+        
+        if (!tsv || tsv.trim().length === 0) {
+            logger.warn('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] TSV buffer is empty');
+            return [];
+        }
 
+        const records = parse(tsv, {
+            columns: true,
+            delimiter: '\t',
+            skip_empty_lines: true,
+            relax_column_count: true,
+            trim: true,
+            skip_records_with_error: true
+        });
+
+        logger.info('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] TSV parsed successfully', { 
+            totalRecords: records.length 
+        });
+
+        return records;
+
+    } catch (error) {
+        logger.error('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] TSV parsing failed', { 
+            error: error.message 
+        });
+
+        // Fallback to legacy parsing
+        try {
+            return convertTSVToJsonLegacy(tsvBuffer);
+        } catch (fallbackError) {
+            logger.error('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] Fallback parsing also failed', { 
+                error: fallbackError.message 
+            });
+            return [];
+        }
+    }
+}
+
+function convertTSVToJsonLegacy(tsvBuffer) {
+    const tsv = tsvBuffer.toString("utf-8");
     const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    if (rows.length === 0) return [];
     const headers = rows[0].split("\t");
-
-    const jsonData = rows.slice(1).map(row => {
+    return rows.slice(1).map(row => {
         const values = row.split("\t");
         return headers.reduce((obj, header, index) => {
-            obj[header] = values[index] || ""; 
+            obj[header] = values[index] || "";
             return obj;
         }, {});
     });
-
-    return jsonData;
 }
 
 module.exports = getReport;

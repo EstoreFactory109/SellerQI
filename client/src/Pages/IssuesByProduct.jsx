@@ -82,17 +82,17 @@ const RankingIssuesTable = ({ product, info }) => {
                 <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
-                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
+                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -112,34 +112,74 @@ const RankingIssuesTable = ({ product, info }) => {
     );
 };
 
-// Table component for conversion issues
-const ConversionIssuesTable = ({ product }) => {
+// Table component for conversion issues (now includes buybox issues)
+const ConversionIssuesTable = ({ product, buyBoxData }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
     
     const extractConversionErrors = (product) => {
         const conversionErrors = product.conversionErrors;
-        if (!conversionErrors) return [];
-        
         const errorRows = [];
-        const issueMap = [
-            ['Images', conversionErrors.imageResultErrorData],
-            ['Video', conversionErrors.videoResultErrorData],
-            ['Product Review', conversionErrors.productReviewResultErrorData],
-            ['Star Rating', conversionErrors.productStarRatingResultErrorData],
-            ['Buy Box', conversionErrors.productsWithOutBuyboxErrorData],
-            ['A+ Content', conversionErrors.aplusErrorData]
-        ];
         
-        issueMap.forEach(([label, errorData]) => {
-            if (errorData?.status === 'Error') {
-                errorRows.push({
-                    issueHeading: `${label} Issue`,
-                    message: errorData.Message,
-                    solution: errorData.HowToSolve
-                });
+        if (conversionErrors) {
+            const issueMap = [
+                ['Images', conversionErrors.imageResultErrorData],
+                ['Video', conversionErrors.videoResultErrorData],
+                ['Product Review', conversionErrors.productReviewResultErrorData],
+                ['Star Rating', conversionErrors.productStarRatingResultErrorData],
+                ['A+ Content', conversionErrors.aplusErrorData]
+            ];
+            
+            issueMap.forEach(([label, errorData]) => {
+                if (errorData?.status === 'Error') {
+                    errorRows.push({
+                        issueHeading: `${label} Issue`,
+                        message: errorData.Message,
+                        solution: errorData.HowToSolve
+                    });
+                }
+            });
+        }
+        
+        // Also extract buybox errors from buyBoxData (now part of conversion)
+        if (buyBoxData?.asinBuyBoxData && Array.isArray(buyBoxData.asinBuyBoxData)) {
+            // Try multiple matching strategies to handle type/format mismatches
+            let productBuyBox = buyBoxData.asinBuyBoxData.find(
+                i => i.childAsin === product.asin || i.parentAsin === product.asin
+            );
+            
+            if (!productBuyBox) {
+                const productAsinStr = String(product.asin || '').trim();
+                productBuyBox = buyBoxData.asinBuyBoxData.find(
+                    i => String(i.childAsin || '').trim() === productAsinStr || 
+                         String(i.parentAsin || '').trim() === productAsinStr
+                );
             }
-        });
+            
+            if (!productBuyBox) {
+                const productAsinLower = String(product.asin || '').trim().toLowerCase();
+                productBuyBox = buyBoxData.asinBuyBoxData.find(
+                    i => String(i.childAsin || '').trim().toLowerCase() === productAsinLower || 
+                         String(i.parentAsin || '').trim().toLowerCase() === productAsinLower
+                );
+            }
+            
+            if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
+                if (productBuyBox.buyBoxPercentage === 0) {
+                    errorRows.push({
+                        issueHeading: 'Buy Box | No Buy Box',
+                        message: `This product has 0% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`,
+                        solution: 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.'
+                    });
+                } else {
+                    errorRows.push({
+                        issueHeading: 'Buy Box | Low Buy Box Percentage',
+                        message: `This product has only ${productBuyBox.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`,
+                        solution: 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.'
+                    });
+                }
+            }
+        }
         
         return errorRows;
     };
@@ -166,17 +206,17 @@ const ConversionIssuesTable = ({ product }) => {
                 <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
-                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
+                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -244,13 +284,25 @@ const InventoryIssuesTable = ({ product }) => {
             });
         }
         
-        // Replenishment
+        // Replenishment - handles single or multiple errors
         if (inventoryErrors.replenishmentErrorData) {
-            errorRows.push({
-                issueHeading: 'Replenishment | Low Inventory Risk',
-                message: inventoryErrors.replenishmentErrorData.Message,
-                solution: inventoryErrors.replenishmentErrorData.HowToSolve
-            });
+            if (Array.isArray(inventoryErrors.replenishmentErrorData)) {
+                // Multiple errors for same ASIN (different SKUs)
+                inventoryErrors.replenishmentErrorData.forEach(error => {
+                    errorRows.push({
+                        issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
+                        message: error.Message,
+                        solution: error.HowToSolve
+                    });
+                });
+            } else {
+                // Single error
+                errorRows.push({
+                    issueHeading: `Replenishment | Low Inventory Risk ${inventoryErrors.replenishmentErrorData.sku ? `(SKU: ${inventoryErrors.replenishmentErrorData.sku})` : ''}`,
+                    message: inventoryErrors.replenishmentErrorData.Message,
+                    solution: inventoryErrors.replenishmentErrorData.HowToSolve
+                });
+            }
         }
         
         return errorRows;
@@ -278,17 +330,17 @@ const InventoryIssuesTable = ({ product }) => {
                 <table className="w-full table-fixed bg-white">
                     <thead>
                         <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-3 py-5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 h-20">
-                                <td className="px-3 py-5 text-xs font-medium text-gray-900 align-top break-words leading-tight">{error.issueHeading}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.message}</td>
-                                <td className="px-3 py-5 text-xs text-gray-700 align-top break-words leading-tight">{error.solution}</td>
+                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
+                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -311,7 +363,6 @@ const InventoryIssuesTable = ({ product }) => {
 const IssuesByProduct = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const navigate = useNavigate();
-    console.log("info: ",info)
     // Enhanced state management
     const [currentPage, setCurrentPage] = useState(0);
     const [productTabs, setProductTabs] = useState({});
@@ -343,17 +394,6 @@ const IssuesByProduct = () => {
         { value: 'asin', label: 'ASIN' },
         { value: 'price', label: 'Price' }
     ];
-    
-    // Get products that have any issues
-    const getProductsWithIssues = () => {
-        if (!info?.productWiseError) return [];
-        return info.productWiseError.filter(product => {
-            const hasRankingIssues = hasAnyRankingIssues(product);
-            const hasConversionIssues = hasAnyConversionIssues(product);
-            const hasInventoryIssues = hasAnyInventoryIssues(product);
-            return hasRankingIssues || hasConversionIssues || hasInventoryIssues;
-        });
-    };
     
     // Check if product has any ranking issues
     const hasAnyRankingIssues = (product) => {
@@ -403,20 +443,116 @@ const IssuesByProduct = () => {
         );
     };
     
-    // Enhanced filtered and sorted products
-    const getFilteredAndSortedProducts = () => {
-        let products = getProductsWithIssues();
+    // Check if product has any buybox issues - Use same matching strategy
+    const hasAnyBuyboxIssues = (product) => {
+        if (!info?.buyBoxData?.asinBuyBoxData) return false;
         
-        // Apply search filter
-        if (searchQuery) {
-            products = products.filter(product => 
-                product.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                product.asin?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                product.sku?.toLowerCase().includes(searchQuery.toLowerCase())
+        // Try multiple matching strategies
+        let productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+            item => item.childAsin === product.asin || item.parentAsin === product.asin
+        );
+        
+        if (!productBuyBox) {
+            const productAsinStr = String(product.asin || '').trim();
+            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+                item => String(item.childAsin || '').trim() === productAsinStr || 
+                       String(item.parentAsin || '').trim() === productAsinStr
             );
         }
         
+        if (!productBuyBox) {
+            const productAsinLower = String(product.asin || '').trim().toLowerCase();
+            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+                item => String(item.childAsin || '').trim().toLowerCase() === productAsinLower || 
+                       String(item.parentAsin || '').trim().toLowerCase() === productAsinLower
+            );
+        }
+        
+        if (!productBuyBox) return false;
+        
+        // Use exact same condition as Category.jsx
+        return productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50;
+    };
+    
+    // Get products that have any issues (must be defined after all hasAny* functions)
+    const getProductsWithIssues = () => {
+        const productsMap = new Map();
+        
+        // First, add all products from productWiseError that have issues
+        if (info?.productWiseError) {
+            info.productWiseError.forEach(product => {
+                const hasRankingIssues = hasAnyRankingIssues(product);
+                const hasConversionIssues = hasAnyConversionIssues(product);
+                const hasInventoryIssues = hasAnyInventoryIssues(product);
+                const hasBuyboxIssues = hasAnyBuyboxIssues(product);
+                if (hasRankingIssues || hasConversionIssues || hasInventoryIssues || hasBuyboxIssues) {
+                    productsMap.set(product.asin, product);
+                }
+            });
+        }
+        
+        // Then, add products with buybox issues that might not be in productWiseError
+        // Use SAME condition as Category.jsx: buyBoxPercentage === 0 || buyBoxPercentage < 50
+        if (info?.buyBoxData?.asinBuyBoxData) {
+            info.buyBoxData.asinBuyBoxData.forEach(buyboxItem => {
+                const asin = buyboxItem.childAsin || buyboxItem.parentAsin;
+                const hasBuyboxIssue = buyboxItem.buyBoxPercentage === 0 || buyboxItem.buyBoxPercentage < 50;
+                
+                // If product has buybox issue and not already in map, add it
+                if (hasBuyboxIssue && asin && !productsMap.has(asin)) {
+                    // Try to find product info from TotalProduct or productWiseError
+                    const productInfo = info?.TotalProduct?.find(p => p.asin === asin) || 
+                                       info?.productWiseError?.find(p => p.asin === asin);
+                    
+                    // Create a product entry for this buybox-only issue
+                    productsMap.set(asin, {
+                        asin: asin,
+                        sku: productInfo?.sku || 'N/A',
+                        name: productInfo?.itemName || productInfo?.name || productInfo?.title || 'N/A',
+                        price: productInfo?.price || 0,
+                        MainImage: productInfo?.MainImage || null,
+                        errors: 1,
+                        rankingErrors: undefined,
+                        conversionErrors: {},
+                        inventoryErrors: {},
+                        sales: 0,
+                        quantity: 0
+                    });
+                }
+            });
+        }
+        
+        return Array.from(productsMap.values());
+    };
+    
+    // Enhanced filtered and sorted products
+    const getFilteredAndSortedProducts = () => {
+        // Get all products with issues (including buybox-only issues)
+        let products = getProductsWithIssues();
+        
+        // Apply search filter
+        if (searchQuery && searchQuery.trim()) {
+            const trimmedQuery = searchQuery.trim().toLowerCase();
+            
+            products = products.filter(product => {
+                if (!product) return false;
+                
+                // Handle null/undefined values safely and convert to strings
+                const productName = (product.name ? String(product.name) : '').trim().toLowerCase();
+                const productAsin = (product.asin ? String(product.asin) : '').trim().toLowerCase();
+                const productSku = (product.sku ? String(product.sku) : '').trim().toLowerCase();
+                
+                // Check if any field matches the search query (case-insensitive)
+                const matchesName = productName && productName.includes(trimmedQuery);
+                const matchesAsin = productAsin && (productAsin.includes(trimmedQuery) || productAsin === trimmedQuery);
+                const matchesSku = productSku && (productSku.includes(trimmedQuery) || productSku === trimmedQuery);
+                
+                return matchesName || matchesAsin || matchesSku;
+            });
+        }
+        
         // Apply priority filter
+        // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
         if (selectedPriority !== 'all') {
             products = products.filter(product => {
                 const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
@@ -428,6 +564,7 @@ const IssuesByProduct = () => {
         }
         
         // Apply sorting
+        // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
         products.sort((a, b) => {
             switch (sortBy) {
                 case 'issues':
@@ -458,6 +595,7 @@ const IssuesByProduct = () => {
     };
 
     // Get priority level for a product
+    // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
     const getProductPriority = (product) => {
         const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
         if (totalIssues >= 5) return { level: 'high', label: 'High', color: 'bg-red-500', textColor: 'text-red-700', bgColor: 'bg-red-50' };
@@ -466,6 +604,7 @@ const IssuesByProduct = () => {
     };
 
     // Calculate summary stats
+    // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
     const calculateStats = () => {
         const allProducts = getProductsWithIssues();
         const totalProducts = allProducts.length;
@@ -577,21 +716,25 @@ const IssuesByProduct = () => {
     
     const countConversionIssues = (product) => {
         const conversionErrors = product.conversionErrors;
-        if (!conversionErrors) return 0;
-        
         let count = 0;
-        const checks = [
-            conversionErrors.imageResultErrorData,
-            conversionErrors.videoResultErrorData,
-            conversionErrors.productReviewResultErrorData,
-            conversionErrors.productStarRatingResultErrorData,
-            conversionErrors.productsWithOutBuyboxErrorData,
-            conversionErrors.aplusErrorData
-        ];
         
-        checks.forEach(check => {
-            if (check?.status === 'Error') count++;
-        });
+        if (conversionErrors) {
+            const checks = [
+                conversionErrors.imageResultErrorData,
+                conversionErrors.videoResultErrorData,
+                conversionErrors.productReviewResultErrorData,
+                conversionErrors.productStarRatingResultErrorData,
+                conversionErrors.productsWithOutBuyboxErrorData,
+                conversionErrors.aplusErrorData
+            ];
+            
+            checks.forEach(check => {
+                if (check?.status === 'Error') count++;
+            });
+        }
+        
+        // Also count buybox issues from buyBoxData (part of conversion now)
+        count += countBuyboxIssues(product);
         
         return count;
     };
@@ -610,9 +753,50 @@ const IssuesByProduct = () => {
         
         if (inventoryErrors.strandedInventoryErrorData) count++;
         if (inventoryErrors.inboundNonComplianceErrorData) count++;
-        if (inventoryErrors.replenishmentErrorData) count++;
+        if (inventoryErrors.replenishmentErrorData) {
+            count += Array.isArray(inventoryErrors.replenishmentErrorData) 
+                ? inventoryErrors.replenishmentErrorData.length 
+                : 1;
+        }
         
         return count;
+    };
+    
+    // Count buybox issues - Use same matching strategy as BuyboxIssuesTable
+    const countBuyboxIssues = (product) => {
+        if (!info?.buyBoxData?.asinBuyBoxData) return 0;
+        
+        // Try multiple matching strategies
+        let productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+            item => item.childAsin === product.asin || item.parentAsin === product.asin
+        );
+        
+        if (!productBuyBox) {
+            // Try string comparison
+            const productAsinStr = String(product.asin || '').trim();
+            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+                item => String(item.childAsin || '').trim() === productAsinStr || 
+                       String(item.parentAsin || '').trim() === productAsinStr
+            );
+        }
+        
+        if (!productBuyBox) {
+            // Try case-insensitive
+            const productAsinLower = String(product.asin || '').trim().toLowerCase();
+            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
+                item => String(item.childAsin || '').trim().toLowerCase() === productAsinLower || 
+                       String(item.parentAsin || '').trim().toLowerCase() === productAsinLower
+            );
+        }
+        
+        if (!productBuyBox) return 0;
+        
+        // Use exact same condition as Category.jsx
+        if (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50) {
+            return 1;
+        }
+        
+        return 0;
     };
     
     const { products, hasMore, total } = getPaginatedProducts();
@@ -788,13 +972,15 @@ const IssuesByProduct = () => {
                     <>
                         {/* Products Grid */}
                         <div className="space-y-8">
-                            {products.map((product, index) => {
-                                const activeTab = getActiveTab(product.asin);
-                                const rankingCount = countRankingIssues(product);
-                                const conversionCount = countConversionIssues(product);
-                                const inventoryCount = countInventoryIssues(product);
-                                const priority = getProductPriority(product);
-                                const totalIssues = rankingCount + conversionCount + inventoryCount;
+                                            {products.map((product, index) => {
+                                                const activeTab = getActiveTab(product.asin);
+                                                const rankingCount = countRankingIssues(product);
+                                                // conversionCount now includes buybox issues
+                                                const conversionCount = countConversionIssues(product);
+                                                const inventoryCount = countInventoryIssues(product);
+                                                const priority = getProductPriority(product);
+                                                // Note: conversionCount already includes buybox, so total is ranking + conversion + inventory
+                                                const totalIssues = rankingCount + conversionCount + inventoryCount;
 
                                 return (
                                     <motion.div 
@@ -862,7 +1048,7 @@ const IssuesByProduct = () => {
                                         {/* Enhanced Product Tabs */}
                                         <div className="flex border-b border-gray-100">
                                             <button
-                                                className={`flex-1 px-6 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
                                                     activeTab === 'ranking'
                                                         ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
                                                         : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -871,7 +1057,8 @@ const IssuesByProduct = () => {
                                             >
                                                 <div className="flex items-center justify-center gap-2">
                                                     <TrendingUp className="w-4 h-4" />
-                                                    <span>Ranking Issues</span>
+                                                    <span className="hidden sm:inline">Ranking Issues</span>
+                                                    <span className="sm:hidden">Ranking</span>
                                                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                                         rankingCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                                                     }`}>
@@ -880,7 +1067,7 @@ const IssuesByProduct = () => {
                                                 </div>
                                             </button>
                                             <button
-                                                className={`flex-1 px-6 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
                                                     activeTab === 'conversion'
                                                         ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
                                                         : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -889,7 +1076,8 @@ const IssuesByProduct = () => {
                                             >
                                                 <div className="flex items-center justify-center gap-2">
                                                     <BarChart3 className="w-4 h-4" />
-                                                    <span>Conversion Issues</span>
+                                                    <span className="hidden sm:inline">Conversion (incl. Buy Box)</span>
+                                                    <span className="sm:hidden">Conversion</span>
                                                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                                         conversionCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                                                     }`}>
@@ -898,7 +1086,7 @@ const IssuesByProduct = () => {
                                                 </div>
                                             </button>
                                             <button
-                                                className={`flex-1 px-6 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
                                                     activeTab === 'inventory'
                                                         ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
                                                         : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -907,7 +1095,8 @@ const IssuesByProduct = () => {
                                             >
                                                 <div className="flex items-center justify-center gap-2">
                                                     <Package className="w-4 h-4" />
-                                                    <span>Inventory Issues</span>
+                                                    <span className="hidden sm:inline">Inventory Issues</span>
+                                                    <span className="sm:hidden">Inventory</span>
                                                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                                         inventoryCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                                                     }`}>
@@ -929,11 +1118,11 @@ const IssuesByProduct = () => {
                                                     exit="exit"
                                                     className="w-full"
                                                 >
-                                                    {activeTab === 'ranking' && (
+                                                            {activeTab === 'ranking' && (
                                                         <RankingIssuesTable product={product} info={info} />
                                                     )}
                                                     {activeTab === 'conversion' && (
-                                                        <ConversionIssuesTable product={product} />
+                                                        <ConversionIssuesTable product={product} buyBoxData={info?.buyBoxData} />
                                                     )}
                                                     {activeTab === 'inventory' && (
                                                         <InventoryIssuesTable product={product} />

@@ -1,9 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
-import Chart from "react-apexcharts";
-import moment from "moment";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, TrendingUp, AlertTriangle, CheckCircle, XCircle, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Activity, BarChart3, Eye, Search, Filter } from 'lucide-react';
-import Health from '../Reports/Reports_Third_Row/Health.jsx'
+import { Shield, AlertTriangle, CheckCircle, XCircle, Download, ChevronDown, Activity, Search, Filter } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
@@ -21,7 +18,6 @@ export default function AccountHealthDashboard() {
 
     // Check if we have any data
     const hasData = info && AccountErrors && Object.keys(AccountErrors).length > 0;
-    const hasSalesData = info?.TotalSales && info.TotalSales.length > 0;
     const hasHealthData = info?.accountHealthPercentage?.Percentage !== undefined;
 
     // Close dropdown when clicking outside
@@ -143,93 +139,8 @@ export default function AccountHealthDashboard() {
         }));
     };
 
-    const totalSales = info?.TotalSales?.slice(-10) || [];
-
-    const chartData = {
-        series: [
-            {
-                name: 'Sales Revenue',
-                data: totalSales.map(item => item.TotalAmount)
-            }
-        ],
-        options: {
-            chart: {
-                type: 'area',
-                toolbar: { show: false },
-                height: 300,
-                sparkline: { enabled: false },
-                animations: {
-                    enabled: true,
-                    easing: 'easeinout',
-                    speed: 800,
-                }
-            },
-            stroke: {
-                curve: 'smooth',
-                width: 3
-            },
-            fill: {
-                type: 'gradient',
-                gradient: {
-                    shadeIntensity: 1,
-                    opacityFrom: 0.4,
-                    opacityTo: 0.1,
-                    stops: [0, 100]
-                }
-            },
-            xaxis: {
-                categories: totalSales.map(item =>
-                    moment(item.interval.split('--')[0]).format('MMM D')
-                ),
-                axisBorder: { show: false },
-                axisTicks: { show: false },
-                labels: {
-                    style: {
-                        colors: '#6B7280',
-                        fontSize: '12px'
-                    }
-                }
-            },
-            yaxis: {
-                labels: {
-                    style: {
-                        colors: '#6B7280',
-                        fontSize: '12px'
-                    },
-                    formatter: function (value) {
-                        return '$' + value.toLocaleString();
-                    }
-                }
-            },
-            colors: ['#3B82F6'],
-            markers: {
-                size: 0,
-                hover: { size: 6 }
-            },
-            dataLabels: {
-                enabled: false
-            },
-            grid: {
-                borderColor: '#F3F4F6',
-                strokeDashArray: 5,
-                xaxis: { lines: { show: false } },
-                yaxis: { lines: { show: true } }
-            },
-            tooltip: {
-                x: {
-                    format: 'MMM dd, yyyy'
-                },
-                y: {
-                    formatter: function(value) {
-                        return '$' + value.toLocaleString();
-                    }
-                }
-            }
-        }
-    };
-
     // If no data is available, show the no data found message
-    if (!hasData || !hasSalesData || !hasHealthData) {
+    if (!hasData || !hasHealthData) {
         return (
             <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 flex items-center justify-center">
                 <div className="text-center max-w-md mx-auto">
@@ -303,61 +214,6 @@ export default function AccountHealthDashboard() {
                         </div>
                     </div>
                 </div>
-            </div>
-
-            {/* Top Section - Health & Sales Chart */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Account Health */}
-                <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.6, delay: 0.2 }}
-                    className="bg-white rounded-2xl shadow-lg border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-xl overflow-hidden"
-                >
-                    <div className="flex items-center justify-between mb-4 p-6 pb-0">
-                        <h3 className="text-lg font-semibold text-gray-900">Account Health</h3>
-                        <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            healthPercentage >= 80 
-                                ? 'bg-green-100 text-green-700' 
-                                : healthPercentage >= 60 
-                                ? 'bg-yellow-100 text-yellow-700'
-                                : 'bg-red-100 text-red-700'
-                        }`}>
-                            {healthPercentage >= 80 ? 'Excellent' : healthPercentage >= 60 ? 'Good' : 'Needs Attention'}
-                        </div>
-                    </div>
-                    <div className="px-3 pb-3 flex flex-col items-center justify-center">
-                        <Health />
-                    </div>
-                </motion.div>
-
-                {/* Sales Chart */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.3 }}
-                    className="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-xl p-6"
-                >
-                    <div className="flex items-center justify-between mb-6">
-                        <div>
-                            <h3 className="text-lg font-semibold text-gray-900 mb-1">Sales Performance</h3>
-                            <p className="text-sm text-gray-500">Revenue trend over the last 10 periods</p>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-gray-500">
-                            <TrendingUp className="w-4 h-4" />
-                            Last 10 periods
-                        </div>
-                    </div>
-                    <div className="h-64">
-                        <Chart
-                            options={chartData.options}
-                            series={chartData.series}
-                            type="area"
-                            width="100%"
-                            height="100%"
-                        />
-                    </div>
-                </motion.div>
             </div>
 
             {/* Search and Filter Controls */}

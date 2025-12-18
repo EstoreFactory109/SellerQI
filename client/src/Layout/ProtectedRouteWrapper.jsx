@@ -10,8 +10,9 @@ import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
 import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js';
 import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js';
 import axiosInstance from '../config/axios.config.js';
-import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
+import { coordinatedAuthCheck, clearAuthCache } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
+import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
 
 const ProtectedRouteWrapper = ({ children }) => {
   const navigate = useNavigate();
@@ -45,6 +46,8 @@ const ProtectedRouteWrapper = ({ children }) => {
       setIsAuthenticating(true);
 
       try {
+        // Clear cache to ensure fresh data on each page load
+        clearAuthCache();
         const result = await coordinatedAuthCheck();
 
         // Check if component is still mounted before proceeding
@@ -71,6 +74,23 @@ const ProtectedRouteWrapper = ({ children }) => {
             // LITE users can access dashboard even with cancelled status since it's free
             localStorage.setItem("isAuth", "true"); // Keep them logged in
             navigate("/pricing");
+            return;
+          }
+          
+          // Check if SP-API is connected
+          // ALWAYS redirect to connect-accounts if SP-API is not connected and user tries to access dashboard
+          const spApiConnected = isSpApiConnected(userData);
+          const currentPath = window.location.pathname;
+          const isDashboardRoute = currentPath.includes('/dashboard') || currentPath.includes('/seller-central-checker');
+          
+          // ALWAYS redirect to connect-accounts if:
+          // 1. SP-API is not connected
+          // 2. User is on dashboard route
+          // 3. Not already on connect-accounts page
+          if (!spApiConnected && isDashboardRoute && !currentPath.includes('/connect-accounts')) {
+            // Redirect to connect accounts - dashboard should not be accessible without SP-API
+            localStorage.setItem("isAuth", "true"); // Keep them logged in
+            navigate("/connect-accounts", { replace: true }); // Use replace to prevent back navigation
             return;
           }
           

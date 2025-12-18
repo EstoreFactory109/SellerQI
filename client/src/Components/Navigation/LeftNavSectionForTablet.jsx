@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck,Search, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -31,7 +31,7 @@ const LeftNavSection = () => {
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
-    const currentTab = searchParams.get('tab') || 'overview';
+    const currentTab = searchParams.get('tab') || 'category';
     const currentSettingsTab = searchParams.get('tab') || 'profile';
     const isIssuesPage = location.pathname === '/seller-central-checker/issues';
     const isSettingsPage = location.pathname === '/seller-central-checker/settings';
@@ -53,8 +53,8 @@ const LeftNavSection = () => {
     // Handle Issues button click
     const handleIssuesClick = () => {
         if (!isIssuesPage) {
-            // If not on issues page, navigate to overview
-            navigate('/seller-central-checker/issues?tab=overview');
+            // If not on issues page, navigate to category
+            navigate('/seller-central-checker/issues?tab=category');
         }
         setIssuesDropdownOpen(!issuesDropdownOpen);
     };
@@ -201,26 +201,6 @@ const LeftNavSection = () => {
                                                 initial={{ y: -10, opacity: 0 }}
                                                 animate={{ y: 0, opacity: 1 }}
                                                 exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.1, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/issues?tab=overview"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isIssuesPage && currentTab === 'overview'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Overview
-                                                </NavLink>
-                                            </motion.div>
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
                                                 transition={{ delay: 0.15, duration: 0.2 }}
                                             >
                                                 <NavLink
@@ -337,6 +317,33 @@ const LeftNavSection = () => {
                                 </NavLink>
                             )}
 
+                            {/* Keyword Analysis - Only for PRO/AGENCY users */}
+                            {!isLiteUser && (
+                                <NavLink
+                                    to="/seller-central-checker/keyword-analysis"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-orange-50 group-hover:bg-orange-100'
+                                            }`}>
+                                                <Search className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-orange-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Keyword Analysis</span>
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
+
                             {/* Reimbursement Dashboard - Only for PRO/AGENCY users */}
                             {!isLiteUser && (
                                 <NavLink
@@ -359,58 +366,6 @@ const LeftNavSection = () => {
                                                 }`}/>
                                             </div>
                                             <span className="font-medium">Reimbursement</span>
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                            {/* ASIN Analyzer - Available for ALL users including LITE */}
-                            <NavLink
-                                to="/seller-central-checker/asin-analyzer"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-cyan-50 group-hover:bg-cyan-100'
-                                        }`}>
-                                            <Search className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-cyan-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">ASIN Analyzer</span>
-                                    </>
-                                )}
-                            </NavLink>
-
-                            {/* Keyword Analysis - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
-                                <NavLink
-                                    to="/seller-central-checker/keyword-analysis"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-emerald-50 group-hover:bg-emerald-100'
-                                            }`}>
-                                                <Target className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-emerald-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium">Keyword Analysis</span>
                                         </>
                                     )}
                                 </NavLink>
@@ -441,30 +396,32 @@ const LeftNavSection = () => {
                                 )}
                                                     </NavLink>}
 
-                        {/* Ecommerce Calendar - Available for ALL users including LITE */}
-                        <NavLink
-                            to="/seller-central-checker/ecommerce-calendar"
-                            className={({ isActive }) =>
-                                `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                    isActive
-                                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                        : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                }`
-                            }
-                        >
-                            {({ isActive }) => (
-                                <>
-                                    <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                        isActive ? 'bg-white/20' : 'bg-pink-50 group-hover:bg-pink-100'
-                                    }`}>
-                                        <Calendar className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                            isActive ? 'text-white' : 'text-pink-600'
-                                        }`}/>
-                                    </div>
-                                    <span className="font-medium">Ecommerce Calendar</span>
-                                </>
+                            {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
+                            {false && (
+                                <NavLink
+                                    to="/seller-central-checker/ecommerce-calendar"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-pink-50 group-hover:bg-pink-100'
+                                            }`}>
+                                                <Calendar className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-pink-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium">Ecommerce Calendar</span>
+                                        </>
+                                    )}
+                                </NavLink>
                             )}
-                        </NavLink>
 
                         {/* Account History - Only for PRO/AGENCY users */}
                             {!isLiteUser && (

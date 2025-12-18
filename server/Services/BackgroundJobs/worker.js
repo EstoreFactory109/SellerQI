@@ -32,7 +32,18 @@ const { connectRedis } = require('../../config/redisConn.js');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
-const WORKER_NAME = process.env.WORKER_NAME || `worker-${process.pid}`;
+// Debug: Log what WORKER_NAME will be set to
+const envWorkerName = process.env.WORKER_NAME;
+const pidBasedName = `worker-${process.pid}`;
+const WORKER_NAME = envWorkerName || pidBasedName;
+
+// Log worker name source for debugging (only on startup)
+if (!global.workerNameLogged) {
+    console.log(`[Worker Debug] process.env.WORKER_NAME: ${envWorkerName || 'undefined'}`);
+    console.log(`[Worker Debug] process.pid: ${process.pid}`);
+    console.log(`[Worker Debug] Final WORKER_NAME: ${WORKER_NAME}`);
+    global.workerNameLogged = true;
+}
 
 // Initialize database and cache connections
 let isInitialized = false;

@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
+import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -130,8 +131,8 @@ export default function Login() {
           // User hasn't selected any plan, redirect to pricing
           navigate('/pricing');
         } else {
-          // All users with plans (LITE, PRO, AGENCY) go to dashboard
-          // Dashboard will handle feature restrictions based on plan type
+          // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
+          // using the profile API which has the full sellerCentral data
           navigate('/seller-central-checker/dashboard');
         }
       }
@@ -142,7 +143,9 @@ export default function Login() {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
         } else if(error.response?.data?.message === "Seller central not found"){
-          navigate('/connect-to-amazon');
+          // Store auth data before redirecting
+          localStorage.setItem('isAuth', 'true');
+          navigate('/connect-accounts');
         } else {
           // Handle wrong password or invalid credentials
           setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
@@ -176,18 +179,9 @@ export default function Login() {
         localStorage.setItem("isAuth", true);
         dispatch(loginSuccess(response.data.data));
         
-        // Check subscription status and redirect accordingly
-        const user = response.data.data;
-       // const hasSelectedPlan = user.packageType;
+        // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
+        // using the profile API which has the full sellerCentral data
         navigate('/seller-central-checker/dashboard');
-        /*if (!hasSelectedPlan) {
-          // User hasn't selected any plan, redirect to pricing
-          navigate('/pricing');
-        } else {
-          // All users with plans (LITE, PRO, AGENCY) go to dashboard
-          // Dashboard will handle feature restrictions based on plan type
-          navigate('/seller-central-checker/dashboard');
-        }*/
         
       } /*else {
         // Clear any cached auth state to force fresh checks

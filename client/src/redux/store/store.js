@@ -13,6 +13,7 @@ import currencySlice from '../slices/currencySlice.js'
 import pageDataSlice from '../slices/PageDataSlice.js'
 import keywordRecommendationsSlice from '../slices/KeywordRecommendationsSlice.js'
 import tasksSlice from '../slices/TasksSlice.js'
+import reimbursementSlice from '../slices/ReimbursementSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -28,6 +29,7 @@ export const store = configureStore({
     currency: currencySlice,
     pageData: pageDataSlice,
     keywordRecommendations: keywordRecommendationsSlice,
-    tasks: tasksSlice
+    tasks: tasksSlice,
+    reimbursement: reimbursementSlice
   },
 });

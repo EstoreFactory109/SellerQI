@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const FbaInventoryPlanningData = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
@@ -271,12 +272,73 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
     }
 };
 
+/**
+ * Convert TSV buffer to JSON using csv-parse library
+ * More robust handling of malformed data, encoding issues, and edge cases
+ */
 function convertTSVToJson(tsvBuffer) {
-    const tsv = tsvBuffer.toString("utf-8");  // Convert Buffer to string
+    try {
+        const tsv = tsvBuffer.toString("utf-8");
+        
+        // Check if buffer is empty
+        if (!tsv || tsv.trim().length === 0) {
+            logger.warn('TSV buffer is empty');
+            return [];
+        }
 
+        const records = parse(tsv, {
+            columns: true,              // Use first row as headers
+            delimiter: '\t',            // TSV delimiter
+            skip_empty_lines: true,     // Skip empty lines
+            relax_column_count: true,   // Handle rows with different column counts
+            trim: true,                 // Trim whitespace from values
+            skip_records_with_error: true,  // Skip malformed rows instead of throwing
+            on_record: (record, context) => {
+                // Log any parsing issues for debugging
+                if (context.error) {
+                    logger.warn('TSV parsing warning', { 
+                        line: context.lines, 
+                        error: context.error.message 
+                    });
+                }
+                return record;
+            }
+        });
+
+        logger.info('TSV parsed successfully', { 
+            totalRecords: records.length,
+            sampleHeaders: records.length > 0 ? Object.keys(records[0]).slice(0, 5) : []
+        });
+
+        return records;
+
+    } catch (error) {
+        logger.error('TSV parsing failed', { 
+            error: error.message,
+            errorCode: error.code
+        });
+
+        // Fallback to legacy parsing if csv-parse fails
+        logger.info('Attempting fallback TSV parsing...');
+        try {
+            return convertTSVToJsonLegacy(tsvBuffer);
+        } catch (fallbackError) {
+            logger.error('Fallback TSV parsing also failed', { error: fallbackError.message });
+            return [];
+        }
+    }
+}
+
+/**
+ * Legacy TSV parser as fallback
+ */
+function convertTSVToJsonLegacy(tsvBuffer) {
+    const tsv = tsvBuffer.toString("utf-8");
     const rows = tsv.split("\n").filter(row => row.trim() !== "");
+    
+    if (rows.length === 0) return [];
+    
     const headers = rows[0].split("\t");
-
     const jsonData = rows.slice(1).map(row => {
         const values = row.split("\t");
         return headers.reduce((obj, header, index) => {

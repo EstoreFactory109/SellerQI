@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
@@ -20,6 +20,9 @@ const KeywordAnalysisDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAsin, setSelectedAsin] = useState('');
   const [isSwitchingAsin, setIsSwitchingAsin] = useState(false);
+  const [isAsinDropdownOpen, setIsAsinDropdownOpen] = useState(false);
+  const [asinSearchQuery, setAsinSearchQuery] = useState('');
+  const asinDropdownRef = useRef(null);
   const itemsPerPage = 10;
 
   // Get data from Redux
@@ -28,9 +31,33 @@ const KeywordAnalysisDashboard = () => {
   const keywordsByAsin = useSelector((state) => state.keywordRecommendations?.keywordsByAsin || {});
   const reduxError = useSelector((state) => state.keywordRecommendations?.error);
 
+  // Get product data from Dashboard to get product names
+  const dashboardInfo = useSelector((state) => state.Dashboard?.DashBoardInfo);
+  const totalProducts = dashboardInfo?.TotalProduct || [];
+  const productWiseError = dashboardInfo?.productWiseError || [];
+
   // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
+
+  // Helper function to get product name by ASIN
+  const getProductName = (asin) => {
+    if (!asin) return '';
+    
+    // Try to find in TotalProduct first
+    const product = totalProducts.find(p => p.asin === asin);
+    if (product) {
+      return product.name || product.itemName || product.title || '';
+    }
+    
+    // Try to find in productWiseError
+    const productError = productWiseError.find(p => p.asin === asin);
+    if (productError) {
+      return productError.name || productError.itemName || productError.title || '';
+    }
+    
+    return '';
+  };
 
   // Get data for selected ASIN from Redux
   const selectedAsinData = keywordsByAsin[selectedAsin] || null;
@@ -123,6 +150,35 @@ const KeywordAnalysisDashboard = () => {
 
     fetchKeywordRecommendations();
   }, [selectedAsin, keywordsByAsin, dispatch]);
+
+  // Handle click outside dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (asinDropdownRef.current && !asinDropdownRef.current.contains(event.target)) {
+        setIsAsinDropdownOpen(false);
+        setAsinSearchQuery('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Filter ASINs based on search query
+  const filteredAsinsList = useMemo(() => {
+    if (!asinSearchQuery.trim()) {
+      return asinsList;
+    }
+    
+    const query = asinSearchQuery.toLowerCase().trim();
+    return asinsList.filter((asinItem) => {
+      const asin = asinItem.asin?.toLowerCase() || '';
+      const productName = getProductName(asinItem.asin)?.toLowerCase() || '';
+      return asin.includes(query) || productName.includes(query);
+    });
+  }, [asinsList, asinSearchQuery, totalProducts, productWiseError]);
 
   // Transform keywordTargetList data to flat structure for table display
   const keywords = useMemo(() => {
@@ -468,7 +524,8 @@ const KeywordAnalysisDashboard = () => {
         
         .asin-filter-select {
           flex: 1;
-          max-width: 300px;
+          max-width: 600px;
+          min-width: 300px;
           padding: 10px 14px;
           border: 1px solid #cbd5e1;
           border-radius: 8px;
@@ -478,16 +535,32 @@ const KeywordAnalysisDashboard = () => {
           color: #1e293b;
           cursor: pointer;
           transition: all 0.2s;
+          appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23334155' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 12px center;
+          padding-right: 36px;
         }
         
-        .asin-filter-select:hover {
+        .asin-filter-select option {
+          padding: 8px;
+          white-space: normal;
+        }
+        
+        .asin-filter-select:hover:not(:disabled) {
           border-color: #3b82f6;
         }
         
-        .asin-filter-select:focus {
+        .asin-filter-select:focus:not(:disabled) {
           outline: none;
           border-color: #3b82f6;
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .asin-filter-select:disabled {
+          background-color: #f1f5f9;
+          color: #94a3b8;
+          cursor: not-allowed;
         }
         
         .asin-info {
@@ -767,24 +840,195 @@ const KeywordAnalysisDashboard = () => {
           </div>
         </div>
 
-        {/* ASIN Filter */}
-        <div className="asin-filter-container">
+        {/* ASIN Filter - Custom Dropdown with Search */}
+        <div className="asin-filter-container" ref={asinDropdownRef}>
           <div className="asin-filter-label">Filter by ASIN:</div>
-          <select
+          <div style={{ position: 'relative', flex: 1, maxWidth: '600px', minWidth: '300px' }}>
+            <button
+              type="button"
             className="asin-filter-select"
-            value={selectedAsin}
-            onChange={(e) => setSelectedAsin(e.target.value)}
-          >
-            {asinsList.map((asinItem) => (
-              <option key={asinItem.asin} value={asinItem.asin}>
-                {asinItem.asin} ({asinItem.keywordCount} keywords)
-              </option>
-            ))}
-          </select>
+              onClick={() => setIsAsinDropdownOpen(!isAsinDropdownOpen)}
+              disabled={loadingAsins || asinsList.length === 0}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                background: 'white',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: selectedAsin ? '#1e293b' : '#94a3b8',
+                cursor: (loadingAsins || asinsList.length === 0) ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s',
+                appearance: 'none',
+                paddingRight: '36px'
+              }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {loadingAsins ? 'Loading ASINs...' : 
+                 asinsList.length === 0 ? 'No ASINs available' :
+                 selectedAsin ? (() => {
+                   const productName = getProductName(selectedAsin);
+                   const selectedItem = asinsList.find(a => a.asin === selectedAsin);
+                   return productName 
+                     ? `${selectedAsin} - ${productName}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`
+                     : `${selectedAsin}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`;
+                 })() : 'Select an ASIN'}
+              </span>
+              <ChevronDown 
+                size={16} 
+                style={{ 
+                  position: 'absolute', 
+                  right: '12px', 
+                  color: '#64748b',
+                  transform: isAsinDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s'
+                }} 
+              />
+            </button>
+
+            {isAsinDropdownOpen && !loadingAsins && asinsList.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                marginTop: '4px',
+                backgroundColor: 'white',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                zIndex: 1000,
+                maxHeight: '400px',
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                {/* Search Bar */}
+                <div style={{ padding: '12px', borderBottom: '1px solid #e2e8f0' }}>
+                  <div style={{ position: 'relative' }}>
+                    <Search 
+                      size={16} 
+                      style={{ 
+                        position: 'absolute', 
+                        left: '12px', 
+                        top: '50%', 
+                        transform: 'translateY(-50%)', 
+                        color: '#94a3b8' 
+                      }} 
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search by ASIN or product name..."
+                      value={asinSearchQuery}
+                      onChange={(e) => setAsinSearchQuery(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px 8px 36px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        outline: 'none',
+                        transition: 'border-color 0.2s'
+                      }}
+                      onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                      onBlur={(e) => e.target.style.borderColor = '#cbd5e1'}
+                    />
+                  </div>
+                </div>
+
+                {/* Dropdown Options */}
+                <div style={{ 
+                  maxHeight: '300px', 
+                  overflowY: 'auto',
+                  padding: '4px'
+                }}>
+                  {filteredAsinsList.length === 0 ? (
+                    <div style={{ 
+                      padding: '16px', 
+                      textAlign: 'center', 
+                      color: '#64748b', 
+                      fontSize: '14px' 
+                    }}>
+                      No ASINs found matching "{asinSearchQuery}"
+                    </div>
+                  ) : (
+                    filteredAsinsList.map((asinItem) => {
+                      const productName = getProductName(asinItem.asin);
+                      const isSelected = selectedAsin === asinItem.asin;
+                      
+                      return (
+                        <button
+                          key={asinItem.asin}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAsin(asinItem.asin);
+                            setIsAsinDropdownOpen(false);
+                            setAsinSearchQuery('');
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '12px 16px',
+                            textAlign: 'left',
+                            border: 'none',
+                            background: isSelected ? '#eff6ff' : 'white',
+                            color: isSelected ? '#1e40af' : '#1e293b',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            transition: 'background-color 0.15s',
+                            borderRadius: '6px',
+                            margin: '2px 0'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) {
+                              e.target.style.backgroundColor = '#f1f5f9';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) {
+                              e.target.style.backgroundColor = 'white';
+                            }
+                          }}
+                        >
+                          <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '4px' }}>
+                            {asinItem.asin}
+                          </div>
+                          {productName && (
+                            <div style={{ 
+                              fontSize: '12px', 
+                              color: isSelected ? '#3b82f6' : '#64748b',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {productName}
+                            </div>
+                          )}
+                          {asinItem.keywordCount && (
+                            <div style={{ 
+                              fontSize: '12px', 
+                              color: isSelected ? '#3b82f6' : '#94a3b8',
+                              marginTop: '2px'
+                            }}>
+                              {asinItem.keywordCount} keywords
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           {selectedAsinInfo && (
             <div className="asin-info">
               <CheckCircle size={16} />
-              <span>{selectedAsinInfo.keywordCount} keywords available</span>
+              <span>{selectedAsinInfo.keywordCount || 0} keywords available</span>
             </div>
           )}
         </div>

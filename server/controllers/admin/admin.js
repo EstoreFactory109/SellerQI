@@ -133,24 +133,51 @@ const getAllAccounts = asyncHandler(async (req, res) => {
 
     try {
         // Get all user accounts with necessary fields
+        // Populate sellerCentral but exclude large arrays (products, TotatProducts) to improve performance
         const accounts = await UserModel.find({})
-            .select('firstName lastName email phone whatsapp accessType packageType subscriptionStatus isInTrialPeriod trialEndsDate isVerified profilePic createdAt updatedAt adminId')
+            .select('firstName lastName email phone whatsapp accessType packageType subscriptionStatus isInTrialPeriod trialEndsDate isVerified profilePic createdAt updatedAt adminId sellerCentral')
             .sort({ createdAt: -1 }) // Sort by newest first
             .lean() // Use lean() for better performance
-            .populate('sellerCentral')
+            .populate({
+                path: 'sellerCentral',
+                select: 'sellerAccount', // Get sellerAccount array
+                // Note: We can't exclude nested array fields directly, but we'll filter them in transformation
+                options: { lean: true }
+            })
 
         
         // Transform the data to include additional computed fields
-        const accountsWithStats = accounts.map(account => ({
-            ...account,
-            fullName: `${account.firstName} ${account.lastName}`,
-            joinedDate: account.createdAt,
-            lastUpdated: account.updatedAt,
-            isAdmin: account.accessType === 'superAdmin',
-            hasValidSubscription: account.subscriptionStatus === 'active',
-            // Check if trial is expired
-            isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate)
-        }));
+        // Also strip out large arrays (products, TotatProducts) from sellerAccount to reduce payload size
+        const accountsWithStats = accounts.map(account => {
+            // If sellerCentral exists, only keep essential fields from sellerAccount
+            let sellerCentral = account.sellerCentral;
+            if (sellerCentral && sellerCentral.sellerAccount && Array.isArray(sellerCentral.sellerAccount)) {
+                sellerCentral = {
+                    ...sellerCentral,
+                    sellerAccount: sellerCentral.sellerAccount.map(acc => ({
+                        spiRefreshToken: acc.spiRefreshToken,
+                        adsRefreshToken: acc.adsRefreshToken,
+                        country: acc.country,
+                        region: acc.region,
+                        ProfileId: acc.ProfileId,
+                        selling_partner_id: acc.selling_partner_id
+                        // Exclude products and TotatProducts arrays to reduce payload size
+                    }))
+                };
+            }
+            
+            return {
+                ...account,
+                sellerCentral, // Use the trimmed sellerCentral
+                fullName: `${account.firstName} ${account.lastName}`,
+                joinedDate: account.createdAt,
+                lastUpdated: account.updatedAt,
+                isAdmin: account.accessType === 'superAdmin',
+                hasValidSubscription: account.subscriptionStatus === 'active',
+                // Check if trial is expired
+                isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate)
+            };
+        });
 
         // Get summary statistics
         const stats = {

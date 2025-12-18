@@ -905,11 +905,23 @@ class ScheduledIntegration {
                     });
                 } else if (functionKey === 'mcpEconomicsData') {
                     // MCP Economics returns { success, data, error } structure
+                    logger.info('Starting MCP Economics fetch', { userId, region: Region, country: Country, hasRefreshToken: !!RefreshToken });
                     promise = serviceFunction(userId, RefreshToken, Region, Country)
                         .then(result => {
-                            // Convert to standard format
+                            logger.info('MCP Economics raw result', { 
+                                userId, 
+                                region: Region, 
+                                country: Country,
+                                hasResult: !!result,
+                                success: result?.success,
+                                hasData: !!result?.data,
+                                error: result?.error
+                            });
+                            // Convert to standard format - KEEP the success wrapper for batch handler
                             if (result && result.success) {
-                                return result.data || result;
+                                logger.info('MCP Economics succeeded', { userId, region: Region, country: Country });
+                                // Return the full success wrapper, not just the data
+                                return { success: true, data: result.data, error: null };
                             } else {
                                 // Don't throw - return error object instead to be handled by Promise.allSettled
                                 const errorMsg = result?.error || 'MCP Economics fetch failed';
@@ -931,9 +943,11 @@ class ScheduledIntegration {
                     // MCP BuyBox returns { success, data, error } structure
                     promise = serviceFunction(userId, RefreshToken, Region, Country)
                         .then(result => {
-                            // Convert to standard format
+                            // Convert to standard format - KEEP the success wrapper for batch handler
                             if (result && result.success) {
-                                return result.data || result;
+                                logger.info('MCP BuyBox succeeded', { userId, region: Region, country: Country });
+                                // Return the full success wrapper, not just the data
+                                return { success: true, data: result.data, error: null };
                             } else {
                                 // Don't throw - return error object instead to be handled by Promise.allSettled
                                 const errorMsg = result?.error || 'MCP BuyBox fetch failed';

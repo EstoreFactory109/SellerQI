@@ -22,6 +22,7 @@ import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
 import ProfitibilityDashboard from './Pages/ProfitibilityDashboard.jsx';
 import PPCDashboard from './Pages/PPCDashboard.jsx';
+import KeywordAnalysisDashboard from './Pages/KeywordAnalysisDashboard.jsx';
 import EmailVerificationForNewPassword from './Pages/EmailVerificationForNewPassword.jsx';
 import ResetPassword from './Pages/ResetPassword.jsx';
 import Home from './Pages/Home.jsx';
@@ -33,7 +34,6 @@ import LoadingPage from './Pages/LoadingPage.jsx';
 import ResultsPage from './Pages/ResultsPage.jsx';
 import RefundPolicy from './Pages/RefundPolicy.jsx';
 import SubscriptionSuccess from './Pages/SubscriptionSuccess.jsx';
-import ASINAnalyzer from './Pages/ASINAnalyzer.jsx';
 import AboutUs from './Pages/AboutUs.jsx';
 import HowItWorks from './Pages/HowItWorks.jsx';
 import PromotionsPage from './Pages/PromotionsPage.jsx';
@@ -52,7 +52,6 @@ import UserLogging from './Pages/UserLogging.jsx';
 import CalendlyWidget from './Pages/consultation.jsx';
 import Tasks from './Pages/Tasks.jsx';
 import EcommerceHolidaysCalendar from './Pages/EventCalender.jsx';
-import KeywordAnalysisDashboard from './Pages/KeywordAnalysisDashboard.jsx';
 import ReimbursementDashboard from './Pages/ReimbursementDashboard.jsx';
 
 const App = () => {
@@ -116,13 +115,12 @@ const App = () => {
             <Route path='dashboard' element={<DashBoard />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
+            <Route path='keyword-analysis' element={<KeywordAnalysisDashboard />} />
             <Route path='issues' element={<Issues />} />
             <Route path='issues-by-product' element={<IssuesByProduct />} />
             <Route path='issues/:asin' element={<IssuesByProducts />} />
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
-            <Route path='asin-analyzer' element={<ASINAnalyzer />} />
-            <Route path='keyword-analysis' element={<KeywordAnalysisDashboard />} />
             <Route path='reimbursement-dashboard' element={<ReimbursementDashboard />} />
             <Route path='tasks' element={<Tasks />} />
             <Route path='ecommerce-calendar' element={<EcommerceHolidaysCalendar />} />
