@@ -56,6 +56,57 @@ const datewiseGrossProfitSchema = new mongoose.Schema({
     _id: false
 });
 
+// Schema for datewise FBA fees, storage fees, and refunds
+const datewiseFeesAndRefundsSchema = new mongoose.Schema({
+    date: {
+        type: String,
+        required: true
+    },
+    fbaFulfillmentFee: {
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    },
+    storageFee: {
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    },
+    refunds: {
+        units: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    }
+}, {
+    _id: false
+});
+
 // Schema for ASIN-wise sales data
 const asinWiseSalesSchema = new mongoose.Schema({
     asin: {
@@ -252,6 +303,10 @@ const economicsMetricsSchema = new mongoose.Schema({
     },
     datewiseGrossProfit: {
         type: [datewiseGrossProfitSchema],
+        default: []
+    },
+    datewiseFeesAndRefunds: {
+        type: [datewiseFeesAndRefundsSchema],
         default: []
     },
     // ASIN-wise breakdown

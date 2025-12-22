@@ -278,12 +278,24 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     const startDate = range.startDate;
     const endDate = range.endDate;
 
-    console.log('startDate', startDate);
-    console.log('endDate', endDate);
+    // Format dates properly for URL (ISO format: YYYY-MM-DD)
+    const formatDateForURL = (date) => {
+      const d = new Date(date);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const formattedStartDate = formatDateForURL(startDate);
+    const formattedEndDate = formatDateForURL(endDate);
+
+    console.log('startDate', formattedStartDate);
+    console.log('endDate', formattedEndDate);
     
     try {
-      // Add periodType as query parameter
-      const url = `${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${startDate}&endDate=${endDate}${periodType ? `&periodType=${periodType}` : ''}`;
+      // Add periodType as query parameter - properly encode dates
+      const url = `${import.meta.env.VITE_BASE_URI}/app/analyse/getDataFromDate?startDate=${encodeURIComponent(formattedStartDate)}&endDate=${encodeURIComponent(formattedEndDate)}${periodType ? `&periodType=${periodType}` : ''}`;
       const dateResponse = await axios.get(url, {withCredentials: true});
 
       if (dateResponse.status !== 200) {
@@ -303,8 +315,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       console.log('calendarMode:', calendarMode);
 
       dispatch(UpdateDashboardInfo({
-        startDate: startDate.toString(),
-        endDate: endDate.toString(),
+        startDate: formattedStartDate,
+        endDate: formattedEndDate,
         financeData: dateResponse.data.data.FinanceData,
         reimburstmentData: dateResponse.data.data.reimburstmentData,
         WeeklySales: dateResponse.data.data.TotalSales.totalSales,

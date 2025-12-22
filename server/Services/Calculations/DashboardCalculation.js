@@ -445,11 +445,9 @@ const analyseData = async (data, userId = null) => {
         replenishment: inventoryAnalysis.replenishment ? inventoryAnalysis.replenishment.filter((item) => item && item.asin && activeProductSet.has(item.asin)) : []
     };
     
-    // Calculate total inventory errors (only for active products)
-    const totalInventoryErrors = (activeInventoryAnalysis.inventoryPlanning?.length || 0) + 
-                               (activeInventoryAnalysis.strandedInventory?.length || 0) + 
-                               (activeInventoryAnalysis.inboundNonCompliance?.length || 0) +
-                               (activeInventoryAnalysis.replenishment?.filter((item) => item && item.status === "Error").length || 0);
+    // Initialize error counters (will be calculated by summing actual errors, not products)
+    let totalErrorInConversion = 0;
+    let totalInventoryErrors = 0;
 
     const productWiseError = [];
     const rankingProductWiseErrors = [];
@@ -518,14 +516,6 @@ const analyseData = async (data, userId = null) => {
         fromFilteredArray: productsWithOutBuyboxError.length
     });
 
-    const totalErrorInConversion =
-        aplusError.length +
-        imageResultError.length +
-        videoResultError.length +
-        productReviewResultError.length +
-        productStarRatingResultError.length +
-        productsWithOutBuyboxError.length;
-
     // This is for getting conversion error for each product
     const getConversionErrors = (asin) => {
         let errorCount = 0;
@@ -593,6 +583,69 @@ const analyseData = async (data, userId = null) => {
 
     let TotalRankingerrors = 0;
 
+    // Helper function to check if A+ content is present for an ASIN
+    const hasAplusContent = (asin) => {
+        if (!asin) return false;
+        const aplusData = data.ConversionData?.aPlusResult?.find((item) => item && item.asin === asin);
+        return aplusData && aplusData.data && aplusData.data.status === "Success";
+    };
+
+    // Helper function to filter description errors if A+ content is present
+    const filterDescriptionErrors = (elm, asin) => {
+        if (!elm || !elm.data) return elm;
+        
+        // Check if A+ content is present
+        if (hasAplusContent(asin)) {
+            // Create a copy of elm to avoid mutating the original
+            const filteredElm = JSON.parse(JSON.stringify(elm));
+            
+            // If Description exists and has errors, mark them as Success
+            if (filteredElm.data.Description) {
+                const description = filteredElm.data.Description;
+                
+                // Mark all description error checks as Success if they were Error
+                if (description.charLim && description.charLim.status === "Error") {
+                    description.charLim = {
+                        status: "Success",
+                        Message: "A+ Content is present, so description errors are not applicable.",
+                        HowTOSolve: ""
+                    };
+                }
+                if (description.RestictedWords && description.RestictedWords.status === "Error") {
+                    description.RestictedWords = {
+                        status: "Success",
+                        Message: "A+ Content is present, so description errors are not applicable.",
+                        HowTOSolve: ""
+                    };
+                }
+                if (description.checkSpecialCharacters && description.checkSpecialCharacters.status === "Error") {
+                    description.checkSpecialCharacters = {
+                        status: "Success",
+                        Message: "A+ Content is present, so description errors are not applicable.",
+                        HowTOSolve: ""
+                    };
+                }
+                
+                // Recalculate NumberOfErrors for Description
+                let descriptionErrorCount = 0;
+                if (description.charLim?.status === "Error") descriptionErrorCount++;
+                if (description.RestictedWords?.status === "Error") descriptionErrorCount++;
+                if (description.checkSpecialCharacters?.status === "Error") descriptionErrorCount++;
+                description.NumberOfErrors = descriptionErrorCount;
+                
+                // Recalculate TotalErrors
+                const titleErrors = (filteredElm.data.TitleResult?.NumberOfErrors || 0);
+                const bulletErrors = (filteredElm.data.BulletPoints?.NumberOfErrors || 0);
+                filteredElm.data.TotalErrors = titleErrors + bulletErrors + descriptionErrorCount;
+            }
+            
+            return filteredElm;
+        }
+        
+        // If A+ content is not present, return original elm
+        return elm;
+    };
+
     // Process ranking data only for active products with safe data access
     const rankingResultArray = data.RankingsData?.RankingResultArray || [];
     if (Array.isArray(rankingResultArray)) {
@@ -609,7 +662,10 @@ const analyseData = async (data, userId = null) => {
             if (seenAsins.has(asin)) return;
             seenAsins.add(asin);
 
-            const title = elm.data?.Title?.substring(0, 50) || "N/A";
+            // Filter description errors if A+ content is present
+            const filteredElm = filterDescriptionErrors(elm, asin);
+
+            const title = filteredElm.data?.Title?.substring(0, 50) || "N/A";
             const productDetails = activeSalesByProducts.find((p) => p.asin === asin);
             const sales = productDetails?.amount || 0;
             const quantity = productDetails?.quantity || 0;
@@ -617,10 +673,14 @@ const analyseData = async (data, userId = null) => {
             const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
             const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
 
+            // Accumulate actual error counts (not products)
+            totalErrorInConversion += conversionErrors;
+            totalInventoryErrors += inventoryErrors;
+
             // Find the product in TotalProducts by ASIN
             const totalProduct = TotalProducts.find((p) => p.asin === asin);
 
-            const elmTotalErrors = elm.data?.TotalErrors || 0;
+            const elmTotalErrors = filteredElm.data?.TotalErrors || 0;
             let productwiseTotalError = elmTotalErrors + conversionErrors + inventoryErrors;
             if (elmTotalErrors > 0) {
                 TotalRankingerrors += elmTotalErrors;
@@ -639,7 +699,7 @@ const analyseData = async (data, userId = null) => {
 
             rankingProductWiseErrors.push(
                 elmTotalErrors > 0
-                    ? elm
+                    ? filteredElm
                     : { asin, data: { Title: title } }
             );
             
@@ -648,9 +708,9 @@ const analyseData = async (data, userId = null) => {
                 sku: totalProduct?.sku || "N/A",
                 name: title,
                 price: totalProduct?.price || 0,
-                MainImage: data.ConversionData?.imageResult?.find((item) => item.asin === elm.asin)?.data?.MainImage || null,
+                MainImage: data.ConversionData?.imageResult?.find((item) => item.asin === asin)?.data?.MainImage || null,
                 errors: productwiseTotalError,
-                rankingErrors: elmTotalErrors > 0 ? elm : undefined,
+                rankingErrors: elmTotalErrors > 0 ? filteredElm : undefined,
                 conversionErrors: conversionData,
                 inventoryErrors: inventoryData,
                 sales,
@@ -665,6 +725,11 @@ const analyseData = async (data, userId = null) => {
         if (seenAsins.has(asin)) return;
         
         const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
+        const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
+        
+        // Accumulate actual error counts (not products)
+        totalErrorInConversion += conversionErrors;
+        totalInventoryErrors += inventoryErrors;
         
         if (inventoryErrors > 0) {
             // Find the product details
@@ -723,6 +788,13 @@ const analyseData = async (data, userId = null) => {
                     // If product doesn't exist in productWiseError array yet, create it
                     const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
                     const { data: inventoryData, errorCount: inventoryErrors } = getInventoryErrors(asin);
+                    
+                    // Accumulate actual error counts if product wasn't processed before
+                    if (!seenAsins.has(asin)) {
+                        totalErrorInConversion += conversionErrors;
+                        totalInventoryErrors += inventoryErrors;
+                        seenAsins.add(asin);
+                    }
                     const totalProduct = TotalProducts.find((p) => p.asin === asin);
                     const title = totalProduct?.itemName || totalProduct?.title?.substring(0, 50) || "N/A";
                     

@@ -241,6 +241,18 @@ const InventoryIssuesTable = ({ product }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
     
+    // Helper function to format message with bold units available
+    const formatMessage = (message) => {
+        if (!message) return message;
+        // Match patterns like "Only X units available", "Currently X units available", or "X units available"
+        // Use a single comprehensive pattern that handles all variations
+        const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
+        
+        return message.replace(pattern, (match) => {
+            return `<strong>${match}</strong>`;
+        });
+    };
+    
     const extractInventoryErrors = (product) => {
         const inventoryErrors = product.inventoryErrors;
         if (!inventoryErrors) return [];
@@ -292,7 +304,8 @@ const InventoryIssuesTable = ({ product }) => {
                     errorRows.push({
                         issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
                         message: error.Message,
-                        solution: error.HowToSolve
+                        solution: error.HowToSolve,
+                        recommendedReplenishmentQty: error.recommendedReplenishmentQty || error.data || null
                     });
                 });
             } else {
@@ -300,7 +313,8 @@ const InventoryIssuesTable = ({ product }) => {
                 errorRows.push({
                     issueHeading: `Replenishment | Low Inventory Risk ${inventoryErrors.replenishmentErrorData.sku ? `(SKU: ${inventoryErrors.replenishmentErrorData.sku})` : ''}`,
                     message: inventoryErrors.replenishmentErrorData.Message,
-                    solution: inventoryErrors.replenishmentErrorData.HowToSolve
+                    solution: inventoryErrors.replenishmentErrorData.HowToSolve,
+                    recommendedReplenishmentQty: inventoryErrors.replenishmentErrorData.recommendedReplenishmentQty || inventoryErrors.replenishmentErrorData.data || null
                 });
             }
         }
@@ -339,7 +353,14 @@ const InventoryIssuesTable = ({ product }) => {
                         {displayedErrors.map((error, idx) => (
                             <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
                                 <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                                    <span dangerouslySetInnerHTML={{ __html: formatMessage(error.message) }} />
+                                    {error.recommendedReplenishmentQty !== null && error.recommendedReplenishmentQty !== undefined && error.recommendedReplenishmentQty > 0 && (
+                                        <span className="ml-2">
+                                            <span className="font-bold text-gray-900">Recommended Restock Quantity: {error.recommendedReplenishmentQty} units</span>
+                                        </span>
+                                    )}
+                                </td>
                                 <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
@@ -604,13 +625,17 @@ const IssuesByProduct = () => {
     };
 
     // Calculate summary stats
-    // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
+    // Use the same backend fields as dashboard and category page to ensure consistency
     const calculateStats = () => {
         const allProducts = getProductsWithIssues();
         const totalProducts = allProducts.length;
-        const totalIssues = allProducts.reduce((sum, product) => 
-            sum + countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product), 0
-        );
+        
+        // Use backend fields for total issues (same as Category page and Dashboard)
+        const rankingIssues = info?.TotalRankingerrors || 0;
+        const conversionIssues = info?.totalErrorInConversion || 0;
+        const inventoryIssues = info?.totalInventoryErrors || 0;
+        const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
+        
         const highPriority = allProducts.filter(product => getProductPriority(product).level === 'high').length;
         const criticalProducts = allProducts.filter(product => {
             const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
@@ -862,29 +887,24 @@ const IssuesByProduct = () => {
                                             </h1>
                                         </div>
                                         <p className="text-gray-300 text-lg">Detailed issue analysis for individual products</p>
-                                        <div className="flex items-center gap-4 mt-4">
-                                            <div className="flex items-center gap-2 text-sm text-gray-400">
-                                                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                                                <span>Real-time monitoring</span>
+                                        {stats.totalProducts > 0 && (
+                                            <div className="flex items-center gap-2 text-sm text-orange-300 mt-4">
+                                                <AlertTriangle className="w-4 h-4" />
+                                                <span>{stats.totalProducts} products need attention</span>
                                             </div>
-                                            {stats.totalIssues > 0 && (
-                                                <div className="flex items-center gap-2 text-sm text-orange-300">
-                                                    <AlertTriangle className="w-4 h-4" />
-                                                    <span>{stats.criticalProducts} products need attention</span>
-                                                </div>
-                                            )}
-                                        </div>
+                                        )}
                                     </div>
                                     
                                     {/* Stats Cards */}
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
                                             <div className="text-2xl font-bold text-white mb-1">{stats.totalProducts}</div>
-                                            <div className="text-xs text-gray-300">Products</div>
+                                            <div className="text-xs text-gray-300">Products with Issues</div>
                                         </div>
                                         <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
                                             <div className="text-2xl font-bold text-orange-300 mb-1">{stats.totalIssues}</div>
                                             <div className="text-xs text-gray-300">Total Issues</div>
+                                            <div className="text-xs text-gray-400 mt-0.5">(Ranking + Conversion + Inventory)</div>
                                         </div>
                                     </div>
                                 </div>

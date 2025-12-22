@@ -13,12 +13,30 @@ import 'react-lazy-load-image-component/src/effects/blur.css';
 import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle, FileText, FileSpreadsheet } from 'lucide-react';
 import './IssuesPerProduct.css';
 
+// Helper function to format message with bold units available
+const formatMessage = (message) => {
+    if (!message) return message;
+    // Match patterns like "Only X units available", "Currently X units available", or "X units available"
+    // Use a single comprehensive pattern that handles all variations
+    const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
+    
+    return message.replace(pattern, (match) => {
+        return `<strong>${match}</strong>`;
+    });
+};
+
 // Reusable component for conversion issues
-const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, toggleFunc }) => (
+const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, toggleFunc, recommendedQty }) => (
     <li className="mb-4">
         <div className="flex justify-between items-center">
             <p className="w-[40vw]">
-                <b>{label}: </b>{message}
+                <b>{label}: </b>
+                <span dangerouslySetInnerHTML={{ __html: formatMessage(message) }} />
+                {recommendedQty !== null && recommendedQty !== undefined && recommendedQty > 0 && (
+                    <span className="ml-2">
+                        <span className="font-bold">Recommended Restock Quantity: {recommendedQty} units</span>
+                    </span>
+                )}
             </p>
             <button
                 className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2"
@@ -62,90 +80,44 @@ const Dashboard = () => {
     // Find product from rankingProductWiseErrors array (same as Category.jsx)
     const rankingProduct = info?.rankingProductWiseErrors?.find(item => item.asin === asin);
     
-    // Also get the product from productWiseError for other data
+    // Get product from productWiseError for error data
     const product = info?.productWiseError?.find(item => item.asin === asin);
     
-    // Get GetOrderData array for calculating quantities and revenue
-    const getOrderData = Array.isArray(info?.GetOrderData) ? info.GetOrderData : [];
+    // Get profitability data (same source as profitability dashboard) for accurate sales/quantity
+    // This uses EconomicsMetrics as primary source, which is more accurate
+    const profitabilityProduct = info?.profitibilityData?.find(item => item.asin === asin);
     
-    // Function to calculate total quantities ASIN-wise from GetOrderData
-    const calculateAsinQuantities = (orderData) => {
-        const asinQuantities = {};
-        
-        // Only consider shipped, unshipped, and partially shipped orders
-        const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
-        
-        orderData.forEach(order => {
-            if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
-                return;
-            }
-            
-            const asinName = order.asin;
-            const quantity = Number(order.quantity) || 0;
-            
-            if (asinQuantities[asinName]) {
-                asinQuantities[asinName] += quantity;
-            } else {
-                asinQuantities[asinName] = quantity;
-            }
-        });
-        
-        return asinQuantities;
-    };
-
-    // Function to calculate total revenue ASIN-wise from GetOrderData
-    const calculateAsinRevenue = (orderData) => {
-        const asinRevenue = {};
-        
-        // Only consider shipped, unshipped, and partially shipped orders
-        const validStatuses = ['Shipped', 'Unshipped', 'PartiallyShipped'];
-        
-        orderData.forEach(order => {
-            if (!order || !order.asin || !validStatuses.includes(order.orderStatus)) {
-                return;
-            }
-            
-            const asinName = order.asin;
-            const itemPrice = Number(order.itemPrice) || 0;
-            
-            if (asinRevenue[asinName]) {
-                asinRevenue[asinName] += itemPrice;
-            } else {
-                asinRevenue[asinName] = itemPrice;
-            }
-        });
-        
-        return asinRevenue;
-    };
+    // Use sales and quantity from profitibilityData (same as profitability dashboard)
+    // Falls back to productWiseError if profitibilityData not available
+    const sales = profitabilityProduct?.sales ?? product?.sales ?? 0;
+    const quantity = profitabilityProduct?.quantity ?? product?.quantity ?? 0;
     
-    // Calculate quantities and revenue from GetOrderData
-    const asinQuantities = calculateAsinQuantities(getOrderData);
-    const asinRevenue = calculateAsinRevenue(getOrderData);
-    
-    // Debug: Log calculations
-    console.log('IssuesPerProduct - GetOrderData length:', getOrderData.length);
-    console.log('IssuesPerProduct - Calculated ASIN quantities:', asinQuantities);
-    console.log('IssuesPerProduct - Calculated ASIN revenue:', asinRevenue);
-    
-    // Update product with calculated quantities and revenue from GetOrderData, plus ranking data from rankingProduct
+    // Update product with ranking data and accurate sales/quantity from profitibilityData
     const updatedProduct = product ? {
         ...product,
-        quantity: asinQuantities[product.asin] || 0,
-        sales: asinRevenue[product.asin] || 0,
-        // Add ranking data from rankingProductWiseErrors array (same source as Category.jsx)
+        // Use sales and quantity from profitibilityData (same source as profitability dashboard)
+        quantity: quantity,
+        sales: sales,
+        // Add ranking data from rankingProductWiseErrors array
         rankingErrors: rankingProduct || undefined
     } : null;
+    
+    // Debug: Log product data
+    console.log('IssuesPerProduct - Product found:', !!product);
+    console.log('IssuesPerProduct - Profitability product found:', !!profitabilityProduct);
+    console.log('IssuesPerProduct - Quantity from profitibilityData:', profitabilityProduct?.quantity);
+    console.log('IssuesPerProduct - Sales from profitibilityData:', profitabilityProduct?.sales);
+    console.log('IssuesPerProduct - Final quantity used:', quantity);
+    console.log('IssuesPerProduct - Final sales used:', sales);
     
     // Debug: Log when component renders with new ASIN
     useEffect(() => {
         console.log('Component rendered with ASIN:', asin);
         console.log('Product found:', !!product);
+        console.log('Product quantity from backend:', product?.quantity);
+        console.log('Product sales from backend:', product?.sales);
         console.log('Ranking product found:', !!rankingProduct);
-        console.log('Ranking product data:', rankingProduct);
-        console.log('Updated product units:', updatedProduct?.quantity);
-        console.log('Updated product revenue:', updatedProduct?.sales);
-        console.log('Updated product ranking errors:', updatedProduct?.rankingErrors);
-    }, [asin, product, rankingProduct, updatedProduct]);
+    }, [asin, product, rankingProduct]);
 
     // Reset states when ASIN changes
     useEffect(() => {
@@ -1233,27 +1205,41 @@ const Dashboard = () => {
                                 {product.inventoryErrors?.replenishmentErrorData && (
                                     Array.isArray(product.inventoryErrors.replenishmentErrorData) ? (
                                         // Multiple errors for same ASIN (different SKUs)
-                                        product.inventoryErrors.replenishmentErrorData.map((error, idx) => (
-                                            <IssueItem
-                                                key={`replenishment-${idx}`}
-                                                label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
-                                                message={error.Message}
-                                                solutionKey={`Replenishment-${idx}`}
-                                                solutionContent={error.HowToSolve}
-                                                stateValue={replenishmentSolution}
-                                                toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
-                                            />
-                                        ))
+                                        product.inventoryErrors.replenishmentErrorData.map((error, idx) => {
+                                            const recommendedQty = error.recommendedReplenishmentQty || error.data || null;
+                                            const messageWithQty = recommendedQty !== null && recommendedQty !== undefined && recommendedQty > 0
+                                                ? `${error.Message} <span class="font-bold">Recommended Restock Quantity: ${recommendedQty} units</span>`
+                                                : error.Message;
+                                            return (
+                                                <IssueItem
+                                                    key={`replenishment-${idx}`}
+                                                    label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
+                                                    message={error.Message}
+                                                    recommendedQty={recommendedQty}
+                                                    solutionKey={`Replenishment-${idx}`}
+                                                    solutionContent={error.HowToSolve}
+                                                    stateValue={replenishmentSolution}
+                                                    toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
+                                                />
+                                            );
+                                        })
                                     ) : (
                                         // Single error
-                                        <IssueItem
-                                            label={`Low Inventory Risk ${product.inventoryErrors.replenishmentErrorData.sku ? `(SKU: ${product.inventoryErrors.replenishmentErrorData.sku})` : ''}`}
-                                            message={product.inventoryErrors?.replenishmentErrorData.Message}
-                                            solutionKey="Replenishment"
-                                            solutionContent={product.inventoryErrors?.replenishmentErrorData.HowToSolve}
-                                            stateValue={replenishmentSolution}
-                                            toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
-                                        />
+                                        (() => {
+                                            const error = product.inventoryErrors.replenishmentErrorData;
+                                            const recommendedQty = error.recommendedReplenishmentQty || error.data || null;
+                                            return (
+                                                <IssueItem
+                                                    label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
+                                                    message={error.Message}
+                                                    recommendedQty={recommendedQty}
+                                                    solutionKey="Replenishment"
+                                                    solutionContent={error.HowToSolve}
+                                                    stateValue={replenishmentSolution}
+                                                    toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
+                                                />
+                                            );
+                                        })()
                                     )
                                 )}
                             </ul>

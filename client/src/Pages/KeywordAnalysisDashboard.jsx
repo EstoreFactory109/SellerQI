@@ -59,6 +59,25 @@ const KeywordAnalysisDashboard = () => {
     return '';
   };
 
+  // Helper function to get product SKU by ASIN
+  const getProductSku = (asin) => {
+    if (!asin) return '';
+    
+    // Try to find in TotalProduct first
+    const product = totalProducts.find(p => p.asin === asin);
+    if (product && product.sku) {
+      return product.sku;
+    }
+    
+    // Try to find in productWiseError
+    const productError = productWiseError.find(p => p.asin === asin);
+    if (productError && productError.sku) {
+      return productError.sku;
+    }
+    
+    return '';
+  };
+
   // Get data for selected ASIN from Redux
   const selectedAsinData = keywordsByAsin[selectedAsin] || null;
   const keywordRecommendationsData = selectedAsinData?.data || null;
@@ -176,7 +195,8 @@ const KeywordAnalysisDashboard = () => {
     return asinsList.filter((asinItem) => {
       const asin = asinItem.asin?.toLowerCase() || '';
       const productName = getProductName(asinItem.asin)?.toLowerCase() || '';
-      return asin.includes(query) || productName.includes(query);
+      const productSku = getProductSku(asinItem.asin)?.toLowerCase() || '';
+      return asin.includes(query) || productName.includes(query) || productSku.includes(query);
     });
   }, [asinsList, asinSearchQuery, totalProducts, productWiseError]);
 
@@ -809,7 +829,7 @@ const KeywordAnalysisDashboard = () => {
         {/* Header */}
         <div className="header">
           <div className="logo">
-            🎯 Keyword Recommendations Dashboard
+            🎯 Keyword Opportunities Dashboard
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <button
@@ -873,10 +893,13 @@ const KeywordAnalysisDashboard = () => {
                  asinsList.length === 0 ? 'No ASINs available' :
                  selectedAsin ? (() => {
                    const productName = getProductName(selectedAsin);
+                   const productSku = getProductSku(selectedAsin);
                    const selectedItem = asinsList.find(a => a.asin === selectedAsin);
+                   const skuDisplay = productSku ? ` | SKU: ${productSku}` : '';
+                   const asinSkuDisplay = `ASIN: ${selectedAsin}${skuDisplay}`;
                    return productName 
-                     ? `${selectedAsin} - ${productName}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`
-                     : `${selectedAsin}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`;
+                     ? `${asinSkuDisplay} - ${productName}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`
+                     : `${asinSkuDisplay}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`;
                  })() : 'Select an ASIN'}
               </span>
               <ChevronDown 
@@ -959,6 +982,7 @@ const KeywordAnalysisDashboard = () => {
                   ) : (
                     filteredAsinsList.map((asinItem) => {
                       const productName = getProductName(asinItem.asin);
+                      const productSku = getProductSku(asinItem.asin);
                       const isSelected = selectedAsin === asinItem.asin;
                       
                       return (
@@ -995,7 +1019,10 @@ const KeywordAnalysisDashboard = () => {
                           }}
                         >
                           <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '4px' }}>
-                            {asinItem.asin}
+                            {productSku 
+                              ? `ASIN: ${asinItem.asin} | SKU: ${productSku}`
+                              : `ASIN: ${asinItem.asin}`
+                            }
                           </div>
                           {productName && (
                             <div style={{ 

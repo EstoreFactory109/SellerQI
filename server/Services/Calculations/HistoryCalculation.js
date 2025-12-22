@@ -189,9 +189,9 @@ const extractHistoryParams = (analyseData, dashboardData) => {
     
     return {
         healthScore: historyData.healthScore,
-        totalProducts: historyData.totalProducts.toString(),
-        productsWithIssues: historyData.productsWithIssues.toString(),
-        totalIssues: historyData.totalIssues.toString()
+        totalProducts: historyData.totalProducts,
+        productsWithIssues: historyData.productsWithIssues,
+        totalIssues: historyData.totalIssues
     };
 };
 

@@ -248,7 +248,18 @@ class Integration {
             }
 
             // Always add account history regardless of success
-            await this.addNewAccountHistory(userId, Country, Region);
+            try {
+                await this.addNewAccountHistory(userId, Country, Region);
+            } catch (historyError) {
+                logger.error("Error adding account history in Integration.getSpApiData", {
+                    error: historyError.message,
+                    stack: historyError.stack,
+                    userId,
+                    country: Country,
+                    region: Region
+                });
+                // Don't fail the entire process if history fails
+            }
 
             return {
                 success: serviceSummary.overallSuccess,
@@ -1389,13 +1400,30 @@ class Integration {
      * Now uses local calculation service instead of external calculation server
      */
     static async addNewAccountHistory(userId, country, region) {
-        logger.info("addNewAccountHistory starting");
+        logger.info("addNewAccountHistory starting", { userId, country, region });
 
         try {
+            // Validate input parameters
+            if (!userId || !country || !region) {
+                logger.error("addNewAccountHistory: Missing required parameters", {
+                    userId,
+                    country,
+                    region
+                });
+                throw new Error('Missing required parameters');
+            }
+
             const getAnalyseData = await AnalyseService.Analyse(userId, country, region);
 
-            if (getAnalyseData.status !== 200) {
-                throw new Error('Failed to get analyse data');
+            if (!getAnalyseData || getAnalyseData.status !== 200) {
+                logger.error("addNewAccountHistory: Failed to get analyse data", {
+                    userId,
+                    country,
+                    region,
+                    status: getAnalyseData?.status,
+                    hasMessage: !!getAnalyseData?.message
+                });
+                throw new Error(`Failed to get analyse data: status ${getAnalyseData?.status}`);
             }
 
             // Use local calculation service instead of external server
@@ -1403,6 +1431,13 @@ class Integration {
             const calculationResult = await analyseData(getAnalyseData.message, userId);
 
             if (!calculationResult?.dashboardData) {
+                logger.error("addNewAccountHistory: Failed to calculate dashboard data", {
+                    userId,
+                    country,
+                    region,
+                    hasResult: !!calculationResult,
+                    hasDashboardData: !!calculationResult?.dashboardData
+                });
                 throw new Error('Failed to calculate dashboard data');
             }
 
@@ -1443,24 +1478,27 @@ class Integration {
                 country,
                 region,
                 healthScore,
-                totalProducts.toString(),
-                numberOfProductsWithIssues.toString(),
-                totalIssues.toString()
+                totalProducts,
+                numberOfProductsWithIssues,
+                totalIssues
             );
 
             if (!addAccountHistoryData) {
-                throw new Error('Failed to add account history');
+                throw new Error('Failed to add account history - null result');
             }
 
-            logger.info("addNewAccountHistory ended");
+            logger.info("addNewAccountHistory completed successfully", { userId, country, region });
             return addAccountHistoryData;
 
         } catch (error) {
-            logger.error("Error adding account history", {
+            logger.error("Error in addNewAccountHistory", {
                 error: error.message,
-                userId
+                stack: error.stack,
+                userId,
+                country,
+                region
             });
-            return null;
+            throw error; // Re-throw so caller can handle
         }
     }
 }

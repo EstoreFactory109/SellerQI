@@ -113,14 +113,23 @@ const ProductChecker = () => {
   }
 
   const navigateToCategoryPage=(category)=>{
+    // Handle direct navigation to dashboard pages for Profitability and Sponsored Ads
+    if (category === 'Profitability') {
+      navigate('/seller-central-checker/profitibility-dashboard');
+      return;
+    }
+    
+    if (category === 'Sponsored Ads') {
+      navigate('/seller-central-checker/ppc-dashboard');
+      return;
+    }
+    
     // Map category names to filter values for the category page
     const categoryMap = {
       'Rankings': 'Ranking',
       'Conversion': 'Conversion',
       'Inventory': 'Inventory',
       'Account Health': 'account', // This goes to account tab
-      'Profitability': 'Profitability',
-      'Sponsored Ads': 'SponsoredAds'
     };
     
     const filterValue = categoryMap[category];

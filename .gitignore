@@ -9,7 +9,9 @@ logs/
 .env
 .env.local
 .env.*.local
-MULTI_INSTANCE_DEPLOYMENT.md
+
+# Markdown files
+*.md
 
 # Dependency directories
 /npm-debug.log

@@ -9,6 +9,8 @@ const RankingTableSection = ({ title, data }) => {
   console.log("data: ",data)
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
+  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const productInfo = info?.TotalProduct || info?.productWiseError || [];
 
   const extractErrors = (item) => {
     
@@ -27,6 +29,10 @@ const RankingTableSection = ({ title, data }) => {
       charLim: 'Character Limit'
     };
 
+    // Get SKU from productInfo
+    const productDetails = productInfo.find(p => p.asin === item.asin);
+    const sku = productDetails?.sku || item.sku || '';
+
     sections.forEach((sectionKey) => {
       
       const section = item.data[sectionKey];
@@ -37,6 +43,7 @@ const RankingTableSection = ({ title, data }) => {
           if (section.status === 'Error') {
               errorRows.push({
                 asin: item.asin,
+                sku: sku,
                 title: item.data?.Title || 'N/A',
                 issueHeading: `${sectionLabels[sectionKey]}`,
                 message: section.Message,
@@ -53,6 +60,7 @@ const RankingTableSection = ({ title, data }) => {
             if (check?.status === 'Error') {
               errorRows.push({
                 asin: item.asin,
+                sku: sku,
                 title: item.data?.Title || 'N/A',
                 issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
                 message: check.Message,
@@ -95,7 +103,7 @@ const RankingTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
@@ -108,8 +116,13 @@ const RankingTableSection = ({ title, data }) => {
                   whileHover={{ backgroundColor: '#f8fafc' }}
                   className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-4 align-top">
-                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top w-40">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      {row.sku && (
+                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
@@ -203,8 +216,12 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
           solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
         }
         
+        // Get SKU from productDetails
+        const sku = productDetails?.sku || '';
+        
         buyboxErrors.push({
           asin,
+          sku: sku,
           title: productTitle,
           issueHeading,
           message,
@@ -217,15 +234,20 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
   };
 
   // Get conversion errors from data
-  const conversionErrors = data.flatMap((item) =>
-    getFormattedErrors(item).map((err) => ({
+  const conversionErrors = data.flatMap((item) => {
+    // Get SKU from productInfo
+    const productDetails = productInfo?.find(p => p.asin === item.asin);
+    const sku = productDetails?.sku || item.sku || '';
+    
+    return getFormattedErrors(item).map((err) => ({
       asin: item.asin,
+      sku: sku,
       title: item.Title || 'N/A',
       issueHeading: `${err.heading} | ${err.subheading}`,
       message: err.message,
       solution: err.solution
-    }))
-  );
+    }));
+  });
 
   // Get buybox errors and combine with conversion errors
   const buyboxErrors = getBuyboxErrors();
@@ -265,7 +287,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
@@ -278,8 +300,13 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                   whileHover={{ backgroundColor: '#f8fafc' }}
                   className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-4 align-top">
-                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top w-40">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      {row.sku && (
+                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
@@ -325,9 +352,28 @@ const InventoryTableSection = ({ title, data }) => {
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
   console.log("InventoryTableSection: ", data);
+  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const productInfo = info?.TotalProduct || info?.productWiseError || [];
+  
+  // Helper function to format message with bold units available
+  const formatMessage = (message) => {
+    if (!message) return message;
+    // Match patterns like "Only X units available", "Currently X units available", or "X units available"
+    // Use a single comprehensive pattern that handles all variations
+    const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
+    
+    return message.replace(pattern, (match) => {
+      return `<strong>${match}</strong>`;
+    });
+  };
+  
   const extractInventoryErrors = (item) => {
     console.log("extractInventoryErrors - processing item:", item);
     const errorRows = [];
+    
+    // Get SKU from productInfo (fallback to item.sku if available)
+    const productDetails = productInfo.find(p => p.asin === item.asin);
+    const defaultSku = productDetails?.sku || item.sku || '';
 
     // Process inventory planning errors
     if (item.inventoryPlanningErrorData) {
@@ -335,6 +381,7 @@ const InventoryTableSection = ({ title, data }) => {
       if (planning.longTermStorageFees?.status === "Error") {
         errorRows.push({
           asin: item.asin,
+          sku: defaultSku,
           title: item.Title || 'N/A',
           issueHeading: 'Inventory Planning | Long-Term Storage Fees',
           message: planning.longTermStorageFees.Message,
@@ -344,6 +391,7 @@ const InventoryTableSection = ({ title, data }) => {
       if (planning.unfulfillable?.status === "Error") {
         errorRows.push({
           asin: item.asin,
+          sku: defaultSku,
           title: item.Title || 'N/A',
           issueHeading: 'Inventory Planning | Unfulfillable Inventory',
           message: planning.unfulfillable.Message,
@@ -356,6 +404,7 @@ const InventoryTableSection = ({ title, data }) => {
     if (item.strandedInventoryErrorData) {
       errorRows.push({
         asin: item.asin,
+        sku: defaultSku,
         title: item.Title || 'N/A',
         issueHeading: 'Stranded Inventory | Product Not Listed',
         message: item.strandedInventoryErrorData.Message,
@@ -367,6 +416,7 @@ const InventoryTableSection = ({ title, data }) => {
     if (item.inboundNonComplianceErrorData) {
       errorRows.push({
         asin: item.asin,
+        sku: defaultSku,
         title: item.Title || 'N/A',
         issueHeading: 'Inbound Non-Compliance | Shipment Issue',
         message: item.inboundNonComplianceErrorData.Message,
@@ -379,22 +429,29 @@ const InventoryTableSection = ({ title, data }) => {
       if (Array.isArray(item.replenishmentErrorData)) {
         // Multiple errors for same ASIN (different SKUs)
         item.replenishmentErrorData.forEach(error => {
+          // Use SKU from error if available, otherwise use default
+          const sku = error.sku || defaultSku;
           errorRows.push({
             asin: item.asin,
+            sku: sku,
             title: item.Title || 'N/A',
             issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
             message: error.Message,
-            solution: error.HowToSolve
+            solution: error.HowToSolve,
+            recommendedReplenishmentQty: error.recommendedReplenishmentQty || error.data || null
           });
         });
       } else {
-        // Single error
+        // Single error - use SKU from error data if available
+        const sku = item.replenishmentErrorData.sku || defaultSku;
         errorRows.push({
           asin: item.asin,
+          sku: sku,
           title: item.Title || 'N/A',
           issueHeading: `Replenishment | Low Inventory Risk ${item.replenishmentErrorData.sku ? `(SKU: ${item.replenishmentErrorData.sku})` : ''}`,
           message: item.replenishmentErrorData.Message,
-          solution: item.replenishmentErrorData.HowToSolve
+          solution: item.replenishmentErrorData.HowToSolve,
+          recommendedReplenishmentQty: item.replenishmentErrorData.recommendedReplenishmentQty || item.replenishmentErrorData.data || null
         });
       }
     }
@@ -430,7 +487,7 @@ const InventoryTableSection = ({ title, data }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
@@ -443,8 +500,13 @@ const InventoryTableSection = ({ title, data }) => {
                   whileHover={{ backgroundColor: '#f8fafc' }}
                   className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-4 align-top">
-                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top w-40">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      {row.sku && (
+                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
@@ -459,7 +521,14 @@ const InventoryTableSection = ({ title, data }) => {
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                        <span dangerouslySetInnerHTML={{ __html: formatMessage(row.message) }} />
+                        {row.recommendedReplenishmentQty !== null && row.recommendedReplenishmentQty !== undefined && row.recommendedReplenishmentQty > 0 && (
+                          <span className="ml-2">
+                            <span className="font-bold text-gray-900">Recommended Restock Quantity: {row.recommendedReplenishmentQty} units</span>
+                          </span>
+                        )}
+                      </p>
                     </div>
                   </td>
                   <td className="py-5 px-4 align-top">
@@ -517,8 +586,12 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
           solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
         }
         
+        // Get SKU from productDetails
+        const sku = productDetails?.sku || '';
+        
         errorRows.push({
           asin,
+          sku: sku,
           title: productTitle,
           issueHeading,
           message,
@@ -562,7 +635,7 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
           <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-32">ASIN</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
@@ -575,8 +648,13 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                   whileHover={{ backgroundColor: '#f8fafc' }}
                   className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
                 >
-                  <td className="py-5 px-4 align-top">
-                    <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block whitespace-nowrap" title={row.asin}>{row.asin}</span>
+                  <td className="py-5 px-4 align-top w-40">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      {row.sku && (
+                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-5 px-4 align-top">
                     <div className="flex items-start gap-2">
@@ -669,11 +747,12 @@ const OptimizationDashboard = () => {
   }, []);
 
   // Calculate issue counts for summary cards
-  const rankingIssues = info?.rankingProductWiseErrors?.length || 0;
-  const baseConversionIssues = info?.conversionProductWiseErrors?.length || 0;
-  const inventoryIssues = info?.inventoryProductWiseErrors?.length || 0;
+  // Use the same fields as dashboard to ensure consistency
+  const rankingIssues = info?.TotalRankingerrors || 0;
+  const conversionIssues = info?.totalErrorInConversion || 0;
+  const inventoryIssues = info?.totalInventoryErrors || 0;
   
-  // Calculate buybox issues count (now part of conversion errors)
+  // Calculate buybox issues count (for display purposes only, already included in conversionIssues)
   const buyboxIssues = (() => {
     if (!info?.buyBoxData?.asinBuyBoxData) return 0;
     return info.buyBoxData.asinBuyBoxData.filter(
@@ -681,9 +760,7 @@ const OptimizationDashboard = () => {
     ).length;
   })();
   
-  // Conversion issues now include buybox issues
-  const conversionIssues = baseConversionIssues + buyboxIssues;
-  
+  // Total issues should match dashboard: sum of ranking, conversion, and inventory
   const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
 
   return (
@@ -700,18 +777,12 @@ const OptimizationDashboard = () => {
                 </h1>
               </div>
               <p className="text-gray-300 text-lg mb-4">Detailed breakdown of issues by category</p>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                  <span>Live analysis active</span>
+              {totalIssues > 0 && (
+                <div className="flex items-center gap-2 text-sm text-orange-300">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Action required</span>
                 </div>
-                {totalIssues > 0 && (
-                  <div className="flex items-center gap-2 text-sm text-orange-300">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Action required</span>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
             
             <div className="flex items-center gap-6 text-white">
@@ -720,6 +791,7 @@ const OptimizationDashboard = () => {
                   {totalIssues}
                 </div>
                 <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Total Issues</div>
+                <div className="text-xs text-gray-400 mt-1">(Ranking + Conversion + Inventory)</div>
                 {totalIssues > 0 && (
                   <div className="text-xs text-orange-300 mt-1">Requires optimization</div>
                 )}
@@ -768,7 +840,7 @@ const OptimizationDashboard = () => {
                         <div className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
                           Issue Categories
                         </div>
-                        {["All", "Ranking", "Conversion", "Inventory", "Buybox"].map((option) => (
+                        {["All", "Ranking", "Conversion", "Inventory"].map((option) => (
                           <button
                             key={option}
                             className={`w-full text-left px-4 py-3 text-sm hover:bg-blue-50 transition-all duration-150 ${
@@ -862,32 +934,7 @@ const OptimizationDashboard = () => {
                 <p className="text-gray-600">Your inventory management is performing perfectly!</p>
               </motion.div>
             )
-          ) : issuesSelectedOption === "Buybox" ? (
-            buyboxIssues > 0 ? (
-              <>
-                <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                  <p className="text-sm text-blue-700">
-                    <span className="font-semibold">Note:</span> Buy Box issues are also included in the Conversion category for comprehensive analysis.
-                  </p>
-                </div>
-                <BuyboxTableSection title="Buy Box Optimization" data={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
-              </>
-            ) : (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
-              >
-                <div className="w-20 h-20 bg-gradient-to-br from-purple-400 to-purple-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                  <ShoppingCart className="w-10 h-10 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Buy Box Issues</h3>
-                <p className="text-gray-600">All your products have excellent Buy Box ownership!</p>
-              </motion.div>
-            )
-          ) : (
-            <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
-          )}
+          ) : null}
         </div>
       </div>
     </div>

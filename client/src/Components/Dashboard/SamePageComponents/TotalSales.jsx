@@ -1,19 +1,19 @@
-import React, { useState } from "react";
-import { AlertCircle, DollarSign, TrendingUp, PieChart } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from "react";
+import { AlertCircle, DollarSign, PieChart } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import axios from 'axios';
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 
-// Function to format date with ordinal suffix (1st, 2nd, 3rd, etc.)
 const formatDateWithOrdinal = (dateString) => {
+  if (!dateString) return 'N/A';
   const date = new Date(dateString);
   const day = date.getDate();
   const month = date.toLocaleDateString('en-US', { month: 'long' });
   
-  // Get ordinal suffix
   const getOrdinalSuffix = (day) => {
     if (day > 3 && day < 21) return 'th';
     switch (day % 10) {
@@ -29,15 +29,70 @@ const formatDateWithOrdinal = (dateString) => {
 
 const TotalSales = () => {
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
+  const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
+  const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
+  const sponsoredAdsMetrics = useSelector(state => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
+  const currency = useSelector(state => state.currency?.currency) || '$';
   const navigate = useNavigate();
+  
+  const [filteredData, setFilteredData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
-  
-  // Get currency from Redux
-  const currency = useSelector(state => state.currency?.currency) || '$';
-  
-  // Get sponsoredAdsMetrics from Redux store - same as other dashboards
-  const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+
+  useEffect(() => {
+    const fetchFilteredData = async () => {
+      if (calendarMode === 'default') {
+        setFilteredData(null);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        let periodType = calendarMode;
+        let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
+        
+        if (periodType === 'custom' && startDate && endDate) {
+          url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        }
+
+        const response = await axios.get(url, { withCredentials: true });
+        
+        if (response.status === 200 && response.data?.data) {
+          setFilteredData(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching filtered total sales data:', error);
+        setFilteredData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFilteredData();
+  }, [calendarMode, startDate, endDate]);
+
+  const filteredDateWiseTotalCosts = useMemo(() => {
+    if (!dateWiseTotalCosts.length) return [];
+    
+    if (!startDate || !endDate || calendarMode === 'default') {
+      return dateWiseTotalCosts;
+    }
+    
+    const filtered = dateWiseTotalCosts.filter(item => {
+      if (!item.date) return false;
+      
+      const itemDate = new Date(item.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+    
+    return filtered;
+  }, [dateWiseTotalCosts, startDate, endDate, calendarMode]);
 
   const labelData = [
     "Gross Profit",
@@ -47,24 +102,39 @@ const TotalSales = () => {
     "Refunds",
   ];
 
-  const grossProfitRaw = Number(info?.accountFinance?.Gross_Profit) || 0;
+  const useFilteredData = filteredData !== null && calendarMode !== 'default';
+  const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
+  
+  const grossProfitRaw = useFilteredData 
+    ? Number(filteredData?.grossProfit?.amount || 0)
+    : Number(info?.accountFinance?.Gross_Profit) || 0;
   const grossProfit = Math.abs(grossProfitRaw);
-  const totalSales = Number(info?.TotalWeeklySale || 0);
+  const totalSales = useFilteredData
+    ? Number(filteredData?.totalSales?.amount || 0)
+    : Number(info?.TotalWeeklySale || 0);
 
-  // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
-  const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-  // Fallback to ProductAdsPayment if Ads API data not available
-  const ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+  let ppcSpent = 0;
+  if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
+    ppcSpent = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+  } else {
+    const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+    ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+  }
 
   const saleValues = [
     grossProfit,
     ppcSpent,
-    Number(info?.accountFinance?.FBA_Fees || 0),
-    Number(info?.accountFinance?.Storage || 0),
-    Number(info?.accountFinance?.Refunds || 0),
+    useFilteredData
+      ? Number(filteredData?.fbaFees?.amount || 0)
+      : Number(info?.accountFinance?.FBA_Fees || 0),
+    useFilteredData
+      ? Number(filteredData?.storageFees?.amount || 0)
+      : Number(info?.accountFinance?.Storage || 0),
+    useFilteredData
+      ? Number(filteredData?.refunds?.amount || 0)
+      : Number(info?.accountFinance?.Refunds || 0),
   ];
 
-  // Handle navigation to profitability dashboard
   const handleNavigateToProfitability = (itemName) => {
     console.log(`Navigating to profitability dashboard from: ${itemName}`);
     navigate('/seller-central-checker/profitibility-dashboard');
@@ -118,9 +188,20 @@ const TotalSales = () => {
     },
   };
 
+  const displayStartDate = useFilteredData && filteredData?.dateRange?.startDate
+    ? filteredData.dateRange.startDate
+    : info?.startDate;
+  const displayEndDate = useFilteredData && filteredData?.dateRange?.endDate
+    ? filteredData.dateRange.endDate
+    : info?.endDate;
+
   return (
-    <div className="p-6 h-full min-h-[400px] bg-white border-2 border-gray-200 rounded-md">
-      {/* Header Section */}
+    <div className="p-6 h-full min-h-[400px] bg-white border-2 border-gray-200 rounded-md relative">
+      {loading && (
+        <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 rounded-md">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -152,7 +233,6 @@ const TotalSales = () => {
         </div>
       </div>
 
-      {/* Sales Numbers */}
       <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
         <div className="flex flex-col">
           <div className="flex items-center gap-3 mb-2">
@@ -161,7 +241,7 @@ const TotalSales = () => {
             </h2>
           </div>
           <p className="text-sm text-gray-500">
-            {info?.startDate ? formatDateWithOrdinal(info.startDate) : '23rd May'} - {info?.endDate ? formatDateWithOrdinal(info.endDate) : '22nd June'}
+            {displayStartDate ? formatDateWithOrdinal(displayStartDate) : 'N/A'} - {displayEndDate ? formatDateWithOrdinal(displayEndDate) : 'N/A'}
           </p>
         </div>
         
@@ -175,9 +255,7 @@ const TotalSales = () => {
         </div>
       </div>
 
-      {/* Chart & Legend */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* Chart */}
         <div className="lg:col-span-2 flex justify-center">
           <Chart
             options={chartData.options}
@@ -188,12 +266,11 @@ const TotalSales = () => {
           />
         </div>
 
-        {/* Legend */}
         <div className="lg:col-span-3 space-y-3">
           {labelData.map((label, index) => {
             const value = saleValues[index];
             const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
-            
+
             return (
               <div
                 key={index}

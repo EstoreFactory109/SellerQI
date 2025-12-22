@@ -48,27 +48,43 @@ const Dashboard = () => {
     console.log('Start date:', dashboardInfo?.startDate);
     console.log('End date:', dashboardInfo?.endDate);
     
+    // Helper function to get actual end date (yesterday due to 24-hour data delay)
+    const getActualEndDate = () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      return yesterday;
+    };
+
+    const formatDate = (date) => {
+      const dateObj = date instanceof Date ? date : new Date(date);
+      return dateObj.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
+    };
+
     if (calendarMode === 'custom' && dashboardInfo?.startDate && dashboardInfo?.endDate) {
       // Show custom date range
-      const formatDate = (dateStr) => {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          year: 'numeric' 
-        });
-      };
       const customPeriod = `${formatDate(dashboardInfo.startDate)} - ${formatDate(dashboardInfo.endDate)}`;
       setSelectedPeriod(customPeriod);
       console.log('Dashboard showing custom range:', customPeriod);
     } else if (calendarMode === 'last7') {
-      // Show "Last 7 Days"
-      setSelectedPeriod('Last 7 Days');
-      console.log('Dashboard showing Last 7 Days');
+      // Show actual date range for Last 7 Days
+      const actualEndDate = getActualEndDate();
+      const startDate = new Date(actualEndDate);
+      startDate.setDate(actualEndDate.getDate() - 6);
+      const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
+      setSelectedPeriod(period);
+      console.log('Dashboard showing Last 7 Days:', period);
     } else {
-      // Show default "Last 30 Days"
-      setSelectedPeriod('Last 30 Days');
-      console.log('Dashboard showing Last 30 Days');
+      // Show actual date range for Last 30 Days
+      const actualEndDate = getActualEndDate();
+      const startDate = new Date(actualEndDate);
+      startDate.setDate(actualEndDate.getDate() - 29);
+      const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
+      setSelectedPeriod(period);
+      console.log('Dashboard showing Last 30 Days:', period);
     }
   }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
   

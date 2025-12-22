@@ -9,7 +9,7 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     // console.log(marketplaceIds);
     try {
         const now = new Date();
-        const EndTime = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours before now
+        const EndTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours before now (1 day delay for data accuracy)
         const StartTime = new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000); // 6 months before now
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,

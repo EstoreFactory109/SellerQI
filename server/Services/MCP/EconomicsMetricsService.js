@@ -66,6 +66,7 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
             refunds: metrics.refunds,
             datewiseSales: metrics.datewiseSales || [],
             datewiseGrossProfit: metrics.datewiseGrossProfit || [],
+            datewiseFeesAndRefunds: metrics.datewiseFeesAndRefunds || [],
             asinWiseSales: metrics.asinWiseSales || [],
             queryId: queryId,
             documentId: documentId,

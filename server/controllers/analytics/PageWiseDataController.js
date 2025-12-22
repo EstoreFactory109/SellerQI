@@ -557,7 +557,22 @@ const getInventoryData = asyncHandler(async (req, res) => {
  */
 async function recordHistory(userId, country, region, analyseData, dashboardData) {
     try {
+        if (!userId || !country || !region) {
+            logger.warn('recordHistory: Missing required parameters', { userId, country, region });
+            return;
+        }
+
         const historyParams = extractHistoryParams(analyseData, dashboardData);
+        
+        logger.info('recordHistory: Calling addAccountHistory', {
+            userId,
+            country,
+            region,
+            healthScore: historyParams.healthScore,
+            totalProducts: historyParams.totalProducts,
+            productsWithIssues: historyParams.productsWithIssues,
+            totalIssues: historyParams.totalIssues
+        });
         
         await addAccountHistory(
             userId,
@@ -569,9 +584,15 @@ async function recordHistory(userId, country, region, analyseData, dashboardData
             historyParams.totalIssues
         );
         
-        logger.info(`History recorded successfully for user ${userId}`);
+        logger.info(`History recorded successfully for user ${userId}`, { country, region });
     } catch (error) {
-        logger.error('Error recording history:', error);
+        logger.error('Error recording history', {
+            error: error.message,
+            stack: error.stack,
+            userId,
+            country,
+            region
+        });
         // Don't throw - history recording should not affect main response
     }
 }

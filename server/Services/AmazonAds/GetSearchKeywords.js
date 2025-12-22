@@ -37,7 +37,7 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
 
             // Calculate dynamic dates
             const now = new Date();
-            const endDate = new Date(now.getTime() - (72 * 60 * 60 * 1000)); // 72 hours before now
+            const endDate = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours before now (1 day delay for data accuracy)
             const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
 
             // Format dates as YYYY-MM-DD strings

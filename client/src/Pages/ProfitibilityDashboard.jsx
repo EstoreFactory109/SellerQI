@@ -11,15 +11,22 @@ import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 
+// Helper function to get actual end date (yesterday due to 24-hour data delay)
+const getActualEndDate = () => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return yesterday;
+};
+
 // Create empty chart data with zero values when no data is available
 const createEmptyProfitabilityData = () => {
-  const today = new Date();
+  const yesterday = getActualEndDate();
   const emptyData = [];
   
-  // Generate last 7 days with zero values
+  // Generate last 7 days with zero values (ending at yesterday)
   for (let i = 6; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - i);
+    const date = new Date(yesterday);
+    date.setDate(yesterday.getDate() - i);
     const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     
     emptyData.push({
@@ -295,7 +302,24 @@ const ProfitabilityDashboard = () => {
       // Add header information
       csvData.push(['Profitability Dashboard Report - Complete Analysis']);
       csvData.push(['Generated on:', new Date().toLocaleDateString()]);
-      csvData.push(['Date Range:', info?.startDate && info?.endDate ? `${info.startDate} to ${info.endDate}` : 'Last 30 Days']);
+      // Show actual date range
+      let dateRangeText = 'Last 30 Days';
+      if (info?.startDate && info?.endDate) {
+        dateRangeText = `${info.startDate} to ${info.endDate}`;
+      } else {
+        const actualEndDate = getActualEndDate();
+        const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        if (info?.calendarMode === 'last7') {
+          const startDate = new Date(actualEndDate);
+          startDate.setDate(actualEndDate.getDate() - 6);
+          dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
+        } else {
+          const startDate = new Date(actualEndDate);
+          startDate.setDate(actualEndDate.getDate() - 29);
+          dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
+        }
+      }
+      csvData.push(['Date Range:', dateRangeText]);
       csvData.push([]);
       
       // Add Executive Summary at the top
@@ -1045,9 +1069,19 @@ const ProfitabilityDashboard = () => {
                       <span className='text-sm font-medium text-gray-700'>
                         {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
                           ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                          : info?.calendarMode === 'last7'
-                          ? 'Last 7 Days'
-                          : 'Last 30 Days'
+                          : (() => {
+                              const actualEndDate = getActualEndDate();
+                              const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                              if (info?.calendarMode === 'last7') {
+                                const startDate = new Date(actualEndDate);
+                                startDate.setDate(actualEndDate.getDate() - 6);
+                                return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
+                              } else {
+                                const startDate = new Date(actualEndDate);
+                                startDate.setDate(actualEndDate.getDate() - 29);
+                                return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
+                              }
+                            })()
                         }
                       </span>
                     </motion.button>

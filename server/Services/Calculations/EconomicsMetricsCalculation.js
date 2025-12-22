@@ -72,6 +72,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
     // Data structures for datewise and ASIN-wise breakdowns
     const datewiseSales = {}; // { date: { sales, grossProfit } }
     const datewiseGrossProfit = {}; // { date: amount }
+    const datewiseFeesAndRefunds = {}; // { date: { fbaFulfillmentFee, storageFee, refunds: { units, amount } } }
     const asinWiseSales = {}; // { asin: { sales, grossProfit, unitsSold, ppcSpent, fbaFees, storageFees, amazonFees } }
 
     /**
@@ -111,6 +112,15 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 datewiseGrossProfit[date] = 0;
             }
             datewiseGrossProfit[date] += grossProfit;
+            
+            // Initialize datewise fees and refunds if not exists
+            if (!datewiseFeesAndRefunds[date]) {
+                datewiseFeesAndRefunds[date] = {
+                    fbaFulfillmentFee: 0,
+                    storageFee: 0,
+                    refunds: { units: 0, amount: 0 }
+                };
+            }
         }
         
         // Initialize ASIN-wise data structure if needed
@@ -192,11 +202,19 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 if (feeTypeNameLower.includes('fba') && (feeTypeNameLower.includes('fulfillment') || feeTypeNameLower.includes('fulfilment'))) {
                     itemFBAFees += feeAmount;
                     totalFBAFees += feeAmount;
+                    // Update datewise FBA fulfillment fee
+                    if (date && datewiseFeesAndRefunds[date]) {
+                        datewiseFeesAndRefunds[date].fbaFulfillmentFee += feeAmount;
+                    }
                 }
                 // Storage Fee
                 else if (feeTypeNameLower.includes('storage')) {
                     itemStorageFees += feeAmount;
                     totalStorageFees += feeAmount;
+                    // Update datewise storage fee
+                    if (date && datewiseFeesAndRefunds[date]) {
+                        datewiseFeesAndRefunds[date].storageFee += feeAmount;
+                    }
                 }
 
                 // Track fee breakdown per ASIN
@@ -219,10 +237,23 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
 
         // Calculate Refunds
         // Refunds can be calculated from unitsRefunded * average selling price
+        // Also check for negative sales amounts which indicate refunds
         const unitsRefunded = parseFloat(item.sales?.unitsRefunded || 0);
         const avgPrice = parseFloat(item.sales?.averageSellingPrice?.amount || 0);
-        const refundAmount = unitsRefunded * avgPrice;
+        let refundAmount = unitsRefunded * avgPrice;
+        
+        // If orderedProductSales is negative, it indicates a refund
+        if (orderedSales < 0) {
+            refundAmount += Math.abs(orderedSales);
+        }
+        
         totalRefunds += refundAmount;
+        
+        // Update datewise refunds
+        if (date && datewiseFeesAndRefunds[date]) {
+            datewiseFeesAndRefunds[date].refunds.units += unitsRefunded;
+            datewiseFeesAndRefunds[date].refunds.amount += refundAmount;
+        }
     };
 
     // Process each record
@@ -297,6 +328,26 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             date,
             grossProfit: {
                 amount: parseFloat(datewiseGrossProfit[date].toFixed(2)),
+                currencyCode
+            }
+        }));
+
+    // Convert datewise fees and refunds to sorted array
+    const datewiseFeesAndRefundsArray = Object.keys(datewiseFeesAndRefunds)
+        .sort()
+        .map(date => ({
+            date,
+            fbaFulfillmentFee: {
+                amount: parseFloat(datewiseFeesAndRefunds[date].fbaFulfillmentFee.toFixed(2)),
+                currencyCode
+            },
+            storageFee: {
+                amount: parseFloat(datewiseFeesAndRefunds[date].storageFee.toFixed(2)),
+                currencyCode
+            },
+            refunds: {
+                units: datewiseFeesAndRefunds[date].refunds.units,
+                amount: parseFloat(datewiseFeesAndRefunds[date].refunds.amount.toFixed(2)),
                 currencyCode
             }
         }));
@@ -389,6 +440,7 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         },
         datewiseSales: datewiseSalesArray,
         datewiseGrossProfit: datewiseGrossProfitArray,
+        datewiseFeesAndRefunds: datewiseFeesAndRefundsArray,
         asinWiseSales: asinWiseSalesArray
     };
 
