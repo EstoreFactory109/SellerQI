@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DateRange } from 'react-date-range';
 import 'react-date-range/dist/styles.css';
 import 'react-date-range/dist/theme/default.css';
@@ -100,55 +101,10 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
   console.log('Initial customActive:', initialState.customActive);
   console.log('Initial selectedRange:', initialState.selectedRange);
 
-  // Update calendar state when Redux state changes
-  useEffect(() => {
-    const calendarMode = dashboardInfo?.calendarMode || 'default';
-    
-    console.log('=== Calendar useEffect: Redux state changed ===');
-    console.log('Calendar mode:', calendarMode);
-    console.log('Redux startDate:', dashboardInfo?.startDate);
-    console.log('Redux endDate:', dashboardInfo?.endDate);
-    
-    if (calendarMode === 'custom') {
-      // Custom range is selected - update to show custom selection
-      setThirtyDaysActive(false);
-      setSevenDaysActive(false);
-      setCustomActive(true);
-      if (dashboardInfo?.startDate && dashboardInfo?.endDate) {
-        setSelectedRange({
-          startDate: new Date(dashboardInfo.startDate),
-          endDate: new Date(dashboardInfo.endDate),
-          key: 'selection',
-        });
-      }
-      console.log('Calendar updated to custom range:', {
-        startDate: dashboardInfo?.startDate,
-        endDate: dashboardInfo?.endDate
-      });
-    } else if (calendarMode === 'last7') {
-      // Last 7 days is selected
-      setThirtyDaysActive(false);
-      setSevenDaysActive(true);
-      setCustomActive(false);
-      setSelectedRange({
-        startDate: subDays(new Date(), 8),
-        endDate: subDays(new Date(), 1),
-        key: 'selection',
-      });
-      console.log('Calendar updated to last 7 days');
-    } else {
-      // Default "Last 30 days" - reset to last 30 days
-      setThirtyDaysActive(true);
-      setSevenDaysActive(false);
-      setCustomActive(false);
-      setSelectedRange({
-        startDate: subDays(new Date(), 30),
-        endDate: subDays(new Date(), 1),
-        key: 'selection',
-      });
-      console.log('Calendar reset to last 30 days (mode:', calendarMode, ')');
-    }
-  }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
+  // NOTE: We no longer sync with Redux state changes while the calendar is open.
+  // The calendar initializes from Redux state when it mounts (via initializeCalendarState),
+  // and user interactions control the state from that point forward.
+  // This prevents the calendar from resetting or closing when the user is switching between filters.
 
   const handleActive=(btnValue)=>{
     switch(btnValue){
@@ -189,6 +145,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     }
 
     await applyDateRange(selectedRange, 'custom');
+    // Interaction flag will be reset in applyDateRange's finally block
   }
 
   const handlePreset = async (type) => {
@@ -231,7 +188,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         break;
       case 'custom':
         handleActive('custom');
-        // Keep current range for custom selection
+        // Keep current range for custom selection - user will select dates and click Apply
         break;
       default:
         break;
@@ -346,14 +303,14 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     setOpenCalender(false);
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.3 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
         style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
         onClick={closeCalendar}
       >
@@ -615,6 +572,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
           </div>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

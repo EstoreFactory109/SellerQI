@@ -10,6 +10,7 @@ import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
+import axios from 'axios';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -43,10 +44,19 @@ const ProfitabilityDashboard = () => {
   const [suggestionsData, setSuggestionsData] = useState([]);
   const [openCalender, setOpenCalender] = useState(false);
   const [showCogsPopup, setShowCogsPopup] = useState(false);
+  const [filteredData, setFilteredData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const CalenderRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      // Don't close calendar if clicking inside the calendar portal
+      // The calendar uses createPortal to render to document.body
+      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
+      if (calendarPortal && calendarPortal.contains(event.target)) {
+        return; // Click is inside the calendar portal, don't close
+      }
+      
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false);
       }
@@ -75,9 +85,47 @@ const ProfitabilityDashboard = () => {
   };
 
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
+  const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
+  const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+
+  // Fetch filtered data when calendar mode or dates change
+  useEffect(() => {
+    const fetchFilteredData = async () => {
+      // Only fetch if not default mode (last 30 days uses default data)
+      if (calendarMode === 'default') {
+        setFilteredData(null);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        let periodType = calendarMode;
+        let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
+        
+        // Add dates for custom range
+        if (periodType === 'custom' && startDate && endDate) {
+          url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        }
+
+        const response = await axios.get(url, { withCredentials: true });
+        
+        if (response.status === 200 && response.data?.data) {
+          setFilteredData(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching filtered total sales data:', error);
+        setFilteredData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFilteredData();
+  }, [calendarMode, startDate, endDate]);
   
   // Get ProductWiseSponsoredAdsGraphData from Redux store
   const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || {};
@@ -132,8 +180,19 @@ const ProfitabilityDashboard = () => {
     return filtered;
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
   
-  // Transform the data for the chart using filtered TotalSales data
+  // Transform the data for the chart using filtered data when available
   const chartData = useMemo(() => {
+    const useFilteredData = filteredData !== null && calendarMode !== 'default';
+    
+    // Use datewise chart data from filtered API response if available
+    if (useFilteredData && filteredData?.datewiseChartData && Array.isArray(filteredData.datewiseChartData) && filteredData.datewiseChartData.length > 0) {
+      return filteredData.datewiseChartData.map(item => ({
+        date: item.date,
+        grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
+        totalSales: parseFloat((item.totalSales || 0).toFixed(2))
+      }));
+    }
+    
     // Prioritize filtered TotalSales data from Redux (calendar selection)
     if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
       // Calculate total fees from account finance data
@@ -199,7 +258,7 @@ const ProfitabilityDashboard = () => {
     
     // Final fallback: Return empty data with zero values
     return createEmptyProfitabilityData();
-  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance]);
+  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode]);
 
   // Get COGs values from Redux store
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
@@ -208,6 +267,9 @@ const ProfitabilityDashboard = () => {
     // Use the same Total Sales value as the Dashboard Total Sales component
     const filteredAccountFinance = info?.accountFinance || accountFinance;
     let totalOverallSpend = 0;
+    
+    // Use filtered data if available, otherwise use default data from Redux
+    const useFilteredData = filteredData !== null && calendarMode !== 'default';
     
     // Calculate total COGS from all products that have COGS entered
     let totalCOGS = 0;
@@ -239,24 +301,40 @@ const ProfitabilityDashboard = () => {
       console.log('Final ad spend used:', adSpend);
     }
     
+    // Use filtered fees when available
+    const fbaFees = useFilteredData
+      ? Number(filteredData?.fbaFees?.amount || 0)
+      : Number(filteredAccountFinance?.FBA_Fees || 0);
+    const storageFees = useFilteredData
+      ? Number(filteredData?.storageFees?.amount || 0)
+      : Number(filteredAccountFinance?.Storage || 0);
+    const refunds = useFilteredData
+      ? Number(filteredData?.refunds?.amount || 0)
+      : Number(filteredAccountFinance?.Refunds || 0);
+    
     // Calculate total overall spend including all Amazon fees (using calculated adSpend)
-    totalOverallSpend = (Number(filteredAccountFinance?.FBA_Fees || 0) + 
-                        Number(filteredAccountFinance?.Storage || 0) + 
+    totalOverallSpend = (fbaFees + 
+                        storageFees + 
                         Number(filteredAccountFinance?.Amazon_Charges || 0) +
                         adSpend +
-                        Number(filteredAccountFinance?.Refunds || 0));
+                        refunds);
     
-    // Always use the same value as Dashboard Total Sales component (TotalWeeklySale)
-    const totalSales = Number(info?.TotalWeeklySale || 0);
-    const originalGrossProfit = Number(filteredAccountFinance?.Gross_Profit) || 0;
+    // Use filtered total sales and gross profit when filters are applied
+    const totalSales = useFilteredData
+      ? Number(filteredData?.totalSales?.amount || 0)
+      : Number(info?.TotalWeeklySale || 0);
+    
+    const originalGrossProfit = useFilteredData
+      ? Number(filteredData?.grossProfit?.amount || 0)
+      : Number(filteredAccountFinance?.Gross_Profit) || 0;
     
     // Adjust gross profit by subtracting total COGS (only for profitability page)
     const adjustedGrossProfit = originalGrossProfit - totalCOGS;
     
     // Use Amazon_Fees if available (from EconomicsMetrics), otherwise calculate from FBA + Storage
-    // Final fallback: sum from product-wise data if all else fails
+    // Use filtered fees when available
     let amazonFees = Number(filteredAccountFinance?.Amazon_Fees || 0) || 
-                     (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0));
+                     (fbaFees + storageFees);
     
     // If account-level fees is 0, calculate from product-wise data as fallback
     if (amazonFees === 0 && profitibilityData.length > 0) {
@@ -282,7 +360,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -1092,7 +1170,7 @@ const ProfitabilityDashboard = () => {
                           animate={{ opacity: 1, scaleY: 1 }}
                           exit={{ opacity: 0, scaleY: 0 }}
                           transition={{ duration: 0.3 }}
-                          className="absolute top-full right-0 z-50 mt-2 bg-white shadow-xl rounded-xl border border-gray-200 origin-top"
+                          className="absolute top-full right-0 z-[9999] mt-2 bg-white shadow-xl rounded-xl border border-gray-200 origin-top"
                         >
                           <Calender setOpenCalender={setOpenCalender} />
                         </motion.div>

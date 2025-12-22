@@ -127,6 +127,13 @@ const PPCDashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      // Don't close calendar if clicking inside the calendar portal
+      // The calendar uses createPortal to render to document.body
+      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
+      if (calendarPortal && calendarPortal.contains(event.target)) {
+        return; // Click is inside the calendar portal, don't close
+      }
+      
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false);
       }
@@ -1405,7 +1412,7 @@ const PPCDashboard = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
+                      className="absolute top-full right-0 mt-2 z-[9999] bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
                     >
                       <Calender setOpenCalender={setOpenCalender} />
                     </motion.div>

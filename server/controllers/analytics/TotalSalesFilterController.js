@@ -174,6 +174,20 @@ async function getLast7DaysData(userId, country, region) {
         datewiseSales.length
     );
 
+    // Prepare datewise data for chart
+    // Use existing grossProfit from datewiseSales (already calculated as netSales - cogs)
+    const datewiseChartData = filteredSales.map(item => {
+        const itemDate = new Date(item.date);
+        const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        return {
+            date: dateKey,
+            totalSales: item.sales?.amount || 0,
+            grossProfit: item.grossProfit?.amount || 0, // Use existing grossProfit from database (netSales - cogs)
+            originalDate: item.date
+        };
+    });
+
     return {
         totalSales: { amount: totalSales, currencyCode },
         grossProfit: { amount: totalGrossProfit, currencyCode },
@@ -185,6 +199,7 @@ async function getLast7DaysData(userId, country, region) {
             startDate: startDateStr,
             endDate: endDateStr
         },
+        datewiseChartData: datewiseChartData,
         currencyCode
     };
 }
@@ -273,6 +288,44 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
         }
     }
 
+    // Prepare datewise data for chart - aggregate by date across all documents
+    const datewiseChartDataMap = new Map();
+    const processedChartDates = new Set();
+    
+    for (const metrics of allMetrics) {
+        const docStartDate = new Date(metrics.dateRange?.startDate);
+        const docEndDate = new Date(metrics.dateRange?.endDate);
+        docStartDate.setHours(0, 0, 0, 0);
+        docEndDate.setHours(23, 59, 59, 999);
+
+        // Check for overlap
+        if (startDate <= docEndDate && endDate >= docStartDate) {
+            const datewiseSales = metrics.datewiseSales || [];
+            const datewiseFeesAndRefunds = metrics.datewiseFeesAndRefunds || [];
+            
+            // Process sales - use existing grossProfit from datewiseSales
+            // The grossProfit in datewiseSales is already calculated correctly (netSales - cogs)
+            datewiseSales.forEach(item => {
+                const itemDate = new Date(item.date);
+                const dateKey = itemDate.toISOString().split('T')[0];
+                
+                if (itemDate >= startDate && itemDate <= endDate && !processedChartDates.has(dateKey)) {
+                    const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    datewiseChartDataMap.set(dateKey, {
+                        date: displayDate,
+                        totalSales: item.sales?.amount || 0,
+                        grossProfit: item.grossProfit?.amount || 0, // Use existing grossProfit from database
+                        originalDate: item.date
+                    });
+                    processedChartDates.add(dateKey);
+                }
+            });
+        }
+    }
+    
+    const datewiseChartData = Array.from(datewiseChartDataMap.values())
+        .sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
+
     return {
         totalSales: { amount: totalSales, currencyCode },
         grossProfit: { amount: totalGrossProfit, currencyCode },
@@ -284,6 +337,7 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
             startDate: formatDate(startDate),
             endDate: formatDate(endDate)
         },
+        datewiseChartData: datewiseChartData,
         currencyCode
     };
 }
