@@ -120,26 +120,33 @@ const KeywordAnalysisDashboard = () => {
     fetchAsinsList();
   }, [asinsList.length, selectedAsin, dispatch]);
 
+  // Use a ref to track keywordsByAsin without causing re-renders
+  const keywordsByAsinRef = useRef(keywordsByAsin);
+  useEffect(() => {
+    keywordsByAsinRef.current = keywordsByAsin;
+  }, [keywordsByAsin]);
+
   // Fetch keyword recommendations data for selected ASIN (only if not in Redux)
   useEffect(() => {
+    // Track if the component is still mounted
+    let isMounted = true;
+
     const fetchKeywordRecommendations = async () => {
       if (!selectedAsin) {
         setIsSwitchingAsin(false);
         return;
       }
 
-      // Show loader immediately when switching ASINs
-      setIsSwitchingAsin(true);
-
-      // Check if data already exists in Redux
-      const existingData = keywordsByAsin[selectedAsin];
+      // Check if data already exists in Redux (using ref to avoid dependency loop)
+      const existingData = keywordsByAsinRef.current[selectedAsin];
       if (existingData && existingData.data) {
-        // Data already exists, hide loader after a brief moment for smooth UX
-        setTimeout(() => {
-          setIsSwitchingAsin(false);
-        }, 150);
+        // Data already exists, no need to fetch or show loader
+        setIsSwitchingAsin(false);
         return;
       }
+
+      // Show loader only when we need to fetch
+      setIsSwitchingAsin(true);
 
       // Data doesn't exist, fetch it
       dispatch(setLoadingKeywordsForAsin({ asin: selectedAsin, loading: true }));
@@ -148,27 +155,36 @@ const KeywordAnalysisDashboard = () => {
       try {
         const response = await axiosInstance.get(`/app/analyse/keywordRecommendations/byAsin?asin=${selectedAsin}`);
         
+        if (!isMounted) return; // Don't update state if unmounted
+        
         if (response.data && response.data.data) {
           dispatch(setKeywordsForAsin({ asin: selectedAsin, data: response.data.data }));
         } else {
           dispatch(setErrorForAsin({ asin: selectedAsin, error: 'No data received from server' }));
         }
       } catch (err) {
+        if (!isMounted) return; // Don't update state if unmounted
+        
         console.error('Error fetching keyword recommendations:', err);
         dispatch(setErrorForAsin({ 
           asin: selectedAsin, 
           error: err.response?.data?.message || 'Failed to fetch keyword recommendations' 
         }));
       } finally {
-        // Hide loader after data is loaded
-        setTimeout(() => {
+        if (isMounted) {
+          // Hide loader after data is loaded
           setIsSwitchingAsin(false);
-        }, 200);
+        }
       }
     };
 
     fetchKeywordRecommendations();
-  }, [selectedAsin, keywordsByAsin, dispatch]);
+
+    // Cleanup function to prevent state updates on unmounted component
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedAsin, dispatch]); // Removed keywordsByAsin from dependencies
 
   // Handle click outside dropdown
   useEffect(() => {
