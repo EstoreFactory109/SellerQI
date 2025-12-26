@@ -124,7 +124,9 @@ const calculateDateWiseTotalCosts = (dateWisePPCData) => {
         }
         
         dateWiseCosts[dateStr].cost += cost;
-        dateWiseCosts[dateStr].sales += parseFloat(String(item.sales7d)) || 0;
+        // Use sales14d (14-day attribution) to match Seller Central, fallback to sales7d
+        const sales = parseFloat(String(item.sales14d)) || parseFloat(String(item.sales7d)) || 0;
+        dateWiseCosts[dateStr].sales += sales;
     });
     
     // Convert to array format and sort by date
@@ -160,7 +162,9 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
             }
             
             campaignWiseData[campaignId].spend += parseFloat(String(item.cost)) || 0;
-            campaignWiseData[campaignId].sales += parseFloat(String(item.sales7d)) || 0;
+            // Use sales14d (14-day attribution) to match Seller Central, fallback to sales7d
+            const campaignSales = parseFloat(String(item.sales14d)) || parseFloat(String(item.sales7d)) || 0;
+            campaignWiseData[campaignId].sales += campaignSales;
         }
     });
     
@@ -176,11 +180,22 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
 /**
  * Calculate profitability errors
  * @param {Array} profitibilityData - Array of profitability data
+ * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
     let totalErrors = 0;
     const errorDetails = [];
+    
+    // Create a map of ASIN to product name for quick lookup
+    const productNameMap = new Map();
+    if (Array.isArray(totalProducts)) {
+        totalProducts.forEach(product => {
+            if (product.asin) {
+                productNameMap.set(product.asin, product.itemName || product.title || product.productName || null);
+            }
+        });
+    }
     
     profitibilityData.forEach((item) => {
         // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
@@ -194,6 +209,7 @@ const calculateProfitabilityErrors = (profitibilityData) => {
             totalErrors++;
             errorDetails.push({
                 asin: item.asin,
+                productName: productNameMap.get(item.asin) || null,
                 sales: item.sales,
                 netProfit: netProfit,
                 profitMargin: profitMargin,
@@ -211,9 +227,19 @@ const calculateProfitabilityErrors = (profitibilityData) => {
  * @param {Array} negativeKeywordsMetrics - Array of negative keywords metrics
  * @returns {Object} Total errors and error details
  */
-const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMetrics) => {
+const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMetrics, totalProducts = []) => {
     let totalErrors = 0;
     const errorDetails = [];
+    
+    // Create a map of ASIN to product name for quick lookup
+    const productNameMap = new Map();
+    if (Array.isArray(totalProducts)) {
+        totalProducts.forEach(product => {
+            if (product.asin) {
+                productNameMap.set(product.asin, product.itemName || product.title || product.productName || null);
+            }
+        });
+    }
     
     // Count products with high ACOS or no sales but high spend
     if (Array.isArray(productWiseSponsoredAds)) {
@@ -239,6 +265,7 @@ const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMe
                 totalErrors++;
                 errorDetails.push({
                     asin: product.asin,
+                    productName: productNameMap.get(product.asin) || null,
                     campaignName: product.campaignName || 'Unknown Campaign',
                     spend: spend,
                     sales: sales,
@@ -881,13 +908,13 @@ const analyseData = async (data, userId = null) => {
     let sponsoredAdsErrorsData = { totalErrors: 0, errorDetails: [] };
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData);
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts);
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
     }
     
     try {
-        sponsoredAdsErrorsData = calculateSponsoredAdsErrors(activeProductWiseSponsoredAds, negativeKeywordsMetrics);
+        sponsoredAdsErrorsData = calculateSponsoredAdsErrors(activeProductWiseSponsoredAds, negativeKeywordsMetrics, TotalProducts);
     } catch (error) {
         logger.error("Error calculating sponsored ads errors:", error);
     }

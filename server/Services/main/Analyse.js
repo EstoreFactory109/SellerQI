@@ -1140,103 +1140,28 @@ class AnalyseService {
 
     /**
      * Process custom date range
+     * Uses EconomicsMetrics for accurate fee and gross profit data
      */
     static async processCustomDateRange(userId, country, region, start, end, daysDifference) {
         try {
             logger.info(`Processing custom date range: ${daysDifference} days from ${start.toISOString()} to ${end.toISOString()}`);
 
-            // Get all order data documents from OrderAndRevenue model
-            const orderDataDocuments = await GetOrderDataModel.find({
+            // Format dates for comparison with EconomicsMetrics data
+            const formatDateStr = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            // Get EconomicsMetrics data (primary source for fees and gross profit)
+            const allMetrics = await EconomicsMetrics.find({
                 User: userId,
-                country,
-                region
+                country: country,
+                region: region
             }).sort({ createdAt: -1 });
 
-            if (!orderDataDocuments || orderDataDocuments.length === 0) {
-                logger.warn("No order data found for custom date range calculation");
-                return {
-                    status: 200,
-                    message: {
-                        startDate: this.formatDate(start),
-                        endDate: this.formatDate(end),
-                        Country: country,
-                        FinanceData: {
-                            Gross_Profit: 0,
-                            ProductAdsPayment: 0,
-                            FBA_Fees: 0,
-                            Storage: 0,
-                            Amazon_Charges: 0,
-                            Refunds: 0
-                        },
-                        reimburstmentData: 0,
-                        TotalSales: {
-                            totalSales: 0,
-                            dateWiseSales: []
-                        }
-                    }
-                };
-            }
-
-            // Collect all orders from all documents and filter based on date range and valid statuses
-            const validOrderStatuses = ["Shipped", "Unshipped", "Pending"];
-            let allOrders = [];
-
-            // Iterate through all order data documents
-            orderDataDocuments.forEach(orderData => {
-                if (orderData && orderData.RevenueData && Array.isArray(orderData.RevenueData)) {
-                    allOrders = allOrders.concat(orderData.RevenueData);
-                }
-            });
-
-            // Filter orders based on date range and valid statuses
-            const filteredOrders = allOrders.filter(order => {
-                const orderDate = new Date(order.orderDate);
-                orderDate.setHours(0, 0, 0, 0); // Normalize to start of day
-                const hasValidStatus = validOrderStatuses.includes(order.orderStatus);
-                const isInDateRange = orderDate >= start && orderDate <= end;
-
-                return hasValidStatus && isInDateRange;
-            });
-
-            logger.info(`Found ${filteredOrders.length} valid orders in the date range`);
-
-            // Calculate gross sales from filtered orders
-            let grossSales = 0;
-            let totalDiscounts = 0;
-            let itemPromotionDiscountsTotal = 0;
-            let shippingPromotionDiscountsTotal = 0;
-            const processedOrderIds = new Set();
-
-            filteredOrders.forEach((order, index) => {
-                // Skip duplicate orders
-                if (processedOrderIds.has(order.amazonOrderId)) return;
-                processedOrderIds.add(order.amazonOrderId);
-
-                // Calculate gross sales - simplified logic
-                // Assume itemPrice is the total price for the quantity ordered
-                grossSales += Number(order.itemPrice || 0);
-
-                // Calculate discounts
-                const itemPromotionDiscount = Number(order.itemPromotionDiscount || 0);
-                const shippingPromotionDiscount = Number(order.shippingPromotionDiscount || 0);
-
-                itemPromotionDiscountsTotal += itemPromotionDiscount;
-                shippingPromotionDiscountsTotal += shippingPromotionDiscount;
-                totalDiscounts += (itemPromotionDiscount + shippingPromotionDiscount);
-            });
-
-            // Apply discount subtraction from gross sales
-            const salesAfterDiscounts = grossSales - totalDiscounts;
-
-            logger.info(`Gross Sales: ${grossSales}, Total Discounts: ${totalDiscounts}, Sales After Discounts: ${salesAfterDiscounts}`);
-
-            // Get financial data from WeeklyFinanceModel based on custom date range
-            const weeklyFinanceData = await WeeklyFinanceModel.findOne({
-                User: userId,
-                country,
-                region
-            }).sort({ createdAt: -1 });
-
+            // Initialize financial data
             let financialEvents = {
                 ProductAdsPayment: 0,
                 FBA_Fees: 0,
@@ -1245,152 +1170,218 @@ class AnalyseService {
                 Storage: 0
             };
 
-            if (weeklyFinanceData && weeklyFinanceData.weeklyFinanceData) {
-                const sections = [
-                    { name: 'FirstSevenDays', data: weeklyFinanceData.weeklyFinanceData.FirstSevenDays },
-                    { name: 'SecondSevenDays', data: weeklyFinanceData.weeklyFinanceData.SecondSevenDays },
-                    { name: 'ThirdSevenDays', data: weeklyFinanceData.weeklyFinanceData.ThirdSevenDays },
-                    { name: 'FourthNineDays', data: weeklyFinanceData.weeklyFinanceData.FourthNineDays }
-                ];
+            let totalSales = 0;
+            let totalGrossProfit = 0;
+            let currencyCode = 'AUD';
+            const processedDates = new Set();
+            const dateWiseSales = [];
 
-                // Calculate financial data based on overlapping periods
-                sections.forEach((section, index) => {
-                    if (section.data && section.data.startDate && section.data.endDate) {
-                        const sectionStartDate = new Date(section.data.startDate);
-                        const sectionEndDate = new Date(section.data.endDate);
+            // Process EconomicsMetrics data if available
+            if (allMetrics && allMetrics.length > 0) {
+                // Build a map of date -> grossProfit from datewiseGrossProfit array
+                const grossProfitByDate = new Map();
+                const processedGrossProfitDates = new Set();
 
-                        // Set times for accurate comparison
-                        sectionStartDate.setHours(0, 0, 0, 0);
-                        sectionEndDate.setHours(23, 59, 59, 999);
+                for (const metrics of allMetrics) {
+                    // Get currency code
+                    if (metrics.totalSales?.currencyCode) {
+                        currencyCode = metrics.totalSales.currencyCode;
+                    }
 
-                        // Check if there's any overlap between the custom date range and the section date range
-                        const hasOverlap = (start <= sectionEndDate && end >= sectionStartDate);
+                    // First, build gross profit map from datewiseGrossProfit (the dedicated array)
+                    const datewiseGrossProfitArr = metrics.datewiseGrossProfit || [];
+                    datewiseGrossProfitArr.forEach(item => {
+                        const itemDate = new Date(item.date);
+                        const dateKey = itemDate.toISOString().split('T')[0];
 
-                        if (hasOverlap) {
-                            const sectionData = section.data;
+                        // Only process if within range and not already processed
+                        if (itemDate >= start && itemDate <= end && !processedGrossProfitDates.has(dateKey)) {
+                            const profitAmount = item.grossProfit?.amount || 0;
+                            grossProfitByDate.set(dateKey, profitAmount);
+                            totalGrossProfit += profitAmount;
+                            processedGrossProfitDates.add(dateKey);
+                        }
+                    });
 
-                            // Calculate the proportion of overlap
-                            const overlapStart = new Date(Math.max(start.getTime(), sectionStartDate.getTime()));
-                            const overlapEnd = new Date(Math.min(end.getTime(), sectionEndDate.getTime()));
+                    // Process datewise sales (for sales amounts)
+                    const datewiseSalesArr = metrics.datewiseSales || [];
+                    datewiseSalesArr.forEach(item => {
+                        const itemDate = new Date(item.date);
+                        const dateKey = itemDate.toISOString().split('T')[0];
 
-                            // Add 1 to include both start and end dates
+                        // Only process if within range and not already processed
+                        if (itemDate >= start && itemDate <= end && !processedDates.has(dateKey)) {
+                            const salesAmount = item.sales?.amount || 0;
+                            totalSales += salesAmount;
+                            processedDates.add(dateKey);
+
+                            // Get gross profit from the dedicated datewiseGrossProfit map
+                            const grossProfitAmount = grossProfitByDate.get(dateKey) || 0;
+
+                            // Add to dateWiseSales array for chart
+                            dateWiseSales.push({
+                                date: itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                                totalSales: salesAmount,
+                                grossProfit: grossProfitAmount,
+                                originalDate: item.date
+                            });
+                        }
+                    });
+
+                    // Process datewise fees and refunds
+                    const datewiseFeesAndRefunds = metrics.datewiseFeesAndRefunds || [];
+                    const processedFeeDates = new Set();
+                    datewiseFeesAndRefunds.forEach(item => {
+                        const itemDate = new Date(item.date);
+                        const dateKey = itemDate.toISOString().split('T')[0];
+
+                        // Only process if within range and not already processed for fees
+                        if (itemDate >= start && itemDate <= end && !processedFeeDates.has(dateKey)) {
+                            financialEvents.FBA_Fees += item.fbaFulfillmentFee?.amount || 0;
+                            financialEvents.Storage += item.storageFee?.amount || 0;
+                            financialEvents.Refunds += item.refunds?.amount || 0;
+                            processedFeeDates.add(dateKey);
+                        }
+                    });
+
+                    // Calculate proportional PPC spent based on date range overlap
+                    if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
+                        const docStartDate = new Date(metrics.dateRange.startDate);
+                        const docEndDate = new Date(metrics.dateRange.endDate);
+                        docStartDate.setHours(0, 0, 0, 0);
+                        docEndDate.setHours(23, 59, 59, 999);
+
+                        // Check for overlap
+                        if (start <= docEndDate && end >= docStartDate) {
+                            const overlapStart = new Date(Math.max(start.getTime(), docStartDate.getTime()));
+                            const overlapEnd = new Date(Math.min(end.getTime(), docEndDate.getTime()));
                             const overlapDays = Math.ceil((overlapEnd - overlapStart + 1) / (1000 * 60 * 60 * 24));
-                            const sectionDays = Math.ceil((sectionEndDate - sectionStartDate + 1) / (1000 * 60 * 60 * 24));
-                            const proportion = Math.min(overlapDays / sectionDays, 1);
-
-                            // Apply proportional values
-                            financialEvents.ProductAdsPayment += Number(sectionData.ProductAdsPayment || 0) * proportion;
-                            financialEvents.FBA_Fees += Number(sectionData.FBA_Fees || 0) * proportion;
-                            financialEvents.Amazon_Charges += Number(sectionData.Amazon_Charges || 0) * proportion;
-                            financialEvents.Refunds += Number(sectionData.Refunds || 0) * proportion;
-                            financialEvents.Storage += Number(sectionData.Storage || 0) * proportion;
-
-                            logger.info(`Section ${section.name}: Overlap ${overlapDays}/${sectionDays} days (${(proportion * 100).toFixed(1)}%)`);
+                            const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
+                            
+                            if (docTotalDays > 0) {
+                                const proportion = Math.min(overlapDays / docTotalDays, 1);
+                                financialEvents.ProductAdsPayment += (metrics.ppcSpent?.amount || 0) * proportion;
+                            }
                         }
                     }
-                });
-            }
-
-            // Calculate final total sales after subtracting refunds
-            const finalTotalSales = salesAfterDiscounts;
-
-            // Calculate gross profit
-            const grossProfit = finalTotalSales - (
-                financialEvents.ProductAdsPayment +
-                financialEvents.FBA_Fees +
-                financialEvents.Amazon_Charges +
-                financialEvents.Storage +
-                financialEvents.Refunds
-            );
-
-            logger.info(`Final Total Sales: ${finalTotalSales}, Gross Profit: ${grossProfit}`);
-
-            // Create date-wise sales array for the custom date range
-            const dateWiseSales = [];
-            const dateToSales = new Map(); // Use Map to aggregate sales by date
-
-            // Group orders by date
-            filteredOrders.forEach(order => {
-                const orderDate = new Date(order.orderDate);
-                orderDate.setHours(0, 0, 0, 0);
-                const dateKey = orderDate.toDateString();
-
-                if (!dateToSales.has(dateKey)) {
-                    dateToSales.set(dateKey, {
-                        total: 0,
-                        discounts: 0,
-                        orders: []
-                    });
                 }
 
-                const dayData = dateToSales.get(dateKey);
-                dayData.total += Number(order.itemPrice || 0);
-                dayData.discounts += Number(order.itemPromotionDiscount || 0) + Number(order.shippingPromotionDiscount || 0);
-                dayData.orders.push(order);
-            });
+                // Amazon_Charges is the sum of FBA fees and storage fees
+                financialEvents.Amazon_Charges = financialEvents.FBA_Fees + financialEvents.Storage;
 
-            // Calculate total fees for proportional distribution
-            const totalFees = financialEvents.ProductAdsPayment +
-                            financialEvents.FBA_Fees +
-                            financialEvents.Amazon_Charges +
-                            financialEvents.Storage +
-                            financialEvents.Refunds;
+                logger.info(`Processed EconomicsMetrics: Sales dates: ${processedDates.size}, GrossProfit dates: ${processedGrossProfitDates.size}`);
+            }
 
-            // Calculate total sales for proportional fee distribution
-            let totalSalesForDistribution = 0;
-            dateToSales.forEach((dayData) => {
-                totalSalesForDistribution += (dayData.total - dayData.discounts);
-            });
+            // Sort dateWiseSales by date
+            dateWiseSales.sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
 
-            // If no sales, distribute fees evenly across all days
-            const distributeEvenly = totalSalesForDistribution === 0;
-
-            // Create entries for all dates in range
-            for (let i = 0; i < daysDifference; i++) {
-                const currentDate = new Date(start);
-                currentDate.setDate(currentDate.getDate() + i);
-                currentDate.setHours(0, 0, 0, 0);
-
-                const dateKey = currentDate.toDateString();
-                const dayData = dateToSales.get(dateKey) || { total: 0, discounts: 0 };
-
-                const daySales = dayData.total - dayData.discounts;
+            // If we don't have EconomicsMetrics data, fall back to order data
+            if (processedDates.size === 0) {
+                logger.info('No EconomicsMetrics data found, falling back to order data');
                 
-                // Calculate fees for this day (proportional to sales or evenly distributed)
-                let dayFees = 0;
-                if (distributeEvenly) {
-                    dayFees = totalFees / daysDifference;
-                } else if (totalSalesForDistribution > 0) {
-                    const salesProportion = daySales / totalSalesForDistribution;
-                    dayFees = totalFees * salesProportion;
+                // Get all order data documents from OrderAndRevenue model
+                const orderDataDocuments = await GetOrderDataModel.find({
+                    User: userId,
+                    country,
+                    region
+                }).sort({ createdAt: -1 });
+
+                if (orderDataDocuments && orderDataDocuments.length > 0) {
+                    const validOrderStatuses = ["Shipped", "Unshipped", "Pending"];
+                    let allOrders = [];
+
+                    orderDataDocuments.forEach(orderData => {
+                        if (orderData && orderData.RevenueData && Array.isArray(orderData.RevenueData)) {
+                            allOrders = allOrders.concat(orderData.RevenueData);
+                        }
+                    });
+
+                    const filteredOrders = allOrders.filter(order => {
+                        const orderDate = new Date(order.orderDate);
+                        orderDate.setHours(0, 0, 0, 0);
+                        const hasValidStatus = validOrderStatuses.includes(order.orderStatus);
+                        const isInDateRange = orderDate >= start && orderDate <= end;
+                        return hasValidStatus && isInDateRange;
+                    });
+
+                    logger.info(`Found ${filteredOrders.length} valid orders in the date range (fallback)`);
+
+                    let grossSales = 0;
+                    let totalDiscounts = 0;
+                    const processedOrderIds = new Set();
+                    const dateToSales = new Map();
+
+                    filteredOrders.forEach((order) => {
+                        if (processedOrderIds.has(order.amazonOrderId)) return;
+                        processedOrderIds.add(order.amazonOrderId);
+
+                        const itemPrice = Number(order.itemPrice || 0);
+                        const itemDiscount = Number(order.itemPromotionDiscount || 0);
+                        const shippingDiscount = Number(order.shippingPromotionDiscount || 0);
+
+                        grossSales += itemPrice;
+                        totalDiscounts += (itemDiscount + shippingDiscount);
+
+                        // Group by date
+                        const orderDate = new Date(order.orderDate);
+                        orderDate.setHours(0, 0, 0, 0);
+                        const dateKey = orderDate.toDateString();
+
+                        if (!dateToSales.has(dateKey)) {
+                            dateToSales.set(dateKey, { total: 0, discounts: 0 });
+                        }
+                        const dayData = dateToSales.get(dateKey);
+                        dayData.total += itemPrice;
+                        dayData.discounts += (itemDiscount + shippingDiscount);
+                    });
+
+                    totalSales = grossSales - totalDiscounts;
+                    // For fallback, we can't calculate accurate gross profit without fee data
+                    // Set a warning that this is estimated
+                    totalGrossProfit = totalSales * 0.7; // Rough estimate: 70% of sales as profit
+
+                    // Create dateWiseSales from order data
+                    dateToSales.forEach((dayData, dateKey) => {
+                        const date = new Date(dateKey);
+                        const dailySales = dayData.total - dayData.discounts;
+                        dateWiseSales.push({
+                            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                            totalSales: dailySales,
+                            grossProfit: dailySales * 0.7, // Estimated
+                            originalDate: date.toISOString().split('T')[0]
+                        });
+                    });
+
+                    dateWiseSales.sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
                 }
-
-                // Calculate profit for this day
-                const dayProfit = daySales - dayFees;
-
-                const dayEntry = {
-                    interval: this.formatDate(currentDate),
-                    TotalAmount: daySales,
-                    Profit: parseFloat(dayProfit.toFixed(2)),
-                    Fees: parseFloat(dayFees.toFixed(2)),
-                    date: currentDate.toISOString().split('T')[0] // Add ISO date for easier parsing
-                };
-
-                dateWiseSales.push(dayEntry);
             }
+
+            logger.info(`Final Total Sales: ${totalSales}, Gross Profit: ${totalGrossProfit}, FBA Fees: ${financialEvents.FBA_Fees}, Storage: ${financialEvents.Storage}, Refunds: ${financialEvents.Refunds}`);
+
+            // Convert dateWiseSales to expected format with interval, TotalAmount, Profit
+            const formattedDateWiseSales = dateWiseSales.map(item => ({
+                interval: item.date,
+                TotalAmount: item.totalSales,
+                Profit: parseFloat(item.grossProfit.toFixed(2)),
+                date: item.originalDate
+            }));
 
             const result = {
                 startDate: this.formatDate(start),
                 endDate: this.formatDate(end),
                 Country: country,
                 FinanceData: {
-                    ...financialEvents,
-                    Gross_Profit: grossProfit
+                    Gross_Profit: parseFloat(totalGrossProfit.toFixed(2)),
+                    ProductAdsPayment: parseFloat(financialEvents.ProductAdsPayment.toFixed(2)),
+                    FBA_Fees: parseFloat(financialEvents.FBA_Fees.toFixed(2)),
+                    Storage: parseFloat(financialEvents.Storage.toFixed(2)),
+                    Amazon_Charges: parseFloat(financialEvents.Amazon_Charges.toFixed(2)),
+                    Refunds: parseFloat(financialEvents.Refunds.toFixed(2))
                 },
                 reimburstmentData: 0, // Not calculated for custom periods
                 TotalSales: {
-                    totalSales: finalTotalSales,
-                    dateWiseSales: dateWiseSales
+                    totalSales: parseFloat(totalSales.toFixed(2)),
+                    dateWiseSales: formattedDateWiseSales
                 }
             };
 

@@ -8,7 +8,9 @@ import {
   Download,
   RefreshCw,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { fetchTasks, updateTaskStatus } from '../redux/slices/TasksSlice.js';
 
@@ -19,6 +21,8 @@ export default function Tasks() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState('taskId');
   const [sortOrder, setSortOrder] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Get tasks data from Redux store
   const tasks = useSelector(state => state.tasks?.tasks || []);
@@ -31,6 +35,9 @@ export default function Tasks() {
 
   // Get user data from Redux store
   const userData = useSelector(state => state.Auth?.user);
+  
+  // Get products data from Redux store for product name lookup
+  const totalProducts = useSelector(state => state.Dashboard?.DashBoardInfo?.TotalProduct) || [];
 
 
 
@@ -64,22 +71,60 @@ export default function Tasks() {
     }
   }, [userData?.userId, tasks.length, dispatch]);
 
+  // Create a map of ASIN to product details for quick lookup
+  const productDetailsMap = useMemo(() => {
+    const map = new Map();
+    totalProducts.forEach(product => {
+      if (product.asin) {
+        map.set(product.asin, {
+          name: product.itemName || product.title || product.productName || null,
+          sku: product.sku || null
+        });
+      }
+    });
+    return map;
+  }, [totalProducts]);
+
   // Transform API data to match table structure
   const transformedTasks = useMemo(() => {
-    return tasks.map((task, index) => ({
-      slNo: index + 1,
-      taskId: task.taskId,
-      product: task.productName,
-      asin: task.asin,
-      errorCategory: task.errorCategory,
-      error: task.error,
-      howToSolve: task.solution,
-      severity: getSeverityFromCategory(task.errorCategory),
-      status: task.status,
-      sales: 0,
-      errorCount: 1
-    }));
-  }, [tasks]);
+    return tasks.map((task, index) => {
+      // Get product details from the map
+      const productDetails = productDetailsMap.get(task.asin);
+      
+      // Get the product name - prioritize the one from products list if the task has a generic name
+      let productName = task.productName;
+      
+      // If product name is generic (starts with "Product " followed by ASIN), look it up
+      if (productName && productName.startsWith('Product ') && task.asin) {
+        if (productDetails?.name) {
+          productName = productDetails.name;
+        }
+      }
+      
+      // If no product name at all, try to look it up
+      if (!productName && task.asin) {
+        productName = productDetails?.name || `Product ${task.asin}`;
+      }
+      
+      // Get SKU from product details
+      const sku = productDetails?.sku || null;
+      
+      return {
+        slNo: index + 1,
+        taskId: task.taskId,
+        product: productName,
+        asin: task.asin,
+        sku: sku,
+        errorCategory: task.errorCategory,
+        error: task.error,
+        howToSolve: task.solution,
+        severity: getSeverityFromCategory(task.errorCategory),
+        status: task.status,
+        sales: 0,
+        errorCount: 1
+      };
+    });
+  }, [tasks, productDetailsMap]);
 
   // completedTasks is now managed by Redux, no need for this effect
 
@@ -139,6 +184,30 @@ export default function Tasks() {
       slNo: index + 1
     }));
   }, [transformedTasks, searchQuery, filterCategory, filterStatus, completedTasks, sortBy, sortOrder]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterCategory, filterStatus]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredAndSortedData.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Pagination navigation functions
+  const goToPreviousPage = () => {
+    setCurrentPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage(prev => Math.min(prev + 1, totalPages));
+  };
+
+  const goToPage = (pageNumber) => {
+    setCurrentPage(Math.max(1, Math.min(pageNumber, totalPages)));
+  };
 
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -384,7 +453,7 @@ export default function Tasks() {
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[150px]'
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors min-w-[200px] max-w-[350px]'
                     onClick={() => handleSort('product')}
                   >
                     <div className='flex items-center gap-2'>
@@ -397,11 +466,11 @@ export default function Tasks() {
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[90px]'
+                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors min-w-[130px]'
                     onClick={() => handleSort('asin')}
                   >
                     <div className='flex items-center gap-2'>
-                      ASIN
+                      ASIN/SKU
                       {sortBy === 'asin' && (
                         sortOrder === 'asc' ? 
                         <TrendingUp className='w-3 h-3' /> : 
@@ -444,8 +513,8 @@ export default function Tasks() {
                 </tr>
               </thead>
               <tbody className='bg-white divide-y divide-gray-200'>
-                {filteredAndSortedData.length > 0 ? (
-                  filteredAndSortedData.map((item, index) => (
+                {currentItems.length > 0 ? (
+                  currentItems.map((item, index) => (
                     <motion.tr
                       key={item.taskId}
                       initial={{ opacity: 0, y: 20 }}
@@ -456,13 +525,24 @@ export default function Tasks() {
                       <td className='px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-[60px]'>
                         {item.slNo}
                       </td>
-                      <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 w-[150px]'>
-                        <div className='truncate' title={item.product}>
-                          {item.product.length > 20 ? `${item.product.substring(0, 20)}...` : item.product}
+                      <td className='px-4 py-4 text-sm text-gray-900 min-w-[200px] max-w-[350px]'>
+                        <div className='whitespace-normal break-words leading-relaxed' title={item.product}>
+                          {item.product}
                         </div>
                       </td>
-                      <td className='px-4 py-4 whitespace-nowrap text-sm text-gray-900 font-mono w-[90px]'>
-                        {item.asin}
+                      <td className='px-4 py-4 text-sm text-gray-900 min-w-[130px]'>
+                        <div className='space-y-1'>
+                          <div className='flex items-center gap-1'>
+                            <span className='text-xs text-gray-500 font-medium'>ASIN:</span>
+                            <span className='font-mono text-gray-900'>{item.asin}</span>
+                          </div>
+                          {item.sku && (
+                            <div className='flex items-center gap-1'>
+                              <span className='text-xs text-gray-500 font-medium'>SKU:</span>
+                              <span className='font-mono text-gray-700 text-xs'>{item.sku}</span>
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className='px-4 py-4 whitespace-nowrap w-[110px]'>
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getCategoryColor(item.errorCategory)}`}>
@@ -519,6 +599,57 @@ export default function Tasks() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls */}
+          {filteredAndSortedData.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-4 bg-gray-50 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-700">
+                  Showing {filteredAndSortedData.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredAndSortedData.length)} of {filteredAndSortedData.length} tasks
+                </span>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={goToPreviousPage}
+                  disabled={currentPage === 1}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
+                    currentPage === 1
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 shadow-sm hover:shadow-md'
+                  }`}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="text-sm font-medium">Previous</span>
+                </motion.button>
+                
+                <div className="flex items-center gap-2">
+                  <span className="px-4 py-2 text-sm font-medium text-gray-700 bg-blue-50 border border-blue-200 rounded-lg">
+                    {currentPage} of {totalPages || 1}
+                  </span>
+                </div>
+                
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={goToNextPage}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
+                    currentPage === totalPages || totalPages === 0
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 shadow-sm hover:shadow-md'
+                  }`}
+                  aria-label="Next page"
+                >
+                  <span className="text-sm font-medium">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </motion.button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

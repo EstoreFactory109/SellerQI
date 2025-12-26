@@ -1,10 +1,36 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Check, AlertTriangle, X, ChevronLeft, ChevronRight, Table, TrendingDown, DollarSign, Package, Target } from 'lucide-react';
+import { Check, AlertTriangle, X, ChevronLeft, ChevronRight, Table, TrendingDown, DollarSign, Package, Target, Loader2, CheckCircle2 } from 'lucide-react';
 import { useSelector, useDispatch } from 'react-redux';
-import { setCogsValue } from '../../redux/slices/cogsSlice';
+import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCogsValues } from '../../redux/slices/cogsSlice';
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
+
+// Currency symbol mapping by country code
+const CURRENCY_SYMBOLS = {
+  US: '$',
+  CA: 'CA$',
+  MX: 'MX$',
+  BR: 'R$',
+  UK: '£',
+  GB: '£',
+  DE: '€',
+  FR: '€',
+  IT: '€',
+  ES: '€',
+  NL: '€',
+  BE: '€',
+  SE: 'kr',
+  PL: 'zł',
+  JP: '¥',
+  AU: 'A$',
+  SG: 'S$',
+  IN: '₹',
+  AE: 'AED',
+  SA: 'SAR',
+  TR: '₺',
+  EG: 'E£',
+};
 
 const ProfitTable = ({ setSuggestionsData }) => {
     const [currentPage, setCurrentPage] = useState(1);
@@ -36,14 +62,60 @@ const ProfitTable = ({ setSuggestionsData }) => {
     
     // Get COGs values from Redux store
     const cogsValues = useSelector((state) => state.cogs.cogsValues);
+    const savedCogsValues = useSelector(selectSavedCogsValues);
+    const cogsSaving = useSelector(selectCogsSaving);
+    const cogsLoading = useSelector((state) => state.cogs.loading);
     
-    // Get currency from Redux
+    // Get currency and country from Redux
     const currency = useSelector(state => state.currency?.currency) || '$';
+    const country = useSelector(state => state.currency?.country);
     
-    // Handle COGS input change
+    // Get the currency symbol for COGS input based on country
+    const cogsCurrencySymbol = useMemo(() => {
+      if (country && CURRENCY_SYMBOLS[country]) {
+        return CURRENCY_SYMBOLS[country];
+      }
+      return currency || '$';
+    }, [country, currency]);
+
+    // Fetch COGS from database on component mount
+    useEffect(() => {
+      dispatch(fetchCogs());
+    }, [dispatch]);
+
+    // Handle COGS input change (local state only)
     const handleCogsChange = (asin, value) => {
       const numValue = parseFloat(value) || 0;
       dispatch(setCogsValue({ asin, value: numValue }));
+    };
+
+    // Handle save COGS to database
+    const handleSaveCogs = async (asin, sku) => {
+      const cogsValue = cogsValues[asin];
+      if (cogsValue !== undefined && cogsValue !== null) {
+        dispatch(saveCogsToDb({ asin, sku, cogs: cogsValue }));
+      }
+    };
+
+    // Check if a COGS value needs to be saved
+    const needsSave = (asin) => {
+      const currentValue = cogsValues[asin];
+      const savedValue = savedCogsValues[asin];
+      // Needs save if there's a value and it's different from saved
+      return currentValue !== undefined && 
+             currentValue !== null && 
+             currentValue !== '' && 
+             currentValue !== savedValue;
+    };
+
+    // Check if a COGS value is saved
+    const isSaved = (asin) => {
+      const currentValue = cogsValues[asin];
+      const savedValue = savedCogsValues[asin];
+      return currentValue !== undefined && 
+             currentValue !== null && 
+             currentValue !== '' && 
+             currentValue === savedValue;
     };
     
     // Generate suggestions based on profitability metrics
@@ -171,6 +243,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
         const productData = {
           name: productDetails.itemName || productDetails.title || `Product ${item.asin}`,
           asin: item.asin,
+          sku: productDetails.sku || item.sku || '',
           units: item.quantity || 0,
           sales: item.sales || 0,
           cogsPerUnit: cogsPerUnit,
@@ -326,6 +399,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
 
         </div>
 
+        {/* Loading state */}
+        {cogsLoading && (
+          <div className="flex items-center justify-center py-4 bg-blue-50 border-b border-blue-100">
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin mr-2" />
+            <span className="text-sm text-blue-700">Loading saved COGS data...</span>
+          </div>
+        )}
+
         {/* Enhanced Table */}
         <div className="w-full">
           <table className="w-full table-fixed">
@@ -335,7 +416,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 <th className="w-28 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
                 <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units</th>
                 <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
+                <th className="w-28 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
                 <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
                 <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
                 <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
@@ -372,18 +453,57 @@ const ProfitTable = ({ setSuggestionsData }) => {
                          <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.sales, currency)}</span>
                        </td>
                        <td className="px-3 py-5 text-center align-middle">
-                         <div className="flex items-center justify-center">
+                         <div className="flex items-center justify-center gap-1">
+                           {/* Currency symbol */}
+                           <span className="text-sm text-gray-500 font-medium min-w-[20px]">{cogsCurrencySymbol}</span>
                            <div className="relative">
                              <input
                                type="number"
                                value={cogsValues[product.asin] || ''}
                                onChange={(e) => handleCogsChange(product.asin, e.target.value)}
                                placeholder="0"
-                               className="w-16 px-2 py-1.5 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                               className={`w-14 px-2 py-1.5 text-sm text-center border rounded focus:outline-none focus:ring-1 transition-all duration-200 ${
+                                 isSaved(product.asin) 
+                                   ? 'border-green-300 bg-green-50 focus:ring-green-500 focus:border-green-500' 
+                                   : needsSave(product.asin)
+                                     ? 'border-amber-300 bg-amber-50 focus:ring-amber-500 focus:border-amber-500'
+                                     : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                               }`}
                                step="0.01"
                                min="0"
                              />
                            </div>
+                           {/* Save button - tick mark icon */}
+                           <button
+                             onClick={() => handleSaveCogs(product.asin, product.sku)}
+                             disabled={cogsSaving[product.asin] || !needsSave(product.asin)}
+                             className={`p-1 rounded transition-all duration-200 ${
+                               cogsSaving[product.asin]
+                                 ? 'text-gray-400 cursor-wait'
+                                 : isSaved(product.asin)
+                                   ? 'text-green-600 cursor-default'
+                                   : needsSave(product.asin)
+                                     ? 'text-blue-600 hover:bg-blue-100 hover:text-blue-700 cursor-pointer'
+                                     : 'text-gray-300 cursor-not-allowed'
+                             }`}
+                             title={
+                               cogsSaving[product.asin] 
+                                 ? 'Saving...' 
+                                 : isSaved(product.asin)
+                                   ? 'Saved'
+                                   : needsSave(product.asin)
+                                     ? 'Click to save COGS'
+                                     : 'Enter COGS value to save'
+                             }
+                           >
+                             {cogsSaving[product.asin] ? (
+                               <Loader2 className="w-4 h-4 animate-spin" />
+                             ) : isSaved(product.asin) ? (
+                               <CheckCircle2 className="w-4 h-4" />
+                             ) : (
+                               <Check className="w-4 h-4" />
+                             )}
+                           </button>
                          </div>
                        </td>
                        <td className="px-3 py-5 text-center align-middle">

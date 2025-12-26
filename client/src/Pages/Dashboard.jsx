@@ -11,6 +11,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
+import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -30,7 +31,12 @@ const Dashboard = () => {
   // Get dashboard data from Redux
   const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
   
-  // Get sponsored ads metrics from Redux (same as sponsored ads page)
+  // Get PPC metrics from PPCMetrics model (NEW - primary source for PPC data)
+  const ppcSummary = useSelector(selectPPCSummary)
+  const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading)
+  const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
+  
+  // Fallback to legacy sponsored ads metrics from Redux
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
   
   // Get search terms from Redux for "Amazon Owes You" calculation
@@ -78,10 +84,11 @@ const Dashboard = () => {
       setSelectedPeriod(period);
       console.log('Dashboard showing Last 7 Days:', period);
     } else {
-      // Show actual date range for Last 30 Days
+      // Show actual date range for Last 30 Days (28 days before yesterday = 29 days total)
+      // Due to 24-hour data delay, we show data from 28 days ago to yesterday
       const actualEndDate = getActualEndDate();
       const startDate = new Date(actualEndDate);
-      startDate.setDate(actualEndDate.getDate() - 29);
+      startDate.setDate(actualEndDate.getDate() - 28);
       const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
       setSelectedPeriod(period);
       console.log('Dashboard showing Last 30 Days:', period);
@@ -113,6 +120,18 @@ const Dashboard = () => {
     }
   }, [dispatch, reimbursementLastFetched, reimbursementLoading])
 
+  // Fetch PPC metrics from PPCMetrics model (cached for 5 minutes)
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const now = Date.now();
+    
+    const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
+    
+    if (shouldFetch && !ppcMetricsLoading) {
+      dispatch(fetchLatestPPCMetrics());
+    }
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading])
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       // Don't close calendar if clicking inside the calendar portal
@@ -135,9 +154,14 @@ const Dashboard = () => {
     }
   }, [])
 
-  // Calculate PPC sales using only real Amazon Advertising data
+  // Calculate PPC sales using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSales = () => {
-    // Only use actual PPC sales from sponsored ads data
+    // PRIMARY: Use data from PPCMetrics model
+    if (ppcSummary?.totalSales && ppcSummary.totalSales > 0) {
+      return ppcSummary.totalSales;
+    }
+    
+    // FALLBACK: Use legacy sponsored ads data
     if (sponsoredAdsMetrics?.totalSalesIn30Days && sponsoredAdsMetrics.totalSalesIn30Days > 0) {
       return sponsoredAdsMetrics.totalSalesIn30Days;
     }
@@ -146,14 +170,17 @@ const Dashboard = () => {
     return 0;
   };
 
-  // Calculate PPC Spend using Amazon Ads API data (PRIMARY source)
+  // Calculate PPC Spend using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSpend = () => {
-    // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
-    // This is the authoritative source for PPC spend
+    // PRIMARY: Use data from PPCMetrics model
+    if (ppcSummary?.totalSpend && ppcSummary.totalSpend > 0) {
+      return ppcSummary.totalSpend;
+    }
+    
+    // FALLBACK: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
     const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
     
-    // Fallback to accountFinance.ProductAdsPayment if Ads API data not available
-    // (Note: Backend now also uses Ads API for ProductAdsPayment, so they should match)
+    // Last resort: accountFinance.ProductAdsPayment
     const spend = adsPPCSpend > 0 ? adsPPCSpend : Number(dashboardInfo?.accountFinance?.ProductAdsPayment || 0);
     return spend;
   };
@@ -240,8 +267,10 @@ const Dashboard = () => {
   const ppcSales = calculatePPCSales();
   const ppcSpend = calculatePPCSpend();
   
-  // Calculate ACOS using only real data - no assumptions
-  const acos = ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
+  // Calculate ACOS - use PPCMetrics model value (PRIMARY) or calculate from spend/sales
+  const acos = ppcSummary?.overallAcos 
+    ? ppcSummary.overallAcos.toFixed(2) 
+    : (ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00');
 
   // Format sales value
   const formatCurrencyLocal = (value) => {

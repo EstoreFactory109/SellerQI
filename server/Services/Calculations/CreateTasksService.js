@@ -393,6 +393,11 @@ class CreateTaskService {
             let solution;
             let errorType;
             
+            // Use product name from error if available, otherwise fallback to ASIN
+            const productName = error.productName 
+                ? error.productName.substring(0, 100) 
+                : `Product ${error.asin}`;
+            
             if (error.errorType === 'negative_profit') {
                 errorType = 'negative_profit';
                 errorMessage = `Product has negative profit: $${error.netProfit.toFixed(2)}`;
@@ -405,7 +410,7 @@ class CreateTaskService {
             
             tasks.push({
                 taskId: generateTaskId(),
-                productName: `Product ${error.asin}`,
+                productName: productName,
                 asin: error.asin,
                 errorCategory: 'profitability',
                 errorType: errorType,
@@ -431,7 +436,16 @@ class CreateTaskService {
             let errorMessage;
             let solution;
             let errorType;
-            const productName = error.asin ? `Product ${error.asin}` : `Keyword: ${error.keyword}`;
+            
+            // Use product name from error if available, otherwise fallback to ASIN or keyword
+            let productName;
+            if (error.productName) {
+                productName = error.productName.substring(0, 100);
+            } else if (error.asin) {
+                productName = `Product ${error.asin}`;
+            } else {
+                productName = `Keyword: ${error.keyword}`;
+            }
             
             // Each error type gets its own specific task
             switch (error.errorType) {

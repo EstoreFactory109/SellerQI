@@ -14,6 +14,7 @@ import pageDataSlice from '../slices/PageDataSlice.js'
 import keywordRecommendationsSlice from '../slices/KeywordRecommendationsSlice.js'
 import tasksSlice from '../slices/TasksSlice.js'
 import reimbursementSlice from '../slices/ReimbursementSlice.js'
+import ppcMetricsSlice from '../slices/PPCMetricsSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -30,6 +31,7 @@ export const store = configureStore({
     pageData: pageDataSlice,
     keywordRecommendations: keywordRecommendationsSlice,
     tasks: tasksSlice,
-    reimbursement: reimbursementSlice
+    reimbursement: reimbursementSlice,
+    ppcMetrics: ppcMetricsSlice
   },
 });

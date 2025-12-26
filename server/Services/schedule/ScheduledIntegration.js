@@ -753,8 +753,8 @@ class ScheduledIntegration {
 
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
-            // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise
-            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise'].includes(functionKey)) {
+            // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise, PPC Metrics Aggregated
+            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'].includes(functionKey)) {
                 return 1;
             }
             // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursements
@@ -939,6 +939,30 @@ class ScheduledIntegration {
                             });
                             return { success: false, error: error.message || 'MCP Economics fetch failed', data: null };
                         });
+                } else if (functionKey === 'ppcMetricsAggregated') {
+                    // PPC Metrics Aggregated - special handling with different parameters
+                    // getPPCMetrics(accessToken, profileId, userId, country, region, refreshToken, startDate, endDate, saveToDatabase)
+                    promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                        .then(result => {
+                            if (result && result.success !== false) {
+                                logger.info('PPC Metrics Aggregated succeeded', { userId, region: Region, country: Country });
+                                return { success: true, data: result, error: null };
+                            } else {
+                                const errorMsg = result?.error || 'PPC Metrics Aggregated fetch failed';
+                                logger.warn('PPC Metrics Aggregated returned failure', { error: errorMsg, userId, region: Region, country: Country });
+                                return { success: false, error: errorMsg, data: null };
+                            }
+                        })
+                        .catch(error => {
+                            logger.error('Error in PPC Metrics Aggregated promise chain', { 
+                                error: error.message, 
+                                stack: error.stack,
+                                userId, 
+                                region: Region, 
+                                country: Country 
+                            });
+                            return { success: false, error: error.message || 'PPC Metrics Aggregated fetch failed', data: null };
+                        });
                 } else if (functionKey === 'mcpBuyBoxData') {
                     // MCP BuyBox returns { success, data, error } structure
                     promise = serviceFunction(userId, RefreshToken, Region, Country)
@@ -1043,6 +1067,27 @@ class ScheduledIntegration {
                 apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'PPC Spends Date Wise');
             } else if (scheduledFunctions['ppcSpendsDateWise']) {
                 apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
+            }
+            
+            if (scheduledFunctions['ppcMetricsAggregated'] && AdsAccessToken) {
+                // Special handling for PPC Metrics Aggregated (returns structured result)
+                const result = firstBatchResults[resultIndex++];
+                if (result.status === 'fulfilled') {
+                    const value = result.value;
+                    if (value && typeof value === 'object' && 'success' in value) {
+                        apiData.ppcMetricsAggregated = value;
+                    } else if (value && value.success !== false) {
+                        apiData.ppcMetricsAggregated = { success: true, data: value, error: null };
+                    } else {
+                        const errorMsg = value?.error || 'Unknown error';
+                        apiData.ppcMetricsAggregated = { success: false, data: null, error: errorMsg };
+                    }
+                } else {
+                    const errorMsg = result.reason?.message || 'Promise rejected';
+                    apiData.ppcMetricsAggregated = { success: false, data: null, error: errorMsg };
+                }
+            } else if (scheduledFunctions['ppcMetricsAggregated']) {
+                apiData.ppcMetricsAggregated = { success: false, data: null, error: "Ads token not available" };
             }
         }
         logger.info("First Batch Ends");
@@ -1257,6 +1302,7 @@ class ScheduledIntegration {
             searchKeywords: apiData.searchKeywords?.success ? apiData.searchKeywords.data : null,
             ppcSpendsDateWise: apiData.ppcSpendsDateWise?.success ? apiData.ppcSpendsDateWise.data : null,
             ppcSpendsBySKU: apiData.ppcSpendsBySKU?.success ? apiData.ppcSpendsBySKU.data : null,
+            ppcMetricsAggregated: apiData.ppcMetricsAggregated?.success ? apiData.ppcMetricsAggregated.data : null,
             campaignData: apiData.campaignData?.success ? apiData.campaignData.data : null,
             adGroupsData: apiData.adGroupsData?.success ? apiData.adGroupsData.data : null,
             fbaInventoryPlanningData: apiData.fbaInventoryPlanningData?.success ? apiData.fbaInventoryPlanningData.data : null,

@@ -4,13 +4,14 @@ import MetricCard from '../Components/ProfitibilityDashboard/MetricCard';
 import ProfitTable from '../Components/ProfitibilityDashboard/ProfitTable';
 import SuggestionList from '../Components/ProfitibilityDashboard/SuggestionList';
 import calenderIcon from '../assets/Icons/Calender.png'
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import axios from 'axios';
+import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -41,12 +42,30 @@ const createEmptyProfitabilityData = () => {
 };
 
 const ProfitabilityDashboard = () => {
+  const dispatch = useDispatch();
   const [suggestionsData, setSuggestionsData] = useState([]);
   const [openCalender, setOpenCalender] = useState(false);
   const [showCogsPopup, setShowCogsPopup] = useState(false);
   const [filteredData, setFilteredData] = useState(null);
   const [loading, setLoading] = useState(false);
   const CalenderRef = useRef(null);
+  
+  // PPCMetrics model data (PRIMARY source for PPC spend)
+  const ppcSummary = useSelector(selectPPCSummary);
+  const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
+  const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
+  const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
+  
+  // Fetch PPC metrics on mount (cached for 5 minutes)
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000;
+    const now = Date.now();
+    const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
+    
+    if (shouldFetch && !ppcMetricsLoading) {
+      dispatch(fetchLatestPPCMetrics());
+    }
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -281,24 +300,55 @@ const ProfitabilityDashboard = () => {
       totalCOGS += cogsPerUnit * quantity;
     });
     
-    // Calculate ad spend using same logic as PPC Dashboard
+    // Calculate ad spend using PPCMetrics model as PRIMARY source
     let adSpend = 0;
     const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
     
-    if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
-      // Use filtered spend data when date range is selected (same as PPC Dashboard)
-      adSpend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
-      console.log('=== Profitability Dashboard: Using filtered spend data ===');
-      console.log('Filtered ad spend:', adSpend);
+    // Filter PPCMetrics dateWiseMetrics based on date range
+    const getFilteredPPCSpend = () => {
+      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
+      
+      if (!isDateRangeSelected) return 0;
+      
+      const start = new Date(info.startDate);
+      const end = new Date(info.endDate);
+      
+      return ppcDateWiseMetrics
+        .filter(item => {
+          const itemDate = new Date(item.date);
+          return itemDate >= start && itemDate <= end;
+        })
+        .reduce((sum, item) => sum + (item.spend || 0), 0);
+    };
+    
+    if (isDateRangeSelected) {
+      // PRIMARY: Use filtered PPCMetrics data when date range is selected
+      const filteredPPCSpend = getFilteredPPCSpend();
+      if (filteredPPCSpend > 0) {
+        adSpend = filteredPPCSpend;
+        console.log('=== Profitability Dashboard: Using filtered PPCMetrics spend ===');
+        console.log('Filtered PPCMetrics ad spend:', adSpend);
+      } else if (filteredDateWiseTotalCosts.length > 0) {
+        // FALLBACK: Use legacy filtered data
+        adSpend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+        console.log('=== Profitability Dashboard: Using legacy filtered spend data ===');
+        console.log('Legacy filtered ad spend:', adSpend);
+      }
     } else {
-      // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
-      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-      // Fallback to ProductAdsPayment if Ads API data not available
-      adSpend = adsPPCSpend > 0 ? adsPPCSpend : Number(filteredAccountFinance?.ProductAdsPayment || 0);
-      console.log('=== Profitability Dashboard: Using Amazon Ads API as PRIMARY ===');
-      console.log('sponsoredAdsMetrics?.totalCost (PRIMARY):', adsPPCSpend);
-      console.log('ProductAdsPayment (fallback):', filteredAccountFinance?.ProductAdsPayment || 0);
-      console.log('Final ad spend used:', adSpend);
+      // PRIMARY: Use PPCMetrics model summary (no date filtering)
+      if (ppcSummary?.totalSpend > 0) {
+        adSpend = ppcSummary.totalSpend;
+        console.log('=== Profitability Dashboard: Using PPCMetrics model as PRIMARY ===');
+        console.log('PPCMetrics totalSpend:', adSpend);
+      } else {
+        // FALLBACK: Use legacy sponsoredAdsMetrics
+        const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+        adSpend = adsPPCSpend > 0 ? adsPPCSpend : Number(filteredAccountFinance?.ProductAdsPayment || 0);
+        console.log('=== Profitability Dashboard: Using legacy data as FALLBACK ===');
+        console.log('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
+        console.log('ProductAdsPayment:', filteredAccountFinance?.ProductAdsPayment || 0);
+        console.log('Final ad spend used:', adSpend);
+      }
     }
     
     // Use filtered fees when available
@@ -360,7 +410,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -392,8 +442,9 @@ const ProfitabilityDashboard = () => {
           startDate.setDate(actualEndDate.getDate() - 6);
           dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
         } else {
+          // Last 30 Days: 28 days before yesterday = 29 days total (to match actual data range)
           const startDate = new Date(actualEndDate);
-          startDate.setDate(actualEndDate.getDate() - 29);
+          startDate.setDate(actualEndDate.getDate() - 28);
           dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
         }
       }
@@ -1155,8 +1206,9 @@ const ProfitabilityDashboard = () => {
                                 startDate.setDate(actualEndDate.getDate() - 6);
                                 return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                               } else {
+                                // Last 30 Days: 28 days before yesterday = 29 days total
                                 const startDate = new Date(actualEndDate);
-                                startDate.setDate(actualEndDate.getDate() - 29);
+                                startDate.setDate(actualEndDate.getDate() - 28);
                                 return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                               }
                             })()

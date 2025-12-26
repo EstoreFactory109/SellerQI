@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { AlertCircle, DollarSign, PieChart } from 'lucide-react';
 import Chart from "react-apexcharts";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import axios from 'axios';
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
+import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
 
 const formatDateWithOrdinal = (dateString) => {
   if (!dateString) return 'N/A';
@@ -28,6 +29,7 @@ const formatDateWithOrdinal = (dateString) => {
 };
 
 const TotalSales = () => {
+  const dispatch = useDispatch();
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
   const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
@@ -36,6 +38,23 @@ const TotalSales = () => {
   const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
   const currency = useSelector(state => state.currency?.currency) || '$';
   const navigate = useNavigate();
+  
+  // PPCMetrics model data (PRIMARY source for PPC spend)
+  const ppcSummary = useSelector(selectPPCSummary);
+  const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
+  const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
+  const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
+  
+  // Fetch PPC metrics on mount (cached for 5 minutes)
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000;
+    const now = Date.now();
+    const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
+    
+    if (shouldFetch && !ppcMetricsLoading) {
+      dispatch(fetchLatestPPCMetrics());
+    }
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
   
   const [filteredData, setFilteredData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -73,6 +92,21 @@ const TotalSales = () => {
 
     fetchFilteredData();
   }, [calendarMode, startDate, endDate]);
+
+  // Filter PPCMetrics dateWiseMetrics based on selected date range
+  const filteredPPCMetrics = useMemo(() => {
+    const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
+    
+    if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    return ppcDateWiseMetrics.filter(item => {
+      const itemDate = new Date(item.date);
+      return itemDate >= start && itemDate <= end;
+    });
+  }, [ppcDateWiseMetrics, startDate, endDate, calendarMode]);
 
   const filteredDateWiseTotalCosts = useMemo(() => {
     if (!dateWiseTotalCosts.length) return [];
@@ -113,12 +147,25 @@ const TotalSales = () => {
     ? Number(filteredData?.totalSales?.amount || 0)
     : Number(info?.TotalWeeklySale || 0);
 
+  // Calculate PPC Spent - use PPCMetrics model as PRIMARY source
   let ppcSpent = 0;
-  if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
-    ppcSpent = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+  if (isDateRangeSelected) {
+    // Use filtered PPCMetrics data when date range is selected
+    if (filteredPPCMetrics.length > 0) {
+      ppcSpent = filteredPPCMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
+    } else if (filteredDateWiseTotalCosts.length > 0) {
+      // Fallback to legacy filtered data
+      ppcSpent = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+    }
   } else {
-    const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-    ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+    // Use PPCMetrics summary as primary source (no date filtering)
+    if (ppcSummary?.totalSpend > 0) {
+      ppcSpent = ppcSummary.totalSpend;
+    } else {
+      // Fallback to legacy data
+      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+      ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+    }
   }
 
   const saleValues = [
@@ -188,12 +235,43 @@ const TotalSales = () => {
     },
   };
 
-  const displayStartDate = useFilteredData && filteredData?.dateRange?.startDate
-    ? filteredData.dateRange.startDate
-    : info?.startDate;
-  const displayEndDate = useFilteredData && filteredData?.dateRange?.endDate
-    ? filteredData.dateRange.endDate
-    : info?.endDate;
+  // Helper function to get actual end date (yesterday due to 24-hour data delay)
+  const getActualEndDate = () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday;
+  };
+
+  // Calculate display dates consistently with the dashboard
+  const getDisplayDates = () => {
+    // If using filtered data with explicit date range, use those dates
+    if (useFilteredData && filteredData?.dateRange?.startDate && filteredData?.dateRange?.endDate) {
+      return {
+        startDate: filteredData.dateRange.startDate,
+        endDate: filteredData.dateRange.endDate
+      };
+    }
+    
+    // For default mode, calculate dates accounting for 24-hour data delay
+    const actualEndDate = getActualEndDate();
+    const startDate = new Date(actualEndDate);
+    
+    if (calendarMode === 'last7') {
+      startDate.setDate(actualEndDate.getDate() - 6);
+    } else {
+      // Last 30 Days: 28 days before yesterday = 29 days total (to match actual data range)
+      startDate.setDate(actualEndDate.getDate() - 28);
+    }
+    
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: actualEndDate.toISOString().split('T')[0]
+    };
+  };
+
+  const displayDates = getDisplayDates();
+  const displayStartDate = displayDates.startDate;
+  const displayEndDate = displayDates.endDate;
 
   return (
     <div className="p-6 h-full min-h-[400px] bg-white border-2 border-gray-200 rounded-md relative">

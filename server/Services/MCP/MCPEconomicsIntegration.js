@@ -5,6 +5,13 @@
  * and storing calculated metrics in the database.
  * 
  * This replaces the separate sales/finance API calls with a unified MCP approach.
+ * 
+ * IMPORTANT: Uses TWO separate queries for accurate data:
+ * 1. RANGE + PARENT_ASIN query: Gets ASIN-level totals and overall summaries
+ * 2. DAY + PARENT_ASIN query: Gets date-wise breakdowns for charts and trends
+ * 
+ * This is necessary because Amazon's Data Kiosk API aggregates differently
+ * based on the dateGranularity parameter.
  */
 
 const { buildEconomicsQuery } = require('./QueryBuilderService.js');
@@ -13,12 +20,17 @@ const {
     waitForQueryCompletionWithRefreshToken,
     downloadDocument 
 } = require('./DataKioskService.js');
-const { calculateEconomicsMetrics } = require('../Calculations/EconomicsMetricsCalculation.js');
+const { calculateEconomicsMetrics, calculateDatewiseMetrics } = require('../Calculations/EconomicsMetricsCalculation.js');
 const { saveEconomicsMetrics, getLatestEconomicsMetrics } = require('./EconomicsMetricsService.js');
+const { fetchSalesAndTrafficByDate } = require('./MCPSalesAndTrafficIntegration.js');
 const logger = require('../../utils/Logger.js');
 
 /**
  * Fetch economics data from MCP Data Kiosk API and store in database
+ * Uses TWO queries for accurate data:
+ * 1. RANGE + PARENT_ASIN: For totals and ASIN-wise breakdown
+ * 2. DAY + PARENT_ASIN: For accurate date-wise breakdowns
+ * 
  * @param {string} userId - User ID
  * @param {string} refreshToken - SP-API refresh token
  * @param {string} region - Region (NA, EU, FE)
@@ -26,7 +38,7 @@ const logger = require('../../utils/Logger.js');
  * @returns {Promise<Object>} Result with success status and data
  */
 async function fetchAndStoreEconomicsData(userId, refreshToken, region, country) {
-    logger.info('Starting MCP Economics data fetch', { 
+    logger.info('Starting MCP Economics data fetch (dual query mode)', { 
         userId, 
         region, 
         country,
@@ -64,62 +76,55 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         const startDateStr = startDate.toISOString().split('T')[0];
         const endDateStr = endDate.toISOString().split('T')[0];
 
-        logger.info('Building economics query', { 
+        logger.info('Building economics queries (RANGE for totals, DAY for datewise)', { 
             startDate: startDateStr, 
             endDate: endDateStr, 
             country 
         });
 
-        // Build the GraphQL query for economics data
-        const graphqlQuery = buildEconomicsQuery({
+        // ============================================================
+        // QUERY 1: RANGE + PARENT_ASIN - For totals and ASIN breakdown
+        // ============================================================
+        const rangeQuery = buildEconomicsQuery({
             startDate: startDateStr,
             endDate: endDateStr,
-            dateGranularity: 'DAY',
+            dateGranularity: 'RANGE',
             productIdGranularity: 'PARENT_ASIN',
             marketplace: country,
             includeFeeComponents: false
         });
 
-        logger.info('Creating Data Kiosk query', { region });
+        logger.info('Creating RANGE query for totals and ASIN breakdown', { region });
 
-        // Create the query using MCP Data Kiosk API
-        const queryResult = await createQueryWithRefreshToken(refreshToken, region, graphqlQuery);
+        const rangeQueryResult = await createQueryWithRefreshToken(refreshToken, region, rangeQuery);
         
-        if (!queryResult || !queryResult.queryId) {
-            logger.error('Failed to create Data Kiosk query', { queryResult });
+        if (!rangeQueryResult || !rangeQueryResult.queryId) {
+            logger.error('Failed to create RANGE query', { rangeQueryResult });
             return {
                 success: false,
-                error: 'Failed to create Data Kiosk query',
+                error: 'Failed to create Data Kiosk RANGE query',
                 data: null
             };
         }
 
-        const queryId = queryResult.queryId;
-        logger.info('Query created successfully', { queryId });
+        const rangeQueryId = rangeQueryResult.queryId;
+        logger.info('RANGE query created successfully', { queryId: rangeQueryId });
 
-        // Wait for query to complete (poll every 10 seconds)
-        const documentDetails = await waitForQueryCompletionWithRefreshToken(
+        // Wait for RANGE query to complete
+        const rangeDocumentDetails = await waitForQueryCompletionWithRefreshToken(
             refreshToken, 
             region, 
-            queryId, 
+            rangeQueryId, 
             10000
         );
 
-        // Check if query completed but has no document (no data)
-        if (documentDetails.hasDocument === false) {
-            logger.warn('Query completed but no data available', { queryId, message: documentDetails.message });
+        // Check if RANGE query completed but has no document
+        if (rangeDocumentDetails.hasDocument === false) {
+            logger.warn('RANGE query completed but no data available', { queryId: rangeQueryId });
             
-            // Return empty metrics structure
             const emptyMetrics = createEmptyMetrics(startDateStr, endDateStr, country);
-            
-            // Save empty metrics to database
             const savedMetrics = await saveEconomicsMetrics(
-                userId,
-                region,
-                country,
-                emptyMetrics,
-                queryId,
-                null
+                userId, region, country, emptyMetrics, rangeQueryId, null
             );
 
             return {
@@ -129,39 +134,26 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             };
         }
 
-        if (!documentDetails || !documentDetails.documentUrl) {
-            // Check for alternate URL field
-            const documentUrl = documentDetails.documentUrl || documentDetails.url;
-            
-            if (!documentUrl) {
-                logger.error('No document URL in query result', { documentDetails });
+        // Download RANGE document content
+        const rangeDocumentUrl = rangeDocumentDetails.documentUrl || rangeDocumentDetails.url;
+        if (!rangeDocumentUrl) {
+            logger.error('No document URL in RANGE query result', { rangeDocumentDetails });
                 return {
                     success: false,
-                    error: 'Failed to get document URL from completed query',
+                error: 'Failed to get document URL from completed RANGE query',
                     data: null
                 };
             }
-        }
 
-        // Download the document content
-        const documentUrl = documentDetails.documentUrl || documentDetails.url;
-        logger.info('Downloading document', { hasUrl: !!documentUrl });
+        logger.info('Downloading RANGE document', { hasUrl: !!rangeDocumentUrl });
+        const rangeDocumentContent = await downloadDocument(rangeDocumentUrl);
         
-        const documentContent = await downloadDocument(documentUrl);
-        
-        if (!documentContent || documentContent.trim() === '') {
-            logger.warn('Downloaded document is empty', { queryId });
+        if (!rangeDocumentContent || rangeDocumentContent.trim() === '') {
+            logger.warn('Downloaded RANGE document is empty', { queryId: rangeQueryId });
             
-            // Return empty metrics structure
             const emptyMetrics = createEmptyMetrics(startDateStr, endDateStr, country);
-            
             const savedMetrics = await saveEconomicsMetrics(
-                userId,
-                region,
-                country,
-                emptyMetrics,
-                queryId,
-                documentDetails.documentId
+                userId, region, country, emptyMetrics, rangeQueryId, rangeDocumentDetails.documentId
             );
 
             return {
@@ -171,23 +163,152 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             };
         }
 
-        logger.info('Document downloaded, calculating metrics', { 
-            contentLength: documentContent.length 
+        // Calculate metrics from RANGE document (totals and ASIN breakdown)
+        logger.info('Calculating metrics from RANGE document', { 
+            contentLength: rangeDocumentContent.length 
         });
 
-        // Calculate metrics from the document
         const calculatedMetrics = calculateEconomicsMetrics(
-            documentContent,
+            rangeDocumentContent,
             startDateStr,
             endDateStr,
             country
         );
 
-        logger.info('Metrics calculated', { 
+        logger.info('RANGE metrics calculated', { 
             totalSales: calculatedMetrics.totalSales?.amount,
             grossProfit: calculatedMetrics.grossProfit?.amount,
-            ppcSpent: calculatedMetrics.ppcSpent?.amount,
+            fbaFees: calculatedMetrics.fbaFees?.amount,
+            storageFees: calculatedMetrics.storageFees?.amount,
+            refunds: calculatedMetrics.refunds?.amount,
             asinCount: calculatedMetrics.asinWiseSales?.length
+        });
+
+        // ============================================================
+        // QUERY 2: DAY + PARENT_ASIN - For accurate date-wise breakdown
+        // ============================================================
+        logger.info('Creating DAY query for date-wise breakdown', { region });
+
+        const dayQuery = buildEconomicsQuery({
+            startDate: startDateStr,
+            endDate: endDateStr,
+            dateGranularity: 'DAY',
+            productIdGranularity: 'PARENT_ASIN',
+            marketplace: country,
+            includeFeeComponents: false
+        });
+
+        let datewiseMetrics = null;
+        
+        try {
+            const dayQueryResult = await createQueryWithRefreshToken(refreshToken, region, dayQuery);
+            
+            if (dayQueryResult && dayQueryResult.queryId) {
+                const dayQueryId = dayQueryResult.queryId;
+                logger.info('DAY query created successfully', { queryId: dayQueryId });
+
+                // Wait for DAY query to complete
+                const dayDocumentDetails = await waitForQueryCompletionWithRefreshToken(
+                    refreshToken, 
+                    region, 
+                    dayQueryId, 
+                    10000
+                );
+
+                if (dayDocumentDetails.hasDocument !== false) {
+                    const dayDocumentUrl = dayDocumentDetails.documentUrl || dayDocumentDetails.url;
+                    
+                    if (dayDocumentUrl) {
+                        logger.info('Downloading DAY document', { hasUrl: !!dayDocumentUrl });
+                        const dayDocumentContent = await downloadDocument(dayDocumentUrl);
+                        
+                        if (dayDocumentContent && dayDocumentContent.trim() !== '') {
+                            // Calculate date-wise metrics from DAY document
+                            datewiseMetrics = calculateDatewiseMetrics(
+                                dayDocumentContent,
+                                startDateStr,
+                                endDateStr,
+                                country
+                            );
+                            
+                            logger.info('DAY metrics calculated', { 
+                                datewiseSalesCount: datewiseMetrics.datewiseSales?.length,
+                                datewiseGrossProfitCount: datewiseMetrics.datewiseGrossProfit?.length,
+                                datewiseFeesAndRefundsCount: datewiseMetrics.datewiseFeesAndRefunds?.length
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (dayQueryError) {
+            // DAY query failed, but we still have RANGE data - log and continue
+            logger.warn('DAY query failed, using RANGE datewise data as fallback', {
+                error: dayQueryError.message
+            });
+        }
+
+        // ============================================================
+        // QUERY 3: Sales and Traffic API - For accurate TOTAL SALES
+        // ============================================================
+        // The Economics API only includes ASIN-linked orders
+        // Sales API includes ALL orders, giving accurate total sales
+        let salesApiData = null;
+        
+        try {
+            logger.info('Fetching Sales and Traffic data for accurate total sales', { region, country });
+            
+            const salesResult = await fetchSalesAndTrafficByDate(
+                refreshToken,
+                region,
+                country,
+                startDateStr,
+                endDateStr
+            );
+            
+            if (salesResult.success && salesResult.data) {
+                salesApiData = salesResult.data;
+                logger.info('Sales and Traffic data fetched successfully', {
+                    totalSales: salesApiData.totalSales?.amount,
+                    datewiseSalesCount: salesApiData.datewiseSales?.length
+                });
+            }
+        } catch (salesError) {
+            logger.warn('Sales and Traffic API fetch failed, using Economics data for sales', {
+                error: salesError.message
+            });
+        }
+
+        // ============================================================
+        // Merge results: 
+        // - Sales API for Total Sales and Date-wise Sales (more complete)
+        // - Economics API for Gross Profit, Fees, Refunds, ASIN breakdown
+        // ============================================================
+        const finalMetrics = {
+            ...calculatedMetrics,
+            // Use Sales API total sales if available (more accurate - includes all orders)
+            totalSales: salesApiData?.totalSales || calculatedMetrics.totalSales,
+            // Use Sales API datewise sales if available, else DAY economics, else RANGE
+            datewiseSales: salesApiData?.datewiseSales?.map(item => ({
+                date: item.date,
+                sales: item.sales,
+                grossProfit: datewiseMetrics?.datewiseSales?.find(d => d.date === item.date)?.grossProfit || 
+                            calculatedMetrics.datewiseSales?.find(d => d.date === item.date)?.grossProfit ||
+                            { amount: 0, currencyCode: item.sales.currencyCode }
+            })) || datewiseMetrics?.datewiseSales || calculatedMetrics.datewiseSales,
+            datewiseGrossProfit: datewiseMetrics?.datewiseGrossProfit || calculatedMetrics.datewiseGrossProfit,
+            datewiseFeesAndRefunds: datewiseMetrics?.datewiseFeesAndRefunds || calculatedMetrics.datewiseFeesAndRefunds
+        };
+
+        logger.info('Final merged metrics', { 
+            totalSales: finalMetrics.totalSales?.amount,
+            totalSalesSource: salesApiData ? 'Sales API' : 'Economics API',
+            grossProfit: finalMetrics.grossProfit?.amount,
+            fbaFees: finalMetrics.fbaFees?.amount,
+            storageFees: finalMetrics.storageFees?.amount,
+            refunds: finalMetrics.refunds?.amount,
+            datewiseSalesCount: finalMetrics.datewiseSales?.length,
+            datewiseSalesSource: salesApiData ? 'Sales API' : (datewiseMetrics ? 'DAY Economics' : 'RANGE Economics'),
+            asinCount: finalMetrics.asinWiseSales?.length
         });
 
         // Save metrics to database
@@ -195,9 +316,9 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             userId,
             region,
             country,
-            calculatedMetrics,
-            queryId,
-            documentDetails.documentId
+            finalMetrics,
+            rangeQueryId,
+            rangeDocumentDetails.documentId
         );
 
         logger.info('Economics metrics saved successfully', { 

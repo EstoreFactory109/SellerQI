@@ -2,7 +2,7 @@ const axios = require('axios');
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
 const logger = require('../../utils/Logger.js');
 
-// Base URIs for different regions (same as PPCSpendsSalesUnitsSold.js)
+// Base URIs for different regions
 const BASE_URIS = {
   'NA': 'https://advertising-api.amazon.com',
   'EU': 'https://advertising-api-eu.amazon.com',

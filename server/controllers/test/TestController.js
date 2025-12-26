@@ -149,15 +149,6 @@ const testAmazonAds = async (req, res) => {
     })
 }
 
-const testPPCSpendsSalesUnitsSold = async (req, res) => {
-    const { accessToken } = req.body;
-    const result = await getPPCSpendsDateWise(accessToken, "676804983458868", "68ae594913b351b03f8ae923", "US", "NA");
-    return res.status(200).json({
-        data: result
-    })
-}
-
-
   const testGetCampaigns = async (req, res) => {
     const { accessToken, profileId } = req.body;
     const result = await getCampaign(accessToken,profileId,"NA","681b7e41525925e8abb7d3c6","US");
@@ -1852,10 +1843,281 @@ const getStoredKeywordRecommendations = async (req, res) => {
   }
 };
 
+/**
+ * Test PPC Metrics - Fetches aggregated PPC data including total sales, spend, ACOS, and date-wise metrics
+ * Accepts userId, country, region - fetches tokens and profile from database
+ * Aggregates data from Sponsored Products, Sponsored Brands, and Sponsored Display campaigns
+ */
+const testPPCMetrics = async (req, res) => {
+  try {
+    const { userId, country, region, startDate, endDate, fetchTokenFromDB = true } = req.body;
+    
+    // Import required modules
+    const mongoose = require('mongoose');
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+    const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
+    const { getPPCMetrics } = require('../../Services/AmazonAds/GetPPCMetrics.js');
+    
+    // Validate required parameters
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required'
+      });
+    }
+    
+    if (!country) {
+      return res.status(400).json({
+        success: false,
+        error: 'country is required (e.g., US, UK, DE, CA)'
+      });
+    }
+    
+    if (!region) {
+      return res.status(400).json({
+        success: false,
+        error: 'region is required (NA, EU, or FE)'
+      });
+    }
+    
+    // Validate region
+    const validRegions = ['NA', 'EU', 'FE'];
+    if (!validRegions.includes(region)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
+      });
+    }
+    
+    // Validate date format if provided
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (startDate && !dateRegex.test(startDate)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid startDate format. Use YYYY-MM-DD'
+      });
+    }
+    if (endDate && !dateRegex.test(endDate)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid endDate format. Use YYYY-MM-DD'
+      });
+    }
+    
+    console.log('🔍 [testPPCMetrics] Fetching seller account from database...');
+    
+    // Convert userId to ObjectId if needed
+    let userIdQuery = userId;
+    if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+      userIdQuery = new mongoose.Types.ObjectId(userId);
+    }
+    
+    // Find the Seller document
+    const sellerCentral = await Seller.findOne({ User: userIdQuery });
+    
+    if (!sellerCentral) {
+      return res.status(404).json({
+        success: false,
+        error: 'Seller account not found for the provided userId',
+        suggestion: 'Please ensure the user has connected their Amazon Seller Central account.'
+      });
+    }
+    
+    // Find the specific seller account for this country/region
+    const sellerAccount = sellerCentral.sellerAccount?.find(
+      acc => acc.country === country && acc.region === region
+    );
+    
+    if (!sellerAccount) {
+      return res.status(404).json({
+        success: false,
+        error: `No seller account found for country: ${country}, region: ${region}`,
+        availableAccounts: sellerCentral.sellerAccount?.map(acc => ({
+          country: acc.country,
+          region: acc.region,
+          hasAdsToken: !!acc.adsRefreshToken,
+          hasProfileId: !!acc.ProfileId
+        })) || []
+      });
+    }
+    
+    // Check for required tokens
+    if (!sellerAccount.adsRefreshToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Ads refresh token not found for this seller account',
+        suggestion: 'Please connect Amazon Ads account first.'
+      });
+    }
+    
+    console.log(`✅ [testPPCMetrics] Found seller account for ${country}/${region}`);
+    
+    // Generate access token from refresh token
+    let adsAccessToken;
+    try {
+      adsAccessToken = await generateAdsAccessToken(sellerAccount.adsRefreshToken);
+      if (!adsAccessToken) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to generate Ads access token',
+          suggestion: 'Please check if the refresh token is valid. You may need to reconnect your Amazon Ads account.'
+        });
+      }
+    } catch (tokenError) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate Ads access token',
+        message: tokenError.message,
+        suggestion: 'The refresh token may be invalid or expired. Please reconnect your Amazon Ads account.'
+      });
+    }
+    
+    // Get profile ID
+    let profileId = sellerAccount.ProfileId;
+    if (!profileId) {
+      console.log('🔄 [testPPCMetrics] Profile ID not found in database, fetching from Amazon Ads API...');
+      try {
+        const profiles = await getProfileById(adsAccessToken, region, country, userId);
+        if (profiles && Array.isArray(profiles) && profiles.length > 0) {
+          // Find the matching profile for the country
+          const countryCodeMap = {
+            'US': 'US', 'CA': 'CA', 'MX': 'MX', 'BR': 'BR',
+            'UK': 'UK', 'GB': 'UK', 'DE': 'DE', 'FR': 'FR', 'ES': 'ES', 'IT': 'IT', 'NL': 'NL', 'SE': 'SE', 'PL': 'PL', 'BE': 'BE',
+            'JP': 'JP', 'AU': 'AU', 'SG': 'SG', 'IN': 'IN', 'AE': 'AE', 'SA': 'SA'
+          };
+          const targetCountryCode = countryCodeMap[country] || country;
+          
+          const matchingProfile = profiles.find(p => 
+            p.countryCode === targetCountryCode || 
+            p.countryCode?.toUpperCase() === country?.toUpperCase()
+          ) || profiles[0];
+          
+          profileId = matchingProfile.profileId?.toString();
+          console.log(`✅ [testPPCMetrics] Auto-selected profile ID: ${profileId} for country: ${matchingProfile.countryCode}`);
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: 'Could not find any Amazon Ads profiles for this account',
+            suggestion: 'Please ensure you have active Amazon Advertising campaigns.'
+          });
+        }
+      } catch (profileError) {
+        console.error('⚠️ [testPPCMetrics] Error fetching profile ID:', profileError.message);
+        return res.status(400).json({
+          success: false,
+          error: 'Failed to fetch Amazon Ads profile ID',
+          message: profileError.message
+        });
+      }
+    }
+    
+    console.log('🚀 [testPPCMetrics] Starting PPC metrics fetch:', {
+      userId,
+      country,
+      region,
+      profileId,
+      hasAccessToken: !!adsAccessToken,
+      startDate: startDate || 'auto (30 days ago)',
+      endDate: endDate || 'auto (yesterday)'
+    });
+    
+    // Fetch PPC metrics
+    const result = await getPPCMetrics(
+      adsAccessToken,
+      profileId,
+      userId,
+      country,
+      region,
+      sellerAccount.adsRefreshToken,
+      startDate,
+      endDate
+    );
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch PPC metrics',
+        message: result.message || result.error
+      });
+    }
+    
+    // Format the response
+    return res.status(200).json({
+      success: true,
+      message: 'PPC metrics fetched successfully',
+      dateRange: result.data.dateRange,
+      summary: {
+        totalSales: result.data.totalSales,
+        totalSpend: result.data.totalSpend,
+        overallAcos: result.data.overallAcos,
+        overallRoas: result.data.overallRoas,
+        totalImpressions: result.data.totalImpressions,
+        totalClicks: result.data.totalClicks,
+        ctr: result.data.ctr,
+        cpc: result.data.cpc
+      },
+      campaignTypeBreakdown: result.data.campaignTypeBreakdown,
+      dateWiseMetrics: result.data.dateWiseMetrics,
+      processedCampaignTypes: result.data.processedCampaignTypes,
+      metadata: {
+        userId,
+        country,
+        region,
+        profileId,
+        processedAt: result.metadata.processedAt
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in testPPCMetrics:', error);
+    
+    // Handle specific error cases
+    if (error.response) {
+      const status = error.response.status || 500;
+      const errorData = error.response.data || {};
+      
+      if (status === 401 || status === 403) {
+        return res.status(status).json({
+          success: false,
+          error: 'Authentication Error',
+          message: error.message,
+          details: errorData,
+          suggestion: 'Please reconnect your Amazon Ads account.'
+        });
+      }
+      
+      if (status === 429) {
+        return res.status(status).json({
+          success: false,
+          error: 'Rate Limit Exceeded',
+          message: 'Too many requests. Please wait before making another request.',
+          suggestion: 'The API has rate limits. Please wait a moment and try again.'
+        });
+      }
+      
+      return res.status(status).json({
+        success: false,
+        error: 'Amazon Ads API Error',
+        status: status,
+        message: error.message,
+        details: errorData
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while fetching PPC metrics'
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
-   getReviewData, testAmazonAds, testPPCSpendsSalesUnitsSold,
+   getReviewData, testAmazonAds,
    testGetCampaigns,testGetAdGroups,
    testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
    testKeywordRecommendationsFromDB,
-   getStoredKeywordRecommendations
+   getStoredKeywordRecommendations,
+   testPPCMetrics
    }

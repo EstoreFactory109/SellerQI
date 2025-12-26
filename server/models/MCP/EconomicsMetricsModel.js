@@ -142,6 +142,18 @@ const asinWiseSalesSchema = new mongoose.Schema({
         required: true,
         default: 0
     },
+    refunds: {
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    },
     ppcSpent: {
         amount: {
             type: Number,

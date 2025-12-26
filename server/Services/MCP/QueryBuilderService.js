@@ -180,7 +180,7 @@ function buildEconomicsQuery({
     // fees { feeTypeName, charges { aggregatedDetail { totalAmount { amount, currencyCode } } } }
     // NOT: fees { totalFees { amount } }
     return `
-query ${schemaName} {
+query EconomicsQuery {
   ${schemaName} {
   economics(
     startDate: "${startDate}"
@@ -232,8 +232,7 @@ query ${schemaName} {
         amount
         currencyCode
       }
-      }
-      ${includeFeeComponents ? `
+          }${includeFeeComponents ? `
           components {
             name
             aggregatedDetail {
@@ -247,6 +246,19 @@ query ${schemaName} {
       }
     }
           }` : ''}
+        }
+      }
+      ads {
+        adTypeName
+        charge {
+          amount {
+            amount
+            currencyCode
+          }
+          totalAmount {
+            amount
+            currencyCode
+          }
         }
       }
       netProceeds {

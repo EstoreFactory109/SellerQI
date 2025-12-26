@@ -24,6 +24,13 @@ const {
     getInventoryData
 } = require('../controllers/analytics/PageWiseDataController.js');
 
+const {
+    getLatestPPCMetrics,
+    getPPCMetricsByDateRange,
+    getPPCMetricsForGraph,
+    getPPCMetricsHistory
+} = require('../controllers/analytics/PPCMetricsController.js');
+
 // ===== MAIN DASHBOARD =====
 // Returns full calculated dashboard data
 router.get('/dashboard', auth, getLocation, analyseDataCache(3600), getDashboardData);
@@ -62,6 +69,19 @@ router.get('/tasks', auth, getTasksData);
 
 // Update task status
 router.put('/tasks/status', auth, updateTaskStatus);
+
+// ===== PPC METRICS (from PPCMetrics Model) =====
+// Get latest PPC metrics for dashboards
+router.get('/ppc-metrics/latest', auth, getLocation, getLatestPPCMetrics);
+
+// Get PPC metrics filtered by date range
+router.get('/ppc-metrics/filter', auth, getLocation, getPPCMetricsByDateRange);
+
+// Get PPC metrics for graph/chart display
+router.get('/ppc-metrics/graph', auth, getLocation, getPPCMetricsForGraph);
+
+// Get PPC metrics history
+router.get('/ppc-metrics/history', auth, getLocation, getPPCMetricsHistory);
 
 module.exports = router;
 

@@ -68,10 +68,11 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         customActive: false
       };
     } else {
-      // Default "Last 30 days" or no dates - default to last 30 days
+      // Default "Last 30 days" or no dates - default to last 29 days (28 days before yesterday to yesterday)
+      // Due to 24-hour data delay, we show data from 28 days ago to yesterday
       return {
         selectedRange: {
-          startDate: subDays(new Date(), 30),
+          startDate: subDays(new Date(), 29),
           endDate: subDays(new Date(), 1),
           key: 'selection',
         },
@@ -154,9 +155,10 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     switch (type) {
       case 'last30':
         handleActive('last30');
-        // Set the range to show last 30 days (backend default)
+        // Set the range to show last 29 days (28 days before yesterday to yesterday)
+        // Due to 24-hour data delay, we show data from 28 days ago to yesterday
         const defaultRange = {
-          startDate: subDays(today, 30),
+          startDate: subDays(today, 29),
           endDate: subDays(today, 1),
           key: 'selection',
         };

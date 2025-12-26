@@ -7,6 +7,13 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../utils/currencyUtils.js';
+import { 
+  fetchLatestPPCMetrics, 
+  fetchPPCMetricsByDateRange,
+  selectPPCSummary, 
+  selectPPCDateWiseMetrics,
+  selectLatestPPCMetricsLoading 
+} from '../redux/slices/PPCMetricsSlice.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -144,12 +151,29 @@ const PPCDashboard = () => {
     };
   }, [])
   
-  // Get sponsoredAdsMetrics from Redux store
+  // Get sponsoredAdsMetrics from Redux store (legacy fallback)
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
   
+  // Get PPC metrics from PPCMetrics model (NEW - primary source)
+  const ppcSummary = useSelector(selectPPCSummary);
+  const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
+  const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
+  const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
+  
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+  
+  // Fetch PPC metrics on component mount
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+    const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
+    
+    if (shouldFetch && !ppcMetricsLoading) {
+      dispatch(fetchLatestPPCMetrics());
+    }
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
   
@@ -318,23 +342,65 @@ const PPCDashboard = () => {
   // Filter search terms where clicks >= 10 and sales = 0
   const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
   
-  // Transform the data for the chart - use only dateWiseTotalCosts for both spend and sales
+  // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
-    // Use filtered dateWiseTotalCosts if available, otherwise fall back to original
-    const costsDataToUse = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
+    // Check if date range is selected
+    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
     
-    // Console log to verify chart is using filtered data
-    if (info?.startDate && info?.endDate) {
-      console.log('=== Chart Data Update ===');
-      console.log('Date range selected:', info.startDate, 'to', info.endDate);
-      console.log('Chart using filtered data points:', costsDataToUse.length);
-      console.log('Chart data source:', costsDataToUse === filteredDateWiseTotalCosts ? 'Filtered Data' : 'Original Data');
-      console.log('costsDataToUse sample:', costsDataToUse.slice(0, 3));
+    // Filter PPCMetrics dateWiseMetrics based on selected date range
+    let filteredPPCMetricsData = ppcDateWiseMetrics;
+    if (isDateRangeSelected && ppcDateWiseMetrics.length > 0) {
+      const startDate = new Date(info.startDate);
+      const endDate = new Date(info.endDate);
+      
+      filteredPPCMetricsData = ppcDateWiseMetrics.filter(item => {
+        const itemDate = new Date(item.date);
+        return itemDate >= startDate && itemDate <= endDate;
+      });
     }
     
-    // Use dateWiseTotalCosts for both spend and sales data
+    // PRIMARY: Use PPCMetrics model dateWiseMetrics
+    if (filteredPPCMetricsData && filteredPPCMetricsData.length > 0) {
+      console.log("🟢 CHART DATA: Using PPCMetrics model dateWiseMetrics");
+      console.log('PPCMetrics data points:', filteredPPCMetricsData.length);
+      
+      const chartData = filteredPPCMetricsData.map((item, index) => {
+        if (!item || !item.date) return null;
+        
+        const date = new Date(item.date);
+        const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        // Get spend and sales from PPCMetrics dateWiseMetrics
+        const spend = parseFloat(item.spend) || 0;
+        const sales = parseFloat(item.sales) || 0;
+        
+        return {
+          date: formattedDate,
+          rawDate: item.date,
+          ppcSales: sales,
+          spend: spend,
+          acos: item.acos || (sales > 0 ? (spend / sales) * 100 : 0),
+          impressions: item.impressions || 0,
+          clicks: item.clicks || 0
+        };
+      }).filter(Boolean);
+      
+      // Sort by raw date
+      chartData.sort((a, b) => new Date(a.rawDate) - new Date(b.rawDate));
+      
+      console.log('=== PPCMetrics Chart Data ===');
+      console.log('chartData length:', chartData.length);
+      console.log('Total spend:', chartData.reduce((sum, item) => sum + item.spend, 0));
+      console.log('Total sales:', chartData.reduce((sum, item) => sum + item.ppcSales, 0));
+      
+      return chartData;
+    }
+    
+    // FALLBACK: Use legacy dateWiseTotalCosts
+    const costsDataToUse = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
+    
     if (costsDataToUse && Array.isArray(costsDataToUse) && costsDataToUse.length > 0) {
-      console.log("🟢 CHART DATA: Using dateWiseTotalCosts for both spend and sales");
+      console.log("🟡 CHART DATA: Using legacy dateWiseTotalCosts (PPCMetrics not available)");
       
       const chartData = costsDataToUse.map((item, index) => {
         if (!item || !item.date) return null;
@@ -342,56 +408,26 @@ const PPCDashboard = () => {
         const date = new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
-        // Get spend and sales from dateWiseTotalCosts
         const spend = parseFloat(item.totalCost) || 0;
-        const sales = parseFloat(item.sales) || 0; // Assuming sales value is available in dateWiseTotalCosts
-        
-        // Debug: Log data for first few items
-        if ((info?.startDate && info?.endDate) && index < 5) {
-          console.log(`=== Chart Data Item ${index + 1} ===`);
-          console.log('item.date:', item.date);
-          console.log('formattedDate:', formattedDate);
-          console.log('item.totalCost:', item.totalCost);
-          console.log('item.sales:', item.sales);
-          console.log('Parsed spend:', spend);
-          console.log('Parsed sales:', sales);
-        }
+        const sales = parseFloat(item.sales) || 0;
         
         return {
           date: formattedDate,
+          rawDate: item.date,
           ppcSales: sales,
           spend: spend,
         };
-      }).filter(Boolean); // Remove any null entries
+      }).filter(Boolean);
       
-      // Sort by date
-      chartData.sort((a, b) => {
-        return new Date(a.date + " 2024") - new Date(b.date + " 2024");
-      });
-      
-      if (info?.startDate && info?.endDate) {
-        console.log('=== Final Chart Data ===');
-        console.log('chartData length:', chartData.length);
-        console.log('chartData sample:', chartData.slice(0, 3));
-        console.log('Total spend:', chartData.reduce((sum, item) => sum + item.spend, 0));
-        console.log('Total sales:', chartData.reduce((sum, item) => sum + item.ppcSales, 0));
-      }
+      chartData.sort((a, b) => new Date(a.rawDate) - new Date(b.rawDate));
       
       return chartData;
     }
     
-    // Fallback: Return empty data with zero values
-    console.log("🔴 CHART DATA: Using empty data fallback (No dateWiseTotalCosts available)");
-    const emptyData = createEmptyChartData();
-    
-    if (info?.startDate && info?.endDate) {
-      console.log('=== Using Empty Data Fallback ===');
-      console.log('emptyData length:', emptyData.length);
-      console.log('emptyData sample:', emptyData.slice(0, 3));
-    }
-    
-    return emptyData;
-  }, [filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate]);
+    // Last resort: Return empty data with zero values
+    console.log("🔴 CHART DATA: Using empty data fallback");
+    return createEmptyChartData();
+  }, [ppcDateWiseMetrics, filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate, info?.calendarMode]);
   
   // Final debug: Log the actual chart data being used
   if (info?.startDate && info?.endDate) {
@@ -790,73 +826,94 @@ const PPCDashboard = () => {
     }
   }, [tabs, selectedTabIndex]);
   
-  // Use Redux data for KPI values - prioritize actual finance data over estimates, with date filtering
-  const kpiData = useMemo(() => {
-    // Check if date range is selected to determine which data to use
-    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+  // Check if date range is selected to determine which data to use
+  const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+  
+  // Filter PPCMetrics dateWiseMetrics based on selected date range (for KPI calculations)
+  const filteredPPCMetricsForKPI = useMemo(() => {
+    if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
     
-    // Calculate spend based on date range selection - match main dashboard logic
+    const startDate = new Date(info.startDate);
+    const endDate = new Date(info.endDate);
+    
+    return ppcDateWiseMetrics.filter(item => {
+      const itemDate = new Date(item.date);
+      return itemDate >= startDate && itemDate <= endDate;
+    });
+  }, [ppcDateWiseMetrics, info?.startDate, info?.endDate, isDateRangeSelected]);
+
+  // Use Redux data for KPI values - prioritize PPCMetrics model, with date filtering
+  const kpiData = useMemo(() => {
+    // Calculate spend based on date range selection
     let spend = 0;
-    if (isDateRangeSelected && filteredDateWiseTotalCosts.length > 0) {
-      // Use filtered spend data when date range is selected
-      spend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
-      console.log('=== KPI Calculation (Filtered) ===');
-      console.log('Using filtered spend data:', spend);
-      console.log('Filtered data points:', filteredDateWiseTotalCosts.length);
+    let ppcSales = 0;
+    let acos = 0;
+    
+    if (isDateRangeSelected) {
+      // PRIMARY: Use filtered PPCMetrics data
+      if (filteredPPCMetricsForKPI.length > 0) {
+        spend = filteredPPCMetricsForKPI.reduce((sum, item) => sum + (item.spend || 0), 0);
+        ppcSales = filteredPPCMetricsForKPI.reduce((sum, item) => sum + (item.sales || 0), 0);
+        console.log('=== KPI Calculation (PPCMetrics Filtered) ===');
+        console.log('Using filtered PPCMetrics spend:', spend);
+        console.log('Using filtered PPCMetrics sales:', ppcSales);
+        console.log('Filtered data points:', filteredPPCMetricsForKPI.length);
+      } else if (filteredDateWiseTotalCosts.length > 0) {
+        // FALLBACK: Use legacy filtered data
+        spend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+        ppcSales = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (parseFloat(item.sales) || 0), 0);
+        console.log('=== KPI Calculation (Legacy Filtered) ===');
+        console.log('Using filtered legacy spend:', spend);
+        console.log('Using filtered legacy sales:', ppcSales);
+      }
     } else {
-      // PRIMARY: Use sponsoredAdsMetrics.totalCost from Amazon Ads API (GetPPCProductWise)
-      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-      // Fallback to ProductAdsPayment if Ads API data not available
-      spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
-      console.log('=== KPI Calculation (Default - Amazon Ads API Primary) ===');
-      console.log('sponsoredAdsMetrics?.totalCost (PRIMARY):', adsPPCSpend);
-      console.log('ProductAdsPayment (fallback):', info?.accountFinance?.ProductAdsPayment || 0);
-      console.log('Final spend used:', spend);
+      // PRIMARY: Use PPCMetrics model summary
+      if (ppcSummary?.totalSpend > 0 || ppcSummary?.totalSales > 0) {
+        spend = ppcSummary.totalSpend || 0;
+        ppcSales = ppcSummary.totalSales || 0;
+        acos = ppcSummary.overallAcos || 0;
+        console.log('=== KPI Calculation (PPCMetrics Model) ===');
+        console.log('PPCMetrics totalSpend:', spend);
+        console.log('PPCMetrics totalSales:', ppcSales);
+        console.log('PPCMetrics overallAcos:', acos);
+      } else {
+        // FALLBACK: Use legacy sponsoredAdsMetrics
+        const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+        spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+        ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
+        console.log('=== KPI Calculation (Legacy Fallback) ===');
+        console.log('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
+        console.log('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
+      }
     }
     
-    // Calculate PPC sales - only use real data, no assumptions
-    let ppcSales = 0;
-    if (isDateRangeSelected) {
-      // For date range selection, only use actual PPC sales data
-      ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-      console.log('Using real PPC sales for date range:', ppcSales);
-    } else {
-      // Use only real PPC sales data - no fallbacks or estimates
-      ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-      console.log('Using real PPC sales (default):', ppcSales);
+    // Calculate ACOS if not already set
+    if (!acos && ppcSales > 0) {
+      acos = (spend / ppcSales) * 100;
     }
     
     // Calculate total sales for TACoS calculation
     let totalSales = 0;
-    if (isDateRangeSelected) {
-      // Use filtered sales data for TACoS when date range is selected
-      const totalSalesData = info?.TotalSales;
-      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      }
+    const totalSalesData = info?.TotalSales;
+    if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
     } else {
-      // Use default total sales calculation
-      const totalSalesData = info?.TotalSales;
-      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      } else {
-        totalSales = Number(info?.TotalWeeklySale || 0);
-      }
+      totalSales = Number(info?.TotalWeeklySale || 0);
     }
     
-    // Calculate units sold - only use real data
-    const unitsSold = sponsoredAdsMetrics?.totalProductsPurchased || 0;
+    // Calculate TACoS
+    const tacos = totalSales > 0 ? (spend / totalSales) * 100 : 0;
     
-    // Log final calculations
-    if (isDateRangeSelected) {
-      console.log('=== Final KPI Values (Filtered) ===');
-      console.log('PPC Sales:', ppcSales);
-      console.log('Spend:', spend);
-      console.log('Total Sales:', totalSales);
-      console.log('ACOS:', ppcSales > 0 ? ((spend / ppcSales) * 100).toFixed(2) + '%' : 'N/A');
-      console.log('TACoS:', totalSales > 0 ? ((spend / totalSales) * 100).toFixed(2) + '%' : 'N/A');
-      console.log('Units Sold (unchanged):', unitsSold);
-    }
+    // Calculate units sold - use PPCMetrics if available, fallback to legacy
+    const unitsSold = ppcSummary?.totalUnits || sponsoredAdsMetrics?.totalProductsPurchased || 0;
+    
+    console.log('=== Final KPI Values ===');
+    console.log('PPC Sales:', ppcSales);
+    console.log('Spend:', spend);
+    console.log('ACOS:', acos.toFixed(2) + '%');
+    console.log('TACoS:', tacos.toFixed(2) + '%');
+    console.log('Units Sold:', unitsSold);
+    console.log('Data source:', ppcSummary ? 'PPCMetrics Model' : 'Legacy');
     
     return [
       { 
@@ -869,18 +926,18 @@ const PPCDashboard = () => {
       },
       { 
         label: 'ACOS', 
-        value: ppcSales > 0 ? `${((spend / ppcSales) * 100).toFixed(2)}%` : '0.00%'
+        value: `${acos.toFixed(2)}%`
       },
       { 
         label: 'TACoS', 
-        value: totalSales > 0 ? `${((spend / totalSales) * 100).toFixed(2)}%` : '0.00%'
+        value: `${tacos.toFixed(2)}%`
       },
       { 
         label: 'Units Sold', 
         value: `${unitsSold}`
       },
     ];
-  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, sponsoredAdsMetrics, filteredDateWiseTotalCosts]);
+  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, isDateRangeSelected, sponsoredAdsMetrics, filteredDateWiseTotalCosts, ppcSummary, filteredPPCMetricsForKPI, currency]);
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
@@ -1183,8 +1240,9 @@ const PPCDashboard = () => {
         startDate.setDate(actualEndDate.getDate() - 6);
         dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
       } else {
+        // Last 30 Days: 28 days before yesterday = 29 days total
         const startDate = new Date(actualEndDate);
-        startDate.setDate(actualEndDate.getDate() - 29);
+        startDate.setDate(actualEndDate.getDate() - 28);
         dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
       }
     }
@@ -1396,8 +1454,9 @@ const PPCDashboard = () => {
                             startDate.setDate(actualEndDate.getDate() - 6);
                             return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                           } else {
+                            // Last 30 Days: 28 days before yesterday = 29 days total
                             const startDate = new Date(actualEndDate);
-                            startDate.setDate(actualEndDate.getDate() - 29);
+                            startDate.setDate(actualEndDate.getDate() - 28);
                             return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                           }
                         })()

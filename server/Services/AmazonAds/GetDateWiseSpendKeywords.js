@@ -69,7 +69,8 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                         "clicks",
                         "purchases7d",
                         "purchasesSameSku7d",
-                        "sales7d"
+                        "sales7d",
+                        "sales14d"
                     ],
                     "filters": [],
                     "timeUnit": "DAILY"
@@ -283,7 +284,8 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                     campaignName: item.campaignName,
                     clicks: item.clicks,
                     impressions: item.impressions,
-                    sales7d:item.sales7d || 0,
+                    sales7d: item.sales7d || 0,
+                    sales14d: item.sales14d || 0,
                 })
             })
             

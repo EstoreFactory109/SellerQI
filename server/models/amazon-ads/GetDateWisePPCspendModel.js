@@ -42,6 +42,10 @@ const getDateWiseSpendsKeywordsSchema = new mongoose.Schema({
             type: String,
             required:true
         },
+        sales14d:{
+            type: String,
+            default: "0"
+        },
     }]
 },{timestamps:true});
 

@@ -81,6 +81,14 @@ const MON_WED_FRI_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'searchKeywords'
     },
+    // PPC Metrics (Aggregated) - SP, SB, SD campaign data
+    'ppcMetricsAggregated': {
+        service: require('../AmazonAds/GetPPCMetrics.js'),
+        functionName: 'getPPCMetrics',
+        description: 'PPC Metrics (Aggregated)',
+        requiresAdsToken: true,
+        apiDataKey: 'ppcMetricsAggregated'
+    },
     // MCP Economics
     'mcpEconomicsData': {
         service: require('../MCP/MCPEconomicsIntegration.js'),

@@ -234,7 +234,8 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     let totalRefunds = 0;
     let totalPpcSpent = 0;
     let currencyCode = 'USD';
-    const processedDates = new Set(); // Track processed dates to avoid duplicates
+    const processedDates = new Set(); // Track processed dates to avoid duplicates for sales
+    const processedFeeDates = new Set(); // Track processed dates to avoid duplicates for fees
 
     for (const metrics of allMetrics) {
         // Check if document's date range overlaps with requested range
@@ -270,11 +271,12 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
                 const itemDate = new Date(item.date);
                 const dateKey = itemDate.toISOString().split('T')[0];
 
-                // Only process if within range
-                if (itemDate >= startDate && itemDate <= endDate) {
+                // Only process if within range and not already processed for fees
+                if (itemDate >= startDate && itemDate <= endDate && !processedFeeDates.has(dateKey)) {
                     totalFbaFees += item.fbaFulfillmentFee?.amount || 0;
                     totalStorageFees += item.storageFee?.amount || 0;
                     totalRefunds += item.refunds?.amount || 0;
+                    processedFeeDates.add(dateKey);
                 }
             });
 
