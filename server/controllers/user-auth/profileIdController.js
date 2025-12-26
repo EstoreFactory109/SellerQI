@@ -23,6 +23,11 @@ const getProfileId=asyncHandler(async(req,res)=>{
     
     const refreshToken=sellerAccount.adsRefreshToken;
     
+    // Check if adsRefreshToken exists
+    if(!refreshToken || refreshToken.trim() === '') {
+        return res.status(400).json(new ApiResponse(400,"","Amazon Ads account is not connected. Please connect your Amazon Ads account first."));
+    }
+    
     const accessToken=await generateAdsAccessToken(refreshToken);
     console.log(accessToken);
     if(!accessToken){
@@ -30,6 +35,12 @@ const getProfileId=asyncHandler(async(req,res)=>{
     }
     
     const profileId=await getProfileById(accessToken,region ,country,userId);
+    
+    // Check if profile data was retrieved successfully
+    if(!profileId || profileId === false) {
+        return res.status(404).json(new ApiResponse(404,"","No profile IDs found. Please ensure your Amazon Ads account has at least one advertising profile."));
+    }
+    
     return res.status(200).json(new ApiResponse(200,profileId,'Profile ID fetched successfully'));
 });
 

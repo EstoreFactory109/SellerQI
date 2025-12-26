@@ -186,12 +186,10 @@ const FetchingTokens = () => {
         console.log(response)
         
         if (response.status === 200 && response.data) {
-          console.log("Tokens generated successfully");
+          console.log("Amazon Ads tokens generated successfully");
           
-          // Store any necessary data from the response
-          if (response.data.sellerId) {
-            sessionStorage.setItem('sp_seller_id', response.data.sellerId);
-          }
+          // Clear the amazonAdsLoading flag
+          localStorage.removeItem('amazonAdsLoading');
           
           // Get the stored marketplace info to determine region
           const selectedMarketplace = JSON.parse(localStorage.getItem('selectedMarketplace') || '{}');
@@ -261,14 +259,12 @@ const FetchingTokens = () => {
       }
     }
 
-   // generateTokens();
-
+    // Check which OAuth flow we're processing based on localStorage flag
     if (localStorage.getItem('amazonAdsLoading') === 'true') {
       generateAmazonAdsTokens();
     } else {
       generateTokens();
     }
-    generateTokens();
   }, [authCode, state, sellingPartnerId, navigate]);
 
   return (
