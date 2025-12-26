@@ -164,25 +164,78 @@ const ConnectAccounts = () => {
 
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
-    // Initial check from Redux state (no API call)
-    if (allAccounts && allAccounts.length > 0) {
-      const connected = isSpApiConnectedFromAccounts(allAccounts);
-      setIsSpApiConnectedState(connected);
-      setCheckingSpApi(false);
-      return;
-    }
+    const checkSpApiConnection = async () => {
+      // Check if we just came back from SP-API OAuth flow
+      const justConnected = sessionStorage.getItem('sp_api_just_connected') === 'true';
+      
+      if (justConnected) {
+        // Clear the flag
+        sessionStorage.removeItem('sp_api_just_connected');
+        
+        // Fetch fresh profile data from API since we just connected
+        try {
+          const response = await axiosInstance.get('/app/profile');
+          if (response?.status === 200 && response.data?.data) {
+            const user = response.data.data;
+            const connected = isSpApiConnected(user);
+            setIsSpApiConnectedState(connected);
+            if (connected) {
+              setIsSellerCentralConnected(true);
+              setSuccessMessage('Amazon Seller Central connected successfully!');
+              // Clear success message after 5 seconds
+              setTimeout(() => setSuccessMessage(''), 5000);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching profile after SP-API connection:', error);
+        }
+        setCheckingSpApi(false);
+        return;
+      }
+      
+      // Initial check from Redux state (no API call)
+      if (allAccounts && allAccounts.length > 0) {
+        const connected = isSpApiConnectedFromAccounts(allAccounts);
+        setIsSpApiConnectedState(connected);
+        if (connected) {
+          setIsSellerCentralConnected(true);
+        }
+        setCheckingSpApi(false);
+        return;
+      }
 
-    if (userData && userData.sellerCentral) {
-      const connected = isSpApiConnected(userData);
-      setIsSpApiConnectedState(connected);
-      setCheckingSpApi(false);
-      return;
-    }
+      if (userData && userData.sellerCentral) {
+        const connected = isSpApiConnected(userData);
+        setIsSpApiConnectedState(connected);
+        if (connected) {
+          setIsSellerCentralConnected(true);
+        }
+        setCheckingSpApi(false);
+        return;
+      }
 
-    // If no user data in Redux, just set to false and finish
-    // Don't make API call - this page is for users who don't have accounts yet
-    setIsSpApiConnectedState(false);
-    setCheckingSpApi(false);
+      // If no user data in Redux, make an API call to check
+      // This handles cases where user refreshes the page or Redux state is stale
+      try {
+        const response = await axiosInstance.get('/app/profile');
+        if (response?.status === 200 && response.data?.data) {
+          const user = response.data.data;
+          const connected = isSpApiConnected(user);
+          setIsSpApiConnectedState(connected);
+          if (connected) {
+            setIsSellerCentralConnected(true);
+          }
+        } else {
+          setIsSpApiConnectedState(false);
+        }
+      } catch (error) {
+        console.error('Error checking SP-API connection status:', error);
+        setIsSpApiConnectedState(false);
+      }
+      setCheckingSpApi(false);
+    };
+    
+    checkSpApiConnection();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency - only run on mount
 
@@ -194,9 +247,15 @@ const ConnectAccounts = () => {
     if (allAccounts && allAccounts.length > 0) {
       const connected = isSpApiConnectedFromAccounts(allAccounts);
       setIsSpApiConnectedState(connected);
+      if (connected) {
+        setIsSellerCentralConnected(true);
+      }
     } else if (userData && userData.sellerCentral) {
       const connected = isSpApiConnected(userData);
       setIsSpApiConnectedState(connected);
+      if (connected) {
+        setIsSellerCentralConnected(true);
+      }
     }
   }, [allAccounts, userData, checkingSpApi]);
 
@@ -246,47 +305,10 @@ const ConnectAccounts = () => {
       setMarketplaceConfig(MARKETPLACE_CONFIG['US']);
     }
 
-    // Check if Seller Central connection was successful
-    const checkConnectionStatus = () => {
-      // Check if we have seller ID from successful token generation
-      const sellerId = sessionStorage.getItem('sp_seller_id');
-      
-      // Check if we were just redirected from successful token generation
-      const wasSellerCentralLoading = localStorage.getItem('sellerCentralLoading') === 'true';
-      
-      if (sellerId && wasSellerCentralLoading) {
-        setIsSellerCentralConnected(true);
-        setIsSpApiConnectedState(true); // SP-API is now connected
-        setSuccessMessage('Amazon Seller Central connected successfully!');
-        // Clear the loading state from localStorage
-        localStorage.removeItem('sellerCentralLoading');
-        
-        // Re-check SP-API connection status from API to ensure it's updated
-        setTimeout(async () => {
-          try {
-            const response = await axiosInstance.get('/app/profile');
-            if (response?.status === 200 && response.data?.data) {
-              const user = response.data.data;
-              const connected = isSpApiConnected(user);
-              setIsSpApiConnectedState(connected);
-            }
-          } catch (error) {
-            console.error('Error re-checking SP-API connection:', error);
-          }
-        }, 2000);
-        
-        // Clear success message after 5 seconds
-        setTimeout(() => {
-          setSuccessMessage('');
-        }, 5000);
-      } else if (sellerId) {
-        // Already connected from previous session
-        setIsSellerCentralConnected(true);
-        setIsSpApiConnectedState(true);
-      }
-    };
-
-    checkConnectionStatus();
+    // Clear the sellerCentralLoading flag if it exists (cleanup from redirect)
+    if (localStorage.getItem('sellerCentralLoading') === 'true') {
+      localStorage.removeItem('sellerCentralLoading');
+    }
     
     // Cleanup: remove event listener when component unmounts
     return () => {

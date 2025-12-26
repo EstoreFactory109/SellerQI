@@ -75,12 +75,21 @@ const FetchingTokens = () => {
           console.log("Tokens generated successfully");
           
           // Store any necessary data from the response
-          if (response.data.sellerId) {
-            sessionStorage.setItem('sp_seller_id', response.data.sellerId);
+          // The API returns ApiResponse structure: { statusCode, data, message }
+          // The data contains sellerCentral with sellerAccount array
+          const sellerCentralData = response.data.data;
+          if (sellerCentralData && sellerCentralData.sellerAccount && sellerCentralData.sellerAccount.length > 0) {
+            const firstAccount = sellerCentralData.sellerAccount[0];
+            if (firstAccount.selling_partner_id) {
+              sessionStorage.setItem('sp_seller_id', firstAccount.selling_partner_id);
+            }
           }
           
-          // Navigate to dashboard with success message
-         navigate('/connect-accounts')
+          // Set a flag to indicate SP-API connection was just completed
+          sessionStorage.setItem('sp_api_just_connected', 'true');
+          
+          // Navigate to connect-accounts page
+          navigate('/connect-accounts')
         }
       } catch (error) {
         console.error("Error generating tokens:", error);
