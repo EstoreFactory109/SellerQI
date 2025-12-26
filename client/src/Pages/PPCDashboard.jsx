@@ -242,6 +242,151 @@ const PPCDashboard = () => {
     
     return filtered;
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
+
+  // Check if date range is explicitly selected (custom or last7, not default last30)
+  const isTableDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+
+  // Filter adsKeywordsPerformanceData based on selected date range
+  const filteredAdsKeywordsPerformanceData = useMemo(() => {
+    // Always return original data if empty
+    if (!adsKeywordsPerformanceData.length) return adsKeywordsPerformanceData;
+    
+    // Only apply date filtering when user explicitly selects a date range (custom or last7)
+    // Default view (last 30 days) shows all data without filtering
+    if (!isTableDateRangeSelected) {
+      return adsKeywordsPerformanceData;
+    }
+    
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+    
+    // Filter data based on selected date range
+    const filtered = adsKeywordsPerformanceData.filter(item => {
+      // If no date field, include the item (backward compatibility for old data)
+      if (!item.date) return true;
+      
+      const itemDate = new Date(item.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+    
+    console.log('=== Filtered AdsKeywordsPerformanceData ===');
+    console.log('Selected Date Range:', { startDate, endDate });
+    console.log('Original length:', adsKeywordsPerformanceData.length);
+    console.log('Filtered length:', filtered.length);
+    
+    return filtered;
+  }, [adsKeywordsPerformanceData, isTableDateRangeSelected, info?.startDate, info?.endDate]);
+
+  // Filter searchTerms based on selected date range
+  const filteredSearchTermsData = useMemo(() => {
+    // Always return original data if empty
+    if (!searchTerms.length) return searchTerms;
+    
+    // Only apply date filtering when user explicitly selects a date range
+    if (!isTableDateRangeSelected) {
+      return searchTerms;
+    }
+    
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+    
+    // Filter data based on selected date range
+    const filtered = searchTerms.filter(item => {
+      // If no date field, include the item (backward compatibility for old data)
+      if (!item.date) return true;
+      
+      const itemDate = new Date(item.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+    
+    console.log('=== Filtered SearchTerms ===');
+    console.log('Selected Date Range:', { startDate, endDate });
+    console.log('Original length:', searchTerms.length);
+    console.log('Filtered length:', filtered.length);
+    
+    return filtered;
+  }, [searchTerms, isTableDateRangeSelected, info?.startDate, info?.endDate]);
+
+  // Filter productWiseSponsoredAds based on selected date range
+  const filteredProductWiseSponsoredAds = useMemo(() => {
+    // Always return original data if empty
+    if (!productWiseSponsoredAds.length) return productWiseSponsoredAds;
+    
+    // Only apply date filtering when user explicitly selects a date range
+    if (!isTableDateRangeSelected) {
+      return productWiseSponsoredAds;
+    }
+    
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+    
+    // Filter data based on selected date range
+    const filtered = productWiseSponsoredAds.filter(item => {
+      // If no date field, include the item (backward compatibility for old data)
+      if (!item.date) return true;
+      
+      const itemDate = new Date(item.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      return itemDate >= start && itemDate <= end;
+    });
+    
+    console.log('=== Filtered ProductWiseSponsoredAds ===');
+    console.log('Selected Date Range:', { startDate, endDate });
+    console.log('Original length:', productWiseSponsoredAds.length);
+    console.log('Filtered length:', filtered.length);
+    
+    return filtered;
+  }, [productWiseSponsoredAds, isTableDateRangeSelected, info?.startDate, info?.endDate]);
+
+  // Calculate date-filtered campaignWiseTotalSalesAndCost from filtered product data
+  const filteredCampaignWiseTotalSalesAndCost = useMemo(() => {
+    // Only recalculate when user explicitly selects a date range
+    if (!isTableDateRangeSelected) {
+      return campaignWiseTotalSalesAndCost;
+    }
+    
+    // If no filtered product data, return original
+    if (!filteredProductWiseSponsoredAds.length) {
+      return campaignWiseTotalSalesAndCost;
+    }
+    
+    // Recalculate from filtered product data
+    const campaignTotals = new Map();
+    
+    filteredProductWiseSponsoredAds.forEach(product => {
+      const campaignId = product.campaignId;
+      if (!campaignId) return;
+      
+      if (!campaignTotals.has(campaignId)) {
+        campaignTotals.set(campaignId, {
+          campaignId: campaignId,
+          campaignName: product.campaignName || 'Unknown Campaign',
+          totalSpend: 0,
+          totalSales: 0
+        });
+      }
+      
+      const campaign = campaignTotals.get(campaignId);
+      campaign.totalSpend += parseFloat(product.spend) || 0;
+      campaign.totalSales += parseFloat(product.salesIn30Days) || parseFloat(product.sales30d) || 0;
+    });
+    
+    const result = Array.from(campaignTotals.values());
+    
+    console.log('=== Filtered CampaignWiseTotalSalesAndCost ===');
+    console.log('Original campaigns:', campaignWiseTotalSalesAndCost.length);
+    console.log('Filtered campaigns:', result.length);
+    
+    return result;
+  }, [filteredProductWiseSponsoredAds, campaignWiseTotalSalesAndCost, isTableDateRangeSelected]);
   
   // Get negetiveKeywords and AdsGroupData from Redux store
   const negetiveKeywords = useSelector((state) => state.Dashboard.DashBoardInfo?.negetiveKeywords) || [];
@@ -340,7 +485,8 @@ const PPCDashboard = () => {
   };
 
   // Filter search terms where clicks >= 10 and sales = 0
-  const filteredSearchTerms = searchTerms.filter(term => term.clicks >= 10 && term.sales === 0);
+  // Filter search terms with zero sales - using date-filtered data
+  const filteredSearchTerms = filteredSearchTermsData.filter(term => term.clicks >= 10 && term.sales === 0);
   
   // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
@@ -498,8 +644,8 @@ const PPCDashboard = () => {
   };
   
   // Process data for different tabs
-  // High ACOS Campaigns - Use campaignWiseTotalSalesAndCost data
-  const highAcosCampaigns = campaignWiseTotalSalesAndCost
+  // High ACOS Campaigns - Use date-filtered campaignWiseTotalSalesAndCost data
+  const highAcosCampaigns = filteredCampaignWiseTotalSalesAndCost
     .map(campaign => {
       // Count keywords for this campaign
       const campaignKeywords = keywords.filter(k => k.campaignId === campaign.campaignId);
@@ -518,11 +664,11 @@ const PPCDashboard = () => {
     .sort((a, b) => b.acos - a.acos);
   
   // Wasted Spend Keywords - cost > 5 && attributedSales30d < 1
-  // Use the new adsKeywordsPerformanceData structure directly
+  // Use date-filtered adsKeywordsPerformanceData structure
   // console.log('=== Starting Wasted Keywords Processing ===');
-  // console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
+  // console.log('Processing', filteredAdsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
 
-  const wastedSpendKeywords = adsKeywordsPerformanceData
+  const wastedSpendKeywords = filteredAdsKeywordsPerformanceData
     .filter((keyword, index) => {
       // Apply filter: cost > 5 && attributedSales30d < 1
       const cost = parseFloat(keyword.cost) || 0;
@@ -571,13 +717,13 @@ const PPCDashboard = () => {
   // console.log('Filtered Wasted Keywords:', wastedSpendKeywords.length);
   // console.log('Wasted Keywords Data:', wastedSpendKeywords);
   
-  if (adsKeywordsPerformanceData.length > 0) {
+  if (filteredAdsKeywordsPerformanceData.length > 0) {
     // console.log('=== Data Analysis ===');
-    // console.log('Cost Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
-    // console.log('AttributedSales30d Distribution (all keywords):', adsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
+    // console.log('Cost Distribution (all keywords):', filteredAdsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
+    // console.log('AttributedSales30d Distribution (all keywords):', filteredAdsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
     
-    const highCostKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.cost) > 5);
-    const lowAttributedSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) < 1);
+    const highCostKeywords = filteredAdsKeywordsPerformanceData.filter(k => parseFloat(k.cost) > 5);
+    const lowAttributedSalesKeywords = filteredAdsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) < 1);
     
     // console.log(`Keywords with cost > 5: ${highCostKeywords.length}`);
     // console.log(`Keywords with attributedSales30d < 1: ${lowAttributedSalesKeywords.length}`);
@@ -586,8 +732,9 @@ const PPCDashboard = () => {
   }
   
   // First, create a map of campaignId to campaign data for easier lookup (still needed for top performing keywords)
+  // Uses date-filtered product data
   const campaignMap = new Map();
-  productWiseSponsoredAds.forEach(product => {
+  filteredProductWiseSponsoredAds.forEach(product => {
     if (!campaignMap.has(product.campaignId)) {
       campaignMap.set(product.campaignId, {
         campaignName: product.campaignName,
@@ -597,12 +744,12 @@ const PPCDashboard = () => {
     campaignMap.get(product.campaignId).products.push(product);
   });
   
-  // Top Performing Keywords - Use adsKeywordsPerformanceData directly
+  // Top Performing Keywords - Use date-filtered adsKeywordsPerformanceData
   // Filter: ACOS < 20%, sales > 100, impressions > 1000
   // console.log('=== Starting Top Performing Keywords Processing ===');
-  // console.log('Processing', adsKeywordsPerformanceData.length, 'keywords for top performance analysis');
+  // console.log('Processing', filteredAdsKeywordsPerformanceData.length, 'keywords for top performance analysis');
 
-  const topPerformingKeywords = adsKeywordsPerformanceData
+  const topPerformingKeywords = filteredAdsKeywordsPerformanceData
     .filter((keyword, index) => {
       // Calculate ACOS using attributedSales30d and cost
       const cost = parseFloat(keyword.cost) || 0;
@@ -669,9 +816,9 @@ const PPCDashboard = () => {
   // console.log('Filtered Top Performing Keywords:', topPerformingKeywords.length);
   // console.log('Top Performing Keywords Data:', topPerformingKeywords);
   
-  if (adsKeywordsPerformanceData.length > 0) {
+  if (filteredAdsKeywordsPerformanceData.length > 0) {
     // console.log('=== Top Performance Analysis ===');
-    const highPerformanceKeywords = adsKeywordsPerformanceData.filter(k => {
+    const highPerformanceKeywords = filteredAdsKeywordsPerformanceData.filter(k => {
       const cost = parseFloat(k.cost) || 0;
       const sales = parseFloat(k.attributedSales30d) || 0;
       const impressions = parseFloat(k.impressions) || 0;
@@ -719,11 +866,11 @@ const PPCDashboard = () => {
     .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
     .map(keyword => keyword.keywordText.toLowerCase());
   
-    // Process auto campaign insights
+    // Process auto campaign insights using date-filtered search terms
   const autoCampaignInsights = [];
   
   // Process search terms directly by matching campaign IDs
-  searchTerms.forEach(searchTerm => {
+  filteredSearchTermsData.forEach(searchTerm => {
     // Check if sales > 30
     if (searchTerm.sales > 30) {
       // Check if this search term's campaignId belongs to an auto campaign
@@ -1341,13 +1488,17 @@ const PPCDashboard = () => {
       csvData.push([]);
     }
     
-    // Add Search Terms Data - ALL DATA (not paginated)
-    if (searchTerms.length > 0) {
-      csvData.push([`All Search Terms - Total: ${searchTerms.length} terms`]);
-      csvData.push(['Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
-      searchTerms.forEach(term => {
+    // Add Search Terms Data - Uses date-filtered data
+    if (filteredSearchTermsData.length > 0) {
+      const dateRangeLabel = (info?.startDate && info?.endDate) 
+        ? ` (${new Date(info.startDate).toLocaleDateString()} - ${new Date(info.endDate).toLocaleDateString()})` 
+        : ' (Last 30 Days)';
+      csvData.push([`All Search Terms${dateRangeLabel} - Total: ${filteredSearchTermsData.length} terms`]);
+      csvData.push(['Date', 'Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
+      filteredSearchTermsData.forEach(term => {
         const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
         csvData.push([
+          term.date || 'N/A',
           term.searchTerm,
           term.campaignName,
           getAdGroupName(term),
@@ -1756,12 +1907,17 @@ const PPCDashboard = () => {
                                     <div>No keyword performance data available</div>
                                     <div className="text-xs">Check if keywords performance data has been synced</div>
                                   </div>
+                                ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No keyword data for selected date range</div>
+                                    <div className="text-xs">Try selecting a different date range</div>
+                                  </div>
                                 ) : (
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No wasted keywords found</div>
                                     <div className="text-xs">
                                        No keywords with cost &gt; $5 and sales &lt; $1 
-                                       (Total keywords: {adsKeywordsPerformanceData.length})
+                                       (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
                                     </div>
                                   </div>
                                 )}
@@ -1884,12 +2040,17 @@ const PPCDashboard = () => {
                                     <div>No keyword performance data available</div>
                                     <div className="text-xs">Check if keywords performance data has been synced</div>
                                   </div>
+                                ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div>No keyword data for selected date range</div>
+                                    <div className="text-xs">Try selecting a different date range</div>
+                                  </div>
                                 ) : (
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No top performing keywords found</div>
                                     <div className="text-xs">
                                       No keywords meeting criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
-                                      (Total keywords: {adsKeywordsPerformanceData.length})
+                                      (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
                                     </div>
                                   </div>
                                 )}
@@ -2023,8 +2184,8 @@ const PPCDashboard = () => {
                               const startIndex = (autoCampaignPage - 1) * itemsPerPage;
                               const endIndex = startIndex + itemsPerPage;
                               return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => {
-                                // Find the original search term to get adGroup
-                                const originalTerm = searchTerms.find(st => st.searchTerm === insight.searchTerm && st.campaignId === insight.campaignId);
+                                // Find the original search term to get adGroup (using date-filtered data)
+                                const originalTerm = filteredSearchTermsData.find(st => st.searchTerm === insight.searchTerm && st.campaignId === insight.campaignId);
                                 return (
                                   <tr key={idx} className="border-b border-gray-200">
                                     <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>

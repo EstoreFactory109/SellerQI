@@ -14,6 +14,11 @@ const searchTermsSchema = new mongoose.Schema({
     required: true
   },
   searchTermData:[{
+    date: {
+      type: String,
+      required: false,
+      default: null
+    },
     campaignId: {
       type: String,
       required: true

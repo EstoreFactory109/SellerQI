@@ -75,10 +75,11 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
                 configuration: {
                     adProduct: "SPONSORED_PRODUCTS",
                     reportTypeId: "spKeywords",
-                    timeUnit: "SUMMARY",
+                    timeUnit: "DAILY",
                     format: "GZIP_JSON",
                     groupBy: ["adGroup"],
                     columns: [
+                        "date",
                         "keywordId",
                         "keyword",
                         "campaignName",

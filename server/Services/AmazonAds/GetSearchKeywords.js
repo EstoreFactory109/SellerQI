@@ -57,10 +57,11 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                 "configuration": {
                     "adProduct": "SPONSORED_PRODUCTS",
                     "reportTypeId": "spSearchTerm",
-                    "timeUnit": "SUMMARY",
+                    "timeUnit": "DAILY",
                     "format": "GZIP_JSON",
                     "groupBy": ["searchTerm"],
                     "columns": [
+                        "date",
                         "campaignId",
                         "campaignName",
                         "adGroupId",
@@ -284,6 +285,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
             reportJson.forEach(item => {
                 sponsoredAdsData.push({
+                    date: item.date || null,
                     campaignId: item.campaignId || '',
                     campaignName: item.campaignName || '',
                     adGroupId: item.adGroupId || '',

@@ -15,6 +15,11 @@ const adsKeywordsPerformanceSchema = new mongoose.Schema({
         required: true
     },
     keywordsData: [{
+        date: {
+            type: String,
+            required: false,
+            default: null
+        },
         keywordId: {
             type:Number,
             required:true
