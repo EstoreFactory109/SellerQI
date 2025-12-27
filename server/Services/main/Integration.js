@@ -52,6 +52,7 @@ const { getPPCSpendsDateWise } = require('../AmazonAds/GetDateWiseSpendKeywords.
 const { getAdGroups } = require('../AmazonAds/AdGroups.js');
 const { getKeywordRecommendations } = require('../AmazonAds/KeyWordsRecommendations.js');
 const { getPPCMetrics } = require('../AmazonAds/GetPPCMetrics.js');
+const { getPPCUnitsSold } = require('../AmazonAds/GetPPCUnitsSold.js');
 
 // Other Services
 const { getBrand } = require('../Sp_API/GetBrand.js');
@@ -784,9 +785,11 @@ class Integration {
                 tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
                     (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
                 // PPC Metrics - aggregated campaign data from SP, SB, SD
-                getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true),
+                // PPC Units Sold - date-wise units sold data
+                getPPCUnitsSold(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
             );
-            firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics (Aggregated)");
+            firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics (Aggregated)", "PPC Units Sold");
         }
 
         const firstBatchResults = await Promise.allSettled(firstBatchPromises);
@@ -805,11 +808,13 @@ class Integration {
             apiData.adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
             apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
             apiData.ppcMetricsAggregated = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
+            apiData.ppcUnitsSold = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
         } else {
             apiData.ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
             apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
             apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
             apiData.ppcMetricsAggregated = { success: false, data: null, error: "Ads token not available" };
+            apiData.ppcUnitsSold = { success: false, data: null, error: "Ads token not available" };
         }
         logger.info("First Batch Ends");
 
@@ -1296,6 +1301,7 @@ class Integration {
             ppcSpendsDateWise: apiData.ppcSpendsDateWise.success ? apiData.ppcSpendsDateWise.data : null,
             ppcSpendsBySKU: apiData.ppcSpendsBySKU.success ? apiData.ppcSpendsBySKU.data : null,
             ppcMetricsAggregated: apiData.ppcMetricsAggregated?.success ? apiData.ppcMetricsAggregated.data : null,
+            ppcUnitsSold: apiData.ppcUnitsSold?.success ? apiData.ppcUnitsSold.data : null,
             campaignData: apiData.campaignData.success ? apiData.campaignData.data : null,
             adGroupsData: apiData.adGroupsData.success ? apiData.adGroupsData.data : null,
             fbaInventoryPlanningData: apiData.fbaInventoryPlanningData.success ? apiData.fbaInventoryPlanningData.data : null,
@@ -1318,6 +1324,7 @@ class Integration {
             { name: "Ads Keywords Performance", result: apiData.adsKeywordsPerformanceData },
             { name: "PPC Spends Date Wise", result: apiData.ppcSpendsDateWise },
             { name: "PPC Metrics (Aggregated)", result: apiData.ppcMetricsAggregated || { success: false, data: null, error: "Not available" } },
+            { name: "PPC Units Sold", result: apiData.ppcUnitsSold || { success: false, data: null, error: "Not available" } },
             { name: "Restock Inventory Recommendations", result: apiData.RestockinventoryData },
             { name: "Product Reviews", result: apiData.productReview },
             { name: "Ads Keywords", result: apiData.adsKeywords },

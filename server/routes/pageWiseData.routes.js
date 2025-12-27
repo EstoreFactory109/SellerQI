@@ -31,6 +31,12 @@ const {
     getPPCMetricsHistory
 } = require('../controllers/analytics/PPCMetricsController.js');
 
+const {
+    getLatestPPCUnitsSold,
+    getPPCUnitsSoldByDateRange,
+    getPPCUnitsSoldSummary
+} = require('../controllers/analytics/PPCUnitsSoldController.js');
+
 // ===== MAIN DASHBOARD =====
 // Returns full calculated dashboard data
 router.get('/dashboard', auth, getLocation, analyseDataCache(3600), getDashboardData);
@@ -82,6 +88,16 @@ router.get('/ppc-metrics/graph', auth, getLocation, getPPCMetricsForGraph);
 
 // Get PPC metrics history
 router.get('/ppc-metrics/history', auth, getLocation, getPPCMetricsHistory);
+
+// ===== PPC UNITS SOLD (from PPCUnitsSold Model) =====
+// Get latest PPC units sold data (default: 30 days)
+router.get('/ppc-units-sold/latest', auth, getLocation, getLatestPPCUnitsSold);
+
+// Get PPC units sold filtered by date range
+router.get('/ppc-units-sold/filter', auth, getLocation, getPPCUnitsSoldByDateRange);
+
+// Get PPC units sold summary for KPI display
+router.get('/ppc-units-sold/summary', auth, getLocation, getPPCUnitsSoldSummary);
 
 module.exports = router;
 

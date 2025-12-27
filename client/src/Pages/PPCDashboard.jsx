@@ -14,6 +14,15 @@ import {
   selectPPCDateWiseMetrics,
   selectLatestPPCMetricsLoading 
 } from '../redux/slices/PPCMetricsSlice.js';
+import {
+  fetchLatestPPCUnitsSold,
+  fetchPPCUnitsSoldByDateRange,
+  selectPPCUnitsSoldTotal,
+  selectPPCUnitsSoldLoading,
+  selectFilteredUnitsSoldTotal,
+  selectFilteredPPCUnitsSoldLoading,
+  selectHasFilteredUnitsSold
+} from '../redux/slices/PPCUnitsSoldSlice.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -161,8 +170,24 @@ const PPCDashboard = () => {
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
   
+  // Get PPC Units Sold from PPCUnitsSold model (NEW - for units sold KPI)
+  const ppcUnitsSoldTotal = useSelector(selectPPCUnitsSoldTotal);
+  const ppcUnitsSoldLoading = useSelector(selectPPCUnitsSoldLoading);
+  const filteredUnitsSoldTotal = useSelector(selectFilteredUnitsSoldTotal);
+  const filteredUnitsSoldLoading = useSelector(selectFilteredPPCUnitsSoldLoading);
+  const hasFilteredUnitsSold = useSelector(selectHasFilteredUnitsSold);
+  const ppcUnitsSoldLastFetched = useSelector(state => state.ppcUnitsSold?.latestUnitsSold?.lastFetched);
+  
+  // FALLBACK: Get PPCUnitsSold data from main dashboard load (Analyse.js)
+  // This is available immediately without a separate API call
+  const dashboardPPCUnitsSold = useSelector((state) => state.Dashboard.DashBoardInfo?.PPCUnitsSold);
+  
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+  
+  // Refs to track fetch attempts to prevent infinite loops
+  const metricsFetchAttempted = useRef(false);
+  const unitsSoldFetchAttempted = useRef(false);
   
   // Fetch PPC metrics on component mount
   useEffect(() => {
@@ -170,10 +195,35 @@ const PPCDashboard = () => {
     const now = Date.now();
     const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
     
-    if (shouldFetch && !ppcMetricsLoading) {
+    if (shouldFetch && !ppcMetricsLoading && !metricsFetchAttempted.current) {
+      metricsFetchAttempted.current = true;
       dispatch(fetchLatestPPCMetrics());
     }
-  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
+    
+    // Reset the ref when lastFetched is updated (successful fetch)
+    if (ppcMetricsLastFetched) {
+      metricsFetchAttempted.current = false;
+    }
+  }, [dispatch, ppcMetricsLastFetched]);
+  
+  // Fetch PPC Units Sold on component mount (for units sold KPI)
+  
+  useEffect(() => {
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+    const shouldFetch = !ppcUnitsSoldLastFetched || (now - ppcUnitsSoldLastFetched) > CACHE_DURATION;
+    
+    // Only fetch if cache is stale and we haven't attempted a fetch in this component lifecycle
+    if (shouldFetch && !ppcUnitsSoldLoading && !unitsSoldFetchAttempted.current) {
+      unitsSoldFetchAttempted.current = true;
+      dispatch(fetchLatestPPCUnitsSold());
+    }
+    
+    // Reset the ref when lastFetched is updated (successful fetch)
+    if (ppcUnitsSoldLastFetched) {
+      unitsSoldFetchAttempted.current = false;
+    }
+  }, [dispatch, ppcUnitsSoldLastFetched]);
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
   
@@ -995,6 +1045,36 @@ const PPCDashboard = () => {
   // Check if date range is selected to determine which data to use
   const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
   
+  // Fetch filtered PPC Units Sold when date range is selected
+  useEffect(() => {
+    console.log('=== Date Range Filter Effect ===');
+    console.log('isDateRangeSelected:', isDateRangeSelected);
+    console.log('info?.startDate:', info?.startDate);
+    console.log('info?.endDate:', info?.endDate);
+    console.log('info?.calendarMode:', info?.calendarMode);
+    
+    if (isDateRangeSelected && info?.startDate && info?.endDate) {
+      // Format dates as YYYY-MM-DD
+      const formatDate = (date) => {
+        const d = new Date(date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
+      const startDate = formatDate(info.startDate);
+      const endDate = formatDate(info.endDate);
+      
+      console.log('=== Dispatching fetchPPCUnitsSoldByDateRange ===');
+      console.log('Start Date:', startDate);
+      console.log('End Date:', endDate);
+      dispatch(fetchPPCUnitsSoldByDateRange({ startDate, endDate }));
+    } else {
+      console.log('Not fetching filtered units - conditions not met');
+    }
+  }, [dispatch, isDateRangeSelected, info?.startDate, info?.endDate]);
+  
   // Filter PPCMetrics dateWiseMetrics based on selected date range (for KPI calculations)
   const filteredPPCMetricsForKPI = useMemo(() => {
     if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
@@ -1070,16 +1150,59 @@ const PPCDashboard = () => {
     // Calculate TACoS
     const tacos = totalSales > 0 ? (spend / totalSales) * 100 : 0;
     
-    // Calculate units sold - use PPCMetrics if available, fallback to legacy
-    const unitsSold = ppcSummary?.totalUnits || sponsoredAdsMetrics?.totalProductsPurchased || 0;
+    // Calculate units sold - use PPCUnitsSold model as primary source
+    // Simplified to only use 1-day attribution (units sold within 1 day of click)
+    let unitsSold = 0;
     
-    console.log('=== Final KPI Values ===');
-    console.log('PPC Sales:', ppcSales);
-    console.log('Spend:', spend);
-    console.log('ACOS:', acos.toFixed(2) + '%');
-    console.log('TACoS:', tacos.toFixed(2) + '%');
-    console.log('Units Sold:', unitsSold);
-    console.log('Data source:', ppcSummary ? 'PPCMetrics Model' : 'Legacy');
+    // Helper to get units from dashboardPPCUnitsSold with date filtering
+    const getUnitsFromDashboardData = (startDate, endDate) => {
+      if (!dashboardPPCUnitsSold?.dateWiseUnits?.length) return 0;
+      
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      
+      // Filter and sum units for the date range
+      const filteredUnits = dashboardPPCUnitsSold.dateWiseUnits.filter(item => {
+        const itemDate = new Date(item.date);
+        return itemDate >= start && itemDate <= end;
+      });
+      
+      return filteredUnits.reduce((sum, day) => sum + (day.units || 0), 0);
+    };
+    
+    // Priority order:
+    // 1. Filtered API data (when date range selected)
+    // 2. Dashboard PPCUnitsSold with date filtering
+    // 3. API PPCUnitsSold (total)
+    // 4. Dashboard PPCUnitsSold totals
+    // 5. Legacy sponsoredAdsMetrics.totalProductsPurchased
+    
+    if (isDateRangeSelected) {
+      // When date range is selected, use filtered data
+      if (hasFilteredUnitsSold && filteredUnitsSoldTotal !== null && filteredUnitsSoldTotal > 0) {
+        unitsSold = filteredUnitsSoldTotal;
+      } else if (dashboardPPCUnitsSold?.dateWiseUnits?.length > 0) {
+        // Use dashboard data for filtering
+        unitsSold = getUnitsFromDashboardData(info.startDate, info.endDate);
+      } else if (sponsoredAdsMetrics?.totalProductsPurchased > 0) {
+        // Use legacy data as fallback for date range
+        unitsSold = sponsoredAdsMetrics.totalProductsPurchased;
+      }
+    } else if (ppcUnitsSoldTotal !== null && ppcUnitsSoldTotal > 0) {
+      // Use data from separate API call
+      unitsSold = ppcUnitsSoldTotal;
+    } else if (dashboardPPCUnitsSold?.totalUnits > 0) {
+      // Use data from main dashboard load (totalUnits is now a number)
+      unitsSold = dashboardPPCUnitsSold.totalUnits;
+    } else if (sponsoredAdsMetrics?.totalProductsPurchased > 0) {
+      // Use legacy sponsored ads data
+      unitsSold = sponsoredAdsMetrics.totalProductsPurchased;
+    } else {
+      // Fallback to ppcSummary or 0
+      unitsSold = ppcSummary?.totalUnits || 0;
+    }
     
     return [
       { 
@@ -1103,7 +1226,7 @@ const PPCDashboard = () => {
         value: `${unitsSold}`
       },
     ];
-  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, isDateRangeSelected, sponsoredAdsMetrics, filteredDateWiseTotalCosts, ppcSummary, filteredPPCMetricsForKPI, currency]);
+  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, isDateRangeSelected, sponsoredAdsMetrics, filteredDateWiseTotalCosts, ppcSummary, filteredPPCMetricsForKPI, currency, ppcUnitsSoldTotal, filteredUnitsSoldTotal, hasFilteredUnitsSold, filteredUnitsSoldLoading, dashboardPPCUnitsSold]);
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
@@ -1685,7 +1808,9 @@ const PPCDashboard = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-600">{kpi.label}</p>
                       {kpi.label === 'Units Sold' && (
-                        <p className="text-xs text-gray-500 mt-0.5">For last 30 days</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          1-day attribution
+                        </p>
                       )}
                     </div>
                   </div>

@@ -6,6 +6,9 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
     testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics}=require('../controllers/test/TestController.js')
 
+// PPC Units Sold Controller - Fetches units sold data date-wise
+const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
+
     
 router.post('/testreport',testReport);
 router.get('/totalsales',getTotalSales);
@@ -30,5 +33,9 @@ router.get('/getStoredKeywordRecommendations',getStoredKeywordRecommendations)  
 
 // PPC Metrics - Aggregated PPC data (sales, spend, ACOS, date-wise metrics)
 router.post('/testPPCMetrics',testPPCMetrics)  // Fetch aggregated PPC metrics from SP, SB, SD campaigns
+
+// PPC Units Sold - Date-wise units sold data with attribution windows
+router.post('/testPPCUnitsSold', testGetPPCUnitsSold)  // Fetch units sold data date-wise from SP, SB, SD campaigns
+router.get('/ppc-units-sold/info', getUnitsMetricsInfo)  // Get info about available units sold metrics
 
 module.exports=router

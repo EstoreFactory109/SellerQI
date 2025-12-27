@@ -89,6 +89,14 @@ const MON_WED_FRI_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'ppcMetricsAggregated'
     },
+    // PPC Units Sold - Date-wise units sold data
+    'ppcUnitsSold': {
+        service: require('../AmazonAds/GetPPCUnitsSold.js'),
+        functionName: 'getPPCUnitsSold',
+        description: 'PPC Units Sold',
+        requiresAdsToken: true,
+        apiDataKey: 'ppcUnitsSold'
+    },
     // MCP Economics
     'mcpEconomicsData': {
         service: require('../MCP/MCPEconomicsIntegration.js'),

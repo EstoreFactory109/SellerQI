@@ -7,15 +7,23 @@ const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel')
 
 const generateReport = async (accessToken, marketplaceIds, baseuri, dataStartTime = null, dataEndTime = null) => {
     try {
-        // Use provided dates or default to test dates
+        // Use provided dates or calculate dynamic default dates
+        // Default: Last 31 days ending yesterday (due to 24h data delay)
         let StartTime, EndTime;
         if (dataStartTime && dataEndTime) {
             StartTime = new Date(dataStartTime);
             EndTime = new Date(dataEndTime);
         } else {
-            // Default test dates
-            StartTime = new Date("2025-10-01T00:00:00.000Z");
-            EndTime = new Date("2025-11-01T23:59:59.999Z");
+            // Dynamic dates: yesterday as end, 31 days before today as start
+            // Example: If today is Dec 27, EndTime is Dec 26, StartTime is Nov 26
+            const now = new Date();
+            EndTime = new Date(now);
+            EndTime.setDate(EndTime.getDate() - 1);
+            EndTime.setHours(23, 59, 59, 999); // End of yesterday
+            
+            StartTime = new Date(now);
+            StartTime.setDate(StartTime.getDate() - 31);
+            StartTime.setHours(0, 0, 0, 0); // Start of 31 days ago
         }
         
         const requestBody = {

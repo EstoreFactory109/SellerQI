@@ -69,6 +69,7 @@ const getLatestPPCMetrics = asyncHandler(async (req, res) => {
 /**
  * Get PPC metrics filtered by date range
  * Used by: Date-wise filtering on dashboards
+ * Now searches ALL historical documents, not just the latest
  */
 const getPPCMetricsByDateRange = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -85,49 +86,38 @@ const getPPCMetricsByDateRange = asyncHandler(async (req, res) => {
     try {
         logger.info(`Fetching PPC metrics for user: ${userId}, date range: ${startDate || 'latest'} to ${endDate || 'latest'}`);
 
-        let metrics;
-
         if (startDate && endDate) {
-            // Try to find exact date range match first
-            metrics = await PPCMetrics.findByDateRange(userId, country, region, startDate, endDate);
+            // Use the new method that searches ALL documents for the date range
+            const result = await PPCMetrics.calculateMetricsForDateRange(userId, country, region, startDate, endDate);
             
-            // If no exact match, get latest and filter dateWiseMetrics
-            if (!metrics) {
-                metrics = await PPCMetrics.findLatestForUser(userId, country, region);
-                
-                if (metrics && metrics.dateWiseMetrics) {
-                    // Filter dateWiseMetrics to the requested range
-                    const filteredDateWise = metrics.dateWiseMetrics.filter(item => {
-                        const itemDate = new Date(item.date);
-                        const start = new Date(startDate);
-                        const end = new Date(endDate);
-                        return itemDate >= start && itemDate <= end;
-                    });
-
-                    // Recalculate summary for filtered data
-                    const filteredSummary = calculateSummaryFromDateWise(filteredDateWise);
-
-                    return res.status(200).json(
-                        new ApiResponse(200, {
-                            found: true,
-                            isFiltered: true,
-                            data: {
-                                dateRange: { startDate, endDate },
-                                summary: filteredSummary,
-                                campaignTypeBreakdown: metrics.campaignTypeBreakdown,
-                                dateWiseMetrics: filteredDateWise,
-                                processedCampaignTypes: metrics.processedCampaignTypes,
-                                lastUpdated: metrics.updatedAt,
-                                originalDateRange: metrics.dateRange
-                            }
-                        }, 'PPC metrics filtered successfully')
-                    );
-                }
+            if (!result) {
+                return res.status(200).json(
+                    new ApiResponse(200, {
+                        found: false,
+                        data: null,
+                        message: 'No PPC metrics data available.'
+                    }, 'No PPC metrics found')
+                );
             }
-        } else {
-            // No date range specified, get latest
-            metrics = await PPCMetrics.findLatestForUser(userId, country, region);
+            
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    found: result.found,
+                    isFiltered: result.isFiltered,
+                    data: {
+                        dateRange: result.dateRange,
+                        summary: result.summary,
+                        dateWiseMetrics: result.dateWiseMetrics,
+                        numberOfDays: result.numberOfDays,
+                        dataAvailability: result.dataAvailability,
+                        message: result.message
+                    }
+                }, result.found ? 'PPC metrics filtered successfully' : 'No data for selected range')
+            );
         }
+        
+        // No date range specified, get latest
+        const metrics = await PPCMetrics.findLatestForUser(userId, country, region);
 
         if (!metrics) {
             return res.status(200).json(

@@ -51,6 +51,8 @@ const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPC
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
 const differenceCalculation = require('../Calculations/DifferenceCalcualtion.js');
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
+// PPC Units Sold model for date-wise units sold data
+const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
 
 class AnalyseService {
     /**
@@ -319,7 +321,8 @@ class AnalyseService {
             GetOrderData,
             GetDateWisePPCspendData,
             AdsGroupData,
-            keywordTrackingData
+            keywordTrackingData,
+            ppcUnitsSoldData
         ] = await Promise.all([
             V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
@@ -355,7 +358,8 @@ class AnalyseService {
             GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
             GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
             AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 })
+            KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+            PPCUnitsSold.findLatestForUser(userId, country, region)
         ]);
 
         console.log("v2Data: ", v2Data);
@@ -439,7 +443,8 @@ class AnalyseService {
             GetOrderData,
             GetDateWisePPCspendData,
             AdsGroupData,
-            keywordTrackingData
+            keywordTrackingData,
+            ppcUnitsSoldData
         };
     }
 
@@ -762,7 +767,14 @@ class AnalyseService {
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,
             keywordTrackingData: (allData.keywordTrackingData || { keywords: [] }).keywords || [],
             DifferenceData: differenceData.percentageDifference,
-            SalesByProducts: (allData.saleByProduct || { productWiseSales: [] }).productWiseSales
+            SalesByProducts: (allData.saleByProduct || { productWiseSales: [] }).productWiseSales,
+            // PPC Units Sold data for date-wise units sold metrics (1-day attribution)
+            PPCUnitsSold: allData.ppcUnitsSoldData ? {
+                dateRange: allData.ppcUnitsSoldData.dateRange,
+                totalUnits: allData.ppcUnitsSoldData.totalUnits,
+                summary: allData.ppcUnitsSoldData.summary,
+                dateWiseUnits: allData.ppcUnitsSoldData.dateWiseUnits
+            } : null
         };
     }
 

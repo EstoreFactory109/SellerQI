@@ -269,33 +269,37 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
     try {
         const now = new Date();
-        const endTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
+        // Use yesterday as end date (24h data delay from Amazon)
+        const endTime = new Date(now);
+        endTime.setDate(endTime.getDate() - 1);
+        endTime.setHours(23, 59, 59, 999); // End of yesterday
 
-        // Define time periods
+        // Define time periods - total 31 days ending yesterday
+        // Example: If today is Dec 27, endTime is Dec 26, startTime is Nov 26
         const periods = [
             {
                 label: "Period 1 (7 days)",
                 days: 7,
-                startOffset: 30, // 30 days ago
-                endOffset: 23    // 23 days ago
+                startOffset: 30, // 30 days before yesterday
+                endOffset: 24    // 24 days before yesterday
             },
             {
                 label: "Period 2 (7 days)",
                 days: 7,
-                startOffset: 23, // 23 days ago
-                endOffset: 16    // 16 days ago
+                startOffset: 24, // 24 days before yesterday
+                endOffset: 17    // 17 days before yesterday
             },
             {
                 label: "Period 3 (7 days)",
                 days: 7,
-                startOffset: 16, // 16 days ago
-                endOffset: 9     // 9 days ago
+                startOffset: 17, // 17 days before yesterday
+                endOffset: 10    // 10 days before yesterday
             },
             {
-                label: "Period 4 (9 days)",
-                days: 9,
-                startOffset: 9,  // 9 days ago
-                endOffset: 0     // to endTime (2 minutes ago)
+                label: "Period 4 (10 days)",
+                days: 10,
+                startOffset: 10, // 10 days before yesterday
+                endOffset: 0     // to yesterday
             }
         ];
 
