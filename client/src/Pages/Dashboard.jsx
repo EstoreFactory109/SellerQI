@@ -42,6 +42,9 @@ const Dashboard = () => {
   // Get search terms from Redux for "Amazon Owes You" calculation
   const searchTerms = useSelector((state) => state.Dashboard.DashBoardInfo?.searchTerms) || [];
   
+  // Get adsKeywordsPerformanceData from Redux for "Money Wasted in Ads" calculation
+  const adsKeywordsPerformanceData = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
+  
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
   
@@ -84,11 +87,11 @@ const Dashboard = () => {
       setSelectedPeriod(period);
       console.log('Dashboard showing Last 7 Days:', period);
     } else {
-      // Show actual date range for Last 30 Days (28 days before yesterday = 29 days total)
-      // Due to 24-hour data delay, we show data from 28 days ago to yesterday
+      // Show actual date range for Last 30 Days (30 days before yesterday)
+      // Due to 24-hour data delay, we show data from 30 days ago to yesterday
       const actualEndDate = getActualEndDate();
       const startDate = new Date(actualEndDate);
-      startDate.setDate(actualEndDate.getDate() - 28);
+      startDate.setDate(actualEndDate.getDate() - 30);
       const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
       setSelectedPeriod(period);
       console.log('Dashboard showing Last 30 Days:', period);
@@ -277,29 +280,29 @@ const Dashboard = () => {
     return formatCurrency(value, currency);
   };
 
-  // Calculate "Amazon Owes You" - total spend of search terms with zero sales
-  // Use the same filter as PPC Dashboard: clicks >= 10 && sales === 0
+  // Calculate "Money Wasted in Ads" - total spend of keywords with zero sales
+  // Uses adsKeywordsPerformanceData: cost > 0 && attributedSales30d < 0.01
   const calculateAmazonOwesYou = () => {
-    if (!Array.isArray(searchTerms) || searchTerms.length === 0) {
+    if (!Array.isArray(adsKeywordsPerformanceData) || adsKeywordsPerformanceData.length === 0) {
       return 0;
     }
     
-    // Filter search terms with zero sales (same logic as PPC Dashboard)
-    const zeroSalesSearchTerms = searchTerms.filter(term => {
-      if (!term) return false;
-      // Match the frontend filter: clicks >= 10 && sales === 0
-      const clicks = term.clicks || 0;
-      const sales = term.sales || 0;
-      return clicks >= 10 && sales === 0;
+    // Filter keywords with zero sales (cost > 0 && attributedSales30d < 0.01)
+    const wastedKeywords = adsKeywordsPerformanceData.filter(keyword => {
+      if (!keyword) return false;
+      const cost = parseFloat(keyword.cost) || 0;
+      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
+      // Use < 0.01 instead of === 0 to handle floating point precision issues
+      return cost > 0 && attributedSales30d < 0.01;
     });
     
-    // Sum the spend for all zero sales search terms
-    const totalSpend = zeroSalesSearchTerms.reduce((total, term) => {
-      const spend = term.spend || term.cost || 0;
-      return total + (typeof spend === 'number' ? spend : parseFloat(spend) || 0);
+    // Sum the spend for all wasted keywords
+    const totalWastedSpend = wastedKeywords.reduce((total, keyword) => {
+      const cost = parseFloat(keyword.cost) || 0;
+      return total + cost;
     }, 0);
     
-    return Math.round(totalSpend * 100) / 100; // Round to 2 decimal places
+    return Math.round(totalWastedSpend * 100) / 100; // Round to 2 decimal places
   };
 
   const amazonOwesYou = calculateAmazonOwesYou();

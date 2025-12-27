@@ -125,8 +125,8 @@ const ProfitabilityDashboard = () => {
         let periodType = calendarMode;
         let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
         
-        // Add dates for custom range
-        if (periodType === 'custom' && startDate && endDate) {
+        // Add dates for both custom and last7 ranges
+        if ((periodType === 'custom' || periodType === 'last7') && startDate && endDate) {
           url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
         }
 
@@ -442,9 +442,9 @@ const ProfitabilityDashboard = () => {
           startDate.setDate(actualEndDate.getDate() - 6);
           dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
         } else {
-          // Last 30 Days: 28 days before yesterday = 29 days total (to match actual data range)
+          // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
           const startDate = new Date(actualEndDate);
-          startDate.setDate(actualEndDate.getDate() - 28);
+          startDate.setDate(actualEndDate.getDate() - 30);
           dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
         }
       }
@@ -1206,9 +1206,9 @@ const ProfitabilityDashboard = () => {
                                 startDate.setDate(actualEndDate.getDate() - 6);
                                 return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                               } else {
-                                // Last 30 Days: 28 days before yesterday = 29 days total
+                                // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
                                 const startDate = new Date(actualEndDate);
-                                startDate.setDate(actualEndDate.getDate() - 28);
+                                startDate.setDate(actualEndDate.getDate() - 30);
                                 return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                               }
                             })()

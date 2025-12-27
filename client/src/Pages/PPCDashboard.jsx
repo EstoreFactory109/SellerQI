@@ -194,6 +194,19 @@ const PPCDashboard = () => {
   // Get adsKeywordsPerformanceData from Redux store
   const adsKeywordsPerformanceData = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
   
+  // DEBUG: Log adsKeywordsPerformanceData to check if data is loaded
+  console.log('=== DEBUG: adsKeywordsPerformanceData ===');
+  console.log('Total keywords loaded:', adsKeywordsPerformanceData.length);
+  if (adsKeywordsPerformanceData.length > 0) {
+    console.log('Sample keyword data:', adsKeywordsPerformanceData[0]);
+    const wastedCount = adsKeywordsPerformanceData.filter(k => {
+      const cost = parseFloat(k.cost) || 0;
+      const sales = parseFloat(k.attributedSales30d) || 0;
+      return cost > 0 && sales < 0.01;
+    }).length;
+    console.log('Keywords matching wasted criteria (cost > 0 && sales < 0.01):', wastedCount);
+  }
+  
   // Get dateWiseTotalCosts from Redux store - actual PPC spend data by date
   const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
 
@@ -486,7 +499,12 @@ const PPCDashboard = () => {
 
   // Filter search terms where clicks >= 10 and sales = 0
   // Filter search terms with zero sales - using date-filtered data
-  const filteredSearchTerms = filteredSearchTermsData.filter(term => term.clicks >= 10 && term.sales === 0);
+  // Use < 0.01 instead of === 0 to handle floating point precision issues
+  const filteredSearchTerms = filteredSearchTermsData.filter(term => {
+    const clicks = parseFloat(term.clicks) || 0;
+    const sales = parseFloat(term.sales) || 0;
+    return clicks >= 10 && sales < 0.01;
+  });
   
   // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
@@ -670,10 +688,11 @@ const PPCDashboard = () => {
 
   const wastedSpendKeywords = filteredAdsKeywordsPerformanceData
     .filter((keyword, index) => {
-      // Apply filter: cost > 5 && attributedSales30d < 1
+      // Apply filter: cost > 0 && attributedSales30d === 0 (with tolerance for floating point)
       const cost = parseFloat(keyword.cost) || 0;
       const attributedSales = parseFloat(keyword.attributedSales30d) || 0;
-      const matchesCriteria = cost > 5 && attributedSales < 1;
+      // Use < 0.01 instead of === 0 to handle floating point precision issues
+      const matchesCriteria = cost > 0 && attributedSales < 0.01;
       
       // Debug: Log every keyword for first 10, then log only matches
       if (index < 10 || matchesCriteria) {
@@ -1387,9 +1406,9 @@ const PPCDashboard = () => {
         startDate.setDate(actualEndDate.getDate() - 6);
         dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
       } else {
-        // Last 30 Days: 28 days before yesterday = 29 days total
+        // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
         const startDate = new Date(actualEndDate);
-        startDate.setDate(actualEndDate.getDate() - 28);
+        startDate.setDate(actualEndDate.getDate() - 30);
         dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
       }
     }
@@ -1422,7 +1441,7 @@ const PPCDashboard = () => {
     
     // Add Wasted Spend Keywords - ALL DATA (not paginated)
     if (wastedSpendKeywords.length > 0) {
-      csvData.push([`Wasted Spend Keywords (>$5 spend, <$1 sales) - Total: ${wastedSpendKeywords.length} keywords`]);
+      csvData.push([`Wasted Spend Keywords (>$0 spend, $0 sales) - Total: ${wastedSpendKeywords.length} keywords`]);
       csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend']);
       wastedSpendKeywords.forEach(keyword => {
         csvData.push([
@@ -1605,9 +1624,9 @@ const PPCDashboard = () => {
                             startDate.setDate(actualEndDate.getDate() - 6);
                             return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                           } else {
-                            // Last 30 Days: 28 days before yesterday = 29 days total
+                            // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
                             const startDate = new Date(actualEndDate);
-                            startDate.setDate(actualEndDate.getDate() - 28);
+                            startDate.setDate(actualEndDate.getDate() - 30);
                             return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
                           }
                         })()
@@ -1916,7 +1935,7 @@ const PPCDashboard = () => {
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No wasted keywords found</div>
                                     <div className="text-xs">
-                                       No keywords with cost &gt; $5 and sales &lt; $1 
+                                       No keywords with cost &gt; $0 and sales = $0 
                                        (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
                                     </div>
                                   </div>

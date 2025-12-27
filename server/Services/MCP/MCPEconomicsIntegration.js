@@ -68,10 +68,12 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             };
         }
 
-        // Calculate date range (last 30 days)
+        // Calculate date range (last 30 days ending yesterday)
+        // Amazon data has a 24-hour delay, so we fetch up to yesterday
         const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
+        endDate.setDate(endDate.getDate() - 1); // Yesterday
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - 30); // 30 days before yesterday
 
         const startDateStr = startDate.toISOString().split('T')[0];
         const endDateStr = endDate.toISOString().split('T')[0];

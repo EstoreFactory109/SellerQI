@@ -491,12 +491,13 @@ const testAmazonAds = async (req, res) => {
                 console.log('🧮 Step 3: Testing wasted spend calculation...');
                 const keywordsData = dbData.keywordsData || [];
 
-                // Calculate wasted spend keywords: cost > 5 && attributedSales30d < 1
+                // Calculate wasted spend keywords: cost > 0 && attributedSales30d === 0 (with tolerance for floating point)
                 const wastedKeywords = keywordsData
                   .filter(keyword => {
                     const cost = parseFloat(keyword.cost) || 0;
                     const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-                    return cost > 5 && attributedSales30d < 1;
+                    // Use < 0.01 instead of === 0 to handle floating point precision issues
+                    return cost > 0 && attributedSales30d < 0.01;
                   })
                   .map(keyword => {
                     const cost = parseFloat(keyword.cost) || 0;

@@ -360,6 +360,17 @@ class AnalyseService {
 
         console.log("v2Data: ", v2Data);
         console.log("economicsMetricsData: ", economicsMetricsData ? 'Found' : 'Not Found');
+        
+        // DEBUG: Log adsKeywordsPerformanceData query result
+        logger.info('=== DEBUG: adsKeywordsPerformanceData in Analyse.js ===');
+        logger.info('Query params:', { userId, country, region });
+        logger.info('adsKeywordsPerformanceData found:', adsKeywordsPerformanceData ? 'Yes' : 'No');
+        if (adsKeywordsPerformanceData) {
+            logger.info('keywordsData length:', adsKeywordsPerformanceData.keywordsData?.length || 0);
+            logger.info('Document userId:', adsKeywordsPerformanceData.userId?.toString());
+            logger.info('Document country:', adsKeywordsPerformanceData.country);
+            logger.info('Document region:', adsKeywordsPerformanceData.region);
+        }
         console.log("buyBoxData: ", buyBoxData ? {
             found: true,
             totalProducts: buyBoxData.totalProducts,

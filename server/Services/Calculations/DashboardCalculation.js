@@ -964,7 +964,21 @@ const analyseData = async (data, userId = null) => {
         keywords: data.keywords || [],
         searchTerms: data.searchTerms || [],
         campaignData: data.campaignData || [],
-        adsKeywordsPerformanceData: data.adsKeywordsPerformanceData || [],
+        adsKeywordsPerformanceData: (() => {
+            const adsData = data.adsKeywordsPerformanceData || [];
+            logger.info('=== DEBUG: adsKeywordsPerformanceData in DashboardCalculation ===');
+            logger.info(`adsKeywordsPerformanceData length: ${adsData.length}`);
+            if (adsData.length > 0) {
+                logger.info('Sample keyword:', JSON.stringify(adsData[0]));
+                const wastedCount = adsData.filter(k => {
+                    const cost = parseFloat(k.cost) || 0;
+                    const sales = parseFloat(k.attributedSales30d) || 0;
+                    return cost > 0 && sales < 0.01;
+                }).length;
+                logger.info(`Keywords matching wasted criteria: ${wastedCount}`);
+            }
+            return adsData;
+        })(),
         GetOrderData: data.GetOrderData || [],
         dateWiseTotalCosts: dateWiseTotalCosts,
         campaignWiseTotalSalesAndCost: campaignWiseTotalSalesAndCost,

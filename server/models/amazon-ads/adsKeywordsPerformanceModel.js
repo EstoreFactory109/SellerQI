@@ -65,7 +65,7 @@ const adsKeywordsPerformanceSchema = new mongoose.Schema({
             required:true
         }
     }]
-})
+}, { timestamps: true });
 
 const adsKeywordsPerformanceModel = mongoose.model('adsKeywordsPerformance', adsKeywordsPerformanceSchema);
 

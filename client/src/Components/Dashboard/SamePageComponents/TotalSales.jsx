@@ -73,7 +73,8 @@ const TotalSales = () => {
         let periodType = calendarMode;
         let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
         
-        if (periodType === 'custom' && startDate && endDate) {
+        // Include startDate and endDate for both 'custom' and 'last7' modes
+        if ((periodType === 'custom' || periodType === 'last7') && startDate && endDate) {
           url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
         }
 
@@ -259,8 +260,8 @@ const TotalSales = () => {
     if (calendarMode === 'last7') {
       startDate.setDate(actualEndDate.getDate() - 6);
     } else {
-      // Last 30 Days: 28 days before yesterday = 29 days total (to match actual data range)
-      startDate.setDate(actualEndDate.getDate() - 28);
+      // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
+      startDate.setDate(actualEndDate.getDate() - 30);
     }
     
     return {

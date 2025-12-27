@@ -50,12 +50,15 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             };
         }
 
-        // Calculate date range if not provided (default to last 30 days)
+        // Calculate date range if not provided (default to last 30 days ending yesterday)
+        // Amazon data has a 24-hour delay, so we fetch up to yesterday
         const now = new Date();
-        const defaultEndDate = endDate || now.toISOString().split('T')[0];
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1); // Yesterday
+        const defaultEndDate = endDate || yesterday.toISOString().split('T')[0];
         const defaultStartDate = startDate || (() => {
-            const start = new Date(now);
-            start.setDate(start.getDate() - 30);
+            const start = new Date(yesterday);
+            start.setDate(start.getDate() - 30); // 30 days before yesterday
             return start.toISOString().split('T')[0];
         })();
 

@@ -41,7 +41,8 @@ const filterTotalSales = asyncHandler(async (req, res) => {
             result = await getLast30DaysData(userId, country, region);
         } else if (periodType === 'last7') {
             // Last 7 days: Get datewise values from latest document, sum them
-            result = await getLast7DaysData(userId, country, region);
+            // Use dates from frontend if provided, otherwise calculate default
+            result = await getLast7DaysData(userId, country, region, startDate, endDate);
         } else if (periodType === 'custom') {
             // Custom range: Check all documents, get datewise values for range, sum them
             result = await getCustomRangeData(userId, country, region, startDate, endDate);
@@ -106,16 +107,26 @@ async function getLast30DaysData(userId, country, region) {
 
 /**
  * Get last 7 days data - get datewise values from latest document, sum them
- * Note: Calendar sends 8 days ago to 1 day ago (8 days total), but we'll use the actual range
+ * Uses dates from frontend if provided, otherwise calculates default (7 days ending yesterday)
  */
-async function getLast7DaysData(userId, country, region) {
-    // Calculate last 7 days date range (8 days ago to yesterday, as per calendar component)
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 1); // Yesterday
-    endDate.setHours(23, 59, 59, 999);
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 8); // 8 days ago
-    startDate.setHours(0, 0, 0, 0);
+async function getLast7DaysData(userId, country, region, startDateParam = null, endDateParam = null) {
+    let startDate, endDate;
+    
+    // Use dates from frontend if provided
+    if (startDateParam && endDateParam) {
+        startDate = new Date(startDateParam);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(endDateParam);
+        endDate.setHours(23, 59, 59, 999);
+    } else {
+        // Default: Calculate last 7 days date range (6 days before yesterday to yesterday)
+        endDate = new Date();
+        endDate.setDate(endDate.getDate() - 1); // Yesterday
+        endDate.setHours(23, 59, 59, 999);
+        startDate = new Date(endDate);
+        startDate.setDate(endDate.getDate() - 6); // 6 days before yesterday = 7 days total
+        startDate.setHours(0, 0, 0, 0);
+    }
 
     const startDateStr = formatDate(startDate);
     const endDateStr = formatDate(endDate);

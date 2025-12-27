@@ -11,12 +11,13 @@ const WastedKeywordsTable = () => {
         state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData
     ) || [];
     
-    // Filter wasted keywords: cost > 5 && attributedSales30d < 1
+    // Filter wasted keywords: cost > 0 && attributedSales30d === 0 (with tolerance for floating point)
     const wastedKeywords = adsKeywordsPerformanceData
         .filter(keyword => {
             const cost = parseFloat(keyword.cost) || 0;
             const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-            return cost > 5 && attributedSales30d < 1;
+            // Use < 0.01 instead of === 0 to handle floating point precision issues
+            return cost > 0 && attributedSales30d < 0.01;
         })
         .map(keyword => {
             const cost = parseFloat(keyword.cost) || 0;
@@ -54,7 +55,7 @@ const WastedKeywordsTable = () => {
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200">
                 <h3 className="text-base font-semibold text-gray-900">
-                    Wasted Keywords (Cost &gt; $5, Sales &lt; $1)
+                    Wasted Keywords (Cost &gt; $0, Sales = $0)
                 </h3>
                 <p className="text-sm text-gray-600 mt-1">
                     {wastedKeywords.length} keywords wasting ad spend

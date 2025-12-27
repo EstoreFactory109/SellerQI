@@ -34,4 +34,4 @@ const FBAFeesSchema = new Schema({
             
         }
     }]
-})
+}, { timestamps: true });

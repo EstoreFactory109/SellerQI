@@ -56,11 +56,11 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         customActive: true
       };
     } else if (calendarMode === 'last7') {
-      // Last 7 days is selected
+      // Last 7 days is selected (6 days before yesterday to yesterday)
       return {
         selectedRange: {
-          startDate: subDays(new Date(), 8),
-          endDate: subDays(new Date(), 1),
+          startDate: subDays(new Date(), 7), // 6 days before yesterday
+          endDate: subDays(new Date(), 1),   // yesterday
           key: 'selection',
         },
         thirtyDaysActive: false,
@@ -68,12 +68,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         customActive: false
       };
     } else {
-      // Default "Last 30 days" or no dates - default to last 29 days (28 days before yesterday to yesterday)
-      // Due to 24-hour data delay, we show data from 28 days ago to yesterday
+      // Default "Last 30 days" - 30 days before yesterday to yesterday (to match MCP data fetch range)
+      // Due to 24-hour data delay, we show data from 30 days ago to yesterday
       return {
         selectedRange: {
-          startDate: subDays(new Date(), 29),
-          endDate: subDays(new Date(), 1),
+          startDate: subDays(new Date(), 31), // 30 days before yesterday
+          endDate: subDays(new Date(), 1),    // yesterday
           key: 'selection',
         },
         thirtyDaysActive: true,
@@ -155,11 +155,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     switch (type) {
       case 'last30':
         handleActive('last30');
-        // Set the range to show last 29 days (28 days before yesterday to yesterday)
-        // Due to 24-hour data delay, we show data from 28 days ago to yesterday
+        // Set the range to show last 30 days (30 days before yesterday to yesterday)
+        // Due to 24-hour data delay, we show data from 30 days ago to yesterday
+        // This matches the MCP data fetch range in the backend
         const defaultRange = {
-          startDate: subDays(today, 29),
-          endDate: subDays(today, 1),
+          startDate: subDays(today, 31), // 30 days before yesterday
+          endDate: subDays(today, 1),    // yesterday
           key: 'selection',
         };
         setSelectedRange(defaultRange);
@@ -173,10 +174,11 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         break;
       case 'last7':
         handleActive('last7');
-        // Set the range to show last 7 days (8 days ago to 1 day ago)
+        // Set the range to show last 7 days (6 days before yesterday to yesterday)
+        // This gives 7 days of data: (yesterday - 6), ..., yesterday
         const last7Range = {
-          startDate: subDays(today, 8),
-          endDate: subDays(today, 1),
+          startDate: subDays(today, 7), // 6 days before yesterday
+          endDate: subDays(today, 1),   // yesterday
           key: 'selection',
         };
         setSelectedRange(last7Range);
