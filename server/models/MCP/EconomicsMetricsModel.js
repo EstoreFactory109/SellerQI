@@ -107,11 +107,21 @@ const datewiseFeesAndRefundsSchema = new mongoose.Schema({
     _id: false
 });
 
-// Schema for ASIN-wise sales data
+// Schema for ASIN-wise sales data (with date for daily breakdown)
 const asinWiseSalesSchema = new mongoose.Schema({
+    date: {
+        type: String,
+        required: false,  // Optional for backward compatibility with existing data
+        default: null
+    },
     asin: {
         type: String,
         required: true
+    },
+    parentAsin: {
+        type: String,
+        required: false,  // Optional - only present for child ASINs that have a parent
+        default: null
     },
     sales: {
         amount: {

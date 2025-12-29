@@ -14,6 +14,80 @@ import {
 } from 'lucide-react';
 import { fetchTasks, updateTaskStatus } from '../redux/slices/TasksSlice.js';
 
+// Helper function to format messages with important details highlighted on separate line
+const formatMessageWithHighlight = (message) => {
+  if (!message) return { mainText: '', highlightedText: '' };
+  
+  // Patterns to extract and highlight on a separate line
+  // These patterns match the exact formats from the backend
+  const patterns = [
+    // Ranking - Restricted words patterns (exact backend formats)
+    /^(.*?)(The Characters used are:\s*.+)$/i,  // Title - restricted words
+    /^(.*?)(The characters which are used:\s*.+)$/i,  // Title - special characters
+    /^(.*?)(The words Used are:\s*.+)$/,  // Bullet Points - restricted words (case sensitive 'Used')
+    /^(.*?)(The words used are:\s*.+)$/i,  // Description - restricted words
+    /^(.*?)(The special characters used are:\s*.+)$/i,  // Bullet Points & Description - special characters
+    
+    // Inventory patterns - units available
+    /^(.*?)(Only \d+ units available.*)$/i,
+    /^(.*?)(Currently \d+ units available.*)$/i,
+    /^(.*?)(\d+ units available.*)$/i,
+    
+    // Inventory - Stranded reason
+    /^(.*?)(Reason:\s*.+)$/i,
+    
+    // Inventory - Inbound non-compliance problem
+    /^(.*?)(Problem:\s*.+)$/i,
+    
+    // Buy Box patterns
+    /^(.*?)(With \d+ page views.+)$/i,
+    
+    // Amazon recommends pattern
+    /^(.*?)(Amazon recommends replenishing \d+ units.*)$/i,
+    
+    // Unfulfillable inventory quantity
+    /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
+    
+    // Profitability patterns
+    /^(.*?)(Revenue:\s*\$[\d,.]+.*)$/i,
+    /^(.*?)(Net Profit:\s*-?\$[\d,.]+.*)$/i,
+    
+    // PPC/Sponsored Ads patterns
+    /^(.*?)(Spend:\s*\$[\d,.]+.*)$/i,
+    /^(.*?)(ACOS:\s*[\d.]+%.*)$/i,
+    /^(.*?)(\d+ clicks from \d+ impressions.*)$/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[2]) {
+      return {
+        mainText: match[1].trim(),
+        highlightedText: match[2].trim()
+      };
+    }
+  }
+  
+  return { mainText: message, highlightedText: '' };
+};
+
+// Component to render message with highlighted part
+const FormattedMessage = ({ message }) => {
+  const { mainText, highlightedText } = formatMessageWithHighlight(message);
+  
+  return (
+    <>
+      {mainText && <span>{mainText}</span>}
+      {highlightedText && (
+        <>
+          <br />
+          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+        </>
+      )}
+    </>
+  );
+};
+
 export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
@@ -551,7 +625,9 @@ export default function Tasks() {
                       </td>
                       <td className='px-4 py-4 text-sm text-gray-900'>
                         <div>
-                          <p className='whitespace-normal'>{item.error}</p>
+                          <p className='whitespace-normal'>
+                            <FormattedMessage message={item.error} />
+                          </p>
                         </div>
                       </td>
                       <td className='px-4 py-4 text-sm text-gray-900'>

@@ -21,7 +21,7 @@ const TaskItemSchema = new mongoose.Schema({
     },
     errorCategory: {
         type: String,
-        enum: ['ranking', 'conversion', 'inventory', 'profitability', 'sponsoredAds'],
+        enum: ['ranking', 'conversion', 'inventory', 'profitability', 'sponsoredAds', 'account'],
         required: true
     },
     errorType: {

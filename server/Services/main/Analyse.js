@@ -17,6 +17,8 @@ const ProductWiseSalesModel = require('../../models/products/ProductWiseSalesMod
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 // New: BuyBoxData model for buybox metrics
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
+// New: DataFetchTracking for getting actual calendar dates from database
+const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const { 
     replenishmentQty,
     inventoryPlanningData: processInventoryPlanningData,
@@ -112,7 +114,9 @@ class AnalyseService {
         const differenceData = await differenceCalculation(userId, country, region);
 
         // Create base result object
-        const result = this.createBaseResult({
+        const result = await this.createBaseResult({
+            userId,
+            region,
             createdAccountDate,
             sellerCentral,
             allSellerAccounts,
@@ -683,8 +687,10 @@ class AnalyseService {
     /**
      * Create base result object
      */
-    static createBaseResult(params) {
+    static async createBaseResult(params) {
         const {
+            userId,
+            region,
             createdAccountDate,
             sellerCentral,
             allSellerAccounts,
@@ -713,12 +719,67 @@ class AnalyseService {
         // Get economics metrics for ASIN-wise data (profitability, ACOS/TACOS calculations)
         const economicsMetrics = allData.economicsMetricsData;
 
+        // Get calendar dates from DataFetchTracking (PRIMARY source - no calculation, just from database)
+        // This tracks when calendar-affecting services actually ran
+        let dataStartDate = null;
+        let dataEndDate = null;
+        let trackingInfo = null;
+        
+        try {
+            const latestTracking = await DataFetchTracking.findLatest(userId, country, region);
+            if (latestTracking && latestTracking.dataRange) {
+                dataStartDate = latestTracking.dataRange.startDate;
+                dataEndDate = latestTracking.dataRange.endDate;
+                trackingInfo = {
+                    fetchedAt: latestTracking.fetchedAt,
+                    dayName: latestTracking.dayName,
+                    dateString: latestTracking.dateString,
+                    timeString: latestTracking.timeString
+                };
+                logger.info('Calendar dates from DataFetchTracking:', {
+                    startDate: dataStartDate,
+                    endDate: dataEndDate,
+                    fetchedAt: latestTracking.fetchedAt,
+                    dayName: latestTracking.dayName
+                });
+            }
+        } catch (trackingError) {
+            logger.warn('Failed to get dates from DataFetchTracking:', { error: trackingError.message });
+        }
+        
+        // Fallback to EconomicsMetrics dateRange if DataFetchTracking not found
+        if (!dataStartDate || !dataEndDate) {
+            // Helper to format date as YYYY-MM-DD for calendar compatibility
+            const formatDateForCalendar = (date) => {
+                const d = new Date(date);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+            
+            dataStartDate = economicsMetrics?.dateRange?.startDate || formatDateForCalendar(financeThirtyDaysAgo);
+            dataEndDate = economicsMetrics?.dateRange?.endDate || formatDateForCalendar(financeCreatedDate);
+            logger.info('Calendar dates from EconomicsMetrics (fallback):', {
+                startDate: dataStartDate,
+                endDate: dataEndDate
+            });
+        }
+        
+        // Debug log to track date source
+        logger.info('Final calendar date range:', {
+            startDate: dataStartDate,
+            endDate: dataEndDate,
+            source: trackingInfo ? 'DataFetchTracking' : 'EconomicsMetrics/Fallback',
+            trackingInfo
+        });
+
         return {
             createdAccountDate: createdAccountDate,
             Brand: sellerCentral.brand,
             AllSellerAccounts: allSellerAccounts,
-            startDate: this.formatDate(financeThirtyDaysAgo),
-            endDate: this.formatDate(financeCreatedDate),
+            startDate: dataStartDate,
+            endDate: dataEndDate,
             Country: country,
             TotalProducts: SellerAccount.products,
             AccountData: {
@@ -742,7 +803,9 @@ class AnalyseService {
                 datewiseSales: economicsMetrics.datewiseSales,
                 datewiseGrossProfit: economicsMetrics.datewiseGrossProfit,
                 asinWiseSales: economicsMetrics.asinWiseSales,
-                dateRange: economicsMetrics.dateRange
+                dateRange: economicsMetrics.dateRange,
+                // When this data was fetched (from DataFetchTracking)
+                fetchInfo: trackingInfo
             } : null,
             // New: BuyBox data for dashboard
             BuyBoxData: allData.buyBoxData ? {

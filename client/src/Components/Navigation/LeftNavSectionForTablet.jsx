@@ -20,6 +20,7 @@ const LeftNavSection = () => {
     const [loader,setLoader]=useState(false)
     const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
     const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
+    const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
 
     const position = useSelector(state => state.MobileMenu.position);
     
@@ -35,6 +36,9 @@ const LeftNavSection = () => {
     const currentSettingsTab = searchParams.get('tab') || 'profile';
     const isIssuesPage = location.pathname === '/seller-central-checker/issues';
     const isSettingsPage = location.pathname === '/seller-central-checker/settings';
+    const isPPCDashboardPage = location.pathname === '/seller-central-checker/ppc-dashboard';
+    const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
+    const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
     
     // Keep dropdown open if we're on any issues-related page
     React.useEffect(() => {
@@ -49,6 +53,13 @@ const LeftNavSection = () => {
             setSettingsDropdownOpen(true);
         }
     }, [isSettingsPage]);
+
+    // Keep sponsored ads dropdown open if we're on any sponsored ads-related page
+    React.useEffect(() => {
+        if (isSponsoredAdsPage) {
+            setSponsoredAdsDropdownOpen(true);
+        }
+    }, [isSponsoredAdsPage]);
 
     // Handle Issues button click
     const handleIssuesClick = () => {
@@ -66,6 +77,15 @@ const LeftNavSection = () => {
             navigate('/seller-central-checker/settings?tab=profile');
         }
         setSettingsDropdownOpen(!settingsDropdownOpen);
+    };
+
+    // Handle Sponsored Ads button click
+    const handleSponsoredAdsClick = () => {
+        if (!isSponsoredAdsPage) {
+            // If not on sponsored ads page, navigate to campaign audit
+            navigate('/seller-central-checker/ppc-dashboard');
+        }
+        setSponsoredAdsDropdownOpen(!sponsoredAdsDropdownOpen);
     };
     
     const logoutUser=async(e)=>{
@@ -100,7 +120,7 @@ const LeftNavSection = () => {
             {/* Mobile Menu */}
             <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm " style={{ left: position }}>
             {/* Logo Section */}
-            <div className="w-full px-4 py-4 border-b border-gray-200/50 flex-shrink-0">
+            <div className="w-full px-4 py-8 border-b border-gray-200/50 flex-shrink-0">
                 <div className="flex items-center justify-between">
                     <img 
                         src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png"
@@ -263,31 +283,94 @@ const LeftNavSection = () => {
                             </div>
                             )}
 
-                            {/* PPC Dashboard - Only for PRO/AGENCY users */}
+                            {/* Sponsored Ads with Dropdown - Only for PRO/AGENCY users */}
                             {!isLiteUser && (
-                                <NavLink
-                                    to="/seller-central-checker/ppc-dashboard"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
+                                <div className="space-y-1">
+                                <div
+                                    className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
+                                        isSponsoredAdsPage
+                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                    }`}
+                                    onClick={handleSponsoredAdsClick}
                                 >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-green-50 group-hover:bg-green-100'
-                                            }`}>
-                                                <LaptopMinimalCheck className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-green-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium">Sponsored Ads</span>
-                                        </>
+                                    <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                        isSponsoredAdsPage 
+                                            ? 'bg-white/20' 
+                                            : 'bg-green-50 group-hover:bg-green-100'
+                                    }`}>
+                                        <LaptopMinimalCheck className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                            isSponsoredAdsPage 
+                                                ? 'text-white' 
+                                                : 'text-green-600'
+                                        }`}/>
+                                    </div>
+                                    <span className="font-medium flex-1">Sponsored Ads</span>
+                                    <motion.div
+                                        animate={{ rotate: sponsoredAdsDropdownOpen ? 90 : 0 }}
+                                        transition={{ duration: 0.2, ease: "easeInOut" }}
+                                    >
+                                        <ChevronRight className="w-3 h-3 opacity-70"/>
+                                    </motion.div>
+                                </div>
+                                
+                                <AnimatePresence>
+                                    {sponsoredAdsDropdownOpen && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: "auto" }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            transition={{ 
+                                                duration: 0.3, 
+                                                ease: "easeInOut",
+                                                opacity: { duration: 0.2 }
+                                            }}
+                                            className="ml-5 space-y-1 overflow-hidden"
+                                        >
+                                            <motion.div
+                                                initial={{ y: -10, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -10, opacity: 0 }}
+                                                transition={{ delay: 0.15, duration: 0.2 }}
+                                            >
+                                                <NavLink
+                                                    to="/seller-central-checker/ppc-dashboard"
+                                                    className={({ isActive }) =>
+                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                            isActive
+                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                        }`
+                                                    }
+                                                >
+                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                    Campaign Audit
+                                                </NavLink>
+                                            </motion.div>
+                                            <motion.div
+                                                initial={{ y: -10, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -10, opacity: 0 }}
+                                                transition={{ delay: 0.175, duration: 0.2 }}
+                                            >
+                                                <NavLink
+                                                    to="/seller-central-checker/keyword-analysis"
+                                                    className={({ isActive }) =>
+                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
+                                                            isActive
+                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                        }`
+                                                    }
+                                                >
+                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                    Keyword Opportunities
+                                                </NavLink>
+                                            </motion.div>
+                                        </motion.div>
                                     )}
-                                </NavLink>
+                                </AnimatePresence>
+                            </div>
                             )}
                             
                             {/* Profitability Dashboard - Only for PRO/AGENCY users */}
@@ -312,33 +395,6 @@ const LeftNavSection = () => {
                                                 }`}/>
                                             </div>
                                             <span className="font-medium">Profitibility</span>
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                            {/* Keyword Analysis - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
-                                <NavLink
-                                    to="/seller-central-checker/keyword-analysis"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-orange-50 group-hover:bg-orange-100'
-                                            }`}>
-                                                <Search className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-orange-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium">Keyword Analysis</span>
                                         </>
                                     )}
                                 </NavLink>

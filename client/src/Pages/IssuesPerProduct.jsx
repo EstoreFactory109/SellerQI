@@ -13,16 +13,69 @@ import 'react-lazy-load-image-component/src/effects/blur.css';
 import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle, FileText, FileSpreadsheet } from 'lucide-react';
 import './IssuesPerProduct.css';
 
-// Helper function to format message with bold units available
-const formatMessage = (message) => {
-    if (!message) return message;
-    // Match patterns like "Only X units available", "Currently X units available", or "X units available"
-    // Use a single comprehensive pattern that handles all variations
-    const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
+// Helper function to format messages with important details highlighted on separate line
+const formatMessageWithHighlight = (message) => {
+    if (!message) return { mainText: '', highlightedText: '' };
     
-    return message.replace(pattern, (match) => {
-        return `<strong>${match}</strong>`;
-    });
+    // Patterns to extract and highlight on a separate line
+    // These patterns match the exact formats from the backend
+    const patterns = [
+        // Ranking - Restricted words patterns (exact backend formats)
+        /^(.*?)(The Characters used are:\s*.+)$/i,  // Title - restricted words
+        /^(.*?)(The characters which are used:\s*.+)$/i,  // Title - special characters
+        /^(.*?)(The words Used are:\s*.+)$/,  // Bullet Points - restricted words (case sensitive 'Used')
+        /^(.*?)(The words used are:\s*.+)$/i,  // Description - restricted words
+        /^(.*?)(The special characters used are:\s*.+)$/i,  // Bullet Points & Description - special characters
+        
+        // Inventory patterns - units available
+        /^(.*?)(Only \d+ units available.*)$/i,
+        /^(.*?)(Currently \d+ units available.*)$/i,
+        /^(.*?)(\d+ units available.*)$/i,
+        
+        // Inventory - Stranded reason
+        /^(.*?)(Reason:\s*.+)$/i,
+        
+        // Inventory - Inbound non-compliance problem
+        /^(.*?)(Problem:\s*.+)$/i,
+        
+        // Buy Box patterns
+        /^(.*?)(With \d+ page views.+)$/i,
+        
+        // Amazon recommends pattern
+        /^(.*?)(Amazon recommends replenishing \d+ units.*)$/i,
+        
+        // Unfulfillable inventory quantity
+        /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
+    ];
+    
+    for (const pattern of patterns) {
+        const match = message.match(pattern);
+        if (match && match[2]) {
+            return {
+                mainText: match[1].trim(),
+                highlightedText: match[2].trim()
+            };
+        }
+    }
+    
+    return { mainText: message, highlightedText: '' };
+};
+
+// Component to render message with highlighted part
+const FormattedMessageComponent = ({ message }) => {
+    const { mainText, highlightedText } = formatMessageWithHighlight(message);
+    
+    return (
+        <>
+            {mainText && <span>{mainText}</span>}
+            {highlightedText && (
+                <>
+                    <br />
+                    <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+                </>
+            )}
+        </>
+    );
 };
 
 // Reusable component for conversion issues
@@ -31,11 +84,12 @@ const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, t
         <div className="flex justify-between items-center">
             <p className="w-[40vw]">
                 <b>{label}: </b>
-                <span dangerouslySetInnerHTML={{ __html: formatMessage(message) }} />
+                <FormattedMessageComponent message={message} />
                 {recommendedQty !== null && recommendedQty !== undefined && recommendedQty > 0 && (
-                    <span className="ml-2">
-                        <span className="font-bold">Recommended Restock Quantity: {recommendedQty} units</span>
-                    </span>
+                    <>
+                        <br />
+                        <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {recommendedQty} units</strong>
+                    </>
                 )}
             </p>
             <button
@@ -864,7 +918,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -881,7 +935,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestrictedWords", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -904,7 +958,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -925,7 +979,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center mb-4'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -939,7 +993,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4' >
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestictedWords", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -953,7 +1007,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -973,7 +1027,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.Description?.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.charLim?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -987,7 +1041,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message}</p>
+                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2 " onClick={() => openCloseSol("RestictedWords", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -1001,7 +1055,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message}</p>
+                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
@@ -1022,7 +1076,7 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b>{updatedProduct.rankingErrors?.data?.charLim?.Message}</p>
+                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.charLim?.Message} /></p>
                                                 <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BackendKeyWords")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />

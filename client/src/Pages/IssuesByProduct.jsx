@@ -7,6 +7,71 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Search, Filter, ChevronDown, Package, Eye, Activity, Star, TrendingUp, BarChart3, ArrowRight, Download } from 'lucide-react';
 import noImage from '../assets/Icons/no-image.png';
 
+// Helper function to format messages with important details highlighted on separate line
+const formatMessageWithHighlight = (message) => {
+  if (!message) return { mainText: '', highlightedText: '' };
+  
+  // Patterns to extract and highlight on a separate line
+  // These patterns match the exact formats from the backend
+  const patterns = [
+    // Ranking - Restricted words patterns (exact backend formats)
+    /^(.*?)(The Characters used are:\s*.+)$/i,  // Title - restricted words
+    /^(.*?)(The characters which are used:\s*.+)$/i,  // Title - special characters
+    /^(.*?)(The words Used are:\s*.+)$/,  // Bullet Points - restricted words (case sensitive 'Used')
+    /^(.*?)(The words used are:\s*.+)$/i,  // Description - restricted words
+    /^(.*?)(The special characters used are:\s*.+)$/i,  // Bullet Points & Description - special characters
+    
+    // Inventory patterns - units available
+    /^(.*?)(Only \d+ units available.*)$/i,
+    /^(.*?)(Currently \d+ units available.*)$/i,
+    /^(.*?)(\d+ units available.*)$/i,
+    
+    // Inventory - Stranded reason
+    /^(.*?)(Reason:\s*.+)$/i,
+    
+    // Inventory - Inbound non-compliance problem
+    /^(.*?)(Problem:\s*.+)$/i,
+    
+    // Buy Box patterns
+    /^(.*?)(With \d+ page views.+)$/i,
+    
+    // Amazon recommends pattern
+    /^(.*?)(Amazon recommends replenishing \d+ units.*)$/i,
+    
+    // Unfulfillable inventory quantity
+    /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[2]) {
+      return {
+        mainText: match[1].trim(),
+        highlightedText: match[2].trim()
+      };
+    }
+  }
+  
+  return { mainText: message, highlightedText: '' };
+};
+
+// Component to render message with highlighted part
+const FormattedMessage = ({ message }) => {
+  const { mainText, highlightedText } = formatMessageWithHighlight(message);
+  
+  return (
+    <>
+      {mainText && <span>{mainText}</span>}
+      {highlightedText && (
+        <>
+          <br />
+          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+        </>
+      )}
+    </>
+  );
+};
+
 // Table component for ranking issues
 const RankingIssuesTable = ({ product, info }) => {
     const [page, setPage] = useState(1);
@@ -91,7 +156,9 @@ const RankingIssuesTable = ({ product, info }) => {
                         {displayedErrors.map((error, idx) => (
                             <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
                                 <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                                    <FormattedMessage message={error.message} />
+                                </td>
                                 <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
@@ -215,7 +282,9 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
                         {displayedErrors.map((error, idx) => (
                             <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
                                 <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.message}</td>
+                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                                    <FormattedMessage message={error.message} />
+                                </td>
                                 <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
@@ -240,18 +309,6 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
 const InventoryIssuesTable = ({ product }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
-    
-    // Helper function to format message with bold units available
-    const formatMessage = (message) => {
-        if (!message) return message;
-        // Match patterns like "Only X units available", "Currently X units available", or "X units available"
-        // Use a single comprehensive pattern that handles all variations
-        const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
-        
-        return message.replace(pattern, (match) => {
-            return `<strong>${match}</strong>`;
-        });
-    };
     
     const extractInventoryErrors = (product) => {
         const inventoryErrors = product.inventoryErrors;
@@ -354,11 +411,12 @@ const InventoryIssuesTable = ({ product }) => {
                             <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
                                 <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
                                 <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
-                                    <span dangerouslySetInnerHTML={{ __html: formatMessage(error.message) }} />
+                                    <FormattedMessage message={error.message} />
                                     {error.recommendedReplenishmentQty !== null && error.recommendedReplenishmentQty !== undefined && error.recommendedReplenishmentQty > 0 && (
-                                        <span className="ml-2">
-                                            <span className="font-bold text-gray-900">Recommended Restock Quantity: {error.recommendedReplenishmentQty} units</span>
-                                        </span>
+                                        <>
+                                            <br />
+                                            <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {error.recommendedReplenishmentQty} units</strong>
+                                        </>
                                     )}
                                 </td>
                                 <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>

@@ -143,7 +143,7 @@ const inventoryPlanningData=(data)=>{
 
     if(Number(data.unfulfillable_quantity)>0){
         unfulfillable.status="Error";
-        unfulfillable.Message="You have unfulfillable inventory in FBA, which can tie up resources and increase operational costs due to items that cannot be sold in their current condition.";
+        unfulfillable.Message=`You have unfulfillable inventory in FBA, which can tie up resources and increase operational costs due to items that cannot be sold in their current condition. Unfulfillable Quantity: ${data.unfulfillable_quantity} units`;
         unfulfillable.HowToSolve="Review the details of your unfulfillable inventory through your Amazon Seller Central account to understand the reasons for its status (such as damaged, customer returns, etc.). Decide whether to have the inventory returned to you for assessment, refurbishing, or disposal. If the items are repairable or repackageable, consider doing so to move them back to fulfillable status. Implement strategies to reduce future occurrences, such as improving packaging or quality control processes.";
     }else{
         unfulfillable.status="Success";

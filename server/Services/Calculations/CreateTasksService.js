@@ -2,7 +2,10 @@
  * Create Tasks Service
  * 
  * This service handles creating tasks from error data received from the calculation service.
- * It accepts all error categories: ranking, conversion, inventory, profitability, and sponsoredAds.
+ * It accepts all error categories: ranking, conversion, inventory, profitability, sponsoredAds, and account.
+ * 
+ * Each error (including sub-errors) is created as an individual task with detailed error
+ * descriptions and solutions matching the Issues by Category page format.
  */
 
 const Task = require('../../models/MCP/TaskModel.js');
@@ -39,6 +42,20 @@ class CreateTaskService {
         try {
             const { userId } = data;
             
+            // Create a product name map from TotalProducts for quick lookup
+            const productNameMap = new Map();
+            if (Array.isArray(data.TotalProducts)) {
+                data.TotalProducts.forEach(product => {
+                    if (product.asin) {
+                        // Try multiple possible name fields
+                        const name = product.itemName || product.title || product.productName || product.name || null;
+                        if (name) {
+                            productNameMap.set(product.asin, name);
+                        }
+                    }
+                });
+            }
+            
             // Generate tasks from all error categories
             const tasks = [];
             
@@ -57,14 +74,19 @@ class CreateTaskService {
                 tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
             }
             
-            // Add profitability error tasks
+            // Add profitability error tasks (with product name lookup)
             if (data.profitabilityErrorDetails) {
-                tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails));
+                tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
             }
             
-            // Add sponsored ads error tasks
+            // Add sponsored ads error tasks (with product name lookup)
             if (data.sponsoredAdsErrorDetails) {
-                tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails));
+                tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
+            }
+            
+            // Add account health error tasks
+            if (data.AccountErrors) {
+                tasks.push(...this.generateAccountTasks(data.AccountErrors));
             }
             
             // Check if user document exists
@@ -149,61 +171,111 @@ class CreateTaskService {
     
     /**
      * Generate tasks from ranking errors
+     * Each sub-error (Title | Restricted Words, Bullet Points | Special Characters, etc.) 
+     * is created as a separate task with the actual error message and solution from the source data.
      * @param {Array} rankingErrors - Array of ranking errors
      * @returns {Array} Array of task items
      */
     generateRankingTasks(rankingErrors) {
         const tasks = [];
         
+        // Section labels for display
+        const sectionLabels = {
+            TitleResult: 'Title',
+            BulletPoints: 'Bullet Points',
+            Description: 'Description',
+            charLim: 'Backend Keywords'
+        };
+        
+        // Issue labels for display
+        const issueLabels = {
+            RestictedWords: 'Restricted Words',
+            checkSpecialCharacters: 'Special Characters',
+            charLim: 'Character Limit'
+        };
+        
         rankingErrors.forEach(error => {
-            if (error.data?.TotalErrors && error.data.TotalErrors > 0) {
-                const productName = error.data.Title?.substring(0, 50) || 'Unknown Product';
+            if (!error.data || error.data.TotalErrors === 0) return;
+            
+            const productName = error.data.Title?.substring(0, 100) || 'Unknown Product';
+            const asin = error.asin;
+            
+            // Process TitleResult, BulletPoints, Description sections
+            const sections = ['TitleResult', 'BulletPoints', 'Description'];
+            
+            sections.forEach(sectionKey => {
+                const section = error.data[sectionKey];
+                if (!section) return;
                 
-                // Character limit error - separate task
-                if (error.data.charLim?.status === 'Error') {
+                // Check RestictedWords error
+                if (section.RestictedWords?.status === 'Error') {
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
-                        asin: error.asin,
+                        asin,
                         errorCategory: 'ranking',
-                        errorType: 'title_char_limit',
-                        error: 'Title character limit exceeded',
-                        solution: 'Optimize product title to meet Amazon\'s character limit requirements. Keep it concise while maintaining keywords.',
+                        errorType: `${sectionKey.toLowerCase()}_restricted_words`,
+                        error: `${sectionLabels[sectionKey]} | ${issueLabels.RestictedWords}: ${section.RestictedWords.Message || 'Restricted words detected in listing content.'}`,
+                        solution: section.RestictedWords.HowTOSolve || 'Review your listing and remove any restricted or banned words according to Amazon\'s guidelines.',
                         status: TaskStatus.PENDING
                     });
                 }
                 
-                // Duplicate words error - separate task
-                if (error.data.dublicateWords === 'Error') {
+                // Check checkSpecialCharacters error
+                if (section.checkSpecialCharacters?.status === 'Error') {
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
-                        asin: error.asin,
+                        asin,
                         errorCategory: 'ranking',
-                        errorType: 'duplicate_words',
-                        error: 'Title contains duplicate words',
-                        solution: 'Remove duplicate words from the product title to improve search ranking and customer experience.',
+                        errorType: `${sectionKey.toLowerCase()}_special_characters`,
+                        error: `${sectionLabels[sectionKey]} | ${issueLabels.checkSpecialCharacters}: ${section.checkSpecialCharacters.Message || 'Special characters detected in listing content.'}`,
+                        solution: section.checkSpecialCharacters.HowTOSolve || 'Remove special characters from your listing content to improve search visibility.',
                         status: TaskStatus.PENDING
                     });
                 }
                 
-                // If there are other ranking errors not covered above, create a generic task
-                const coveredErrors = (error.data.charLim?.status === 'Error' ? 1 : 0) + 
-                                    (error.data.dublicateWords === 'Error' ? 1 : 0);
-                const remainingErrors = error.data.TotalErrors - coveredErrors;
-                
-                if (remainingErrors > 0) {
+                // Check charLim error within section (for Title, Bullets, Description)
+                if (section.charLim?.status === 'Error') {
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
-                        asin: error.asin,
+                        asin,
                         errorCategory: 'ranking',
-                        errorType: 'additional_ranking_issues',
-                        error: `Additional ranking optimization needed (${remainingErrors} issues)`,
-                        solution: 'Review and optimize product listing elements including keywords, backend search terms, and other ranking factors.',
+                        errorType: `${sectionKey.toLowerCase()}_char_limit`,
+                        error: `${sectionLabels[sectionKey]} | ${issueLabels.charLim}: ${section.charLim.Message || 'Character limit issue detected.'}`,
+                        solution: section.charLim.HowTOSolve || 'Optimize your content length to meet Amazon\'s character requirements.',
                         status: TaskStatus.PENDING
                     });
                 }
+            });
+            
+            // Process Backend Keywords (charLim at root level)
+            if (error.data.charLim?.status === 'Error') {
+                tasks.push({
+                    taskId: generateTaskId(),
+                    productName,
+                    asin,
+                    errorCategory: 'ranking',
+                    errorType: 'backend_keywords_char_limit',
+                    error: `${sectionLabels.charLim}: ${error.data.charLim.Message || 'Backend keywords exceed Amazon\'s byte limit.'}`,
+                    solution: error.data.charLim.HowTOSolve || 'Reduce your backend search terms to stay within Amazon\'s 249-byte limit.',
+                    status: TaskStatus.PENDING
+                });
+            }
+            
+            // Check duplicate words error
+            if (error.data.dublicateWords === 'Error') {
+                tasks.push({
+                    taskId: generateTaskId(),
+                    productName,
+                    asin,
+                    errorCategory: 'ranking',
+                    errorType: 'duplicate_words',
+                    error: 'Title | Duplicate Words: Your product title contains repeated words which can negatively impact search ranking and customer experience.',
+                    solution: 'Review and remove duplicate words from your product title. Each word should appear only once for optimal search performance.',
+                    status: TaskStatus.PENDING
+                });
             }
         });
         
@@ -211,7 +283,9 @@ class CreateTaskService {
     }
     
     /**
-     * Generate tasks from conversion errors (each error type as separate task)
+     * Generate tasks from conversion errors
+     * Each error type (Images, Videos, Reviews, Rating, Buy Box, A+ Content) uses the actual
+     * Message and HowToSolve from the source error data.
      * @param {Array} conversionErrors - Array of conversion errors
      * @returns {Array} Array of task items
      */
@@ -219,88 +293,112 @@ class CreateTaskService {
         const tasks = [];
         
         conversionErrors.forEach(error => {
-            const productName = error.Title?.substring(0, 50) || 'Unknown Product';
+            const productName = error.Title?.substring(0, 100) || 'Unknown Product';
+            const asin = error.asin;
             
-            // A+ Content error - separate task
+            // A+ Content error - use actual error data
             if (error.aplusErrorData) {
+                const errorData = error.aplusErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
                     errorType: 'missing_aplus_content',
-                    error: 'A+ Content missing or needs improvement',
-                    solution: 'Create compelling A+ Content with high-quality images and detailed product information to improve conversion rates.',
+                    error: `A+ Content | Missing: ${errorData.Message || 'Your product listing lacks A+ Content. Not utilizing A+ Content leads to missed opportunities for enhanced visual storytelling and detailed product explanations.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Create A+ Content for your product listing to provide a richer buying experience. Include detailed descriptions, high-quality images, comparison charts, and more to effectively showcase your product. Consider hiring agencies like eStore Factory for professional A+ page creation.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Image error - separate task
+            // Image error - use actual error data
             if (error.imageResultErrorData) {
+                const errorData = error.imageResultErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
-                    errorType: 'poor_images',
-                    error: 'Product images need improvement',
-                    solution: 'Upload high-quality product images that meet Amazon\'s requirements. Ensure main image has white background and shows the product clearly.',
+                    errorType: 'insufficient_images',
+                    error: `Images | Insufficient: ${errorData.Message || 'Your product listing has fewer than the recommended 7 images, limiting buyers\' ability to fully evaluate the product.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Increase the number of images to at least 7, covering all angles and important features of your product. Include high-quality images that showcase the product in use, important details, variations, and packaging.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Video error - separate task
+            // Video error - use actual error data
             if (error.videoResultErrorData) {
+                const errorData = error.videoResultErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
                     errorType: 'missing_video',
-                    error: 'Product video missing or low quality',
-                    solution: 'Add a professional product demonstration video to showcase features and benefits, improving customer engagement.',
+                    error: `Video | Missing: ${errorData.Message || 'Your product listing does not include a video, missing an opportunity to demonstrate product features and benefits.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Add a professional product demonstration video to your listing. Videos help customers understand your product better and can significantly improve conversion rates.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Product review error - separate task
+            // Product review error - use actual error data
             if (error.productReviewResultErrorData) {
+                const errorData = error.productReviewResultErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
                     errorType: 'insufficient_reviews',
-                    error: 'Insufficient reviews or poor review quality',
-                    solution: 'Implement review acquisition strategy through follow-up emails and improve product quality to earn better reviews.',
+                    error: `Reviews | Insufficient: ${errorData.Message || 'Your product has fewer reviews than recommended, which can affect buyer confidence and conversion rates.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Implement a review acquisition strategy through follow-up emails using Amazon\'s Request a Review button. Focus on providing excellent customer service and product quality to encourage positive reviews.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Star rating error - separate task
+            // Star rating error - use actual error data
             if (error.productStarRatingResultErrorData) {
+                const errorData = error.productStarRatingResultErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
                     errorType: 'low_star_rating',
-                    error: 'Star rating below optimal threshold',
-                    solution: 'Focus on improving product quality and customer service to achieve higher star ratings.',
+                    error: `Rating | Low: ${errorData.Message || 'Your product\'s star rating is below the optimal threshold, which can deter potential buyers.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Focus on improving product quality and addressing common customer complaints. Respond promptly to negative reviews and consider product improvements based on feedback.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Buy Box error - separate task
+            // Buy Box error - use actual error data
             if (error.productsWithOutBuyboxErrorData) {
+                const errorData = error.productsWithOutBuyboxErrorData;
+                const buyBoxPercentage = errorData.buyBoxPercentage;
+                const pageViews = errorData.pageViews || 0;
+                const sessions = errorData.sessions || 0;
+                
+                let errorMessage, solutionMessage;
+                
+                if (buyBoxPercentage === 0) {
+                    errorMessage = `Buy Box | No Ownership: This product has 0% Buy Box ownership. With ${pageViews} page views and ${sessions} sessions, you're losing potential sales to competitors who own the Buy Box.`;
+                    solutionMessage = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Ensure your product is Prime eligible if possible.';
+                } else if (buyBoxPercentage !== undefined && buyBoxPercentage < 50) {
+                    errorMessage = `Buy Box | Low Percentage: This product has only ${buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${pageViews} page views and ${sessions} sessions, a significant portion of potential sales are going to competitors.`;
+                    solutionMessage = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
+                } else {
+                    errorMessage = errorData.Message || 'Buy Box | Issue: You are not winning the Buy Box for this product.';
+                    solutionMessage = errorData.HowToSolve || errorData.HowTOSolve || 'Optimize pricing, improve seller metrics, and ensure fast shipping to win the Buy Box more frequently.';
+                }
+                
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'conversion',
                     errorType: 'no_buybox',
-                    error: 'Not winning the Buy Box',
-                    solution: 'Optimize pricing, improve seller metrics, and ensure fast shipping to win the Buy Box more frequently.',
+                    error: errorMessage,
+                    solution: solutionMessage,
                     status: TaskStatus.PENDING
                 });
             }
@@ -310,7 +408,9 @@ class CreateTaskService {
     }
     
     /**
-     * Generate tasks from inventory errors (each error type as separate task)
+     * Generate tasks from inventory errors
+     * Each sub-error type (Long-Term Storage, Unfulfillable, Stranded, Inbound Non-Compliance, 
+     * Replenishment) is created as a separate task with actual Message and HowToSolve from source data.
      * @param {Array} inventoryErrors - Array of inventory errors
      * @returns {Array} Array of task items
      */
@@ -318,62 +418,101 @@ class CreateTaskService {
         const tasks = [];
         
         inventoryErrors.forEach(error => {
-            const productName = error.Title?.substring(0, 50) || 'Unknown Product';
+            const productName = error.Title?.substring(0, 100) || 'Unknown Product';
+            const asin = error.asin;
             
-            // Inventory planning error - separate task
+            // Process inventory planning errors (contains sub-errors)
             if (error.inventoryPlanningErrorData) {
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin: error.asin,
-                    errorCategory: 'inventory',
-                    errorType: 'inventory_planning',
-                    error: 'Inventory planning optimization required',
-                    solution: 'Review inventory levels and adjust replenishment strategy to avoid stockouts while minimizing storage costs.',
-                    status: TaskStatus.PENDING
-                });
+                const planningData = error.inventoryPlanningErrorData;
+                
+                // Long-Term Storage Fees error
+                if (planningData.longTermStorageFees?.status === 'Error') {
+                    const ltsf = planningData.longTermStorageFees;
+                    tasks.push({
+                        taskId: generateTaskId(),
+                        productName,
+                        asin,
+                        errorCategory: 'inventory',
+                        errorType: 'long_term_storage_fees',
+                        error: `Inventory Planning | Long-Term Storage Fees: ${ltsf.Message || 'Your inventory has been stored in FBA for a long period, making it eligible for Long-Term Storage Fees (LTSF).'}`,
+                        solution: ltsf.HowToSolve || ltsf.HowTOSolve || 'Review your inventory levels and sales velocity to identify slow-moving stock. Consider running promotions or lowering prices to increase sales. Alternatively, remove excess inventory from FBA to avoid additional fees.',
+                        status: TaskStatus.PENDING
+                    });
+                }
+                
+                // Unfulfillable inventory error
+                if (planningData.unfulfillable?.status === 'Error') {
+                    const unfulfillable = planningData.unfulfillable;
+                    tasks.push({
+                        taskId: generateTaskId(),
+                        productName,
+                        asin,
+                        errorCategory: 'inventory',
+                        errorType: 'unfulfillable_inventory',
+                        error: `Inventory Planning | Unfulfillable Inventory: ${unfulfillable.Message || 'You have unfulfillable inventory in FBA which cannot be sold in its current condition.'}`,
+                        solution: unfulfillable.HowToSolve || unfulfillable.HowTOSolve || 'Review the details of your unfulfillable inventory in Seller Central. Decide whether to have items returned for assessment, refurbishing, or disposal. Implement strategies to reduce future occurrences.',
+                        status: TaskStatus.PENDING
+                    });
+                }
             }
             
-            // Stranded inventory error - separate task
+            // Stranded inventory error
             if (error.strandedInventoryErrorData) {
+                const strandedData = error.strandedInventoryErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'inventory',
                     errorType: 'stranded_inventory',
-                    error: 'Stranded inventory detected',
-                    solution: 'Review and fix listing issues causing stranded inventory. Check for suppressed or incomplete listings.',
+                    error: `Stranded Inventory | Product Not Listed: ${strandedData.Message || 'Some of your inventory is stranded, meaning it is in Amazon\'s fulfillment centers but not actively listed for sale.'}`,
+                    solution: strandedData.HowToSolve || strandedData.HowTOSolve || 'Check the Stranded Inventory Report in Seller Central > Inventory > Manage Inventory to identify affected SKUs. Resolve listing errors, pricing rules, or account suspensions causing the issue.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Inbound non-compliance error - separate task
+            // Inbound non-compliance error
             if (error.inboundNonComplianceErrorData) {
+                const complianceData = error.inboundNonComplianceErrorData;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
-                    asin: error.asin,
+                    asin,
                     errorCategory: 'inventory',
                     errorType: 'inbound_non_compliance',
-                    error: 'Inbound shipment non-compliance',
-                    solution: 'Review and correct inbound shipment preparation to meet Amazon\'s requirements and avoid fees.',
+                    error: `Inbound Non-Compliance | Shipment Issue: ${complianceData.Message || 'There is an issue with a product in your incoming shipment that may cause delays.'}`,
+                    solution: complianceData.HowToSolve || complianceData.HowTOSolve || 'Check the Shipment Status in Seller Central > Inventory > Manage FBA Shipments. Resolve issues with labeling, quantity discrepancies, or carrier delays. Contact Amazon Seller Support if needed.',
                     status: TaskStatus.PENDING
                 });
             }
             
-            // Replenishment error - separate task
+            // Replenishment/restock errors - handles single or multiple
             if (error.replenishmentErrorData) {
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin: error.asin,
-                    errorCategory: 'inventory',
-                    errorType: 'replenishment_needed',
-                    error: 'Product restocking required',
-                    solution: 'Create replenishment shipment to avoid stockout. Review sales velocity and adjust reorder points.',
-                    status: TaskStatus.PENDING
-                });
+                const processReplenishmentError = (repError) => {
+                    if (repError.status !== 'Error') return;
+                    
+                    const sku = repError.sku || '';
+                    const skuInfo = sku ? ` (SKU: ${sku})` : '';
+                    const qty = repError.recommendedReplenishmentQty || repError.data || 0;
+                    const available = repError.available || 0;
+                    
+                    tasks.push({
+                        taskId: generateTaskId(),
+                        productName,
+                        asin,
+                        errorCategory: 'inventory',
+                        errorType: `replenishment_needed${sku ? '_' + sku.substring(0, 20) : ''}`,
+                        error: `Replenishment | Low Inventory${skuInfo}: ${repError.Message || `Product requires restocking. ${available} units available, Amazon recommends replenishing ${qty} units.`}`,
+                        solution: repError.HowToSolve || repError.HowTOSolve || 'Create an FBA shipment immediately with the recommended quantity. Analyze your sales data to forecast demand more accurately. Consider setting up automatic restocking alerts in Seller Central.',
+                        status: TaskStatus.PENDING
+                    });
+                };
+                
+                if (Array.isArray(error.replenishmentErrorData)) {
+                    error.replenishmentErrorData.forEach(processReplenishmentError);
+                } else {
+                    processReplenishmentError(error.replenishmentErrorData);
+                }
             }
         });
         
@@ -382,40 +521,54 @@ class CreateTaskService {
     
     /**
      * Generate tasks from profitability errors
+     * Provides detailed, actionable error messages and solutions.
      * @param {Array} profitabilityErrors - Array of profitability errors
+     * @param {Map} productNameMap - Map of ASIN to product name for lookup
      * @returns {Array} Array of task items
      */
-    generateProfitabilityTasks(profitabilityErrors) {
+    generateProfitabilityTasks(profitabilityErrors, productNameMap = new Map()) {
         const tasks = [];
         
         profitabilityErrors.forEach(error => {
-            let errorMessage;
-            let solution;
-            let errorType;
+            // Try to get product name from error, then from map, then use ASIN as last resort
+            let productName = error.productName;
+            if (!productName && error.asin) {
+                productName = productNameMap.get(error.asin);
+            }
+            // Final fallback - just use ASIN but make it clear
+            productName = productName ? productName.substring(0, 100) : error.asin;
             
-            // Use product name from error if available, otherwise fallback to ASIN
-            const productName = error.productName 
-                ? error.productName.substring(0, 100) 
-                : `Product ${error.asin}`;
+            let errorMessage, solution, errorType;
             
             if (error.errorType === 'negative_profit') {
                 errorType = 'negative_profit';
-                errorMessage = `Product has negative profit: $${error.netProfit.toFixed(2)}`;
-                solution = 'Review pricing strategy, reduce costs, or optimize advertising spend to achieve profitability.';
-            } else {
+                const netProfit = error.netProfit?.toFixed(2) || '0.00';
+                const revenue = error.revenue?.toFixed(2) || '0.00';
+                const totalCosts = error.totalCosts?.toFixed(2) || '0.00';
+                
+                errorMessage = `Profitability | Negative Profit: This product is losing money with a net profit of -$${Math.abs(parseFloat(netProfit)).toFixed(2)}. Revenue: $${revenue}, Total Costs: $${totalCosts}. Immediate action required to prevent ongoing losses.`;
+                solution = `Review and optimize your cost structure immediately: 1) Analyze your pricing strategy - consider increasing price if market allows. 2) Review fulfillment costs - consider FBA vs FBM options. 3) Reduce advertising spend or optimize for better ROAS. 4) Negotiate with suppliers for better COGS. 5) Consider discontinuing this product if profitability cannot be achieved.`;
+            } else if (error.errorType === 'low_profit_margin') {
                 errorType = 'low_profit_margin';
-                errorMessage = `Low profit margin: ${error.profitMargin.toFixed(1)}%`;
-                solution = 'Improve profit margins by optimizing pricing, reducing costs, or improving advertising efficiency.';
+                const profitMargin = error.profitMargin?.toFixed(1) || '0.0';
+                const netProfit = error.netProfit?.toFixed(2) || '0.00';
+                
+                errorMessage = `Profitability | Low Margin: This product has a profit margin of only ${profitMargin}% (Net Profit: $${netProfit}). Low margins leave little room for market fluctuations or unexpected costs.`;
+                solution = `Improve profit margins through: 1) Strategic price optimization - test higher price points. 2) Cost reduction through supplier negotiations or alternative sourcing. 3) Optimize advertising efficiency - reduce ACOS while maintaining sales. 4) Consider bundling with higher-margin products. 5) Review fulfillment method for cost savings.`;
+            } else {
+                errorType = 'profitability_issue';
+                errorMessage = `Profitability | Issue: ${error.message || 'This product has profitability concerns that require attention.'}`;
+                solution = 'Review your pricing strategy, costs, and advertising spend to improve profitability. Analyze all cost components including FBA fees, referral fees, and advertising costs.';
             }
             
             tasks.push({
                 taskId: generateTaskId(),
-                productName: productName,
+                productName,
                 asin: error.asin,
                 errorCategory: 'profitability',
-                errorType: errorType,
+                errorType,
                 error: errorMessage,
-                solution: solution,
+                solution,
                 status: TaskStatus.PENDING
             });
         });
@@ -424,71 +577,146 @@ class CreateTaskService {
     }
     
     /**
-     * Generate tasks from sponsored ads errors (each error as separate task)
+     * Generate tasks from sponsored ads errors
+     * Each error type gets detailed, actionable descriptions and solutions.
      * @param {Array} sponsoredAdsErrors - Array of sponsored ads errors
+     * @param {Map} productNameMap - Map of ASIN to product name for lookup
      * @returns {Array} Array of task items
      */
-    generateSponsoredAdsTasks(sponsoredAdsErrors) {
+    generateSponsoredAdsTasks(sponsoredAdsErrors, productNameMap = new Map()) {
         const tasks = [];
         
-        // Each sponsored ads error is already a separate error type, so each creates one task
         sponsoredAdsErrors.forEach(error => {
-            let errorMessage;
-            let solution;
-            let errorType;
-            
-            // Use product name from error if available, otherwise fallback to ASIN or keyword
             let productName;
+            
+            // Try to get product name from error first
             if (error.productName) {
                 productName = error.productName.substring(0, 100);
-            } else if (error.asin) {
-                productName = `Product ${error.asin}`;
-            } else {
-                productName = `Keyword: ${error.keyword}`;
+            } 
+            // Then try the product name map lookup
+            else if (error.asin && productNameMap.get(error.asin)) {
+                productName = productNameMap.get(error.asin).substring(0, 100);
+            }
+            // For keyword-only errors, use keyword
+            else if (error.keyword) {
+                productName = `Keyword: ${error.keyword.substring(0, 50)}`;
+            }
+            // If we have ASIN but no name, just use the ASIN
+            else if (error.asin) {
+                productName = error.asin;
+            }
+            // Last resort
+            else {
+                productName = 'Campaign Target';
             }
             
-            // Each error type gets its own specific task
+            let errorMessage, solution, errorType;
+            const acos = error.acos?.toFixed(1) || '0.0';
+            const spend = error.spend?.toFixed(2) || '0.00';
+            const sales = error.sales?.toFixed(2) || '0.00';
+            const clicks = error.clicks || 0;
+            const impressions = error.impressions || 0;
+            
             switch (error.errorType) {
                 case 'high_acos':
                     errorType = 'high_acos';
-                    errorMessage = `High ACOS detected (${error.acos.toFixed(1)}%)`;
-                    solution = 'Optimize keywords, improve product listing, or adjust bids to reduce ACOS and improve profitability.';
+                    errorMessage = `PPC | High ACOS: This target has an ACOS of ${acos}% (Spend: $${spend}, Sales: $${sales}). Your advertising cost is eating into your profit margins significantly.`;
+                    solution = `Reduce ACOS by: 1) Lowering bids on underperforming keywords. 2) Adding negative keywords to filter irrelevant traffic. 3) Improving product listing conversion rate. 4) Focusing budget on proven, profitable keywords. 5) Consider pausing this target if ACOS remains high after optimization.`;
                     break;
-                case 'no_sales_high_spend':
-                    errorType = 'no_sales_high_spend';
-                    errorMessage = `High spend with no sales ($${error.spend.toFixed(2)})`;
-                    solution = 'Review keyword relevance, improve product listing, or pause underperforming keywords.';
-                    break;
-                case 'marginal_profit':
-                    errorType = 'marginal_profit';
-                    errorMessage = `Marginal profitability (ACOS: ${error.acos.toFixed(1)}%)`;
-                    solution = 'Fine-tune bidding strategy and keyword targeting to improve campaign efficiency.';
-                    break;
+                    
                 case 'extreme_high_acos':
                     errorType = 'extreme_high_acos';
-                    errorMessage = `Extremely high ACOS (${error.acos.toFixed(1)}%)`;
-                    solution = 'Immediately review and optimize or pause this keyword to prevent further losses.';
+                    errorMessage = `PPC | Critical ACOS: This target has an extremely high ACOS of ${acos}% (Spend: $${spend}, Sales: $${sales}). You are losing money on every sale through this advertising channel.`;
+                    solution = `URGENT: 1) Consider pausing this target immediately to stop losses. 2) If keeping active, drastically reduce bids (50%+ reduction). 3) Review keyword relevance - is this target actually related to your product? 4) Add as negative keyword if consistently underperforming. 5) Analyze search term report for wasted spend.`;
                     break;
+                    
+                case 'no_sales_high_spend':
+                    errorType = 'no_sales_high_spend';
+                    errorMessage = `PPC | No Sales: This target has spent $${spend} with ${clicks} clicks but generated $0 in sales. Your advertising budget is being wasted on non-converting traffic.`;
+                    solution = `Address zero-sale spend by: 1) Review keyword relevance - ensure it matches buyer intent. 2) Check your product listing for conversion issues. 3) Analyze competitor pricing and reviews. 4) Consider adding this as a negative keyword. 5) If keyword is relevant, optimize listing copy and images before resuming spend.`;
+                    break;
+                    
                 case 'keyword_no_sales':
                     errorType = 'keyword_no_sales';
-                    errorMessage = `Keyword with spend but no sales ($${error.spend.toFixed(2)})`;
-                    solution = 'Consider adding as negative keyword or improving product listing relevance.';
+                    errorMessage = `PPC | Keyword Without Sales: The keyword "${error.keyword || 'Unknown'}" has spent $${spend} with ${clicks} clicks but no sales. This suggests either poor keyword-product match or listing conversion issues.`;
+                    solution = `Optimize or remove: 1) Add as negative keyword if not relevant to your product. 2) If relevant, lower bid and continue monitoring. 3) Review search term report to understand what queries are triggering this keyword. 4) Improve product listing if the keyword is relevant but not converting.`;
                     break;
+                    
+                case 'marginal_profit':
+                    errorType = 'marginal_profit';
+                    errorMessage = `PPC | Marginal Performance: This target has an ACOS of ${acos}% (Spend: $${spend}, Sales: $${sales}). While generating sales, the advertising efficiency is suboptimal.`;
+                    solution = `Fine-tune for better performance: 1) Gradually reduce bids while monitoring performance. 2) Test different match types (broad, phrase, exact). 3) Analyze day-parting data to optimize ad scheduling. 4) Review placement adjustments for better ROAS. 5) Consider if this spend could be better allocated to higher-performing keywords.`;
+                    break;
+                    
+                case 'low_ctr':
+                    errorType = 'low_ctr';
+                    const ctr = ((clicks / impressions) * 100).toFixed(2);
+                    errorMessage = `PPC | Low Click-Through Rate: This target has a CTR of only ${ctr}% (${clicks} clicks from ${impressions} impressions). Low CTR indicates your ad or product is not compelling to shoppers.`;
+                    solution = `Improve CTR by: 1) Optimize main product image for better visibility. 2) Review and improve product title for keyword relevance. 3) Ensure pricing is competitive. 4) Check that star rating is competitive. 5) Consider if this keyword is truly relevant to your product.`;
+                    break;
+                    
                 default:
-                    errorType = 'general_optimization';
-                    errorMessage = `Sponsored ads optimization needed (ACOS: ${error.acos.toFixed(1)}%)`;
-                    solution = 'Review and optimize sponsored ads performance.';
+                    errorType = 'ppc_optimization';
+                    errorMessage = `PPC | Optimization Needed: This advertising target requires optimization (ACOS: ${acos}%, Spend: $${spend}, Sales: $${sales}).`;
+                    solution = 'Review this campaign target and optimize based on performance data. Consider adjusting bids, adding negative keywords, or improving product listing conversion rate.';
             }
             
-            // Create individual task for each sponsored ads error
             tasks.push({
                 taskId: generateTaskId(),
                 productName,
                 asin: error.asin || 'N/A',
                 errorCategory: 'sponsoredAds',
-                errorType: errorType,
+                errorType,
                 error: errorMessage,
-                solution: solution,
+                solution,
+                status: TaskStatus.PENDING
+            });
+        });
+        
+        return tasks;
+    }
+    
+    /**
+     * Generate tasks from account health errors
+     * Each account health issue is created as a task with the actual Message and HowTOSolve from source data.
+     * @param {Object} accountErrors - Object containing account health errors
+     * @returns {Array} Array of task items
+     */
+    generateAccountTasks(accountErrors) {
+        const tasks = [];
+        
+        if (!accountErrors || typeof accountErrors !== 'object') return tasks;
+        
+        // Map of error keys to readable names
+        const errorLabels = {
+            accountStatus: 'Account Status',
+            PolicyViolations: 'Policy Violations',
+            validTrackingRateStatus: 'Valid Tracking Rate',
+            orderWithDefectsStatus: 'Order Defect Rate',
+            lateShipmentRateStatus: 'Late Shipment Rate',
+            CancellationRate: 'Cancellation Rate',
+            negativeFeedbacks: 'Negative Feedback',
+            NCX: 'Negative Customer Experience',
+            a_z_claims: 'A-to-Z Claims',
+            responseUnder24HoursCount: 'Response Time'
+        };
+        
+        Object.keys(accountErrors).forEach(key => {
+            // Skip TotalErrors counter and empty objects
+            if (key === 'TotalErrors') return;
+            const errorData = accountErrors[key];
+            if (!errorData || !errorData.status || errorData.status !== 'Error') return;
+            
+            const errorLabel = errorLabels[key] || key;
+            
+            tasks.push({
+                taskId: generateTaskId(),
+                productName: 'Account Health',
+                asin: 'ACCOUNT',
+                errorCategory: 'account',
+                errorType: key,
+                error: `Account | ${errorLabel}: ${errorData.Message || `Your ${errorLabel.toLowerCase()} requires attention.`}`,
+                solution: errorData.HowTOSolve || errorData.HowToSolve || `Check your Account Health Dashboard in Seller Central to address this ${errorLabel.toLowerCase()} issue.`,
                 status: TaskStatus.PENDING
             });
         });
@@ -554,4 +782,3 @@ class CreateTaskService {
 }
 
 module.exports = new CreateTaskService();
-

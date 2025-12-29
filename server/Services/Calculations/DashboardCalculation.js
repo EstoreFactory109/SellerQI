@@ -950,6 +950,8 @@ const analyseData = async (data, userId = null) => {
         inventoryProductWiseErrors: inventoryProductWiseErrors,
         InventoryAnalysis: activeInventoryAnalysis,
         AccountErrors: data.AccountData?.accountHealth || {},
+        // Calendar date range from DataFetchTracking (via Analyse.js)
+        // No calculation - these dates come directly from the database
         startDate: data.startDate || new Date().toISOString().split('T')[0],
         endDate: data.endDate || new Date().toISOString().split('T')[0],
         profitibilityData: profitibilityData,
@@ -1021,7 +1023,9 @@ const analyseData = async (data, userId = null) => {
                 conversionProductWiseErrors: conversionProductWiseErrors,
                 inventoryProductWiseErrors: inventoryProductWiseErrors,
                 profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
-                sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails
+                sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
+                AccountErrors: data.AccountData?.accountHealth || {},
+                TotalProducts: TotalProducts
             });
             logger.info(`Tasks created successfully for user: ${userId}`);
         } catch (error) {

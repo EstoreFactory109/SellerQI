@@ -5,6 +5,71 @@ import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers, ShoppingCart } from 'lucide-react';
 import dropdown from '../../assets/Icons/Arrow.png'
 
+// Helper function to format messages with important details highlighted on separate line
+const formatMessageWithHighlight = (message) => {
+  if (!message) return { mainText: '', highlightedText: '' };
+  
+  // Patterns to extract and highlight on a separate line
+  // These patterns match the exact formats from the backend
+  const patterns = [
+    // Ranking - Restricted words patterns (exact backend formats)
+    /^(.*?)(The Characters used are:\s*.+)$/i,  // Title - restricted words
+    /^(.*?)(The characters which are used:\s*.+)$/i,  // Title - special characters
+    /^(.*?)(The words Used are:\s*.+)$/,  // Bullet Points - restricted words (case sensitive 'Used')
+    /^(.*?)(The words used are:\s*.+)$/i,  // Description - restricted words
+    /^(.*?)(The special characters used are:\s*.+)$/i,  // Bullet Points & Description - special characters
+    
+    // Inventory patterns - units available
+    /^(.*?)(Only \d+ units available.*)$/i,
+    /^(.*?)(Currently \d+ units available.*)$/i,
+    /^(.*?)(\d+ units available.*)$/i,
+    
+    // Inventory - Stranded reason
+    /^(.*?)(Reason:\s*.+)$/i,
+    
+    // Inventory - Inbound non-compliance problem
+    /^(.*?)(Problem:\s*.+)$/i,
+    
+    // Buy Box patterns
+    /^(.*?)(With \d+ page views.+)$/i,
+    
+    // Amazon recommends pattern
+    /^(.*?)(Amazon recommends replenishing \d+ units.*)$/i,
+    
+    // Unfulfillable inventory quantity
+    /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[2]) {
+      return {
+        mainText: match[1].trim(),
+        highlightedText: match[2].trim()
+      };
+    }
+  }
+  
+  return { mainText: message, highlightedText: '' };
+};
+
+// Component to render message with highlighted part
+const FormattedMessage = ({ message }) => {
+  const { mainText, highlightedText } = formatMessageWithHighlight(message);
+  
+  return (
+    <>
+      {mainText && <span>{mainText}</span>}
+      {highlightedText && (
+        <>
+          <br />
+          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+        </>
+      )}
+    </>
+  );
+};
+
 const RankingTableSection = ({ title, data }) => {
   console.log("data: ",data)
   const [page, setPage] = useState(1);
@@ -137,7 +202,9 @@ const RankingTableSection = ({ title, data }) => {
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                        <FormattedMessage message={row.message} />
+                      </p>
                     </div>
                   </td>
                   <td className="py-5 px-4 align-top">
@@ -321,7 +388,9 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                        <FormattedMessage message={row.message} />
+                      </p>
                     </div>
                   </td>
                   <td className="py-5 px-4 align-top">
@@ -354,18 +423,6 @@ const InventoryTableSection = ({ title, data }) => {
   console.log("InventoryTableSection: ", data);
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const productInfo = info?.TotalProduct || info?.productWiseError || [];
-  
-  // Helper function to format message with bold units available
-  const formatMessage = (message) => {
-    if (!message) return message;
-    // Match patterns like "Only X units available", "Currently X units available", or "X units available"
-    // Use a single comprehensive pattern that handles all variations
-    const pattern = /((?:Only|Currently)\s+\d+\s+units\s+available|\d+\s+units\s+available)/gi;
-    
-    return message.replace(pattern, (match) => {
-      return `<strong>${match}</strong>`;
-    });
-  };
   
   const extractInventoryErrors = (item) => {
     console.log("extractInventoryErrors - processing item:", item);
@@ -522,11 +579,12 @@ const InventoryTableSection = ({ title, data }) => {
                         {row.issueHeading}
                       </span>
                       <p className="text-sm text-gray-600 leading-relaxed break-words">
-                        <span dangerouslySetInnerHTML={{ __html: formatMessage(row.message) }} />
+                        <FormattedMessage message={row.message} />
                         {row.recommendedReplenishmentQty !== null && row.recommendedReplenishmentQty !== undefined && row.recommendedReplenishmentQty > 0 && (
-                          <span className="ml-2">
-                            <span className="font-bold text-gray-900">Recommended Restock Quantity: {row.recommendedReplenishmentQty} units</span>
-                          </span>
+                          <>
+                            <br />
+                            <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {row.recommendedReplenishmentQty} units</strong>
+                          </>
                         )}
                       </p>
                     </div>
@@ -669,7 +727,9 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">{row.message}</p>
+                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                        <FormattedMessage message={row.message} />
+                      </p>
                     </div>
                   </td>
                   <td className="py-5 px-4 align-top">

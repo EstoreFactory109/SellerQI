@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target, RefreshCw } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
@@ -11,7 +11,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
-import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js'
+import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../redux/slices/PPCMetricsSlice.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -32,9 +32,66 @@ const Dashboard = () => {
   const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
   
   // Get PPC metrics from PPCMetrics model (NEW - primary source for PPC data)
-  const ppcSummary = useSelector(selectPPCSummary)
+  const ppcSummaryLatest = useSelector(selectPPCSummary)
+  const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics)
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading)
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
+  
+  // Calculate filtered PPC summary based on date range (same approach as PPCDashboard)
+  const calendarMode = dashboardInfo?.calendarMode || 'default';
+  const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && dashboardInfo?.startDate && dashboardInfo?.endDate;
+  
+  // Filter dateWiseMetrics and calculate summary for selected date range
+  const ppcSummary = useMemo(() => {
+    // If no custom date range, use latest summary
+    if (!isDateRangeSelected || !ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) {
+      return ppcSummaryLatest;
+    }
+    
+    // Filter dateWiseMetrics to selected date range
+    const startDate = new Date(dashboardInfo.startDate);
+    const endDate = new Date(dashboardInfo.endDate);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+    
+    const filteredMetrics = ppcDateWiseMetrics.filter(item => {
+      const itemDate = new Date(item.date);
+      return itemDate >= startDate && itemDate <= endDate;
+    });
+    
+    if (filteredMetrics.length === 0) {
+      return ppcSummaryLatest;
+    }
+    
+    // Calculate summary from filtered data
+    const totalSpend = filteredMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
+    const totalSales = filteredMetrics.reduce((sum, item) => sum + (item.sales || 0), 0);
+    const totalImpressions = filteredMetrics.reduce((sum, item) => sum + (item.impressions || 0), 0);
+    const totalClicks = filteredMetrics.reduce((sum, item) => sum + (item.clicks || 0), 0);
+    
+    const overallAcos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
+    const overallRoas = totalSpend > 0 ? totalSales / totalSpend : 0;
+    const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+    const cpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
+    
+    console.log('=== Dashboard: Calculated filtered PPC Summary ===');
+    console.log('Date range:', dashboardInfo.startDate, 'to', dashboardInfo.endDate);
+    console.log('Filtered data points:', filteredMetrics.length);
+    console.log('Total Spend:', totalSpend);
+    console.log('Total Sales:', totalSales);
+    console.log('Calculated ACOS:', overallAcos.toFixed(2) + '%');
+    
+    return {
+      totalSpend,
+      totalSales,
+      totalImpressions,
+      totalClicks,
+      overallAcos,
+      overallRoas,
+      ctr,
+      cpc
+    };
+  }, [isDateRangeSelected, ppcDateWiseMetrics, ppcSummaryLatest, dashboardInfo?.startDate, dashboardInfo?.endDate]);
   
   // Fallback to legacy sponsored ads metrics from Redux
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
@@ -43,7 +100,35 @@ const Dashboard = () => {
   const searchTerms = useSelector((state) => state.Dashboard.DashBoardInfo?.searchTerms) || [];
   
   // Get adsKeywordsPerformanceData from Redux for "Money Wasted in Ads" calculation
-  const adsKeywordsPerformanceData = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
+  const adsKeywordsPerformanceDataRaw = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
+  
+  // Filter adsKeywordsPerformanceData based on selected date range (same as PPCDashboard)
+  const adsKeywordsPerformanceData = useMemo(() => {
+    if (!adsKeywordsPerformanceDataRaw.length) return adsKeywordsPerformanceDataRaw;
+    
+    // Only filter if custom date range is selected
+    if (!isDateRangeSelected) return adsKeywordsPerformanceDataRaw;
+    
+    const startDate = new Date(dashboardInfo?.startDate);
+    const endDate = new Date(dashboardInfo?.endDate);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+    
+    const filtered = adsKeywordsPerformanceDataRaw.filter(item => {
+      // If no date field, include the item (backward compatibility)
+      if (!item.date) return true;
+      
+      const itemDate = new Date(item.date);
+      return itemDate >= startDate && itemDate <= endDate;
+    });
+    
+    console.log('=== Dashboard: Filtered adsKeywordsPerformanceData ===');
+    console.log('Date range:', dashboardInfo?.startDate, 'to', dashboardInfo?.endDate);
+    console.log('Original length:', adsKeywordsPerformanceDataRaw.length);
+    console.log('Filtered length:', filtered.length);
+    
+    return filtered;
+  }, [adsKeywordsPerformanceDataRaw, isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -310,7 +395,7 @@ const Dashboard = () => {
   const quickStats = [
     { icon: RefreshCw, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
     { icon: DollarSign, label: 'Money Wasted in Ads', value: formatCurrencyWithLocale(amazonOwesYou, currency), change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
-    { icon: Target, label: 'ACOS', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: Target, label: 'ACoS %', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
     { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
   ]
 

@@ -71,6 +71,9 @@ const { fetchAndStoreEconomicsData } = require('../MCP/MCPEconomicsIntegration.j
 // MCP Services for BuyBox data
 const { fetchAndStoreBuyBoxData } = require('../MCP/MCPBuyBoxIntegration.js');
 
+// Data Fetch Tracking for calendar-affecting services
+const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
+
 // Redis cache clearing
 const { clearAnalyseCache } = require('../../middlewares/redisCache.js');
 
@@ -97,6 +100,9 @@ class Integration {
         } catch (loggingError) {
             logger.warn('Failed to initialize logging session', { error: loggingError.message, userId });
         }
+
+        // Track data fetch for calendar-affecting services (defined outside try for catch access)
+        let trackingEntry = null;
 
         try {
             // Validate inputs
@@ -168,6 +174,44 @@ class Integration {
 
             // Initialize TokenManager
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            // Start tracking for calendar-affecting services (first-time user fetch)
+            // For new users, ALL calendar-affecting services run regardless of day
+            // Calculate the data date range (30 days ending yesterday)
+            const trackingEndDate = new Date();
+            trackingEndDate.setDate(trackingEndDate.getDate() - 1); // Yesterday
+            const trackingStartDate = new Date(trackingEndDate);
+            trackingStartDate.setDate(trackingStartDate.getDate() - 30); // 30 days before yesterday
+            
+            const formatTrackingDate = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+            
+            try {
+                trackingEntry = await DataFetchTrackingService.startTracking(
+                    userId,
+                    Country,
+                    Region,
+                    { startDate: formatTrackingDate(trackingStartDate), endDate: formatTrackingDate(trackingEndDate) },
+                    loggingHelper?.sessionId || null
+                );
+                logger.info('[Integration] Data fetch tracking started (first-time user)', {
+                    trackingId: trackingEntry._id,
+                    dayName: trackingEntry.dayName,
+                    dateString: trackingEntry.dateString,
+                    dataRange: { startDate: formatTrackingDate(trackingStartDate), endDate: formatTrackingDate(trackingEndDate) }
+                });
+            } catch (trackingError) {
+                logger.warn('[Integration] Failed to start tracking (non-critical)', {
+                    error: trackingError.message,
+                    userId,
+                    Country,
+                    Region
+                });
+            }
 
             // Fetch merchant listings data
             const merchantListingsData = await this.fetchMerchantListings(
@@ -263,6 +307,35 @@ class Integration {
                 // Don't fail the entire process if history fails
             }
 
+            // Complete tracking for calendar-affecting services
+            if (trackingEntry) {
+                try {
+                    if (serviceSummary.overallSuccess) {
+                        await DataFetchTrackingService.completeTracking(trackingEntry._id);
+                        logger.info('[Integration] Data fetch tracking completed successfully', {
+                            trackingId: trackingEntry._id
+                        });
+                    } else if (serviceSummary.failed.length > 0 && serviceSummary.successful.length > 0) {
+                        // Partial success
+                        trackingEntry.status = 'partial';
+                        await trackingEntry.save();
+                        logger.info('[Integration] Data fetch tracking completed with partial success', {
+                            trackingId: trackingEntry._id
+                        });
+                    } else {
+                        await DataFetchTrackingService.failTracking(trackingEntry._id, 'Critical services failed');
+                        logger.info('[Integration] Data fetch tracking marked as failed', {
+                            trackingId: trackingEntry._id
+                        });
+                    }
+                } catch (trackingError) {
+                    logger.warn('[Integration] Failed to complete tracking (non-critical)', {
+                        error: trackingError.message,
+                        trackingId: trackingEntry._id
+                    });
+                }
+            }
+
             return {
                 success: serviceSummary.overallSuccess,
                 statusCode: serviceSummary.overallSuccess ? 200 : 207,
@@ -288,6 +361,20 @@ class Integration {
             if (loggingHelper) {
                 loggingHelper.logFunctionError('Integration.getSpApiData', unexpectedError);
                 await loggingHelper.endSession('failed');
+            }
+
+            // Mark tracking as failed if it was started
+            if (trackingEntry) {
+                try {
+                    await DataFetchTrackingService.failTracking(trackingEntry._id, unexpectedError.message);
+                    logger.info('[Integration] Data fetch tracking marked as failed due to unexpected error', {
+                        trackingId: trackingEntry._id
+                    });
+                } catch (trackingError) {
+                    logger.warn('[Integration] Failed to mark tracking as failed', {
+                        error: trackingError.message
+                    });
+                }
             }
 
             return {

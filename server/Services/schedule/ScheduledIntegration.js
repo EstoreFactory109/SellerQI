@@ -18,6 +18,7 @@ const LoggingHelper = require('../../utils/LoggingHelper.js');
 const { getFunctionsForDay } = require('./ScheduleConfig.js');
 const ListingItemsModel = require('../../models/products/GetListingItemsModel.js');
 const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
+const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
 
 class ScheduledIntegration {
     /**
@@ -43,6 +44,9 @@ class ScheduledIntegration {
         } catch (loggingError) {
             logger.warn('Failed to initialize logging session', { error: loggingError.message, userId });
         }
+
+        // Track data fetch for calendar-affecting services (defined outside try for catch access)
+        let trackingEntry = null;
 
         try {
             // Get current day of week (0 = Sunday, 6 = Saturday)
@@ -125,6 +129,66 @@ class ScheduledIntegration {
 
             // Initialize TokenManager
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            // Start tracking for calendar-affecting services
+            // ONLY track on Mon/Wed/Fri (days 1, 3, 5) when calendar-filtered services run:
+            // - mcpEconomicsData (Total Sales, Gross Profit, Fees, Refunds)
+            // - ppcMetricsAggregated (PPC Metrics)
+            // - ppcSpendsDateWise (Date-wise PPC Spend)
+            // - adsKeywordsPerformanceData (Keywords Performance)
+            // - searchKeywords (Search Terms)
+            // - ppcSpendsBySKU (Product-wise Sponsored Ads)
+            // - ppcUnitsSold (PPC Units Sold)
+            // - campaignData (Campaign Data)
+            const isCalendarAffectingDay = dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5; // Mon/Wed/Fri
+            
+            if (isCalendarAffectingDay) {
+                // Calculate the data date range (30 days ending yesterday)
+                const endDate = new Date();
+                endDate.setDate(endDate.getDate() - 1); // Yesterday
+                const startDate = new Date(endDate);
+                startDate.setDate(startDate.getDate() - 30); // 30 days before yesterday
+                
+                const formatDate = (date) => {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+                
+                // Note: All calendar-affecting services run together on Mon/Wed/Fri
+                // Services: mcpEconomicsData, ppcMetricsAggregated, ppcSpendsDateWise,
+                // adsKeywordsPerformanceData, searchKeywords, ppcSpendsBySKU, ppcUnitsSold, campaignData
+                // No need to track individual services - just the date range
+                
+                try {
+                    trackingEntry = await DataFetchTrackingService.startTracking(
+                        userId,
+                        Country,
+                        Region,
+                        { startDate: formatDate(startDate), endDate: formatDate(endDate) },
+                        loggingHelper?.sessionId || null
+                    );
+                    logger.info('[ScheduledIntegration] Data fetch tracking started (Mon/Wed/Fri)', {
+                        trackingId: trackingEntry._id,
+                        dayName: trackingEntry.dayName,
+                        dayOfWeek: dayOfWeek,
+                        dataRange: { startDate: formatDate(startDate), endDate: formatDate(endDate) }
+                    });
+                } catch (trackingError) {
+                    logger.warn('[ScheduledIntegration] Failed to start tracking (non-critical)', {
+                        error: trackingError.message,
+                        userId,
+                        Country,
+                        Region
+                    });
+                }
+            } else {
+                logger.info('[ScheduledIntegration] Skipping data fetch tracking (not Mon/Wed/Fri)', {
+                    dayOfWeek: dayOfWeek,
+                    dayName: dayNames[dayOfWeek]
+                });
+            }
 
             // Fetch merchant listings data (needed for product data)
             const merchantListingsData = await this.fetchMerchantListings(
@@ -224,6 +288,40 @@ class ScheduledIntegration {
                 }
             }
 
+            // Complete tracking for calendar-affecting services
+            if (trackingEntry) {
+                try {
+                    if (serviceSummary.overallSuccess) {
+                        await DataFetchTrackingService.completeTracking(trackingEntry._id);
+                        logger.info('[ScheduledIntegration] Data fetch tracking completed successfully', {
+                            trackingId: trackingEntry._id,
+                            dayName: trackingEntry.dayName,
+                            dataRange: trackingEntry.dataRange
+                        });
+                    } else if (serviceSummary.failed.length > 0 && serviceSummary.successful.length > 0) {
+                        // Partial success - mark as partial but still completed for date tracking purposes
+                        trackingEntry.status = 'partial';
+                        trackingEntry.errorMessage = errorMessage;
+                        await trackingEntry.save();
+                        logger.info('[ScheduledIntegration] Data fetch tracking completed with partial success', {
+                            trackingId: trackingEntry._id,
+                            successfulServices: serviceSummary.successful.length,
+                            failedServices: serviceSummary.failed.length
+                        });
+                    } else {
+                        await DataFetchTrackingService.failTracking(trackingEntry._id, errorMessage);
+                        logger.info('[ScheduledIntegration] Data fetch tracking marked as failed', {
+                            trackingId: trackingEntry._id
+                        });
+                    }
+                } catch (trackingError) {
+                    logger.warn('[ScheduledIntegration] Failed to complete tracking (non-critical)', {
+                        error: trackingError.message,
+                        trackingId: trackingEntry._id
+                    });
+                }
+            }
+
             return {
                 success: serviceSummary.overallSuccess,
                 statusCode: serviceSummary.overallSuccess ? 200 : 207,
@@ -262,6 +360,20 @@ class ScheduledIntegration {
             if (loggingHelper) {
                 loggingHelper.logFunctionError('ScheduledIntegration.getScheduledApiData', errorToLog);
                 await loggingHelper.endSession('failed');
+            }
+
+            // Mark tracking as failed if it was started
+            if (trackingEntry) {
+                try {
+                    await DataFetchTrackingService.failTracking(trackingEntry._id, errorMessage);
+                    logger.info('[ScheduledIntegration] Data fetch tracking marked as failed due to unexpected error', {
+                        trackingId: trackingEntry._id
+                    });
+                } catch (trackingError) {
+                    logger.warn('[ScheduledIntegration] Failed to mark tracking as failed', {
+                        error: trackingError.message
+                    });
+                }
             }
 
             return {

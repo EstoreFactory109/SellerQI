@@ -124,8 +124,6 @@ const PPCDashboard = () => {
   const [prevTab, setPrevTab] = useState(0);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
-  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
-  const [expandedSuggestions, setExpandedSuggestions] = useState(new Set());
   const CalenderRef = useRef(null);
   
   // Pagination states for each table
@@ -1214,11 +1212,11 @@ const PPCDashboard = () => {
         value: formatCurrencyWithLocale(spend, currency) 
       },
       { 
-        label: 'ACOS', 
+        label: 'ACoS %', 
         value: `${acos.toFixed(2)}%`
       },
       { 
-        label: 'TACoS', 
+        label: 'TACoS %', 
         value: `${tacos.toFixed(2)}%`
       },
       { 
@@ -1230,284 +1228,6 @@ const PPCDashboard = () => {
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
-  };
-
-  // Function to analyze keywords and generate suggestions based on rules
-  const analyzeKeywordsAndGenerateSuggestions = () => {
-    const suggestions = [];
-    const analyzedKeywords = new Set();
-    
-    // 1. Suggestions from High ACOS Campaigns
-    highAcosCampaigns.forEach((campaign, index) => {
-      if (index < 3) { // Top 3 worst performing campaigns
-        suggestions.push({
-          type: 'campaign-high-acos',
-          campaign: campaign.campaignName,
-          message: `Campaign "${campaign.campaignName}" has ${campaign.acos.toFixed(0)}% ACOS. Consider reducing bids, refining targeting, or pausing underperforming keywords.`,
-          priority: campaign.acos > 80 ? 'high' : 'medium',
-          metrics: {
-            spend: campaign.totalSpend,
-            sales: campaign.totalSales,
-            acos: campaign.acos
-          }
-        });
-      }
-    });
-    
-    // 2. Suggestions from Wasted Spend Keywords
-    wastedSpendKeywords.slice(0, 5).forEach((keyword) => {
-      suggestions.push({
-        type: 'keyword-wasted-spend',
-        keyword: keyword.keyword,
-        campaign: keyword.campaignName,
-        message: `"${keyword.keyword}" - Add as negative keyword. ${currency}${keyword.spend.toFixed(2)} spent with no sales.`,
-        priority: 'high',
-        metrics: {
-          spend: keyword.spend,
-          bid: keyword.bid
-        }
-      });
-    });
-    
-    // 3. Suggestions from Top Performing Keywords (optimization opportunities)
-    topPerformingKeywords.slice(0, 3).forEach((keyword) => {
-      suggestions.push({
-        type: 'keyword-optimize',
-        keyword: keyword.keyword,
-        campaign: keyword.campaignName,
-        message: `"${keyword.keyword}" performing well (${keyword.acos.toFixed(0)}% ACOS, ${keyword.impressions.toLocaleString()} impressions). High-performing keyword with potential for increased investment.`,
-        priority: 'low',
-        metrics: {
-          sales: keyword.sales,
-          acos: keyword.acos,
-          impressions: keyword.impressions,
-          spend: keyword.spend
-        }
-      });
-    });
-    
-    // 4. Suggestions from Negative Keywords (high ACOS keywords)
-    negativeKeywordsMetrics
-      .filter(keyword => keyword.acos > 50 && keyword.spend > 10)
-      .slice(0, 5)
-      .forEach((keyword) => {
-        // Skip if already analyzed
-        const keywordIdentifier = `${keyword.keyword}-${keyword.campaignName}`;
-        if (analyzedKeywords.has(keywordIdentifier)) return;
-        analyzedKeywords.add(keywordIdentifier);
-        
-        if (keyword.acos > 100) {
-          suggestions.push({
-            type: 'keyword-extreme-acos',
-            keyword: keyword.keyword,
-            campaign: keyword.campaignName,
-            message: `"${keyword.keyword}" has ${keyword.acos.toFixed(0)}% ACOS. Pause immediately or reduce bid significantly.`,
-            priority: 'high',
-            metrics: {
-              spend: keyword.spend,
-              sales: keyword.sales,
-              acos: keyword.acos
-            }
-          });
-        } else {
-          suggestions.push({
-            type: 'keyword-high-acos',
-            keyword: keyword.keyword,
-            campaign: keyword.campaignName,
-            message: `"${keyword.keyword}" has ${keyword.acos.toFixed(0)}% ACOS. Consider bid optimization or adding as negative keyword.`,
-            priority: 'medium',
-            metrics: {
-              spend: keyword.spend,
-              sales: keyword.sales,
-              acos: keyword.acos
-            }
-          });
-        }
-      });
-    
-    // Continue with existing product-level analysis but skip if already covered
-    if (Array.isArray(productWiseSponsoredAds)) {
-      // Aggregate product data by ASIN
-      const aggregatedProductData = new Map();
-      
-      productWiseSponsoredAds.forEach((product) => {
-        const asin = product.asin;
-        if (!aggregatedProductData.has(asin)) {
-          aggregatedProductData.set(asin, {
-            asin: asin,
-            totalSpend: 0,
-            totalSales: 0,
-            campaigns: []
-          });
-        }
-        
-        const aggregated = aggregatedProductData.get(asin);
-        aggregated.totalSpend += parseFloat(product.spend) || 0;
-        aggregated.totalSales += parseFloat(product.salesIn30Days) || 0;
-        if (product.campaignName) {
-          aggregated.campaigns.push(product.campaignName);
-        }
-      });
-      
-      // Analyze aggregated product data for errors
-      aggregatedProductData.forEach((aggregatedProduct) => {
-        const spend = aggregatedProduct.totalSpend;
-        const sales = aggregatedProduct.totalSales;
-        const acos = sales > 0 ? (spend / sales) * 100 : 0;
-        const campaignCount = new Set(aggregatedProduct.campaigns).size;
-        
-        // Check if this product has an error based on the same criteria used in analyse.js
-        let hasError = false;
-        let errorType = '';
-        
-        if (acos > 50 && sales > 0) {
-          hasError = true;
-          errorType = 'high_acos';
-          suggestions.push({
-            type: 'product-high-acos',
-            asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% (${currency}${spend.toFixed(2)} spend, ${currency}${sales.toFixed(2)} sales). Consider reducing bids or pausing underperforming campaigns.`,
-            priority: 'high'
-          });
-        } else if (spend > 5 && sales === 0) {
-          hasError = true;
-          errorType = 'no_sales';
-          suggestions.push({
-            type: 'product-no-sales',
-            asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: ${currency}${spend.toFixed(2)} spent with no sales. Review targeting and consider pausing campaigns.`,
-            priority: 'high'
-          });
-        } else if (spend > 10 && acos > 30) {
-          hasError = true;
-          errorType = 'marginal_profit';
-          suggestions.push({
-            type: 'product-marginal',
-            asin: aggregatedProduct.asin,
-            message: `ASIN ${aggregatedProduct.asin}: ACoS at ${acos.toFixed(0)}% with ${currency}${spend.toFixed(2)} spend. Optimize bids to improve profitability.`,
-            priority: 'medium'
-          });
-        }
-      });
-    }
-    
-    // Then analyze negative keywords
-    negativeKeywordsMetrics.forEach((keyword) => {
-      const keywordIdentifier = `${keyword.keyword}-${keyword.campaignName}`;
-      
-      // Skip if already analyzed
-      if (analyzedKeywords.has(keywordIdentifier)) return;
-      analyzedKeywords.add(keywordIdentifier);
-      
-      // Check if this keyword has an error based on the same criteria used in analyse.js
-      let hasError = false;
-      
-      // Rule #1: High Spend, No Sales
-      if (keyword.spend >= 5 && keyword.sales === 0) {
-        hasError = true;
-        suggestions.push({
-          type: 'high-spend-no-sales',
-          keyword: keyword.keyword,
-          campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - Consider adding as negative. ${currency}${keyword.spend.toFixed(2)} spent with no conversions.`,
-          priority: 'high'
-        });
-      }
-      
-      // Rule #2: Extremely High ACoS
-      else if (keyword.acos >= 100 && keyword.spend >= 5) {
-        hasError = true;
-        suggestions.push({
-          type: 'high-acos',
-          keyword: keyword.keyword,
-          campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - ACoS at ${keyword.acos.toFixed(0)}%. Reduce bid or pause temporarily to improve profitability.`,
-          priority: 'high'
-        });
-      }
-      
-      // Additional rule for keywords with some sales but still unprofitable
-      else if (keyword.acos > 50 && keyword.acos < 100 && keyword.spend >= 10) {
-        suggestions.push({
-          type: 'moderate-acos',
-          keyword: keyword.keyword,
-          campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - ACoS at ${keyword.acos.toFixed(0)}%. Consider bid optimization to improve performance.`,
-          priority: 'medium'
-        });
-      }
-      
-      // Rule for low spend but poor performance
-      else if (keyword.acos > 30 && keyword.spend < 5 && keyword.sales > 0) {
-        suggestions.push({
-          type: 'low-spend-poor-performance',
-          keyword: keyword.keyword,
-          campaign: keyword.campaignName,
-          message: `"${keyword.keyword}" - Low spend (${currency}${keyword.spend.toFixed(2)}) with ${keyword.acos.toFixed(0)}% ACoS. Test with adjusted bids or consider pausing.`,
-          priority: 'low'
-        });
-      }
-    });
-    
-    // Rule #5: Check for duplicate keywords across campaigns
-    const keywordMap = new Map();
-    negativeKeywordsMetrics.forEach((keyword) => {
-      if (!keywordMap.has(keyword.keyword)) {
-        keywordMap.set(keyword.keyword, []);
-      }
-      keywordMap.get(keyword.keyword).push(keyword);
-    });
-    
-    keywordMap.forEach((instances, keywordText) => {
-      if (instances.length > 1) {
-        // Find best and worst performing instance
-        const sortedByAcos = [...instances].sort((a, b) => {
-          // Handle cases where acos is 0 (no sales)
-          if (a.sales === 0 && b.sales === 0) return b.spend - a.spend;
-          if (a.sales === 0) return 1;
-          if (b.sales === 0) return -1;
-          return a.acos - b.acos;
-        });
-        
-        const best = sortedByAcos[0];
-        const worst = sortedByAcos[sortedByAcos.length - 1];
-        
-        // Check if there's a significant performance difference
-        if ((worst.acos > best.acos + 20) || (worst.sales === 0 && best.sales > 0)) {
-          suggestions.push({
-            type: 'duplicate-keyword',
-            keyword: keywordText,
-            campaign: worst.campaignName,
-            message: `"${keywordText}" - Duplicate found. Pause in "${worst.campaignName}" (${worst.sales === 0 ? 'No sales' : worst.acos.toFixed(0) + '% ACoS'}) and consolidate in "${best.campaignName}" (${best.acos.toFixed(0)}% ACoS).`,
-            priority: 'medium'
-          });
-        }
-      }
-    });
-    
-    // Sort suggestions by priority
-    return suggestions.sort((a, b) => {
-      const priorityOrder = { high: 0, medium: 1, low: 2 };
-      return priorityOrder[a.priority] - priorityOrder[b.priority];
-    });
-  };
-  
-  // Generate suggestions
-  const suggestions = analyzeKeywordsAndGenerateSuggestions();
-  
-  // Get suggestions to display based on showAllSuggestions state
-  const suggestionsToDisplay = showAllSuggestions ? suggestions : suggestions.slice(0, 10);
-
-  // Prepare data for CSV/Excel export
-  // Function to toggle suggestion expansion
-  const toggleSuggestionExpansion = (index) => {
-    const newExpanded = new Set(expandedSuggestions);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
-    }
-    setExpandedSuggestions(newExpanded);
   };
 
   // Prepare data for CSV/Excel export
@@ -1701,14 +1421,6 @@ const PPCDashboard = () => {
       csvData.push([]);
     }
     
-    // Add Suggestions
-    if (suggestions.length > 0) {
-      csvData.push(['Optimization Suggestions']);
-      suggestions.forEach((suggestion, index) => {
-        csvData.push([`${index + 1}.`, suggestion.message]);
-      });
-    }
-    
     return csvData;
   };
 
@@ -1720,7 +1432,7 @@ const PPCDashboard = () => {
           <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
             <div className='flex items-center gap-4'>
               <div>
-                <h1 className='text-2xl font-bold text-gray-900'>Sponsored Ads</h1>
+                <h1 className='text-2xl font-bold text-gray-900'>Campaign Audit</h1>
                 <p className='text-sm text-gray-600 mt-1'>Monitor your Amazon PPC performance and optimize campaigns</p>
               </div>
               <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium'>
@@ -1971,9 +1683,13 @@ const PPCDashboard = () => {
                   {/* High ACOS Campaigns Tab */}
                   {selectedTab === 0 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">High ACOS Campaigns</h2>
-                      <div className="mb-4 text-sm text-gray-600">
-                        Campaigns with high advertising cost of sales for last 30 days
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">High ACOS Campaigns</h2>
+                      <OptimizationTip 
+                        tip="Reduce bids or add negatives to lower ACoS."
+                        icon="📉"
+                      />
+                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                        Campaigns with high advertising cost of sales
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full table-fixed min-w-[600px]">
@@ -1982,7 +1698,7 @@ const PPCDashboard = () => {
                               <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
                               <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Spend</th>
                               <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">ACOS</th>
+                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">ACoS %</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2018,19 +1734,19 @@ const PPCDashboard = () => {
                         totalItems={highAcosCampaigns.length}
                         itemsPerPage={itemsPerPage}
                       />
-                      <OptimizationTip 
-                        tip="Reduce bids or add negatives to lower ACoS."
-                        icon="📉"
-                      />
                     </>
                   )}
                   
                   {/* Wasted Spend Keywords Tab */}
                   {selectedTab === 1 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Wasted Spend Keywords</h2>
-                      <div className="mb-4 text-sm text-gray-600">
-                        Keywords with high spend but low returns for last 30 days
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Wasted Spend Keywords</h2>
+                      <OptimizationTip 
+                        tip="Consider pausing or lowering bids for unprofitable keywords."
+                        icon="⚠️"
+                      />
+                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                        Keywords with high spend but low returns
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full table-fixed min-w-[600px]">
@@ -2093,18 +1809,18 @@ const PPCDashboard = () => {
                         itemsPerPage={itemsPerPage}
                       />
                       </div>
-                      <OptimizationTip 
-                        tip="Consider pausing or lowering bids for unprofitable keywords."
-                        icon="⚠️"
-                      />
                     </>
                   )}
                   
                   {/* Campaigns Without Negative Keywords Tab */}
                   {selectedTab === 2 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Campaigns Without Negative Keywords</h2>
-                      <div className="mb-4 text-sm text-gray-600">
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Campaigns Without Negative Keywords</h2>
+                      <OptimizationTip 
+                        tip="Add negative keywords to these campaigns to prevent irrelevant traffic and improve ad performance."
+                        icon="⚠️"
+                      />
+                      <div className="mb-4 mt-4 text-sm text-gray-600">
                         Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
                       </div>
                       <div className="overflow-x-auto">
@@ -2150,20 +1866,17 @@ const PPCDashboard = () => {
                         totalItems={campaignsWithoutNegativeKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
-                      <OptimizationTip 
-                        tip="Add negative keywords to these campaigns to prevent irrelevant traffic and improve ad performance."
-                        icon="⚠️"
-                      />
                     </>
                   )}
                   
                   {/* Top Performing Keywords Tab */}
                   {selectedTab === 3 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Top Performing Keywords</h2>
-                      <div className="mb-4 text-sm text-gray-600">
-                        For Last 30 days
-                      </div>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Top Performing Keywords</h2>
+                      <OptimizationTip 
+                        tip="This keyword performs well — consider raising bid by 15–20%."
+                        icon="📈"
+                      />
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200">
@@ -2171,7 +1884,7 @@ const PPCDashboard = () => {
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS %</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Impressions</th>
                           </tr>
                         </thead>
@@ -2233,19 +1946,19 @@ const PPCDashboard = () => {
                         totalItems={topPerformingKeywords.length}
                         itemsPerPage={itemsPerPage}
                       />
-                      <OptimizationTip 
-                        tip="This keyword performs well — consider raising bid by 15–20%."
-                        icon="📈"
-                      />
                     </>
                   )}
                   
                   {/* Search Terms Tab */}
                   {selectedTab === 4 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Search Terms with Zero Sales</h2>
-                      <div className="mb-4 text-sm text-gray-600">
-                        Search terms that generated clicks but no conversions for last 30 days
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Search Terms with Zero Sales</h2>
+                      <OptimizationTip 
+                        tip="Consider adding a negative keyword or revising listing content."
+                        icon="📝"
+                      />
+                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                        Search terms that generated clicks but no conversions
                       </div>
                       <table className="w-full">
                         <thead>
@@ -2292,19 +2005,19 @@ const PPCDashboard = () => {
                         totalItems={filteredSearchTerms.length}
                         itemsPerPage={itemsPerPage}
                       />
-                      <OptimizationTip 
-                        tip="Consider adding a negative keyword or revising listing content."
-                        icon="📝"
-                      />
                     </>
                   )}
                   
                   {/* Auto Campaign Insights Tab */}
                   {selectedTab === 5 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-6">Auto Campaign Insights</h2>
-                      <div className="mb-4 text-sm text-gray-600">
-                        Performance insights from automatic targeting campaigns for last 30 days
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Auto Campaign Insights</h2>
+                      <OptimizationTip 
+                        tip="Promote high performing search terms to manual campaigns for better control."
+                        icon="🎯"
+                      />
+                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                        Performance insights from automatic targeting campaigns
                       </div>
                       <table className="w-full">
                         <thead>
@@ -2313,7 +2026,7 @@ const PPCDashboard = () => {
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Ad Group</th>
                             <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACOS</th>
+                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS %</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2355,10 +2068,6 @@ const PPCDashboard = () => {
                         totalItems={autoCampaignInsights.length}
                         itemsPerPage={itemsPerPage}
                       />
-                      <OptimizationTip 
-                        tip="Promote high performing search terms to manual campaigns for better control."
-                        icon="🎯"
-                      />
                     </>
                   )}
                 </motion.div>
@@ -2373,189 +2082,6 @@ const PPCDashboard = () => {
               )}
             </div>
           </div>
-        
-          {/* Optimization Suggestions */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.7 }}
-            className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden"
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Optimization Suggestions</h3>
-                  <p className="text-sm text-gray-600 mt-1">AI-powered recommendations to improve your campaign performance</p>
-                </div>
-              </div>
-              {suggestions.length > 0 ? (
-                <div>
-                  {/* Priority Summary Cards */}
-                  <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-red-900">High Priority</p>
-                          <p className="text-2xl font-bold text-red-700">
-                            {suggestions.filter(s => s.priority === 'high').length}
-                          </p>
-                        </div>
-                        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                          <span className="text-red-600 font-bold">!</span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-red-600 mt-1">Issues requiring immediate attention</p>
-                    </div>
-                    
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-yellow-900">Medium Priority</p>
-                          <p className="text-2xl font-bold text-yellow-700">
-                            {suggestions.filter(s => s.priority === 'medium').length}
-                          </p>
-                        </div>
-                        <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                          <span className="text-yellow-600 font-bold">⚠</span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-yellow-700 mt-1">Optimization opportunities</p>
-                    </div>
-                    
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">Low Priority</p>
-                          <p className="text-2xl font-bold text-gray-600">
-                            {suggestions.filter(s => s.priority === 'low').length}
-                          </p>
-                        </div>
-                        <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                          <span className="text-gray-600 font-bold">i</span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-700 mt-1">Minor improvements</p>
-                    </div>
-                  </div>
-
-                  {/* Organized Suggestions Table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-gray-200">
-                          <th className="text-left py-3 text-sm font-medium text-gray-700">Type</th>
-                          <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign/Keyword</th>
-                          <th className="text-center py-3 text-sm font-medium text-gray-700">Priority</th>
-                          <th className="text-center py-3 text-sm font-medium text-gray-700">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(showAllSuggestions ? suggestions : suggestions.slice(0, 10)).map((suggestion, index) => (
-                          <React.Fragment key={index}>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-4 text-sm text-gray-900 capitalize">
-                                {suggestion.type.replace('-', ' ')}
-                              </td>
-                              <td className="py-4 text-sm text-gray-900">
-                                {suggestion.campaign || suggestion.keyword || suggestion.asin || 'N/A'}
-                              </td>
-                              <td className="py-4 text-center">
-                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                  suggestion.priority === 'high' ? 'bg-red-100 text-red-800' : 
-                                  suggestion.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {suggestion.priority === 'high' ? '🚨 High' : 
-                                   suggestion.priority === 'medium' ? '⚠️ Medium' : 
-                                   '📊 Low'}
-                                </span>
-                              </td>
-                              <td className="py-4 text-center">
-                                <button
-                                  onClick={() => toggleSuggestionExpansion(index)}
-                                  className="inline-flex items-center px-3 py-1 bg-yellow-400 text-black text-xs font-medium rounded hover:bg-yellow-500 transition-colors"
-                                >
-                                  {expandedSuggestions.has(index) ? 'HIDE' : 'SHOW'}
-                                </button>
-                              </td>
-                            </tr>
-                            
-                            {/* Expanded suggestion details */}
-                            {expandedSuggestions.has(index) && (
-                              <tr className="bg-blue-50 border-b border-gray-200">
-                                <td colSpan={4} className="py-4 px-4">
-                                  <div className="space-y-3">
-                                    <div>
-                                      <h4 className="text-sm font-medium text-gray-900 mb-2">Suggestion Details:</h4>
-                                      <p className="text-sm text-gray-700">{suggestion.message}</p>
-                                    </div>
-                                    
-                                    {/* Show metrics if available */}
-                                    {suggestion.metrics && (
-                                      <div>
-                                        <h4 className="text-sm font-medium text-gray-900 mb-2">Performance Metrics:</h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                          {suggestion.metrics.spend && (
-                                            <div>
-                                              <span className="text-gray-600">Spend:</span>
-                                              <span className="font-medium ml-1">${suggestion.metrics.spend.toFixed(2)}</span>
-                                            </div>
-                                          )}
-                                          {suggestion.metrics.sales && (
-                                            <div>
-                                              <span className="text-gray-600">Sales:</span>
-                                              <span className="font-medium ml-1">${suggestion.metrics.sales.toFixed(2)}</span>
-                                            </div>
-                                          )}
-                                          {suggestion.metrics.acos && (
-                                            <div>
-                                              <span className="text-gray-600">ACOS:</span>
-                                              <span className="font-medium ml-1">{suggestion.metrics.acos.toFixed(2)}%</span>
-                                            </div>
-                                          )}
-                                          {suggestion.metrics.bid && (
-                                            <div>
-                                              <span className="text-gray-600">Current Bid:</span>
-                                              <span className="font-medium ml-1">${suggestion.metrics.bid.toFixed(2)}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )}
-                                    
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </tbody>
-                    </table>
-                    
-                    {/* Show More/Show Less Button */}
-                    {suggestions.length > 10 && (
-                      <div className="mt-4 text-center">
-                        <button
-                          onClick={() => setShowAllSuggestions(!showAllSuggestions)}
-                          className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-                        >
-                          {showAllSuggestions ? 
-                            `Show Less` : 
-                            `Show More (${suggestions.length - 10} more)`
-                          }
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>No specific optimization suggestions at this time.</p>
-                  <p>Continue monitoring keyword performance for optimization opportunities.</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
         </div>
       </div>
     </div>

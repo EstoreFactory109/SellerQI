@@ -20,7 +20,7 @@ const {
     waitForQueryCompletionWithRefreshToken,
     downloadDocument 
 } = require('./DataKioskService.js');
-const { calculateEconomicsMetrics, calculateDatewiseMetrics } = require('../Calculations/EconomicsMetricsCalculation.js');
+const { calculateEconomicsMetrics, calculateDatewiseMetrics, calculateAsinWiseDailyMetrics } = require('../Calculations/EconomicsMetricsCalculation.js');
 const { saveEconomicsMetrics, getLatestEconomicsMetrics } = require('./EconomicsMetricsService.js');
 const { fetchSalesAndTrafficByDate } = require('./MCPSalesAndTrafficIntegration.js');
 const logger = require('../../utils/Logger.js');
@@ -250,7 +250,72 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         }
 
         // ============================================================
-        // QUERY 3: Sales and Traffic API - For accurate TOTAL SALES
+        // QUERY 3: DAY + CHILD_ASIN - For accurate ASIN-wise daily data
+        // ============================================================
+        // This query gets daily breakdown per ASIN with all metrics:
+        // sales, grossProfit, unitsSold, refunds, ppcSpent, fbaFees, storageFees, totalFees, amazonFees
+        logger.info('Creating DAY + CHILD_ASIN query for ASIN-wise daily breakdown', { region });
+
+        let asinWiseDailyMetrics = null;
+        
+        try {
+            const asinDailyQuery = buildEconomicsQuery({
+                startDate: startDateStr,
+                endDate: endDateStr,
+                dateGranularity: 'DAY',
+                productIdGranularity: 'CHILD_ASIN',
+                marketplace: country,
+                includeFeeComponents: false
+            });
+
+            const asinDailyQueryResult = await createQueryWithRefreshToken(refreshToken, region, asinDailyQuery);
+            
+            if (asinDailyQueryResult && asinDailyQueryResult.queryId) {
+                const asinDailyQueryId = asinDailyQueryResult.queryId;
+                logger.info('ASIN Daily query created successfully', { queryId: asinDailyQueryId });
+
+                // Wait for ASIN Daily query to complete
+                const asinDailyDocumentDetails = await waitForQueryCompletionWithRefreshToken(
+                    refreshToken, 
+                    region, 
+                    asinDailyQueryId, 
+                    10000
+                );
+
+                if (asinDailyDocumentDetails.hasDocument !== false) {
+                    const asinDailyDocumentUrl = asinDailyDocumentDetails.documentUrl || asinDailyDocumentDetails.url;
+                    
+                    if (asinDailyDocumentUrl) {
+                        logger.info('Downloading ASIN Daily document', { hasUrl: !!asinDailyDocumentUrl });
+                        const asinDailyDocumentContent = await downloadDocument(asinDailyDocumentUrl);
+                        
+                        if (asinDailyDocumentContent && asinDailyDocumentContent.trim() !== '') {
+                            // Calculate ASIN-wise daily metrics using the new function
+                            asinWiseDailyMetrics = calculateAsinWiseDailyMetrics(
+                                asinDailyDocumentContent,
+                                startDateStr,
+                                endDateStr,
+                                country
+                            );
+                            
+                            logger.info('ASIN-wise daily metrics calculated', { 
+                                asinWiseSalesCount: asinWiseDailyMetrics.asinWiseSales?.length,
+                                uniqueAsins: new Set(asinWiseDailyMetrics.asinWiseSales?.map(r => r.asin) || []).size,
+                                uniqueDates: new Set(asinWiseDailyMetrics.asinWiseSales?.map(r => r.date) || []).size
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (asinDailyQueryError) {
+            // ASIN Daily query failed, fall back to RANGE data for ASIN breakdown
+            logger.warn('ASIN Daily query failed, using RANGE ASIN data as fallback', {
+                error: asinDailyQueryError.message
+            });
+        }
+
+        // ============================================================
+        // QUERY 4: Sales and Traffic API - For accurate TOTAL SALES
         // ============================================================
         // The Economics API only includes ASIN-linked orders
         // Sales API includes ALL orders, giving accurate total sales
@@ -283,7 +348,8 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         // ============================================================
         // Merge results: 
         // - Sales API for Total Sales and Date-wise Sales (more complete)
-        // - Economics API for Gross Profit, Fees, Refunds, ASIN breakdown
+        // - Economics API for Gross Profit, Fees, Refunds
+        // - ASIN Daily query for accurate ASIN-wise breakdown with dates
         // ============================================================
         const finalMetrics = {
             ...calculatedMetrics,
@@ -298,7 +364,9 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
                             { amount: 0, currencyCode: item.sales.currencyCode }
             })) || datewiseMetrics?.datewiseSales || calculatedMetrics.datewiseSales,
             datewiseGrossProfit: datewiseMetrics?.datewiseGrossProfit || calculatedMetrics.datewiseGrossProfit,
-            datewiseFeesAndRefunds: datewiseMetrics?.datewiseFeesAndRefunds || calculatedMetrics.datewiseFeesAndRefunds
+            datewiseFeesAndRefunds: datewiseMetrics?.datewiseFeesAndRefunds || calculatedMetrics.datewiseFeesAndRefunds,
+            // Use ASIN Daily query data if available (with dates), else fallback to RANGE data (without dates)
+            asinWiseSales: asinWiseDailyMetrics?.asinWiseSales || calculatedMetrics.asinWiseSales
         };
 
         logger.info('Final merged metrics', { 
@@ -310,7 +378,9 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             refunds: finalMetrics.refunds?.amount,
             datewiseSalesCount: finalMetrics.datewiseSales?.length,
             datewiseSalesSource: salesApiData ? 'Sales API' : (datewiseMetrics ? 'DAY Economics' : 'RANGE Economics'),
-            asinCount: finalMetrics.asinWiseSales?.length
+            asinCount: finalMetrics.asinWiseSales?.length,
+            asinWiseSalesSource: asinWiseDailyMetrics ? 'DAY + CHILD_ASIN (with dates)' : 'RANGE + PARENT_ASIN (without dates)',
+            asinWiseHasDates: asinWiseDailyMetrics ? true : false
         });
 
         // Save metrics to database

@@ -18,6 +18,7 @@ const LeftNavSection = () => {
     const [loader,setLoader]=useState(false)
     const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
     const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
+    const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
     
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
@@ -48,6 +49,9 @@ const LeftNavSection = () => {
     const currentSettingsTab = searchParams.get('tab') || 'profile';
     const isIssuesPage = location.pathname === '/seller-central-checker/issues';
     const isSettingsPage = location.pathname === '/seller-central-checker/settings';
+    const isPPCDashboardPage = location.pathname === '/seller-central-checker/ppc-dashboard';
+    const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
+    const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
     
     // Keep dropdown open if we're on any issues-related page
     React.useEffect(() => {
@@ -62,6 +66,13 @@ const LeftNavSection = () => {
             setSettingsDropdownOpen(true);
         }
     }, [isSettingsPage]);
+
+    // Keep sponsored ads dropdown open if we're on any sponsored ads-related page
+    React.useEffect(() => {
+        if (isSponsoredAdsPage) {
+            setSponsoredAdsDropdownOpen(true);
+        }
+    }, [isSponsoredAdsPage]);
 
     // Handle Issues button click
     const handleIssuesClick = () => {
@@ -79,6 +90,15 @@ const LeftNavSection = () => {
             navigate('/seller-central-checker/settings?tab=profile');
         }
         setSettingsDropdownOpen(!settingsDropdownOpen);
+    };
+
+    // Handle Sponsored Ads button click
+    const handleSponsoredAdsClick = () => {
+        if (!isSponsoredAdsPage) {
+            // If not on sponsored ads page, navigate to campaign audit
+            navigate('/seller-central-checker/ppc-dashboard');
+        }
+        setSponsoredAdsDropdownOpen(!sponsoredAdsDropdownOpen);
     };
     
     const logoutUser=async(e)=>{
@@ -115,7 +135,7 @@ const LeftNavSection = () => {
                 {/* Top Section - Logo and Navigation */}
                 <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     {/* Logo Section */}
-                    <div className="w-full px-3 py-2 border-b border-gray-200/50 flex-shrink-0">
+                    <div className="w-full px-3 py-6 border-b border-gray-200/50 flex-shrink-0">
                         <div className="flex items-center justify-center">
                             <img 
                                 src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png"
@@ -264,23 +284,95 @@ const LeftNavSection = () => {
                         </div>
                         )}
 
-                        {/* PPC Dashboard - Only for PRO/AGENCY users */}
+                        {/* Sponsored Ads with Dropdown - Only for PRO/AGENCY users */}
                         {!isLiteUser && (
-                            <NavLink
-                                to="/seller-central-checker/ppc-dashboard"
-                                className={({ isActive }) =>
-                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
-                                }
+                            <div className="space-y-0.5">
+                            <div
+                                className={`${menuItemClass} cursor-pointer ${
+                                    isSponsoredAdsPage
+                                        ? activeMenuItemClass
+                                        : inactiveMenuItemClass
+                                }`}
+                                onClick={handleSponsoredAdsClick}
                             >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-green-50 group-hover:bg-green-100'}`}>
-                                            <LaptopMinimalCheck className={`${iconClass} ${isActive ? 'text-white' : 'text-green-600'}`}/>
-                                        </div>
-                                        <span className="font-medium">Sponsored Ads</span>
-                                    </>
+                                <div className={`${iconWrapperClass} ${
+                                    isSponsoredAdsPage 
+                                        ? 'bg-white/20' 
+                                        : 'bg-green-50 group-hover:bg-green-100'
+                                }`}>
+                                    <LaptopMinimalCheck className={`${iconClass} ${
+                                        isSponsoredAdsPage 
+                                            ? 'text-white' 
+                                            : 'text-green-600'
+                                    }`}/>
+                                </div>
+                                <span className="font-medium flex-1">Sponsored Ads</span>
+                                <motion.div
+                                    animate={{ rotate: sponsoredAdsDropdownOpen ? 90 : 0 }}
+                                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                                    className="flex items-center justify-center"
+                                >
+                                    <ChevronRight className={`${iconClass} opacity-70`}/>
+                                </motion.div>
+                            </div>
+                            
+                            <AnimatePresence>
+                                {sponsoredAdsDropdownOpen && (
+                                    <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: "auto" }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        transition={{ 
+                                            duration: 0.3, 
+                                            ease: "easeInOut",
+                                            opacity: { duration: 0.2 }
+                                        }}
+                                        className="ml-4 space-y-0.5 overflow-hidden"
+                                    >
+                                        <motion.div
+                                            initial={{ y: -10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ delay: 0.15, duration: 0.2 }}
+                                        >
+                                            <NavLink
+                                                to="/seller-central-checker/ppc-dashboard"
+                                                className={({ isActive }) =>
+                                                    `${dropdownItemClass} ${
+                                                        isActive
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                    }`
+                                                }
+                                            >
+                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
+                                                Campaign Audit
+                                            </NavLink>
+                                        </motion.div>
+                                        <motion.div
+                                            initial={{ y: -10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ delay: 0.175, duration: 0.2 }}
+                                        >
+                                            <NavLink
+                                                to="/seller-central-checker/keyword-analysis"
+                                                className={({ isActive }) =>
+                                                    `${dropdownItemClass} ${
+                                                        isActive
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                    }`
+                                                }
+                                            >
+                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
+                                                Keyword Opportunities
+                                            </NavLink>
+                                        </motion.div>
+                                    </motion.div>
                                 )}
-                            </NavLink>
+                            </AnimatePresence>
+                        </div>
                         )}
                         
                         {/* Profitability Dashboard - Only for PRO/AGENCY users */}
@@ -297,25 +389,6 @@ const LeftNavSection = () => {
                                             <ChartLine className={`${iconClass} ${isActive ? 'text-white' : 'text-purple-600'}`}/>
                                         </div>
                                         <span className="font-medium">Profitibility</span>
-                                    </>
-                                )}
-                            </NavLink>
-                        )}
-
-                        {/* Keyword Opportunities - Only for PRO/AGENCY users */}
-                        {!isLiteUser && (
-                            <NavLink
-                                to="/seller-central-checker/keyword-analysis"
-                                className={({ isActive }) =>
-                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-orange-50 group-hover:bg-orange-100'}`}>
-                                            <Search className={`${iconClass} ${isActive ? 'text-white' : 'text-orange-600'}`}/>
-                                        </div>
-                                        <span className="font-medium">Keyword Opportunities</span>
                                     </>
                                 )}
                             </NavLink>

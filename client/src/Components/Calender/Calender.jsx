@@ -8,6 +8,8 @@ import axios from 'axios'
 import {useDispatch, useSelector} from 'react-redux'
 import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode} from '../../redux/slices/DashboardSlice.js'
 import { addBrand } from '../../redux/slices/authSlice.js'
+// PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
+// No need to fetch filtered metrics from API
 import PulseLoader from "react-spinners/PulseLoader";
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -56,11 +58,14 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         customActive: true
       };
     } else if (calendarMode === 'last7') {
-      // Last 7 days is selected (6 days before yesterday to yesterday)
+      // Last 7 days: Use backend's endDate as reference (no calculation from current date)
+      // startDate = endDate - 6 days (gives 7 days total)
+      const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
+      const backendEndDate = hasBackendDates ? new Date(dashboardInfo.endDate) : subDays(new Date(), 1);
       return {
         selectedRange: {
-          startDate: subDays(new Date(), 7), // 6 days before yesterday
-          endDate: subDays(new Date(), 1),   // yesterday
+          startDate: subDays(backendEndDate, 6), // 6 days before backend endDate
+          endDate: backendEndDate,               // backend endDate
           key: 'selection',
         },
         thirtyDaysActive: false,
@@ -68,12 +73,14 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         customActive: false
       };
     } else {
-      // Default "Last 30 days" - 30 days before yesterday to yesterday (to match MCP data fetch range)
-      // Due to 24-hour data delay, we show data from 30 days ago to yesterday
+      // Default "Last 30 days" - use actual data range from backend if available
+      // This ensures calendar shows the correct date range based on when data was actually fetched
+      // Falls back to calculated dates only if backend dates are not available
+      const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
       return {
         selectedRange: {
-          startDate: subDays(new Date(), 31), // 30 days before yesterday
-          endDate: subDays(new Date(), 1),    // yesterday
+          startDate: hasBackendDates ? new Date(dashboardInfo.startDate) : subDays(new Date(), 31),
+          endDate: hasBackendDates ? new Date(dashboardInfo.endDate) : subDays(new Date(), 1),
           key: 'selection',
         },
         thirtyDaysActive: true,
@@ -155,12 +162,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     switch (type) {
       case 'last30':
         handleActive('last30');
-        // Set the range to show last 30 days (30 days before yesterday to yesterday)
-        // Due to 24-hour data delay, we show data from 30 days ago to yesterday
-        // This matches the MCP data fetch range in the backend
+        // Use existing backend dates if available, otherwise fallback to calculated dates
+        // This prevents showing incorrect dates before the API call returns
+        const hasExistingBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
         const defaultRange = {
-          startDate: subDays(today, 31), // 30 days before yesterday
-          endDate: subDays(today, 1),    // yesterday
+          startDate: hasExistingBackendDates ? new Date(dashboardInfo.startDate) : subDays(today, 31),
+          endDate: hasExistingBackendDates ? new Date(dashboardInfo.endDate) : subDays(today, 1),
           key: 'selection',
         };
         setSelectedRange(defaultRange);
@@ -170,15 +177,18 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         dispatch(setCalendarMode('default'));
         
         // Make API call to get the default dashboard data
+        // The applyDefaultDateRange function will update selectedRange with actual backend dates
         await applyDefaultDateRange();
         break;
       case 'last7':
         handleActive('last7');
-        // Set the range to show last 7 days (6 days before yesterday to yesterday)
-        // This gives 7 days of data: (yesterday - 6), ..., yesterday
+        // Last 7 days: Use backend's endDate as reference (no calculation from current date)
+        // endDate = from backend, startDate = endDate - 6 days (gives 7 days total)
+        const hasBackendDatesFor7 = dashboardInfo?.startDate && dashboardInfo?.endDate;
+        const backendEndDateFor7 = hasBackendDatesFor7 ? new Date(dashboardInfo.endDate) : subDays(today, 1);
         const last7Range = {
-          startDate: subDays(today, 7), // 6 days before yesterday
-          endDate: subDays(today, 1),   // yesterday
+          startDate: subDays(backendEndDateFor7, 6), // 6 days before backend endDate
+          endDate: backendEndDateFor7,               // backend endDate
           key: 'selection',
         };
         setSelectedRange(last7Range);
@@ -187,7 +197,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         // Set calendar mode to last7
         dispatch(setCalendarMode('last7'));
         
-        // Make API call with last 7 days range
+        // Make API call with last 7 days range (relative to backend endDate)
         await applyDateRange(last7Range, 'last7');
         break;
       case 'custom':
@@ -219,6 +229,21 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
 
       // Update Redux store with the complete dashboard data
       dispatch(setDashboardInfo(dashboardData));
+      
+      // PPC metrics are now filtered locally in Dashboard
+      // When calendarMode is 'default', Dashboard will use ppcSummaryLatest
+      console.log('=== Calendar: Last 30 days selected, Dashboard will use latest PPC metrics ===');
+      
+      // Update the calendar's selected range to match the actual backend dates
+      // This ensures the calendar displays the correct date range based on when data was actually fetched
+      if (dashboardData?.startDate && dashboardData?.endDate) {
+        setSelectedRange({
+          startDate: new Date(dashboardData.startDate),
+          endDate: new Date(dashboardData.endDate),
+          key: 'selection',
+        });
+        console.log('Calendar: Updated selectedRange from backend dates:', dashboardData.startDate, 'to', dashboardData.endDate);
+      }
       
       // Dispatch brand name if available
       if (dashboardData?.Brand) {
@@ -286,6 +311,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         calendarMode: calendarMode, // Use determined calendar mode
         createdAccountDate: createdAccountDate
       }));
+      
+      // PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
+      // No need for separate API call - Dashboard will recalculate when dates change
+      console.log('=== Calendar: Date range updated, Dashboard will filter PPC metrics locally ===');
+      console.log('startDate:', formattedStartDate);
+      console.log('endDate:', formattedEndDate);
 
     } catch (error) {
       console.error('Calendar API Error:', error);
