@@ -5,6 +5,7 @@ import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCog
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
+import { parseLocalDate } from '../../utils/dateUtils';
 
 // Currency symbol mapping by country code
 const CURRENCY_SYMBOLS = {
@@ -206,8 +207,8 @@ const ProfitTable = ({ setSuggestionsData }) => {
             // Step 1: Filter by date range if applicable
             let filteredData = asinWiseSales;
             if (isDateRangeSelected && hasDateData) {
-                const start = new Date(startDate);
-                const end = new Date(endDate);
+                const start = parseLocalDate(startDate);
+                const end = parseLocalDate(endDate);
                 start.setHours(0, 0, 0, 0);
                 end.setHours(23, 59, 59, 999);
                 
@@ -512,7 +513,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   {isDateRangeSelected && (
                     <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                       <Calendar className="w-3 h-3 inline mr-1" />
-                      {new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {parseLocalDate(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {parseLocalDate(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </span>
                   )}
                 </p>

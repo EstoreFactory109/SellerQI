@@ -24,6 +24,8 @@ import {
   selectHasFilteredUnitsSold
 } from '../redux/slices/PPCUnitsSoldSlice.js';
 
+import { parseLocalDate } from '../utils/dateUtils.js';
+
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
   const yesterday = new Date();
@@ -283,11 +285,8 @@ const PPCDashboard = () => {
       if (!item.date) return false;
       
       const itemDate = new Date(item.date);
-      //console.log('itemDate', itemDate);
-      const start = new Date(startDate);
-      //console.log('start', start);
-      const end = new Date(endDate);
-      //console.log('end', end);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
@@ -327,8 +326,8 @@ const PPCDashboard = () => {
       if (!item.date) return true;
       
       const itemDate = new Date(item.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
@@ -360,8 +359,8 @@ const PPCDashboard = () => {
       if (!item.date) return true;
       
       const itemDate = new Date(item.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
@@ -393,8 +392,8 @@ const PPCDashboard = () => {
       if (!item.date) return true;
       
       const itemDate = new Date(item.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
@@ -562,8 +561,8 @@ const PPCDashboard = () => {
     // Filter PPCMetrics dateWiseMetrics based on selected date range
     let filteredPPCMetricsData = ppcDateWiseMetrics;
     if (isDateRangeSelected && ppcDateWiseMetrics.length > 0) {
-      const startDate = new Date(info.startDate);
-      const endDate = new Date(info.endDate);
+      const startDate = parseLocalDate(info.startDate);
+      const endDate = parseLocalDate(info.endDate);
       
       filteredPPCMetricsData = ppcDateWiseMetrics.filter(item => {
         const itemDate = new Date(item.date);
@@ -1077,8 +1076,8 @@ const PPCDashboard = () => {
   const filteredPPCMetricsForKPI = useMemo(() => {
     if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
     
-    const startDate = new Date(info.startDate);
-    const endDate = new Date(info.endDate);
+    const startDate = parseLocalDate(info.startDate);
+    const endDate = parseLocalDate(info.endDate);
     
     return ppcDateWiseMetrics.filter(item => {
       const itemDate = new Date(item.date);
@@ -1153,11 +1152,11 @@ const PPCDashboard = () => {
     let unitsSold = 0;
     
     // Helper to get units from dashboardPPCUnitsSold with date filtering
-    const getUnitsFromDashboardData = (startDate, endDate) => {
+    const getUnitsFromDashboardData = (startDateStr, endDateStr) => {
       if (!dashboardPPCUnitsSold?.dateWiseUnits?.length) return 0;
       
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDateStr);
+      const end = parseLocalDate(endDateStr);
       start.setHours(0, 0, 0, 0);
       end.setHours(23, 59, 59, 999);
       
@@ -1353,7 +1352,7 @@ const PPCDashboard = () => {
     // Add Search Terms Data - Uses date-filtered data
     if (filteredSearchTermsData.length > 0) {
       const dateRangeLabel = (info?.startDate && info?.endDate) 
-        ? ` (${new Date(info.startDate).toLocaleDateString()} - ${new Date(info.endDate).toLocaleDateString()})` 
+        ? ` (${parseLocalDate(info.startDate).toLocaleDateString()} - ${parseLocalDate(info.endDate).toLocaleDateString()})` 
         : ' (Last 30 Days)';
       csvData.push([`All Search Terms${dateRangeLabel} - Total: ${filteredSearchTermsData.length} terms`]);
       csvData.push(['Date', 'Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
@@ -1449,22 +1448,9 @@ const PPCDashboard = () => {
                 >
                   <img src={calenderIcon} alt='' className='w-4 h-4' />
                   <span className='text-sm font-medium text-gray-700'>
-                    {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
-                      ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                      : (() => {
-                          const actualEndDate = getActualEndDate();
-                          const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                          if (info?.calendarMode === 'last7') {
-                            const startDate = new Date(actualEndDate);
-                            startDate.setDate(actualEndDate.getDate() - 6);
-                            return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-                          } else {
-                            // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
-                            const startDate = new Date(actualEndDate);
-                            startDate.setDate(actualEndDate.getDate() - 30);
-                            return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-                          }
-                        })()
+                    {info?.startDate && info?.endDate
+                      ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : 'Select Date Range'
                     }
                   </span>
                 </button>

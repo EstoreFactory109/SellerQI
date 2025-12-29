@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../redux/slices/PPCMetricsSlice.js'
+import { parseLocalDate } from '../utils/dateUtils.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -49,8 +50,8 @@ const Dashboard = () => {
     }
     
     // Filter dateWiseMetrics to selected date range
-    const startDate = new Date(dashboardInfo.startDate);
-    const endDate = new Date(dashboardInfo.endDate);
+    const startDate = parseLocalDate(dashboardInfo.startDate);
+    const endDate = parseLocalDate(dashboardInfo.endDate);
     startDate.setHours(0, 0, 0, 0);
     endDate.setHours(23, 59, 59, 999);
     
@@ -109,8 +110,8 @@ const Dashboard = () => {
     // Only filter if custom date range is selected
     if (!isDateRangeSelected) return adsKeywordsPerformanceDataRaw;
     
-    const startDate = new Date(dashboardInfo?.startDate);
-    const endDate = new Date(dashboardInfo?.endDate);
+    const startDate = parseLocalDate(dashboardInfo?.startDate);
+    const endDate = parseLocalDate(dashboardInfo?.endDate);
     startDate.setHours(0, 0, 0, 0);
     endDate.setHours(23, 59, 59, 999);
     
@@ -158,13 +159,22 @@ const Dashboard = () => {
       });
     };
 
-    if (calendarMode === 'custom' && dashboardInfo?.startDate && dashboardInfo?.endDate) {
-      // Show custom date range
-      const customPeriod = `${formatDate(dashboardInfo.startDate)} - ${formatDate(dashboardInfo.endDate)}`;
-      setSelectedPeriod(customPeriod);
-      console.log('Dashboard showing custom range:', customPeriod);
+    // Always use the actual dates from the database if available
+    if (dashboardInfo?.startDate && dashboardInfo?.endDate) {
+      // Parse date strings as local dates (YYYY-MM-DD format)
+      const parseLocalDate = (dateString) => {
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      };
+      
+      const startDateObj = parseLocalDate(dashboardInfo.startDate);
+      const endDateObj = parseLocalDate(dashboardInfo.endDate);
+      
+      const period = `${formatDate(startDateObj)} - ${formatDate(endDateObj)}`;
+      setSelectedPeriod(period);
+      console.log('Dashboard showing date range from database:', period);
     } else if (calendarMode === 'last7') {
-      // Show actual date range for Last 7 Days
+      // Fallback: Show actual date range for Last 7 Days
       const actualEndDate = getActualEndDate();
       const startDate = new Date(actualEndDate);
       startDate.setDate(actualEndDate.getDate() - 6);
@@ -172,8 +182,7 @@ const Dashboard = () => {
       setSelectedPeriod(period);
       console.log('Dashboard showing Last 7 Days:', period);
     } else {
-      // Show actual date range for Last 30 Days (30 days before yesterday)
-      // Due to 24-hour data delay, we show data from 30 days ago to yesterday
+      // Fallback: Show actual date range for Last 30 Days
       const actualEndDate = getActualEndDate();
       const startDate = new Date(actualEndDate);
       startDate.setDate(actualEndDate.getDate() - 30);

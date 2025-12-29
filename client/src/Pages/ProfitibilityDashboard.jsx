@@ -10,6 +10,7 @@ import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
+import { parseLocalDate } from '../utils/dateUtils.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js';
 
@@ -184,8 +185,8 @@ const ProfitabilityDashboard = () => {
       if (!item.date) return false;
       
       const itemDate = new Date(item.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
@@ -310,8 +311,8 @@ const ProfitabilityDashboard = () => {
       
       if (!isDateRangeSelected) return 0;
       
-      const start = new Date(info.startDate);
-      const end = new Date(info.endDate);
+      const start = parseLocalDate(info.startDate);
+      const end = parseLocalDate(info.endDate);
       
       return ppcDateWiseMetrics
         .filter(item => {
@@ -1196,22 +1197,9 @@ const ProfitabilityDashboard = () => {
                     >
                       <Calendar className="w-4 h-4 text-gray-600" />
                       <span className='text-sm font-medium text-gray-700'>
-                        {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
-                          ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                          : (() => {
-                              const actualEndDate = getActualEndDate();
-                              const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                              if (info?.calendarMode === 'last7') {
-                                const startDate = new Date(actualEndDate);
-                                startDate.setDate(actualEndDate.getDate() - 6);
-                                return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-                              } else {
-                                // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
-                                const startDate = new Date(actualEndDate);
-                                startDate.setDate(actualEndDate.getDate() - 30);
-                                return `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-                              }
-                            })()
+                        {info?.startDate && info?.endDate
+                          ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                          : 'Select Date Range'
                         }
                       </span>
                     </motion.button>

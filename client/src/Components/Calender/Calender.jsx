@@ -19,6 +19,7 @@ import {
   subDays,
   subMonths,
 } from 'date-fns';
+import { parseLocalDate } from '../../utils/dateUtils.js';
 
 export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
   const navigate=useNavigate();
@@ -49,8 +50,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       // Custom range is selected - initialize with those dates
       return {
         selectedRange: {
-          startDate: new Date(dashboardInfo.startDate),
-          endDate: new Date(dashboardInfo.endDate),
+          startDate: parseLocalDate(dashboardInfo.startDate),
+          endDate: parseLocalDate(dashboardInfo.endDate),
           key: 'selection',
         },
         thirtyDaysActive: false,
@@ -61,7 +62,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       // Last 7 days: Use backend's endDate as reference (no calculation from current date)
       // startDate = endDate - 6 days (gives 7 days total)
       const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
-      const backendEndDate = hasBackendDates ? new Date(dashboardInfo.endDate) : subDays(new Date(), 1);
+      const backendEndDate = hasBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(new Date(), 1);
       return {
         selectedRange: {
           startDate: subDays(backendEndDate, 6), // 6 days before backend endDate
@@ -79,8 +80,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
       return {
         selectedRange: {
-          startDate: hasBackendDates ? new Date(dashboardInfo.startDate) : subDays(new Date(), 31),
-          endDate: hasBackendDates ? new Date(dashboardInfo.endDate) : subDays(new Date(), 1),
+          startDate: hasBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(new Date(), 31),
+          endDate: hasBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(new Date(), 1),
           key: 'selection',
         },
         thirtyDaysActive: true,
@@ -166,8 +167,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         // This prevents showing incorrect dates before the API call returns
         const hasExistingBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
         const defaultRange = {
-          startDate: hasExistingBackendDates ? new Date(dashboardInfo.startDate) : subDays(today, 31),
-          endDate: hasExistingBackendDates ? new Date(dashboardInfo.endDate) : subDays(today, 1),
+          startDate: hasExistingBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(today, 31),
+          endDate: hasExistingBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(today, 1),
           key: 'selection',
         };
         setSelectedRange(defaultRange);
@@ -185,7 +186,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         // Last 7 days: Use backend's endDate as reference (no calculation from current date)
         // endDate = from backend, startDate = endDate - 6 days (gives 7 days total)
         const hasBackendDatesFor7 = dashboardInfo?.startDate && dashboardInfo?.endDate;
-        const backendEndDateFor7 = hasBackendDatesFor7 ? new Date(dashboardInfo.endDate) : subDays(today, 1);
+        const backendEndDateFor7 = hasBackendDatesFor7 ? parseLocalDate(dashboardInfo.endDate) : subDays(today, 1);
         const last7Range = {
           startDate: subDays(backendEndDateFor7, 6), // 6 days before backend endDate
           endDate: backendEndDateFor7,               // backend endDate
@@ -238,8 +239,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       // This ensures the calendar displays the correct date range based on when data was actually fetched
       if (dashboardData?.startDate && dashboardData?.endDate) {
         setSelectedRange({
-          startDate: new Date(dashboardData.startDate),
-          endDate: new Date(dashboardData.endDate),
+          startDate: parseLocalDate(dashboardData.startDate),
+          endDate: parseLocalDate(dashboardData.endDate),
           key: 'selection',
         });
         console.log('Calendar: Updated selectedRange from backend dates:', dashboardData.startDate, 'to', dashboardData.endDate);

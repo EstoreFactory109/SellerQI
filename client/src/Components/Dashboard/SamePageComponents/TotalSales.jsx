@@ -7,6 +7,7 @@ import axios from 'axios';
 import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
+import { parseLocalDate } from '../../../utils/dateUtils.js';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
 
 const formatDateWithOrdinal = (dateString) => {
@@ -100,8 +101,8 @@ const TotalSales = () => {
     
     if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
     
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
     
     return ppcDateWiseMetrics.filter(item => {
       const itemDate = new Date(item.date);
@@ -120,8 +121,8 @@ const TotalSales = () => {
       if (!item.date) return false;
       
       const itemDate = new Date(item.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       
       return itemDate >= start && itemDate <= end;
     });
