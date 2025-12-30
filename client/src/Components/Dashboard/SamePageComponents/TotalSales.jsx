@@ -12,13 +12,17 @@ import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, sele
 
 const formatDateWithOrdinal = (dateString) => {
   if (!dateString) return 'N/A';
-  const date = new Date(dateString);
-  const day = date.getDate();
-  const month = date.toLocaleDateString('en-US', { month: 'long' });
   
-  const getOrdinalSuffix = (day) => {
-    if (day > 3 && day < 21) return 'th';
-    switch (day % 10) {
+  // Parse as local date to avoid timezone issues
+  const [year, month, day] = dateString.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  
+  const dayNum = date.getDate();
+  const monthName = date.toLocaleDateString('en-US', { month: 'long' });
+  
+  const getOrdinalSuffix = (d) => {
+    if (d > 3 && d < 21) return 'th';
+    switch (d % 10) {
       case 1: return 'st';
       case 2: return 'nd';
       case 3: return 'rd';
@@ -26,7 +30,7 @@ const formatDateWithOrdinal = (dateString) => {
     }
   };
   
-  return `${day}${getOrdinalSuffix(day)} ${month}`;
+  return `${dayNum}${getOrdinalSuffix(dayNum)} ${monthName}`;
 };
 
 const TotalSales = () => {
@@ -244,8 +248,16 @@ const TotalSales = () => {
     return yesterday;
   };
 
-  // Calculate display dates consistently with the dashboard
+  // Get display dates directly from database/Redux state
   const getDisplayDates = () => {
+    // Always use the dates from Redux state (database) if available
+    if (startDate && endDate) {
+      return {
+        startDate: startDate,
+        endDate: endDate
+      };
+    }
+    
     // If using filtered data with explicit date range, use those dates
     if (useFilteredData && filteredData?.dateRange?.startDate && filteredData?.dateRange?.endDate) {
       return {
@@ -254,19 +266,13 @@ const TotalSales = () => {
       };
     }
     
-    // For default mode, calculate dates accounting for 24-hour data delay
+    // Fallback: calculate dates (should rarely happen)
     const actualEndDate = getActualEndDate();
-    const startDate = new Date(actualEndDate);
-    
-    if (calendarMode === 'last7') {
-      startDate.setDate(actualEndDate.getDate() - 6);
-    } else {
-      // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
-      startDate.setDate(actualEndDate.getDate() - 30);
-    }
+    const calcStartDate = new Date(actualEndDate);
+    calcStartDate.setDate(actualEndDate.getDate() - 30);
     
     return {
-      startDate: startDate.toISOString().split('T')[0],
+      startDate: calcStartDate.toISOString().split('T')[0],
       endDate: actualEndDate.toISOString().split('T')[0]
     };
   };
