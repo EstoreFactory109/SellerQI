@@ -74,7 +74,7 @@ const PackageRouteWrapper = ({ children }) => {
   // Handle redirect from base route only
   React.useEffect(() => {
     if (!user) return;
-    
+
     // Always redirect from base route to dashboard
     // LITE users will see the upgrade overlay on dashboard
     if (location.pathname === '/seller-central-checker') {
@@ -100,13 +100,13 @@ const PackageRouteWrapper = ({ children }) => {
 
   // Render
   if (shouldShowOverlay) {
-    return (
+  return (
       <UpgradeRequiredOverlay>
-        {children}
+      {children}
       </UpgradeRequiredOverlay>
     );
   }
-
+      
   return <>{children}</>;
 };
 

@@ -72,7 +72,7 @@ function getQueueRedisConnection() {
         // Use local Redis (default - more reliable for BullMQ)
         defaultHost = process.env.QUEUE_REDIS_HOST || 'localhost';
         defaultPort = process.env.QUEUE_REDIS_PORT 
-            ? parseInt(process.env.QUEUE_REDIS_PORT, 10)
+        ? parseInt(process.env.QUEUE_REDIS_PORT, 10)
             : 6379;
         username = undefined;
         password = undefined;

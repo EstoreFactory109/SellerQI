@@ -150,11 +150,11 @@ async function addIntegrationJob(userId, country, region) {
             
             if (finishedOn && finishedOn >= twoHoursAgo) {
                 logger.info(`[IntegrationQueue] Job completed recently for user ${userId}, ${country}-${region}. Wait before re-analysing.`);
-                return {
-                    jobId: customJobId,
-                    isExisting: true,
-                    state: 'completed'
-                };
+            return {
+                jobId: customJobId,
+                isExisting: true,
+                state: 'completed'
+            };
             }
             
             // Job is older than 2 hours, remove it and allow new job
