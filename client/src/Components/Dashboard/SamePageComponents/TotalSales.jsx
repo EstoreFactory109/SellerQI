@@ -75,7 +75,7 @@ const TotalSales = () => {
 
       setLoading(true);
       try {
-        let periodType = calendarMode;
+        let periodType = calendarMode; // last30, last7, custom
         let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
         
         // Include startDate and endDate for both 'custom' and 'last7' modes
