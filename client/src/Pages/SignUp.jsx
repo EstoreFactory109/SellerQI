@@ -38,7 +38,7 @@ const defaultCountryData = {
 };
 
 const SignUp = () => {
-  const [plans, setPlans] = useState("PRO-Trial");
+  const [plans, setPlans] = useState("PRO-Trial"); // Default to PRO-Trial, can be "PRO-Trial" or "PRO"
   const [formData, setFormData] = useState({
     firstname: '',
     lastname: '',
@@ -93,6 +93,9 @@ const SignUp = () => {
     const plan = params.get("intended_package");
     if(plan){
       setPlans(plan);
+    } else {
+      // No extension in URL - user will choose plan on pricing page after signup
+      setPlans(null);
     }
   }, []);
 
@@ -186,19 +189,45 @@ const SignUp = () => {
     if (!validateForm()) return;
     setLoading(true);
     try {
+      // Determine package settings based on selected plan
+      // If no plan selected (plans is null), user will choose on pricing page after signup
+      // PRO-Trial: Free 7-day trial with PRO features
+      // PRO: Requires payment after email verification
+      // AGENCY: Requires payment after email verification
+      const isPROTrial = plans === "PRO-Trial";
+      const isPRO = plans === "PRO";
+      const isAGENCY = plans === "AGENCY";
+      const noPlanSelected = plans === null || plans === undefined;
+      
+      // Determine packageType based on plan
+      // If no plan selected, default to LITE (user will choose on pricing page)
+      let packageType = "LITE";
+      if (isAGENCY) {
+        packageType = "AGENCY";
+      } else if (isPRO || isPROTrial) {
+        packageType = "PRO";
+      }
+      
       const formDataWithTerms = {
         ...formData,
         phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
-        packageType: plans=="PRO-Trial" ? "PRO" : plans=="LITE",
-        isInTrialPeriod: plans=="PRO-Trial" ? true : false,
-        subscriptionStatus: plans=="PRO-Trial" ? "active" : "inactive",
-        trialEndsDate: plans=="PRO-Trial" ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
+        packageType: packageType, // LITE if no plan, PRO for PRO-Trial/PRO, AGENCY for AGENCY
+        isInTrialPeriod: isPROTrial, // Only true for PRO-Trial
+        subscriptionStatus: noPlanSelected ? "active" : (isPROTrial ? "active" : "inactive"), // LITE is active, PRO/AGENCY needs payment first
+        trialEndsDate: isPROTrial ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null, // 7 days for trial
+        intendedPackage: plans, // Store the intended package for post-verification flow (null if no plan)
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
       if (response.status === 201) {
         setLoading(false);
-        navigate('/verify-email', { state: { email: formData.email, phone: `${countryCode} ${formData.phone}` } });
+        // Store intended package in localStorage for email verification page (null if no plan)
+        if (plans) {
+          localStorage.setItem('intendedPackage', plans);
+        } else {
+          localStorage.removeItem('intendedPackage'); // Clear if exists
+        }
+        navigate('/verify-email', { state: { email: formData.email, phone: `${countryCode} ${formData.phone}`, intendedPackage: plans } });
       }
     } catch (error) {
       setLoading(false);
@@ -218,21 +247,47 @@ const SignUp = () => {
 
     setGoogleLoading(true);
     try {
-      const packageType = plans=="PRO-Trial" ? "PRO" : plans=="LITE";
-      const isInTrialPeriod = plans=="PRO-Trial" ? true : false;
-      const subscriptionStatus = plans=="PRO-Trial" ? "active" : "inactive";
-      const trialEndsDate = plans=="PRO-Trial" ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null;
-        const response = await googleAuthService.handleGoogleSignUp(packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate);
+      // Determine package settings based on selected plan
+      const isPROTrial = plans === "PRO-Trial";
+      const isAGENCY = plans === "AGENCY";
+      const noPlanSelected = plans === null || plans === undefined;
+      
+      // Determine packageType based on plan
+      // If no plan selected, default to LITE (user will choose on pricing page)
+      let packageType = "LITE";
+      if (isAGENCY) {
+        packageType = "AGENCY";
+      } else if (isPROTrial || plans === "PRO") {
+        packageType = "PRO";
+      }
+      
+      const isInTrialPeriod = isPROTrial;
+      const subscriptionStatus = noPlanSelected ? "active" : (isPROTrial ? "active" : "inactive");
+      const trialEndsDate = isPROTrial ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null;
+      
+      const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
         
-        if (response.status === 200) {
+        if (response.status === 200 || response.status === 201) {
           // Clear any cached auth state to force fresh checks
           clearAuthCache();
           // Store auth information
           localStorage.setItem("isAuth", true);
-          dispatch(loginSuccess(response.data.data));
+          dispatch(loginSuccess(response.data.data || response.data));
           
-          // Redirect to pricing page for plan selection
+          // If no plan selected, redirect to pricing page
+          if (noPlanSelected) {
           navigate('/pricing');
+          } else if (isPROTrial) {
+            // PRO-Trial: Go directly to connect-to-amazon
+            navigate('/connect-to-amazon');
+          } else {
+            // PRO/AGENCY (paid): Go to Stripe payment
+            // Store intended package and redirect to payment
+            localStorage.setItem('intendedPackage', plans);
+            // Import stripeService and redirect to payment
+            const stripeService = (await import('../services/stripeService.js')).default;
+            await stripeService.createCheckoutSession(packageType);
+          }
           
         } else {
             // Clear any cached auth state to force fresh checks

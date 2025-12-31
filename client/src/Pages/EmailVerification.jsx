@@ -5,6 +5,7 @@ import { Mail, Clock, RotateCcw, ArrowRight, Loader2 } from 'lucide-react';
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
 import { clearAuthCache } from '../utils/authCoordinator.js';
+import stripeService from '../services/stripeService.js';
 
 
 const OtpVerification = () => {
@@ -12,7 +13,7 @@ const OtpVerification = () => {
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const location = useLocation();
-  const { email, phone } = location.state || {};
+  const { email, phone, intendedPackage: stateIntendedPackage } = location.state || {};
   const [loading, setLoading] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(300); // 5 minutes in seconds
   const [resendCooldown, setResendCooldown] = useState(40); // 40 seconds cooldown
@@ -25,6 +26,12 @@ const OtpVerification = () => {
   const five = useRef(null);
   
   const navigate = useNavigate();
+  
+  // Get intended package from state or localStorage
+  // If null/undefined, user will choose plan on pricing page
+  const intendedPackage = stateIntendedPackage !== null && stateIntendedPackage !== undefined 
+    ? stateIntendedPackage 
+    : localStorage.getItem('intendedPackage');
 
   useEffect(() => {
     one.current.focus();
@@ -138,8 +145,34 @@ const OtpVerification = () => {
         clearAuthCache();
         localStorage.setItem("isAuth", true);
         
-        // After email verification, always redirect to pricing page for plan selection
+        // Redirect based on intended package
+        // If no intended package: Redirect to pricing page to choose plan
+        // PRO-Trial: Go directly to connect-to-amazon (free trial)
+        // PRO: Go to Stripe payment page (requires payment)
+        // AGENCY: Go to Stripe payment page (requires payment)
+        if (!intendedPackage || intendedPackage === 'null' || intendedPackage === 'undefined') {
+          // No plan selected - redirect to pricing page
+          localStorage.removeItem('intendedPackage');
+          navigate("/pricing");
+        } else if (intendedPackage === 'PRO' || intendedPackage === 'AGENCY') {
+          // Clear intended package from localStorage after storing for post-payment
+          const packageToCheckout = intendedPackage;
+          localStorage.removeItem('intendedPackage');
+          // Redirect to Stripe checkout for payment
+          try {
+            await stripeService.createCheckoutSession(packageToCheckout);
+            // stripeService will handle the redirect to Stripe
+          } catch (stripeError) {
+            console.error('Stripe checkout error:', stripeError);
+            setErrorMessage('Failed to initiate payment. Please try again.');
+            setLoading(false);
+            return;
+          }
+        } else {
+          // PRO-Trial: Go directly to connect-to-amazon
+          localStorage.removeItem('intendedPackage');
         navigate("/connect-to-amazon");
+        }
       }
     } catch (error) {
       console.error("Verification failed", error);

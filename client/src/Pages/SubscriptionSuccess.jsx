@@ -23,26 +23,20 @@ export default function SubscriptionSuccess() {
                         setPlanType(result.data.planType);
                         setStatus('success');
                         
-                        // Clear any intended plan from localStorage
+                        // Clear any intended plan/package from localStorage
                         localStorage.removeItem('intendedPlan');
+                        localStorage.removeItem('intendedPackage');
+                        localStorage.removeItem('previousPlan');
                         
-                        // Check previous plan to determine redirect
-                        const previousPlan = localStorage.getItem('previousPlan');
-                        
-                        // Redirect based on upgrade path
+                        // Redirect based on plan type
                         setTimeout(() => {
                             if (result.data.planType === 'AGENCY') {
                                 // User purchased AGENCY plan, redirect to client registration
-                                localStorage.removeItem('previousPlan');
                                 navigate('/agency-client-registration');
-                            } else if (previousPlan === 'LITE' || !previousPlan) {
-                                // User upgraded from LITE or new user, redirect to connect-to-amazon
-                                localStorage.removeItem('previousPlan');
-                                navigate('/connect-to-amazon');
                             } else {
-                                // User already had paid plan, redirect to dashboard
-                                localStorage.removeItem('previousPlan');
-                                navigate('/seller-central-checker/dashboard');
+                                // PRO plan: Always redirect to connect-to-amazon for new users
+                                // This is where they connect their Amazon account
+                                navigate('/connect-to-amazon');
                             }
                         }, 3000);
                     } else {
@@ -53,25 +47,15 @@ export default function SubscriptionSuccess() {
                         }, 2000);
                     }
                 } else {
-                    // No session ID, this might be from LITE plan selection
+                    // No session ID, redirect to dashboard
                     setStatus('success');
                     // Clear any intended plan from localStorage
                     localStorage.removeItem('intendedPlan');
+                    localStorage.removeItem('intendedPackage');
                     
-                    // Check previous plan to determine redirect (fallback case)
-                    const previousPlan = localStorage.getItem('previousPlan');
-                    
-                    // Redirect after a short delay
+                    // Redirect to connect-to-amazon
                     setTimeout(() => {
-                        if (previousPlan === 'LITE' || !previousPlan) {
-                            // User upgraded from LITE or new user, redirect to connect-to-amazon
-                            localStorage.removeItem('previousPlan');
                             navigate('/connect-to-amazon');
-                        } else {
-                            // User already had paid plan, redirect to dashboard
-                            localStorage.removeItem('previousPlan');
-                            navigate('/seller-central-checker/dashboard');
-                        }
                     }, 3000);
                 }
                 

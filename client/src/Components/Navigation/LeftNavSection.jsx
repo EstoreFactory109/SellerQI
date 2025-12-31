@@ -129,7 +129,7 @@ const LeftNavSection = () => {
     const dropdownItemClass = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-300";
 
     return (
-        <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 hidden lg:block backdrop-blur-sm flex flex-col overflow-hidden">
+        <aside className="h-screen w-[240px] xl:w-[280px] flex-shrink-0 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 hidden lg:flex lg:flex-col backdrop-blur-sm overflow-hidden">
             {/* Main Container - Top and Bottom Sections */}
             <div className="flex flex-col justify-between h-full min-h-0">
                 {/* Top Section - Logo and Navigation */}
@@ -613,6 +613,28 @@ const LeftNavSection = () => {
                                             </motion.div>
                                         )}
 
+                                        {/* Plans & Billing - Available for all users */}
+                                        <motion.div
+                                            initial={{ y: -10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ delay: 0.17, duration: 0.15 }}
+                                        >
+                                            <NavLink
+                                                to="/seller-central-checker/settings?tab=plans-billing"
+                                                className={() =>
+                                                    `${dropdownItemClass} ${
+                                                        isSettingsPage && currentSettingsTab === 'plans-billing'
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                    }`
+                                                }
+                                            >
+                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
+                                                Plans & Billing
+                                            </NavLink>
+                                        </motion.div>
+
                                         {/* Admin Section - Only for AGENCY users */}
                                         {isAgencyUser && (
                                             <>
@@ -735,7 +757,7 @@ const LeftNavSection = () => {
                             <div className="p-1 rounded-lg transition-colors duration-300 bg-white/20 group-hover:bg-white/30">
                                 <Calendar className="w-4 h-4 text-white"/>
                             </div>
-                            <span className="font-semibold flex-1">Book a Call</span>
+                            <span className="font-semibold flex-1">Need Help?</span>
                             <div className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse"></div>
                         </NavLink>
                     </div>

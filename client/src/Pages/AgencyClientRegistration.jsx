@@ -14,6 +14,8 @@ import {
 
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
+import { loginSuccess } from '../redux/slices/authSlice';
 
 const AgencyClientRegistration = () => {
   const [formData, setFormData] = useState({
@@ -28,6 +30,7 @@ const AgencyClientRegistration = () => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
+  const dispatch = useDispatch();
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -90,7 +93,30 @@ const AgencyClientRegistration = () => {
       );
       
       if (response.status === 201) {
-        // Successfully registered client, redirect to connect-to-amazon
+        const responseData = response.data.data;
+        
+        // Store admin token and info in localStorage (for agency admin access)
+        if (responseData.adminToken) {
+          localStorage.setItem('isAdminAuth', 'true');
+          localStorage.setItem('adminAccessType', responseData.adminAccessType || 'enterpriseAdmin');
+          localStorage.setItem('adminId', responseData.adminId);
+        }
+        
+        // Set user as authenticated (cookies are already set for the client)
+        localStorage.setItem('isAuth', 'true');
+        
+        // Update Redux state with client info (the user will now operate as the client)
+        // The cookies set by the backend will authenticate as the client
+        dispatch(loginSuccess({
+          _id: responseData.clientId,
+          firstName: responseData.firstName,
+          lastName: responseData.lastName,
+          email: responseData.email,
+          packageType: 'PRO', // Clients get PRO package
+          isVerified: true
+        }));
+        
+        // Redirect to connect-to-amazon (as the client)
         navigate('/connect-to-amazon');
       }
     } catch (error) {

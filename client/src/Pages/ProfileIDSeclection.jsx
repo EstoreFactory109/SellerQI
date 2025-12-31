@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Globe, ChevronLeft, ChevronRight, User, Check } from 'lucide-react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 
@@ -17,6 +17,10 @@ const ProfileIDSelection = () => {
   const [dataLoading, setDataLoading] = useState(true); // Loading state for initial data fetch
   
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Check if profile data was passed via navigation state (pre-fetched)
+  const prefetchedProfileData = location.state?.profileData;
   
   const ITEMS_PER_PAGE = 10;
 
@@ -31,12 +35,26 @@ const ProfileIDSelection = () => {
   const selectedBaseUri = BASE_URIS[region] || BASE_URIS['NA']; // Fallback to NA if invalid region
 
   useEffect(() => {
-    const fetchProfileData = async () => {
+    let isMounted = true;
+    
+    // If we have prefetched data from navigation state, use it immediately
+    if (prefetchedProfileData && Array.isArray(prefetchedProfileData) && prefetchedProfileData.length > 0) {
+      console.log('Using prefetched profile data:', prefetchedProfileData.length, 'profiles');
+      setProfileData(prefetchedProfileData);
+      setDataLoading(false);
+      return;
+    }
+    
+    const fetchProfileData = async (retryCount = 0) => {
+      if (!isMounted) return;
+      
       setDataLoading(true); // Start loading
       try {
         const response = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/profile/getProfileId`, {
           withCredentials: true
         });
+        
+        if (!isMounted) return;
         
         console.log('API Response:', response);
         console.log('Response data:', response.data);
@@ -54,27 +72,63 @@ const ProfileIDSelection = () => {
               country: String(scope.countryCode || scope.country_code || scope.country || 'Unknown')
             }));
             setProfileData(profiles);
+            setDataLoading(false);
             console.log('Processed profiles:', profiles);
           } else {
             console.warn('No profile data found or data is not an array:', dataArray);
+            // If no data and we haven't retried yet, try again after a short delay
+            // This handles the race condition where tokens aren't saved yet
+            if (retryCount < 3) {
+              console.log(`Retrying fetch (attempt ${retryCount + 1}/3)...`);
+              setTimeout(() => fetchProfileData(retryCount + 1), 1500);
+              return;
+            }
             setProfileData([]);
+            setDataLoading(false);
           }
         } else {
           console.error('Invalid response status or no data:', response);
+          if (retryCount < 3) {
+            setTimeout(() => fetchProfileData(retryCount + 1), 1500);
+            return;
+          }
           setProfileData([]);
+          setDataLoading(false);
         }
       } catch (error) {
+        if (!isMounted) return;
+        
         console.error('Error fetching profile data:', error);
         console.error('Error response:', error.response);
+        
+        // Retry on certain errors (might be timing issue after redirect)
+        const status = error.response?.status;
+        if ((status === 400 || status === 404 || status === 401 || !status) && retryCount < 3) {
+          console.log(`Retrying fetch after error (attempt ${retryCount + 1}/3)...`);
+          setTimeout(() => fetchProfileData(retryCount + 1), 1500);
+          return;
+        }
+        
         setProfileData([]);
-        // You can replace this with your preferred notification method
+        setDataLoading(false);
+        // Only show alert after all retries are exhausted
+        if (retryCount >= 3) {
         alert('Failed to fetch profile data. Please try again.');
-      } finally {
-        setDataLoading(false); // Stop loading regardless of success or error
+        }
       }
     };
+    
+    // Only fetch if no prefetched data available
+    // Add a small delay before first fetch to ensure cookies are set after redirect
+    const initialDelay = setTimeout(() => {
     fetchProfileData();
-  }, []);
+    }, 300);
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(initialDelay);
+    };
+  }, [prefetchedProfileData]);
 
   const saveProfileId = async (profileId,currencyCode) => {
     setLoading(true);

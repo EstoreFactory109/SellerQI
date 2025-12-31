@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "dev": "nodemon server/index.js",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "worker": "node server/Services/BackgroundJobs/worker.js",
+    "integration-worker": "node server/Services/BackgroundJobs/integrationWorker.js"
   },
   "author": "",
   "license": "ISC",

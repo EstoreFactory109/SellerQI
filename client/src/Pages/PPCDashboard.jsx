@@ -1424,7 +1424,7 @@ const PPCDashboard = () => {
   };
 
   return (
-    <div className='min-h-screen w-full bg-gray-50/50'>
+    <div className='min-h-screen w-full bg-gray-50/50 overflow-x-hidden'>
       {/* Header Section */}
       <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
         <div className='px-4 lg:px-6 py-4'>
@@ -1863,7 +1863,8 @@ const PPCDashboard = () => {
                         tip="This keyword performs well — consider raising bid by 15–20%."
                         icon="📈"
                       />
-                      <table className="w-full">
+                      <div className="overflow-x-auto">
+                      <table className="w-full min-w-[800px]">
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
@@ -1925,6 +1926,7 @@ const PPCDashboard = () => {
                           )}
                         </tbody>
                       </table>
+                      </div>
                       <TablePagination
                         currentPage={topPerformingPage}
                         totalPages={Math.ceil(topPerformingKeywords.length / itemsPerPage)}
@@ -1946,7 +1948,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Search terms that generated clicks but no conversions
                       </div>
-                      <table className="w-full">
+                      <div className="overflow-x-auto">
+                      <table className="w-full min-w-[800px]">
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
@@ -1984,6 +1987,7 @@ const PPCDashboard = () => {
                           )}
                         </tbody>
                       </table>
+                      </div>
                       <TablePagination
                         currentPage={searchTermsPage}
                         totalPages={Math.ceil(filteredSearchTerms.length / itemsPerPage)}
@@ -2005,7 +2009,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Performance insights from automatic targeting campaigns
                       </div>
-                      <table className="w-full">
+                      <div className="overflow-x-auto">
+                      <table className="w-full min-w-[700px]">
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
@@ -2047,6 +2052,7 @@ const PPCDashboard = () => {
                           )}
                         </tbody>
                       </table>
+                      </div>
                       <TablePagination
                         currentPage={autoCampaignPage}
                         totalPages={Math.ceil(autoCampaignInsights.length / itemsPerPage)}

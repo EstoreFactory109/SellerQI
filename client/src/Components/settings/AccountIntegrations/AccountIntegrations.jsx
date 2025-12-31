@@ -151,12 +151,46 @@ export default function AccountCards() {
                         <p className="text-sm text-gray-600">{account.brand || 'Amazon Seller'}</p>
                       </div>
                     </div>
-                    
-                    {/* Dynamic Status indicator */}
-                    <div className={`flex items-center gap-2 px-3 py-1.5 ${statusInfo.bgColor} ${statusInfo.color} rounded-full text-xs font-medium`}>
-                      <div className={`w-2 h-2 ${statusInfo.dotColor} rounded-full`}></div>
-                      {statusInfo.icon}
-                      <span className="whitespace-nowrap">{statusInfo.text}</span>
+                  </div>
+
+                  {/* Individual Connection Statuses */}
+                  <div className="space-y-2 mb-4">
+                    {/* Seller Account Status */}
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+                      account.SpAPIrefreshTokenStatus 
+                        ? 'bg-emerald-50 text-emerald-700' 
+                        : 'bg-red-50 text-red-700'
+                    }`}>
+                      <div className={`w-2 h-2 rounded-full ${
+                        account.SpAPIrefreshTokenStatus ? 'bg-emerald-500' : 'bg-red-500'
+                      }`}></div>
+                      {account.SpAPIrefreshTokenStatus ? (
+                        <CheckCircle className="w-3 h-3" />
+                      ) : (
+                        <AlertCircle className="w-3 h-3" />
+                      )}
+                      <span className="whitespace-nowrap">
+                        {account.SpAPIrefreshTokenStatus ? 'Seller Account Connected' : 'Seller Account Not Connected'}
+                      </span>
+                    </div>
+
+                    {/* Ads Account Status */}
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+                      account.AdsAPIrefreshTokenStatus 
+                        ? 'bg-emerald-50 text-emerald-700' 
+                        : 'bg-red-50 text-red-700'
+                    }`}>
+                      <div className={`w-2 h-2 rounded-full ${
+                        account.AdsAPIrefreshTokenStatus ? 'bg-emerald-500' : 'bg-red-500'
+                      }`}></div>
+                      {account.AdsAPIrefreshTokenStatus ? (
+                        <CheckCircle className="w-3 h-3" />
+                      ) : (
+                        <AlertCircle className="w-3 h-3" />
+                      )}
+                      <span className="whitespace-nowrap">
+                        {account.AdsAPIrefreshTokenStatus ? 'Ads Account Connected' : 'Ads Account Not Connected'}
+                      </span>
                     </div>
                   </div>
 

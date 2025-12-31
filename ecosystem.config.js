@@ -90,6 +90,39 @@ module.exports = {
             env_development: {
                 NODE_ENV: 'development'
             }
+        },
+        {
+            // Integration Worker - SEPARATE from scheduled workers
+            // Handles first-time Integration.getSpApiData() jobs
+            // Uses separate queue: 'user-integration'
+            name: 'integration-worker',
+            script: './server/Services/BackgroundJobs/integrationWorker.js',
+            instances: parseInt(process.env.INTEGRATION_WORKER_INSTANCES || '1', 10), // Default: 1 worker
+            exec_mode: 'cluster', // Run multiple instances if needed
+            env: {
+                NODE_ENV: 'production',
+                INTEGRATION_WORKER_CONCURRENCY: process.env.INTEGRATION_WORKER_CONCURRENCY || '2', // Jobs per worker
+            },
+            // Logging - separate log files
+            error_file: './logs/pm2-integration-worker-error.log',
+            out_file: './logs/pm2-integration-worker-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            // Auto-restart on crash
+            autorestart: true,
+            max_restarts: 10,
+            min_uptime: '10s',
+            // Memory limits (integration jobs are heavier)
+            max_memory_restart: '3G',
+            // Watch mode (disable in production)
+            watch: false,
+            // Environment variables
+            env_production: {
+                NODE_ENV: 'production'
+            },
+            env_development: {
+                NODE_ENV: 'development'
+            }
         }
     ]
 };

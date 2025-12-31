@@ -7,13 +7,13 @@ import TrialBanner from '../Components/TrialBanner/TrialBanner'
 const MainPagesLayout = () => {
 
   return (
-    <div className='flex min-h-screen'>
+    <div className='flex min-h-screen w-full overflow-x-hidden'>
         <LeftNavSection  />
         <LeftNavSectionForTablet/>
-        <section className='w-full h-[100vh] flex flex-col'>
+        <section className='flex-1 min-w-0 h-[100vh] flex flex-col overflow-x-hidden'>
             <TopNav/>
             <TrialBanner/>
-            <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ overscrollBehavior: 'contain' }}>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide" style={{ overscrollBehavior: 'contain' }}>
                 <div className="lg:pt-0 pt-[8vh]">
                     <Outlet/>
                 </div>

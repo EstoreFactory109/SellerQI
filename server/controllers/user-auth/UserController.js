@@ -22,12 +22,19 @@ const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage } = req.body;
     // console.log(firstname)
 
-    if (!firstname || !lastname || !phone || !email || !password || !packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate) {
+    // Validate required fields - trialEndsDate is only required for trial users
+    if (!firstname || !lastname || !phone || !email || !password || !packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
+    }
+
+    // If user is in trial period, trialEndsDate is required
+    if (isInTrialPeriod === true && !trialEndsDate) {
+        logger.error(new ApiError(400, "Trial end date is required for trial users"));
+        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
     }
 
     if (typeof allTermsAndConditionsAgreed !== 'boolean' || allTermsAndConditionsAgreed !== true) {
@@ -35,13 +42,13 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
 
-    /* const checkUserIfExists = await getUserByEmail(email);
- 
- 
+    // Check if user already exists
+    const checkUserIfExists = await getUserByEmail(email);
      if (checkUserIfExists) {
          logger.error(new ApiError(409, "User already exists"));
          return res.status(409).json(new ApiResponse(409, "", "User already exists"));
-     }*/
+    }
+
     let otp = generateOTP();
 
     if (!otp) {
@@ -63,18 +70,38 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
     }   */
 
-    let data = await createUser(firstname, lastname, phone, phone, email, password, otp, allTermsAndConditionsAgreed, "PRO", false, "active", trialEndsDate);
-    // console.log(data);
+    // Create user with proper package settings
+    // PRO-Trial: isInTrialPeriod=true, subscriptionStatus=active, trialEndsDate set
+    // PRO: isInTrialPeriod=false, subscriptionStatus=inactive (needs payment)
+    let data = await createUser(
+        firstname, 
+        lastname, 
+        phone, 
+        phone, 
+        email, 
+        password, 
+        otp, 
+        allTermsAndConditionsAgreed, 
+        packageType,           // PRO for both PRO-Trial and PRO
+        isInTrialPeriod,       // true for PRO-Trial, false for PRO
+        subscriptionStatus,    // active for PRO-Trial, inactive for PRO (pending payment)
+        trialEndsDate          // Date for PRO-Trial, null for PRO
+    );
 
     if (!data) {
         logger.error(new ApiError(500, "Internal server error in registering user"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in registering user"));
     }
 
-
+    logger.info(`User registered: ${email}, package: ${packageType}, isInTrialPeriod: ${isInTrialPeriod}, intendedPackage: ${intendedPackage || 'not specified'}`);
 
     res.status(201)
-        .json(new ApiResponse(201, "", "User registered successfully. OTP has been sent to your email address"));
+        .json(new ApiResponse(201, { 
+            email: email,
+            packageType: packageType,
+            isInTrialPeriod: isInTrialPeriod,
+            subscriptionStatus: subscriptionStatus
+        }, "User registered successfully. OTP has been sent to your email address"));
 
 })
 
@@ -157,9 +184,13 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
+        // Create admin token for the agency owner (to be stored in localStorage)
+        const AdminAccessToken = await createAccessToken(agencyOwnerId);
+
         const options = getHttpsCookieOptions();
 
-        // Set cookies to switch to client context
+        // Set cookies for the client (the user will operate as the client)
+        // Also return admin token in response for localStorage storage
         res.status(201)
             .cookie("IBEXAccessToken", AccessToken, options)
             .cookie("IBEXRefreshToken", RefreshToken, options)
@@ -167,7 +198,11 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
                 clientId: savedClient._id,
                 firstName: savedClient.firstName,
                 lastName: savedClient.lastName,
-                email: savedClient.email
+                email: savedClient.email,
+                // Admin token for the agency owner
+                adminToken: AdminAccessToken,
+                adminId: agencyOwnerId,
+                adminAccessType: agencyOwner.accessType || 'enterpriseAdmin'
             }, "Client registered successfully"));
 
     } catch (error) {
@@ -226,10 +261,19 @@ const verifyUser = asyncHandler(async (req, res) => {
 
     const options = getHttpsCookieOptions();
 
+    // Return user package info for frontend to determine redirect
+    const responseData = {
+        userId: verifyUser.id,
+        packageType: verifyUser.packageType,
+        isInTrialPeriod: verifyUser.isInTrialPeriod,
+        subscriptionStatus: verifyUser.subscriptionStatus,
+        trialEndsDate: verifyUser.trialEndsDate
+    };
+
     res.status(200)
         .cookie("IBEXAccessToken", AccessToken, options)
         .cookie("IBEXRefreshToken", RefreshToken, options)
-        .json(new ApiResponse(200, "", "User verified successfully"))
+        .json(new ApiResponse(200, responseData, "User verified successfully"))
 
 
 })
@@ -926,9 +970,16 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Google ID token is missing"));
     }
 
-    if (!packageType || !isInTrialPeriod || !subscriptionStatus || !trialEndsDate) {
+    // Validate required fields - trialEndsDate is only required for trial users
+    if (!packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
         logger.error(new ApiError(400, "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+    }
+    
+    // If user is in trial period, trialEndsDate is required
+    if (isInTrialPeriod === true && !trialEndsDate) {
+        logger.error(new ApiError(400, "Trial end date is required for trial users"));
+        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
     }
 
     try {
@@ -1042,7 +1093,8 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         // Hash the password before saving
         const hashedPassword = await hashPassword(googleTempPassword);
 
-        const newUser = new UserModel({
+        // Create user data based on package settings from request
+        const userData = {
             firstName: firstName,
             lastName: lastName,
             phone: placeholderPhone,
@@ -1053,11 +1105,17 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             isVerified: true, // Google accounts are pre-verified
             allTermsAndConditionsAgreed: true, // Assuming Google signup implies agreement
             OTP: null,
-            packageType: "PRO",
-            isInTrialPeriod: false,
-            subscriptionStatus: "active",
-            trialEndsDate: trialEndsDate
-        });
+            packageType: packageType,
+            isInTrialPeriod: isInTrialPeriod,
+            subscriptionStatus: subscriptionStatus
+        };
+        
+        // Only set trialEndsDate if it's provided (for trial users)
+        if (trialEndsDate) {
+            userData.trialEndsDate = trialEndsDate;
+        }
+        
+        const newUser = new UserModel(userData);
 
         const savedUser = await newUser.save();
 

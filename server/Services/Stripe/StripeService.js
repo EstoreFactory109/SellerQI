@@ -1,6 +1,5 @@
-// COMMENTED OUT FOR TESTING - No Stripe key available
-// const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const stripe = null; // Dummy stripe object for testing
+// Stripe integration for payment processing
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Subscription = require('../../models/user-auth/SubscriptionModel');
 const User = require('../../models/user-auth/userModel');
 const logger = require('../../utils/Logger');
@@ -9,6 +8,9 @@ const { createAccessToken } = require('../../utils/Tokens');
 class StripeService {
     constructor() {
         this.stripe = stripe;
+        if (!process.env.STRIPE_SECRET_KEY) {
+            logger.warn('STRIPE_SECRET_KEY is not set. Stripe functionality will not work.');
+        }
     }
 
     /**
@@ -253,7 +255,8 @@ class StripeService {
             // Update user's package type, subscription status, and access type
             const updateData = {
                 packageType: planType,
-                subscriptionStatus: stripeSubscription.status
+                subscriptionStatus: stripeSubscription.status,
+                isInTrialPeriod: false // User has now paid, no longer in trial
             };
             
             // If user purchased AGENCY plan, update accessType to enterpriseAdmin
@@ -262,6 +265,8 @@ class StripeService {
             }
             
             await User.findByIdAndUpdate(userId, updateData);
+            
+            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${stripeSubscription.status}, isInTrialPeriod=false`);
 
             // Create admin token for AGENCY users
             let adminToken = null;

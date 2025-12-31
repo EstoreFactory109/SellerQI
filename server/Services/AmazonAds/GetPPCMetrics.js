@@ -14,12 +14,13 @@ const BASE_URIS = {
 };
 
 // Report types for different campaign types
-// Note: Column names differ by campaign type based on Amazon Ads API v3 spec
+// Using 30-day attribution window (sales30d) for all campaign types for consistency
+// Note: SP supports sales30d, SB/SD use 'sales' which is their default 14-day attribution
 const CAMPAIGN_TYPES = {
     SPONSORED_PRODUCTS: {
         adProduct: 'SPONSORED_PRODUCTS',
         reportTypeId: 'spCampaigns',
-        salesMetric: 'sales7d',
+        salesMetric: 'sales30d',
         columns: [
             "date",
             "campaignId",
@@ -28,8 +29,8 @@ const CAMPAIGN_TYPES = {
             "cost",
             "impressions",
             "clicks",
-            "sales7d",
-            "purchases7d"
+            "sales30d",
+            "purchases30d"
         ]
     },
     SPONSORED_BRANDS: {
@@ -171,9 +172,9 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
         const url = `${baseUri}/reporting/reports/${reportId}`;
         let currentAccessToken = accessToken;
         let attempts = 0;
-        const maxAttempts = 30; // Max 30 minutes wait
 
-        while (attempts < maxAttempts) {
+        // Infinite loop - only exits on COMPLETED or FAILURE status
+        while (true) {
             try {
                 const headers = {
                     'Authorization': `Bearer ${currentAccessToken}`,
@@ -206,7 +207,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 }
 
                 if (status === 'PROCESSING' || status === 'PENDING') {
+                    // Log every 10 attempts (10 minutes) to track progress
+                    if (attempts > 0 && attempts % 10 === 0) {
+                        console.log(`⏳ [GetPPCMetrics] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
+                    } else {
                     console.log(`⏳ [GetPPCMetrics] Report still ${status}, waiting 60 seconds...`);
+                    }
                     await new Promise(resolve => setTimeout(resolve, 60000));
                     attempts++;
                 } else {
@@ -237,8 +243,6 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 throw error;
             }
         }
-
-        throw new Error('Report generation timed out after 30 minutes');
 
     } catch (error) {
         if (error.response) {
@@ -316,8 +320,8 @@ function processReportData(reportData, campaignType) {
 
     reportData.forEach(row => {
         // Get sales from the appropriate column based on campaign type
-        // SP uses sales7d, SB/SD use sales
-        const sales = parseFloat(row[salesMetric] || row.sales || row.sales7d || 0);
+        // SP uses sales30d, SB/SD use 'sales' (which is 14-day by default)
+        const sales = parseFloat(row[salesMetric] || row.sales30d || row.sales || 0);
         const spend = parseFloat(row.cost || 0);
         const impressions = parseInt(row.impressions || 0);
         const clicks = parseInt(row.clicks || 0);

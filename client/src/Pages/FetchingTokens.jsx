@@ -170,23 +170,19 @@ const FetchingTokens = () => {
       hasProcessed.current = true;
 
       try {
-        console.log("Processing SP-API authorization callback...");
-        console.log("Authorization Code:", authCode);
-        console.log("State Parameter:", state);
+        console.log("Processing Amazon Ads authorization callback...");
+        console.log("Authorization Code:", amazonAdsAuthCode);
         
 
-        // Validate state parameter (should match what was sent initially)
-        
-        
-        // Send the authorization code and state to the backend
+        // Step 1: Generate and save the ads tokens
         const response = await axiosInstance.post('/app/token/generateAdsTokens', {
           authCode: amazonAdsAuthCode,
         });
 
-        console.log(response)
+        console.log("Token generation response:", response);
         
         if (response.status === 200 && response.data) {
-          console.log("Amazon Ads tokens generated successfully");
+          console.log("Amazon Ads tokens generated and saved successfully");
           
           // Clear the amazonAdsLoading flag
           localStorage.removeItem('amazonAdsLoading');
@@ -195,13 +191,42 @@ const FetchingTokens = () => {
           const selectedMarketplace = JSON.parse(localStorage.getItem('selectedMarketplace') || '{}');
           const region = selectedMarketplace.region || 'NA';
           
-          // Navigate to profile selection page with region parameter
-          navigate(`/profile-selection?region=${region}`)
+          // Step 2: Pre-fetch the profile IDs before redirecting
+          // This ensures data is loaded before the user sees the page
+          console.log("Fetching profile IDs...");
+          let profileData = null;
+          
+          try {
+            const profileResponse = await axiosInstance.get('/app/profile/getProfileId');
+            
+            if (profileResponse.status === 200 && profileResponse.data) {
+              const dataArray = profileResponse.data.data || profileResponse.data || [];
+              
+              if (Array.isArray(dataArray) && dataArray.length > 0) {
+                profileData = dataArray.map((scope, index) => ({
+                  id: `PF${String(index + 1).padStart(3, '0')}`,
+                  profileId: String(scope.profileId || scope.profile_id || 'Unknown'),
+                  name: String(scope.accountInfo?.name || scope.name || 'Unknown'),
+                  currency: String(scope.currencyCode || 'Unknown'),
+                  country: String(scope.countryCode || scope.country_code || scope.country || 'Unknown')
+                }));
+                console.log("Profile IDs fetched successfully:", profileData.length, "profiles");
+              }
+            }
+          } catch (profileError) {
+            console.warn("Could not pre-fetch profile IDs:", profileError);
+            // Continue anyway - the profile selection page will retry
+          }
+          
+          // Step 3: Navigate to profile selection page with pre-fetched data
+          navigate(`/profile-selection?region=${region}`, {
+            state: { profileData }
+          });
         }
       } catch (error) {
         console.error("Error generating tokens:", error);
         
-        let errorMessage = "Failed to connect to Amazon Seller Central";
+        let errorMessage = "Failed to connect to Amazon Ads";
         let errorCode = 500;
         
         // Handle specific error cases

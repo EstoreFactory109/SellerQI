@@ -26,6 +26,9 @@ const BASE_URIS = {
 };
 
 // Report configurations with units sold columns
+// Attribution windows per Amazon documentation:
+// - Sponsored Products: 7-day for sellers
+// - Sponsored Brands/Display: 14-day
 const UNITS_SOLD_REPORT_CONFIGS = {
     SPONSORED_PRODUCTS: {
         adProduct: 'SPONSORED_PRODUCTS',
@@ -174,9 +177,9 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
     const url = `${baseUri}/reporting/reports/${reportId}`;
     let currentAccessToken = accessToken;
     let attempts = 0;
-    const maxAttempts = 30; // Max 30 minutes wait
 
-    while (attempts < maxAttempts) {
+    // Infinite loop - only exits on COMPLETED or FAILURE status
+    while (true) {
         try {
             const headers = {
                 'Authorization': `Bearer ${currentAccessToken}`,
@@ -192,6 +195,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             console.log(`📊 [GetPPCUnitsSold] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
             if (status === 'COMPLETED') {
+                console.log(`✅ [GetPPCUnitsSold] Report completed after ${attempts + 1} attempts`);
                 return {
                     status: 'COMPLETED',
                     location: location,
@@ -199,6 +203,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
                     finalAccessToken: currentAccessToken
                 };
             } else if (status === 'FAILURE') {
+                console.error(`❌ [GetPPCUnitsSold] Report generation failed after ${attempts + 1} attempts`);
                 return {
                     status: 'FAILURE',
                     reportId: reportId,
@@ -207,6 +212,12 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             }
 
             if (status === 'PROCESSING' || status === 'PENDING') {
+                // Log every 10 attempts (10 minutes) to track progress
+                if (attempts > 0 && attempts % 10 === 0) {
+                    console.log(`⏳ [GetPPCUnitsSold] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
+                } else {
+                    console.log(`⏳ [GetPPCUnitsSold] Report still ${status}, waiting 60 seconds...`);
+                }
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
             } else {
@@ -220,6 +231,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
+                        console.log(`✅ [GetPPCUnitsSold] Token refreshed successfully, continuing poll...`);
                         continue;
                     }
                 } catch (refreshError) {
@@ -228,6 +240,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             }
 
             if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+                console.error(`[GetPPCUnitsSold] Network error checking report status, retrying... (attempt ${attempts + 1})`);
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
                 continue;
@@ -235,8 +248,6 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             throw error;
         }
     }
-
-    throw new Error('Report generation timed out after 30 minutes');
 }
 
 /**
@@ -310,19 +321,19 @@ function processUnitsData(reportData, campaignType) {
             };
         }
 
-        // Process based on campaign type - only use 1-day attribution
+        // Process based on campaign type
+        // SP uses 7-day attribution for sellers, SB/SD use 14-day
         let units = 0;
         let sales = 0;
         
         if (campaignType === 'SPONSORED_PRODUCTS') {
-            units = parseInt(row.unitsSoldClicks1d || 0);
+            // Use 7-day units to match Seller Central's attribution for sellers
+            units = parseInt(row.unitsSoldClicks7d || row.unitsSoldClicks1d || 0);
             sales = parseFloat(row.sales7d || 0);
         } else if (campaignType === 'SPONSORED_BRANDS') {
-            // SB doesn't have 1d, use unitsSold14d as best available
             units = parseInt(row.unitsSold14d || 0);
             sales = parseFloat(row.sales14d || 0);
         } else if (campaignType === 'SPONSORED_DISPLAY') {
-            // SD doesn't have 1d, use unitsSold14d as best available
             units = parseInt(row.unitsSold14d || 0);
             sales = parseFloat(row.sales14d || 0);
         }

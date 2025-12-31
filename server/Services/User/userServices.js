@@ -7,8 +7,16 @@ const logger = require("../../utils/Logger.js");
 
 const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate) => {
 
-    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp || !packageType || (isInTrialPeriod == null) || !subscriptionStatus || !trialEndsDate){
+    // Validate required fields
+    // Note: trialEndsDate can be null for PRO users who need to pay (not in trial)
+    if(!firstname || !lastname || !phone || !whatsapp || !email || !password || !otp || !packageType || (isInTrialPeriod == null) || !subscriptionStatus){
         logger.error(new ApiError(404,"Details and credentials are missing"));
+        return false;
+    }
+
+    // If user is in trial period, trialEndsDate is required
+    if (isInTrialPeriod === true && !trialEndsDate) {
+        logger.error(new ApiError(400, "Trial end date is required for trial users"));
         return false;
     }
 
@@ -19,7 +27,7 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
 
     try {
        // const hashedPassword = await hashPassword(password);
-        const user = new UserModel({
+        const userData = {
             firstName: firstname,
             lastName: lastname,
             phone: phone,
@@ -30,9 +38,15 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
             allTermsAndConditionsAgreed: allTermsAndConditionsAgreed,
             packageType: packageType,
             isInTrialPeriod: isInTrialPeriod,
-            subscriptionStatus: subscriptionStatus,
-            trialEndsDate: trialEndsDate
-        });
+            subscriptionStatus: subscriptionStatus
+        };
+        
+        // Only set trialEndsDate if it's provided (for trial users)
+        if (trialEndsDate) {
+            userData.trialEndsDate = trialEndsDate;
+        }
+        
+        const user = new UserModel(userData);
         return await user.save();
     } catch (error) {
         logger.error(`Error in registering user: ${error}`);
