@@ -40,25 +40,49 @@ const logger = require('../utils/Logger.js');
 /**
  * Get Redis connection options for BullMQ
  * 
- * Uses Redis Cloud by default (same as cache), or local Redis if QUEUE_REDIS_HOST is set to localhost.
- * BullMQ uses 'bullmq:' prefix for all keys, so it won't conflict with cache keys.
+ * IMPORTANT: Uses LOCAL Redis for queues by default!
+ * Redis Cloud with volatile-lru eviction policy evicts BullMQ keys,
+ * causing jobs to be lost immediately after being added.
+ * 
+ * Local Redis with noeviction policy is required for reliable job persistence.
+ * 
+ * Configuration:
+ * - Default: localhost:6379 (local Redis)
+ * - Override with QUEUE_REDIS_HOST and QUEUE_REDIS_PORT to use a different Redis
+ * - Set QUEUE_USE_REDIS_CLOUD=true to force Redis Cloud (not recommended)
  * 
  * @returns {Object} Redis connection options for BullMQ
  */
 function getQueueRedisConnection() {
-    // Default to Redis Cloud (same as cache) if QUEUE_REDIS_HOST not set
-    // This ensures both cache and queue use the same Redis Cloud instance
-    const defaultHost = process.env.QUEUE_REDIS_HOST || process.env.REDIS_HOST || 'localhost';
-    const defaultPort = process.env.QUEUE_REDIS_PORT 
-        ? parseInt(process.env.QUEUE_REDIS_PORT, 10)
-        : (process.env.REDIS_HOST ? 13335 : 6379); // Redis Cloud port or local port
+    // Use local Redis by default for queues (avoids eviction issues with Redis Cloud)
+    // Only use Redis Cloud if explicitly configured
+    const useRedisCloud = process.env.QUEUE_USE_REDIS_CLOUD === 'true';
+    
+    let defaultHost, defaultPort, username, password;
+    
+    if (useRedisCloud && process.env.REDIS_HOST) {
+        // Use Redis Cloud (explicitly configured)
+        defaultHost = process.env.QUEUE_REDIS_HOST || process.env.REDIS_HOST;
+        defaultPort = process.env.QUEUE_REDIS_PORT 
+            ? parseInt(process.env.QUEUE_REDIS_PORT, 10)
+            : 13335;
+        username = process.env.QUEUE_REDIS_USERNAME || 'default';
+        password = process.env.QUEUE_REDIS_PASSWORD || process.env.REDIS_PASSWORD;
+    } else {
+        // Use local Redis (default - more reliable for BullMQ)
+        defaultHost = process.env.QUEUE_REDIS_HOST || 'localhost';
+        defaultPort = process.env.QUEUE_REDIS_PORT 
+            ? parseInt(process.env.QUEUE_REDIS_PORT, 10)
+            : 6379;
+        username = undefined;
+        password = undefined;
+    }
     
     const connectionOptions = {
         host: defaultHost,
         port: defaultPort,
-        // Default to Redis Cloud credentials if using Redis Cloud
-        username: process.env.QUEUE_REDIS_USERNAME || (process.env.REDIS_HOST ? 'default' : undefined),
-        password: process.env.QUEUE_REDIS_PASSWORD || (process.env.REDIS_HOST ? process.env.REDIS_PASSWORD : undefined),
+        username,
+        password,
         // Enable retry strategy
         retryStrategy: (times) => {
             const delay = Math.min(times * 50, 2000);

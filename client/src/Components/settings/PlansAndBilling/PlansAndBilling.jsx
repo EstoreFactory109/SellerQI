@@ -69,7 +69,7 @@ export default function PlansAndBilling() {
     PRO: {
       name: 'PRO',
       displayName: 'Pro',
-      price: 49,
+      price: 99,
       currency: 'USD',
       icon: Crown,
       color: 'blue',
@@ -278,7 +278,7 @@ export default function PlansAndBilling() {
   };
 
     return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-[#eeeeee]">
       {/* Cancel Success/Error Message */}
       {cancelMessage && (
         <motion.div 
@@ -420,13 +420,15 @@ export default function PlansAndBilling() {
           transition={{ duration: 0.7, delay: 0.2 }}
           className="mb-16"
         >
-          <div className="text-center mb-12">
+          <div className="text-center mb-12 mt-8">
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Upgrade Your Experience</h2>
             <p className="text-xl text-gray-600">Choose the plan that fits your business needs</p>
         </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {Object.entries(plans).map(([planKey, plan], index) => (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
+            {Object.entries(plans)
+              .filter(([planKey]) => planKey !== 'LITE')
+              .map(([planKey, plan], index) => (
               <motion.div
                 key={planKey}
                 initial={{ opacity: 0, y: 20 }}
@@ -435,18 +437,18 @@ export default function PlansAndBilling() {
                 className={`relative group ${plan.popular ? 'lg:scale-105 z-10' : ''}`}
               >
                 {/* Plan Card */}
-                <div className={`relative overflow-hidden bg-white rounded-3xl shadow-xl border-2 transition-all duration-300 group-hover:shadow-2xl group-hover:border-gray-300 ${
+                <div className={`relative overflow-hidden bg-white rounded-xl shadow-lg border-2 transition-all duration-300 group-hover:shadow-xl group-hover:border-gray-300 ${
                   plan.popular 
                     ? 'border-blue-200' 
                     : 'border-gray-200'
                 }`}>
                   
                   {/* Card Content */}
-                  <div className="p-8">
+                  <div className="p-6">
                     {/* Plan Header */}
-                    <div className="text-center mb-8">
-                      <div className={`w-20 h-20 bg-gradient-to-r ${plan.gradient} rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg`}>
-                        <plan.icon className="w-10 h-10 text-white" />
+                    <div className="text-center mb-6">
+                      <div className={`w-16 h-16 bg-gradient-to-r ${plan.gradient} rounded-xl flex items-center justify-center mx-auto mb-4 shadow-md`}>
+                        <plan.icon className="w-8 h-8 text-white" />
                 </div>
 
                       <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.displayName}</h3>
@@ -534,7 +536,7 @@ export default function PlansAndBilling() {
             transition={{ duration: 0.7, delay: 0.4 }}
             className="mb-16"
           >
-            <div className="bg-white/80 backdrop-blur-lg rounded-3xl p-8 shadow-xl border border-white/20">
+            <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
                   <CreditCard className="w-6 h-6 text-blue-600" />
@@ -668,7 +670,7 @@ export default function PlansAndBilling() {
           transition={{ duration: 0.7, delay: 0.5 }}
           className="mb-16"
         >
-          <div className="bg-white/80 backdrop-blur-lg rounded-3xl p-8 shadow-xl border border-white/20">
+          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
                 <Receipt className="w-6 h-6 text-blue-600" />
@@ -790,7 +792,7 @@ export default function PlansAndBilling() {
           transition={{ duration: 0.7, delay: 0.7 }}
           className="text-center"
         >
-          <div className="bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 rounded-3xl p-12 text-white">
+          <div className="bg-gradient-to-r from-gray-800 via-blue-800 to-purple-800 rounded-xl p-8 text-white">
             <div className="max-w-2xl mx-auto">
               <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-6">
                 <MessageCircle className="w-8 h-8 text-white" />

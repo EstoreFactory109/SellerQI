@@ -142,14 +142,24 @@ async function addIntegrationJob(userId, country, region) {
             };
         }
         
-        // If job is completed, return it as completed (don't create new)
+        // If job is completed in queue, check if it's recent (within 2 hours)
+        // If older than 2 hours, allow creating a new job
         if (state === 'completed') {
-            logger.info(`[IntegrationQueue] Job already completed for user ${userId}, ${country}-${region}`);
-            return {
-                jobId: customJobId,
-                isExisting: true,
-                state: 'completed'
-            };
+            const finishedOn = existingJob.finishedTimestamp;
+            const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+            
+            if (finishedOn && finishedOn >= twoHoursAgo) {
+                logger.info(`[IntegrationQueue] Job completed recently for user ${userId}, ${country}-${region}. Wait before re-analysing.`);
+                return {
+                    jobId: customJobId,
+                    isExisting: true,
+                    state: 'completed'
+                };
+            }
+            
+            // Job is older than 2 hours, remove it and allow new job
+            logger.info(`[IntegrationQueue] Removing old completed job for user ${userId}, ${country}-${region}`);
+            await existingJob.remove();
         }
     }
     
@@ -188,6 +198,12 @@ async function addIntegrationJob(userId, country, region) {
     );
     
     logger.info(`[IntegrationQueue] Added integration job ${job.id} for user ${userId}, ${country}-${region}`);
+    
+    // Verify job is actually in queue
+    const verifyJob = await queue.getJob(job.id);
+    const verifyState = verifyJob ? await verifyJob.getState() : 'NOT_FOUND';
+    const waitingCount = await queue.getWaitingCount();
+    logger.info(`[IntegrationQueue] Verification - Job ${job.id} state: ${verifyState}, Total waiting: ${waitingCount}`);
     
     return {
         jobId: job.id,

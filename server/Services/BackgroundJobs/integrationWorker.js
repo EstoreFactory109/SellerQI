@@ -214,6 +214,14 @@ async function startIntegrationWorker() {
     );
 
     // Worker event listeners
+    worker.on('active', (job) => {
+        logger.info(`[IntegrationWorker:${WORKER_NAME}] Job ${job.id} is now ACTIVE`, {
+            userId: job.data.userId,
+            country: job.data.country,
+            region: job.data.region
+        });
+    });
+
     worker.on('completed', (job, result) => {
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Job ${job.id} completed`, {
             userId: job.data.userId,
@@ -257,6 +265,27 @@ async function startIntegrationWorker() {
 
     // Log worker startup
     logger.info(`[IntegrationWorker:${WORKER_NAME}] Integration worker started with concurrency: ${WORKER_CONCURRENCY}`);
+
+    // Debug: Check queue status every 10 seconds
+    const { getIntegrationQueue } = require('./integrationQueue.js');
+    let statusCheckCount = 0;
+    setInterval(async () => {
+        try {
+            const queue = getIntegrationQueue();
+            const waiting = await queue.getWaitingCount();
+            const active = await queue.getActiveCount();
+            const completed = await queue.getCompletedCount();
+            const failed = await queue.getFailedCount();
+            
+            statusCheckCount++;
+            // Log every 6 checks (every minute) or immediately if there are jobs
+            if (waiting > 0 || active > 0 || statusCheckCount % 6 === 0) {
+                logger.info(`[IntegrationWorker:${WORKER_NAME}] Queue status - Waiting: ${waiting}, Active: ${active}, Completed: ${completed}, Failed: ${failed}`);
+            }
+        } catch (error) {
+            logger.error(`[IntegrationWorker:${WORKER_NAME}] Error checking queue status:`, error.message);
+        }
+    }, 10000);
 
     return worker;
 }

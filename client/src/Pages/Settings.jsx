@@ -52,7 +52,7 @@ const Settings = () => {
 
   return (
     <div className="h-[90vh] bg-[#eeeeee] w-full max-h-[90vh] p-6 lg:mt-0 mt-[8vh] overflow-y-auto">
-      <p className="text-sm font-medium">SETTINGS</p>
+      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
       {/* Content Area */}
       <div className="w-full mt-7">

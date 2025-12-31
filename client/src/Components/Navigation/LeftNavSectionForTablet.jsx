@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -27,8 +27,37 @@ const LeftNavSection = () => {
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
     const userPlan = user?.packageType || 'LITE';
-    const isLiteUser = userPlan === 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
+    
+    // Check if user's trial has expired
+    const isTrialExpired = () => {
+        if (!user?.isInTrialPeriod || !user?.trialEndsDate) return false;
+        const now = new Date();
+        const trialEnd = new Date(user.trialEndsDate);
+        return now >= trialEnd;
+    };
+    
+    // Check if user was downgraded from trial to LITE
+    const wasDowngradedFromTrial = () => {
+        return user?.packageType === 'LITE' && 
+               user?.isInTrialPeriod === false && 
+               user?.trialEndsDate !== null && 
+               user?.trialEndsDate !== undefined;
+    };
+    
+    // Check if user chose LITE plan (never had trial)
+    const choseLitePlan = () => {
+        return user?.packageType === 'LITE' && 
+               !user?.isInTrialPeriod && 
+               (user?.trialEndsDate === null || user?.trialEndsDate === undefined);
+    };
+    
+    // Determine if premium features should be locked (show but not accessible without upgrade)
+    // Now ALL LITE users see the pages with lock icon - they can click and see blurred content
+    const isPremiumLocked = userPlan === 'LITE';
+    
+    // No longer hiding pages - all LITE users can see and access pages (with blur overlay)
+    const isLiteUser = false;
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
@@ -146,8 +175,8 @@ const LeftNavSection = () => {
                     <div className="mb-6">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-2">Navigation</p>
                         <div className="space-y-1">
-                            {/* Dashboard - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                            {/* Dashboard - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <NavLink
                                     to="/seller-central-checker/dashboard"
                                     className={({ isActive }) =>
@@ -167,14 +196,17 @@ const LeftNavSection = () => {
                                                     isActive ? 'text-white' : 'text-blue-600'
                                                 }`}/>
                                             </div>
-                                            <span className="font-medium">Dashboard</span>
+                                            <span className="font-medium flex-1">Dashboard</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
                                         </>
                                     )}
                                 </NavLink>
                             )}
 
-                            {/* Issues with Dropdown - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                            {/* Issues with Dropdown - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <div className="space-y-1">
                                 <div
                                     className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
@@ -196,6 +228,9 @@ const LeftNavSection = () => {
                                         }`}/>
                                     </div>
                                     <span className="font-medium flex-1">Issues</span>
+                                    {isPremiumLocked && (
+                                        <Lock className="w-3 h-3 text-amber-500 mr-1" />
+                                    )}
                                     <motion.div
                                         animate={{ rotate: issuesDropdownOpen ? 90 : 0 }}
                                         transition={{ duration: 0.2, ease: "easeInOut" }}
@@ -283,8 +318,8 @@ const LeftNavSection = () => {
                             </div>
                             )}
 
-                            {/* Sponsored Ads with Dropdown - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                            {/* Sponsored Ads with Dropdown - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <div className="space-y-1">
                                 <div
                                     className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
@@ -306,6 +341,9 @@ const LeftNavSection = () => {
                                         }`}/>
                                     </div>
                                     <span className="font-medium flex-1">Sponsored Ads</span>
+                                    {isPremiumLocked && (
+                                        <Lock className="w-3 h-3 text-amber-500 mr-1" />
+                                    )}
                                     <motion.div
                                         animate={{ rotate: sponsoredAdsDropdownOpen ? 90 : 0 }}
                                         transition={{ duration: 0.2, ease: "easeInOut" }}
@@ -373,8 +411,8 @@ const LeftNavSection = () => {
                             </div>
                             )}
                             
-                            {/* Profitability Dashboard - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                            {/* Profitability Dashboard - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <NavLink
                                     to="/seller-central-checker/profitibility-dashboard"
                                     className={({ isActive }) =>
@@ -394,14 +432,17 @@ const LeftNavSection = () => {
                                                     isActive ? 'text-white' : 'text-purple-600'
                                                 }`}/>
                                             </div>
-                                            <span className="font-medium">Profitibility</span>
+                                            <span className="font-medium flex-1">Profitibility</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
                                         </>
                                     )}
                                 </NavLink>
                             )}
 
-                            {/* Reimbursement Dashboard - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                            {/* Reimbursement Dashboard - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <NavLink
                                     to="/seller-central-checker/reimbursement-dashboard"
                                     className={({ isActive }) =>
@@ -421,7 +462,10 @@ const LeftNavSection = () => {
                                                     isActive ? 'text-white' : 'text-emerald-600'
                                                 }`}/>
                                             </div>
-                                            <span className="font-medium">Reimbursement</span>
+                                            <span className="font-medium flex-1">Reimbursement</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
                                         </>
                                     )}
                                 </NavLink>
@@ -479,8 +523,8 @@ const LeftNavSection = () => {
                                 </NavLink>
                             )}
 
-                        {/* Account History - Only for PRO/AGENCY users */}
-                            {!isLiteUser && (
+                        {/* Account History - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
                                 <NavLink
                                     to="/seller-central-checker/account-history"
                                     className={({ isActive }) =>
@@ -500,7 +544,10 @@ const LeftNavSection = () => {
                                                     isActive ? 'text-white' : 'text-amber-600'
                                                 }`}/>
                                             </div>
-                                            <span className="font-medium">Accounts History</span>
+                                            <span className="font-medium flex-1">Accounts History</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
                                         </>
                                     )}
                                 </NavLink>
