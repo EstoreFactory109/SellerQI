@@ -123,6 +123,37 @@ module.exports = {
             env_development: {
                 NODE_ENV: 'development'
             }
+        },
+        {
+            // Weekly History Worker
+            // Runs every Sunday at 11:59 PM UTC to record weekly account history snapshots
+            name: 'weekly-history-worker',
+            script: './server/Services/BackgroundJobs/weeklyHistoryWorker.js',
+            instances: 1, // Single instance (cron-based, doesn't need clustering)
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production'
+            },
+            // Logging - separate log files
+            error_file: './logs/pm2-weekly-history-error.log',
+            out_file: './logs/pm2-weekly-history-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            // Auto-restart on crash
+            autorestart: true,
+            max_restarts: 10,
+            min_uptime: '10s',
+            // Memory limits
+            max_memory_restart: '2G',
+            // Watch mode (disable in production)
+            watch: false,
+            // Environment variables
+            env_production: {
+                NODE_ENV: 'production'
+            },
+            env_development: {
+                NODE_ENV: 'development'
+            }
         }
     ]
 };
