@@ -63,6 +63,9 @@ const searchTermsSchema = new mongoose.Schema({
   }]
 },{timestamps: true});
 
+// Compound index for efficient queries
+searchTermsSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+
 const SearchTerms = mongoose.model('SearchTerms', searchTermsSchema);
 
 module.exports = SearchTerms;

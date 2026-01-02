@@ -132,71 +132,129 @@ const getAllAccounts = asyncHandler(async (req, res) => {
     }
 
     try {
-        // Get all user accounts with necessary fields
-        // Populate sellerCentral but exclude large arrays (products, TotatProducts) to improve performance
-        const accounts = await UserModel.find({})
-            .select('firstName lastName email phone whatsapp accessType packageType subscriptionStatus isInTrialPeriod trialEndsDate isVerified profilePic createdAt updatedAt adminId sellerCentral')
-            .sort({ createdAt: -1 }) // Sort by newest first
-            .lean() // Use lean() for better performance
-            .populate({
-                path: 'sellerCentral',
-                select: 'sellerAccount', // Get sellerAccount array
-                // Note: We can't exclude nested array fields directly, but we'll filter them in transformation
-                options: { lean: true }
-            })
-
-        
-        // Transform the data to include additional computed fields
-        // Also strip out large arrays (products, TotatProducts) from sellerAccount to reduce payload size
-        const accountsWithStats = accounts.map(account => {
-            // If sellerCentral exists, only keep essential fields from sellerAccount
-            let sellerCentral = account.sellerCentral;
-            if (sellerCentral && sellerCentral.sellerAccount && Array.isArray(sellerCentral.sellerAccount)) {
-                sellerCentral = {
-                    ...sellerCentral,
-                    sellerAccount: sellerCentral.sellerAccount.map(acc => ({
-                        spiRefreshToken: acc.spiRefreshToken,
-                        adsRefreshToken: acc.adsRefreshToken,
-                        country: acc.country,
-                        region: acc.region,
-                        ProfileId: acc.ProfileId,
-                        selling_partner_id: acc.selling_partner_id
-                        // Exclude products and TotatProducts arrays to reduce payload size
-                    }))
-                };
+        // PERFORMANCE OPTIMIZATION: Use aggregation pipeline to fetch only needed fields
+        // This avoids loading large arrays (products, TotatProducts) from sellerCentral
+        const accounts = await UserModel.aggregate([
+            // Stage 1: Project only needed user fields
+            {
+                $project: {
+                    firstName: 1,
+                    lastName: 1,
+                    email: 1,
+                    phone: 1,
+                    whatsapp: 1,
+                    accessType: 1,
+                    packageType: 1,
+                    subscriptionStatus: 1,
+                    isInTrialPeriod: 1,
+                    trialEndsDate: 1,
+                    isVerified: 1,
+                    profilePic: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    adminId: 1,
+                    sellerCentral: 1
+                }
+            },
+            // Stage 2: Sort by newest first
+            { $sort: { createdAt: -1 } },
+            // Stage 3: Lookup sellerCentral with projection to exclude large arrays
+            {
+                $lookup: {
+                    from: 'sellers', // MongoDB collection name (lowercase, pluralized)
+                    let: { sellerCentralId: '$sellerCentral' },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ['$_id', '$$sellerCentralId'] } } },
+                        {
+                            $project: {
+                                brand: 1,
+                                selling_partner_id: 1,
+                                // Only project essential fields from sellerAccount, excluding products and TotatProducts
+                                sellerAccount: {
+                                    $map: {
+                                        input: '$sellerAccount',
+                                        as: 'acc',
+                                        in: {
+                                            spiRefreshToken: '$$acc.spiRefreshToken',
+                                            adsRefreshToken: '$$acc.adsRefreshToken',
+                                            country: '$$acc.country',
+                                            region: '$$acc.region',
+                                            ProfileId: '$$acc.ProfileId',
+                                            selling_partner_id: '$$acc.selling_partner_id'
+                                            // products and TotatProducts are NOT included
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    as: 'sellerCentralData'
+                }
+            },
+            // Stage 4: Unwind the lookup result (convert array to single object)
+            {
+                $addFields: {
+                    sellerCentral: { $arrayElemAt: ['$sellerCentralData', 0] }
+                }
+            },
+            // Stage 5: Remove the temporary array field
+            {
+                $project: {
+                    sellerCentralData: 0
+                }
             }
-            
-            return {
-                ...account,
-                sellerCentral, // Use the trimmed sellerCentral
-                fullName: `${account.firstName} ${account.lastName}`,
-                joinedDate: account.createdAt,
-                lastUpdated: account.updatedAt,
-                isAdmin: account.accessType === 'superAdmin',
-                hasValidSubscription: account.subscriptionStatus === 'active',
-                // Check if trial is expired
-                isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate)
-            };
-        });
+        ]);
 
-        // Get summary statistics
+        // Transform the data to include additional computed fields
+        // Since we used aggregation, sellerCentral is already trimmed
+        const accountsWithStats = accounts.map(account => ({
+            ...account,
+            fullName: `${account.firstName} ${account.lastName}`,
+            joinedDate: account.createdAt,
+            lastUpdated: account.updatedAt,
+            isAdmin: account.accessType === 'superAdmin',
+            hasValidSubscription: account.subscriptionStatus === 'active',
+            // Check if trial is expired
+            isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate)
+        }));
+
+        // PERFORMANCE OPTIMIZATION: Calculate stats in a single pass instead of multiple filter operations
         const stats = {
-            total: accounts.length,
-            verified: accounts.filter(acc => acc.isVerified).length,
-            unverified: accounts.filter(acc => !acc.isVerified).length,
-            activeSubscriptions: accounts.filter(acc => acc.subscriptionStatus === 'active').length,
-            inactiveSubscriptions: accounts.filter(acc => acc.subscriptionStatus === 'inactive').length,
-            trialUsers: accounts.filter(acc => acc.isInTrialPeriod).length,
+            total: 0,
+            verified: 0,
+            unverified: 0,
+            activeSubscriptions: 0,
+            inactiveSubscriptions: 0,
+            trialUsers: 0,
             packageStats: {
-                LITE: accounts.filter(acc => acc.packageType === 'LITE').length,
-                PRO: accounts.filter(acc => acc.packageType === 'PRO').length,
-                AGENCY: accounts.filter(acc => acc.packageType === 'AGENCY').length
+                LITE: 0,
+                PRO: 0,
+                AGENCY: 0
             },
             accessTypeStats: {
-                user: accounts.filter(acc => acc.accessType === 'user').length,
-                superAdmin: accounts.filter(acc => acc.accessType === 'superAdmin').length
+                user: 0,
+                superAdmin: 0
             }
         };
+
+        // Single pass through accounts to calculate all stats
+        accounts.forEach(acc => {
+            stats.total++;
+            if (acc.isVerified) stats.verified++;
+            else stats.unverified++;
+            
+            if (acc.subscriptionStatus === 'active') stats.activeSubscriptions++;
+            else if (acc.subscriptionStatus === 'inactive') stats.inactiveSubscriptions++;
+            
+            if (acc.isInTrialPeriod) stats.trialUsers++;
+            
+            if (acc.packageType === 'LITE') stats.packageStats.LITE++;
+            else if (acc.packageType === 'PRO') stats.packageStats.PRO++;
+            else if (acc.packageType === 'AGENCY') stats.packageStats.AGENCY++;
+            
+            if (acc.accessType === 'user') stats.accessTypeStats.user++;
+            else if (acc.accessType === 'superAdmin') stats.accessTypeStats.superAdmin++;
+        });
 
         
 

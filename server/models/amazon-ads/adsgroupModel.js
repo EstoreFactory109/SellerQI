@@ -35,7 +35,10 @@ const adsgroupSchema = new mongoose.Schema({
             required: true
         }
     }]
-},{timestamps:true})
+},{timestamps:true});
+
+// Compound index for efficient queries
+adsgroupSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
 
 const AdsGroup = mongoose.model('AdsGroup', adsgroupSchema);
 

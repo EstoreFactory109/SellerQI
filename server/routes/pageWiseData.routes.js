@@ -39,35 +39,36 @@ const {
 
 // ===== MAIN DASHBOARD =====
 // Returns full calculated dashboard data
-router.get('/dashboard', auth, getLocation, analyseDataCache(3600), getDashboardData);
+// Cache TTL: 1 hour, page-specific cache key
+router.get('/dashboard', auth, getLocation, analyseDataCache(3600, 'dashboard'), getDashboardData);
 
 // ===== PROFITABILITY DASHBOARD =====
 // Returns profitability-specific calculated data
-router.get('/profitability', auth, getLocation, analyseDataCache(3600), getProfitabilityData);
+router.get('/profitability', auth, getLocation, analyseDataCache(3600, 'profitability'), getProfitabilityData);
 
 // ===== PPC/SPONSORED ADS DASHBOARD =====
 // Returns PPC/sponsored ads specific calculated data
-router.get('/ppc', auth, getLocation, analyseDataCache(3600), getPPCData);
+router.get('/ppc', auth, getLocation, analyseDataCache(3600, 'ppc'), getPPCData);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data
-router.get('/issues', auth, getLocation, analyseDataCache(3600), getIssuesData);
+router.get('/issues', auth, getLocation, analyseDataCache(3600, 'issues'), getIssuesData);
 
 // ===== ISSUES BY PRODUCT PAGE =====
 // Returns detailed issues by product data
-router.get('/issues-by-product', auth, getLocation, analyseDataCache(3600), getIssuesByProductData);
+router.get('/issues-by-product', auth, getLocation, analyseDataCache(3600, 'issues-by-product'), getIssuesByProductData);
 
 // ===== KEYWORD ANALYSIS PAGE =====
 // Returns keyword analysis data
-router.get('/keyword-analysis', auth, getLocation, analyseDataCache(3600), getKeywordAnalysisData);
+router.get('/keyword-analysis', auth, getLocation, analyseDataCache(3600, 'keyword-analysis'), getKeywordAnalysisData);
 
 // ===== REIMBURSEMENT DASHBOARD =====
 // Returns reimbursement data
-router.get('/reimbursement', auth, getLocation, analyseDataCache(3600), getReimbursementData);
+router.get('/reimbursement', auth, getLocation, analyseDataCache(3600, 'reimbursement'), getReimbursementData);
 
 // ===== INVENTORY PAGE =====
 // Returns inventory data
-router.get('/inventory', auth, getLocation, analyseDataCache(3600), getInventoryData);
+router.get('/inventory', auth, getLocation, analyseDataCache(3600, 'inventory'), getInventoryData);
 
 // ===== TASKS PAGE =====
 // Returns tasks data

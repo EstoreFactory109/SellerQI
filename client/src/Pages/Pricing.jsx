@@ -5,12 +5,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSelector } from 'react-redux';
 import axiosInstance from '../config/axios.config.js';
 import stripeService from '../services/stripeService.js';
+import razorpayService from '../services/razorpayService.js';
+import { detectCountry } from '../utils/countryDetection.js';
+import IndiaPricing from '../Components/Pricing/IndiaPricing.jsx';
 
 export default function PricingPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState({});
   const [showCancelledMessage, setShowCancelledMessage] = useState(false);
+  const [country, setCountry] = useState(null);
+  const [isDetectingCountry, setIsDetectingCountry] = useState(true);
   
   // Get user auth status from Redux and localStorage fallback
   const isAuthenticatedRedux = useSelector(state => state.auth?.isAuthenticated || false);
@@ -20,6 +25,23 @@ export default function PricingPage() {
   // Get user data to access current plan
   const user = useSelector((state) => state.Auth?.user);
   const currentPlan = user?.packageType || null;
+  
+  // Detect country on component mount
+  useEffect(() => {
+    const detectUserCountry = async () => {
+      try {
+        const detectedCountry = await detectCountry();
+        setCountry(detectedCountry);
+      } catch (error) {
+        console.error('Error detecting country:', error);
+        setCountry(null);
+      } finally {
+        setIsDetectingCountry(false);
+      }
+    };
+    
+    detectUserCountry();
+  }, []);
   
   useEffect(() => {
     // Check if user came here from cancelled payment
@@ -53,6 +75,7 @@ export default function PricingPage() {
         if (isAuthenticated && currentPlan) {
           localStorage.setItem('previousPlan', currentPlan);
         }
+        // Use Stripe for all countries
         await stripeService.createCheckoutSession(planType);
       } else {
         throw new Error('Invalid plan type');
@@ -64,6 +87,49 @@ export default function PricingPage() {
       setTimeout(() => {
         setLoading(prev => ({ ...prev, [planType]: false }));
       }, 500);
+    }
+  };
+
+  // Handle subscription for India (Razorpay)
+  const handleIndiaSubscribe = async (planType) => {
+    if (!isAuthenticated) {
+      localStorage.setItem('intendedPlan', planType);
+      localStorage.setItem('intendedCountry', 'IN');
+      navigate('/sign-up');
+      return;
+    }
+
+    // Only PRO plan is available for India via Razorpay
+    if (planType !== 'PRO') {
+      alert('Please contact us for Agency plan in India.');
+      return;
+    }
+
+    setLoading(prev => ({ ...prev, [planType]: true }));
+
+    try {
+      await razorpayService.initiatePayment(
+        planType,
+        // Success callback
+        (result) => {
+          console.log('Payment successful:', result);
+          setLoading(prev => ({ ...prev, [planType]: false }));
+          // Navigate to success page
+          navigate('/subscription-success?gateway=razorpay');
+        },
+        // Error callback
+        (error) => {
+          console.error('Payment failed:', error);
+          setLoading(prev => ({ ...prev, [planType]: false }));
+          if (error.message !== 'Payment cancelled by user') {
+            alert(error.message || 'Payment failed. Please try again.');
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Error initiating Razorpay payment:', error);
+      alert(error.response?.data?.message || 'Failed to process payment. Please try again.');
+      setLoading(prev => ({ ...prev, [planType]: false }));
     }
   };
 
@@ -93,6 +159,11 @@ export default function PricingPage() {
         setLoading(prev => ({ ...prev, freeTrial: false }));
       }, 500);
     }
+  };
+
+  const handleContactUs = (planType) => {
+    // Open external contact page
+    window.open('https://www.sellerqi.com/contact', '_blank');
   };
 
   return (
@@ -147,173 +218,186 @@ export default function PricingPage() {
         </motion.div>
 
         {/* Pricing Cards */}
-        <div className="w-full max-w-5xl mx-auto">
-          <div className="grid lg:grid-cols-3 gap-5 items-stretch">
-            
-            {/* Free Trial Card */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-              className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
-            >
-              {/* Icon */}
-              <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/20">
-                <Zap className="w-6 h-6 text-white" />
-              </div>
-
-              <h3 className="text-xl font-bold text-gray-900 mb-1">Free Trial</h3>
-              <div className="mb-4">
-                <span className="text-3xl font-bold text-gray-900">$0</span>
-                <span className="text-gray-500 text-sm ml-1">for 7 days</span>
-              </div>
-              <p className="text-gray-600 text-sm mb-5">Try all Pro features free for 7 days. No credit card required.</p>
-              
-              <ul className="space-y-2.5 mb-6 flex-1">
-                {[
-                  'Full Pro access for 7 days',
-                  'Unlimited product analyses',
-                  'Download detailed reports',
-                  'AI-powered recommendations',
-                  'Priority support'
-                ].map((feature, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <Check className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-700 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-              
-              <button 
-                onClick={handleFreeTrial}
-                disabled={loading.freeTrial}
-                className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
-                  loading.freeTrial
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30'
-                }`}
-              >
-                {loading.freeTrial ? (
-                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-                ) : (
-                  'Start Free Trial'
-                )}
-              </button>
-            </motion.div>
-
-            {/* Pro Plan - Featured */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="relative bg-gradient-to-br from-[#3B4A6B] to-[#2d3a52] rounded-2xl p-6 shadow-2xl flex flex-col lg:scale-105 z-10"
-            >
-              {/* Popular Badge */}
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3" />
-                  MOST POPULAR
-                </div>
-              </div>
-
-              {/* Icon */}
-              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center mb-4 mt-2">
-                <Crown className="w-6 h-6 text-white" />
-              </div>
-
-              <h3 className="text-xl font-bold text-white mb-1">Pro Plan</h3>
-              <div className="mb-4">
-                <span className="text-3xl font-bold text-white">$99</span>
-                <span className="text-white/70 text-sm ml-1">/month</span>
-              </div>
-              <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business.</p>
-              
-              <ul className="space-y-2.5 mb-6 flex-1">
-                {[
-                  'Unlimited product analyses',
-                  'Download detailed reports',
-                  'AI-powered fix recommendations',
-                  'Track unlimited products',
-                  'Priority support',
-                  'Advanced analytics'
-                ].map((feature, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-white/90 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-              
-              <button 
-                onClick={() => handleSubscribe('PRO')}
-                disabled={loading.PRO}
-                className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
-                  loading.PRO
-                    ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                    : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg'
-                }`}
-              >
-                {loading.PRO ? (
-                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-                ) : (
-                  'Subscribe to Pro'
-                )}
-              </button>
-            </motion.div>
-
-            {/* Agency Plan */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
-              className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
-            >
-              {/* Icon */}
-              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-purple-500/20">
-                <Users className="w-6 h-6 text-white" />
-              </div>
-
-              <h3 className="text-xl font-bold text-gray-900 mb-1">Agency</h3>
-              <div className="mb-4">
-                <span className="text-3xl font-bold text-gray-900">$49</span>
-                <span className="text-gray-500 text-sm ml-1">/user/month</span>
-              </div>
-              <p className="text-gray-600 text-sm mb-5">For agencies and consultants managing multiple clients.</p>
-              
-              <ul className="space-y-2.5 mb-6 flex-1">
-                {[
-                  'Everything in Pro',
-                  'Client management dashboard',
-                  'White-label reports',
-                  'Bulk operations',
-                  'Dedicated support',
-                  'Custom integrations'
-                ].map((feature, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <Check className="w-4 h-4 text-purple-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-700 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-              
-              <button 
-                onClick={() => handleSubscribe('AGENCY')}
-                disabled={loading.AGENCY}
-                className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
-                  loading.AGENCY
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30'
-                }`}
-              >
-                {loading.AGENCY ? (
-                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-                ) : (
-                  'Subscribe to Agency'
-                )}
-              </button>
-            </motion.div>
+        {isDetectingCountry ? (
+          <div className="w-full max-w-5xl mx-auto flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
           </div>
-        </div>
+        ) : country === 'IN' ? (
+          <IndiaPricing 
+            loading={loading}
+            handleFreeTrial={handleFreeTrial}
+            handleSubscribe={handleIndiaSubscribe}
+            handleContactUs={handleContactUs}
+          />
+        ) : (
+          <div className="w-full max-w-5xl mx-auto">
+            <div className="grid lg:grid-cols-3 gap-5 items-stretch">
+              
+              {/* Free Trial Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
+              >
+                {/* Icon */}
+                <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/20">
+                  <Zap className="w-6 h-6 text-white" />
+                </div>
+
+                <h3 className="text-xl font-bold text-gray-900 mb-1">Free Trial</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-gray-900">$0</span>
+                  <span className="text-gray-500 text-sm ml-1">for 7 days</span>
+                </div>
+                <p className="text-gray-600 text-sm mb-5">Try all Pro features free for 7 days. No credit card required.</p>
+                
+                <ul className="space-y-2.5 mb-6 flex-1">
+                  {[
+                    'Full Pro access for 7 days',
+                    'Unlimited product analyses',
+                    'Download detailed reports',
+                    'AI-powered recommendations',
+                    'Priority support'
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700 text-sm">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                
+                <button 
+                  onClick={handleFreeTrial}
+                  disabled={loading.freeTrial}
+                  className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
+                    loading.freeTrial
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30'
+                  }`}
+                >
+                  {loading.freeTrial ? (
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                  ) : (
+                    'Start Free Trial'
+                  )}
+                </button>
+              </motion.div>
+
+              {/* Pro Plan - Featured */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+                className="relative bg-gradient-to-br from-[#3B4A6B] to-[#2d3a52] rounded-2xl p-6 shadow-2xl flex flex-col lg:scale-105 z-10"
+              >
+                {/* Popular Badge */}
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <div className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3" />
+                    MOST POPULAR
+                  </div>
+                </div>
+
+                {/* Icon */}
+                <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center mb-4 mt-2">
+                  <Crown className="w-6 h-6 text-white" />
+                </div>
+
+                <h3 className="text-xl font-bold text-white mb-1">Pro Plan</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-white">$99</span>
+                  <span className="text-white/70 text-sm ml-1">/month</span>
+                </div>
+                <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business.</p>
+                
+                <ul className="space-y-2.5 mb-6 flex-1">
+                  {[
+                    'Unlimited product analyses',
+                    'Download detailed reports',
+                    'AI-powered fix recommendations',
+                    'Track unlimited products',
+                    'Priority support',
+                    'Advanced analytics'
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <span className="text-white/90 text-sm">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                
+                <button 
+                  onClick={() => handleSubscribe('PRO')}
+                  disabled={loading.PRO}
+                  className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
+                    loading.PRO
+                      ? 'bg-white/20 text-white/50 cursor-not-allowed'
+                      : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg'
+                  }`}
+                >
+                  {loading.PRO ? (
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                  ) : (
+                    'Subscribe to Pro'
+                  )}
+                </button>
+              </motion.div>
+
+              {/* Agency Plan */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.3 }}
+                className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
+              >
+                {/* Icon */}
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-purple-500/20">
+                  <Users className="w-6 h-6 text-white" />
+                </div>
+
+                <h3 className="text-xl font-bold text-gray-900 mb-1">Agency</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-gray-900">$49</span>
+                  <span className="text-gray-500 text-sm ml-1">/user/month</span>
+                </div>
+                <p className="text-gray-600 text-sm mb-5">For agencies and consultants managing multiple clients.</p>
+                
+                <ul className="space-y-2.5 mb-6 flex-1">
+                  {[
+                    'Everything in Pro',
+                    'Client management dashboard',
+                    'White-label reports',
+                    'Bulk operations',
+                    'Dedicated support',
+                    'Custom integrations'
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-purple-500 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700 text-sm">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                
+                <button 
+                  onClick={() => handleSubscribe('AGENCY')}
+                  disabled={loading.AGENCY}
+                  className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
+                    loading.AGENCY
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30'
+                  }`}
+                >
+                  {loading.AGENCY ? (
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                  ) : (
+                    'Subscribe to Agency'
+                  )}
+                </button>
+              </motion.div>
+            </div>
+          </div>
+        )}
 
         {/* Trust Indicators */}
         <motion.div

@@ -92,6 +92,9 @@ const ProductWiseSponsoredAdsDataSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Compound index for efficient queries with userId, country, region, and createdAt
+// This significantly speeds up the common query pattern used in Analyse.js
+ProductWiseSponsoredAdsDataSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
 
 // Create and export the model
 const ProductWiseSponsoredAdsData = mongoose.model('ProductWiseSponsoredAdsData', ProductWiseSponsoredAdsDataSchema);

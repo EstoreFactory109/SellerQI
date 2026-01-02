@@ -52,7 +52,10 @@ const campaignSchema = new mongoose.Schema({
    ]
 },{
     timestamps: true
-})
+});
+
+// Compound index for efficient queries
+campaignSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
 
 const Campaign = mongoose.model('Campaign', campaignSchema);
 

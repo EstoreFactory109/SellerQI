@@ -301,6 +301,8 @@ class AnalyseService {
         const ThirtyDaysAgo = new Date(createdDate);
         ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
 
+        // Use .lean() for all queries to return plain JavaScript objects instead of Mongoose documents
+        // This significantly reduces memory usage and improves query performance
         const [
             v2Data,
             v1Data,
@@ -328,43 +330,44 @@ class AnalyseService {
             keywordTrackingData,
             ppcUnitsSoldData
         ] = await Promise.all([
-            V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+            V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             // Use EconomicsMetrics instead of financeModel and TotalSalesModel
             EconomicsMetrics.findLatest(userId, region, country),
             // Fetch BuyBox data
             BuyBoxData.findLatest(userId, region, country),
-            restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            ProductWiseSponsoredAdsData.find({
+            restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            // Optimized: Only fetch the most recent record (limit 1) instead of all 30-day records
+            // The sponsoredAds array within the record already contains all the PPC data we need
+            ProductWiseSponsoredAdsData.findOne({
                 userId,
                 country,
-                region,
-                createdAt: {
-                    $gte: ThirtyDaysAgo,
-                    $lte: createdDate
-                }
-            }).sort({ createdAt: -1 }),
-            NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
+                region
+            }).sort({ createdAt: -1 }).lean(),
+            NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
             Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead
-            adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }),
-            GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }),
-            KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }),
+            adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+            KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
             PPCUnitsSold.findLatestForUser(userId, country, region)
         ]);
+        
+        // Convert single ProductWiseSponsoredAds result to array format for backward compatibility
+        const ProductWiseSponsoredAdsArray = ProductWiseSponsoredAds ? [ProductWiseSponsoredAds] : [];
 
         console.log("v2Data: ", v2Data);
         console.log("economicsMetricsData: ", economicsMetricsData ? 'Found' : 'Not Found');
@@ -388,7 +391,8 @@ class AnalyseService {
         } : 'Not Found');
 
         // Calculate total PPC spend from Amazon Ads API (PRIMARY source)
-        const adsPPCSpend = this.calculateTotalPPCSpendFromAdsAPI(ProductWiseSponsoredAds);
+        // Use the array format for backward compatibility
+        const adsPPCSpend = this.calculateTotalPPCSpendFromAdsAPI(ProductWiseSponsoredAdsArray);
         logger.info('PPC Spend calculated from Amazon Ads API:', { adsPPCSpend });
         
         // Convert EconomicsMetrics to legacy financeData format for backward compatibility
@@ -418,15 +422,15 @@ class AnalyseService {
             console.log('[DEBUG] No KeywordTrackingData found for userId:', userId, 'country:', country, 'region:', region);
         }
 
-        // Convert Mongoose documents to plain objects if needed
-        const buyBoxDataPlain = buyBoxData ? (buyBoxData.toObject ? buyBoxData.toObject() : buyBoxData) : null;
+        // With .lean(), buyBoxData is already a plain object, no need for toObject()
+        const buyBoxDataPlain = buyBoxData || null;
         
         return {
             v2Data,
             v1Data,
             financeData,
             economicsMetricsData, // New: raw economics data for profitability calculations
-            buyBoxData: buyBoxDataPlain, // Convert to plain object for easier access
+            buyBoxData: buyBoxDataPlain, // Already a plain object from .lean()
             restockInventoryRecommendationsData,
             numberOfProductReviews,
             GetlistingAllItems,
@@ -434,7 +438,7 @@ class AnalyseService {
             TotalSales,
             shipmentdata,
             saleByProduct,
-            ProductWiseSponsoredAds,
+            ProductWiseSponsoredAds: ProductWiseSponsoredAdsArray, // Use the array format
             negetiveKeywords,
             keywords,
             searchTerms,

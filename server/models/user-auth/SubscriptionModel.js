@@ -8,6 +8,13 @@ const subscriptionSchema = new mongoose.Schema(
       required: true,
       unique: true, // One subscription per user
     },
+    // Payment gateway type (stripe or razorpay)
+    paymentGateway: {
+      type: String,
+      enum: ["stripe", "razorpay"],
+      default: "stripe",
+    },
+    // Stripe fields
     stripeCustomerId: {
       type: String,
       required: false,
@@ -20,14 +27,32 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    stripePriceId: {
+      type: String,
+      required: false, // Not required for LITE plan
+    },
+    // Razorpay fields
+    razorpayOrderId: {
+      type: String,
+      required: false,
+    },
+    razorpayPaymentId: {
+      type: String,
+      required: false,
+    },
+    razorpaySubscriptionId: {
+      type: String,
+      required: false,
+    },
+    razorpaySignature: {
+      type: String,
+      required: false,
+    },
+    // Common fields
     planType: {
       type: String,
       enum: ["LITE", "PRO", "AGENCY"],
       required: true,
-    },
-    stripePriceId: {
-      type: String,
-      required: false, // Not required for LITE plan
     },
     status: {
       type: String,
@@ -70,6 +95,8 @@ const subscriptionSchema = new mongoose.Schema(
     paymentHistory: [
       {
         sessionId: String,
+        orderId: String, // For Razorpay
+        paymentId: String, // For Razorpay
         amount: Number,
         currency: String,
         status: String,
@@ -78,6 +105,11 @@ const subscriptionSchema = new mongoose.Schema(
           default: Date.now,
         },
         stripePaymentIntentId: String,
+        razorpayPaymentId: String,
+        paymentGateway: {
+          type: String,
+          enum: ["stripe", "razorpay"],
+        },
       }
     ],
     metadata: {
@@ -94,6 +126,8 @@ const subscriptionSchema = new mongoose.Schema(
 // Note: userId index is automatically created by unique: true in schema
 subscriptionSchema.index({ stripeCustomerId: 1 });
 subscriptionSchema.index({ stripeSubscriptionId: 1 });
+subscriptionSchema.index({ razorpayOrderId: 1 });
+subscriptionSchema.index({ razorpayPaymentId: 1 });
 
 const Subscription = mongoose.model("Subscription", subscriptionSchema);
 module.exports = Subscription; 

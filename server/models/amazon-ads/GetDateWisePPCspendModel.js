@@ -49,5 +49,8 @@ const getDateWiseSpendsKeywordsSchema = new mongoose.Schema({
     }]
 },{timestamps:true});
 
+// Compound index for efficient queries
+getDateWiseSpendsKeywordsSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+
 const GetDateWiseSpendsKeywords = mongoose.model("GetDateWiseSpendsKeywords", getDateWiseSpendsKeywordsSchema);
 module.exports = GetDateWiseSpendsKeywords;

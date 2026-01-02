@@ -43,6 +43,9 @@ const keywordSchema = new mongoose.Schema({
             }
         }
     ]
-}, {timestamps: true})
+}, {timestamps: true});
+
+// Compound index for efficient queries
+keywordSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Keyword', keywordSchema);

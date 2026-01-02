@@ -399,6 +399,20 @@ const analyseData = async (data, userId = null) => {
     const activeFBAFeesData = Array.isArray(data.FBAFeesData) ? 
         data.FBAFeesData.filter((product) => product && product.asin && activeProductSet.has(product.asin)) : [];
 
+    // PERFORMANCE OPTIMIZATION: Create Maps for O(1) lookups instead of O(n) array.find()
+    // This significantly improves performance for large datasets
+    const salesByAsinMap = new Map();
+    activeSalesByProducts.forEach(p => {
+        if (p && p.asin) salesByAsinMap.set(p.asin, p);
+    });
+
+    const totalProductsByAsinMap = new Map();
+    if (Array.isArray(TotalProducts)) {
+        TotalProducts.forEach(p => {
+            if (p && p.asin) totalProductsByAsinMap.set(p.asin, p);
+        });
+    }
+
     // Only calculate profitability for active products with error handling
     let profitibilityData = [];
     let sponsoredAdsMetrics = { totalCost: 0, totalSalesIn30Days: 0, totalProductsPurchased: 0, acos: 0, tacos: 0 };
@@ -495,6 +509,61 @@ const analyseData = async (data, userId = null) => {
     const productStarRatingResultError = Array.isArray(data.ConversionData?.productStarRatingResult) ? 
         data.ConversionData.productStarRatingResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
 
+    // PERFORMANCE OPTIMIZATION: Create Maps for conversion error lookups (O(1) instead of O(n))
+    const aplusErrorMap = new Map(aplusError.map(p => [p.asin, p]));
+    const imageResultErrorMap = new Map(imageResultError.map(p => [p.asin, p]));
+    const videoResultErrorMap = new Map(videoResultError.map(p => [p.asin, p]));
+    const productReviewResultErrorMap = new Map(productReviewResultError.map(p => [p.asin, p]));
+    const productStarRatingResultErrorMap = new Map(productStarRatingResultError.map(p => [p.asin, p]));
+
+    // PERFORMANCE OPTIMIZATION: Create Maps for inventory error lookups
+    const inventoryPlanningMap = new Map();
+    if (activeInventoryAnalysis.inventoryPlanning) {
+        activeInventoryAnalysis.inventoryPlanning.forEach(item => {
+            if (item && item.asin) inventoryPlanningMap.set(item.asin, item);
+        });
+    }
+    const strandedInventoryMap = new Map();
+    if (activeInventoryAnalysis.strandedInventory) {
+        activeInventoryAnalysis.strandedInventory.forEach(item => {
+            if (item && item.asin) strandedInventoryMap.set(item.asin, item);
+        });
+    }
+    const inboundNonComplianceMap = new Map();
+    if (activeInventoryAnalysis.inboundNonCompliance) {
+        activeInventoryAnalysis.inboundNonCompliance.forEach(item => {
+            if (item && item.asin) inboundNonComplianceMap.set(item.asin, item);
+        });
+    }
+    // Replenishment can have multiple entries per ASIN, so use Map of arrays
+    const replenishmentMap = new Map();
+    if (activeInventoryAnalysis.replenishment) {
+        activeInventoryAnalysis.replenishment.forEach(item => {
+            if (item && item.asin && item.status === "Error") {
+                if (!replenishmentMap.has(item.asin)) {
+                    replenishmentMap.set(item.asin, []);
+                }
+                replenishmentMap.get(item.asin).push(item);
+            }
+        });
+    }
+
+    // PERFORMANCE OPTIMIZATION: Create Map for image result (for MainImage lookup)
+    const imageResultMap = new Map();
+    if (Array.isArray(data.ConversionData?.imageResult)) {
+        data.ConversionData.imageResult.forEach(item => {
+            if (item && item.asin) imageResultMap.set(item.asin, item);
+        });
+    }
+
+    // PERFORMANCE OPTIMIZATION: Create Map for A+ content lookup
+    const aplusResultMap = new Map();
+    if (Array.isArray(data.ConversionData?.aPlusResult)) {
+        data.ConversionData.aPlusResult.forEach(item => {
+            if (item && item.asin) aplusResultMap.set(item.asin, item);
+        });
+    }
+
     // Get products without buybox - prioritize MCP BuyBox data, fallback to legacy ConversionData
     let productsWithOutBuyboxError = [];
     if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
@@ -543,38 +612,63 @@ const analyseData = async (data, userId = null) => {
         fromFilteredArray: productsWithOutBuyboxError.length
     });
 
+    // PERFORMANCE OPTIMIZATION: Create Map for buybox errors
+    const buyboxErrorMap = new Map(productsWithOutBuyboxError.map(p => [p.asin, p]));
+
     // This is for getting conversion error for each product
+    // OPTIMIZED: Uses Maps for O(1) lookups instead of O(n) array.find()
     const getConversionErrors = (asin) => {
         let errorCount = 0;
         const convData = { asin };
 
-        const sources = [
-            { key: 'aplusErrorData', list: aplusError },
-            { key: 'imageResultErrorData', list: imageResultError },
-            { key: 'videoResultErrorData', list: videoResultError },
-            { key: 'productReviewResultErrorData', list: productReviewResultError },
-            { key: 'productStarRatingResultErrorData', list: productStarRatingResultError },
-            { key: 'productsWithOutBuyboxErrorData', list: productsWithOutBuyboxError },
-        ];
+        // Use Map lookups (O(1)) instead of array.find() (O(n))
+        const aplusFound = aplusErrorMap.get(asin);
+        if (aplusFound) {
+            convData.aplusErrorData = aplusFound.data;
+            errorCount++;
+        }
 
-        sources.forEach(source => {
-            const found = source.list.find((p) => p.asin === asin);
-            if (found) {
-                convData[source.key] = found.data;
-                errorCount++;
-            }
-        });
+        const imageFound = imageResultErrorMap.get(asin);
+        if (imageFound) {
+            convData.imageResultErrorData = imageFound.data;
+            errorCount++;
+        }
+
+        const videoFound = videoResultErrorMap.get(asin);
+        if (videoFound) {
+            convData.videoResultErrorData = videoFound.data;
+            errorCount++;
+        }
+
+        const reviewFound = productReviewResultErrorMap.get(asin);
+        if (reviewFound) {
+            convData.productReviewResultErrorData = reviewFound.data;
+            errorCount++;
+        }
+
+        const ratingFound = productStarRatingResultErrorMap.get(asin);
+        if (ratingFound) {
+            convData.productStarRatingResultErrorData = ratingFound.data;
+            errorCount++;
+        }
+
+        const buyboxFound = buyboxErrorMap.get(asin);
+        if (buyboxFound) {
+            convData.productsWithOutBuyboxErrorData = buyboxFound.data;
+            errorCount++;
+        }
 
         return { data: convData, errorCount };
     };
 
     // This is for getting inventory errors for each product (using filtered active inventory data)
+    // OPTIMIZED: Uses Maps for O(1) lookups instead of O(n) array.find()
     const getInventoryErrors = (asin) => {
         let errorCount = 0;
         const invData = { asin };
 
-        // Check inventory planning errors
-        const planningError = activeInventoryAnalysis.inventoryPlanning?.find((item) => item.asin === asin);
+        // Check inventory planning errors (O(1) Map lookup)
+        const planningError = inventoryPlanningMap.get(asin);
         if (planningError) {
             invData.inventoryPlanningErrorData = planningError;
             // Count individual errors within planning data
@@ -582,22 +676,22 @@ const analyseData = async (data, userId = null) => {
             if (planningError.unfulfillable?.status === "Error") errorCount++;
         }
 
-        // Check stranded inventory errors
-        const strandedError = activeInventoryAnalysis.strandedInventory?.find((item) => item.asin === asin);
+        // Check stranded inventory errors (O(1) Map lookup)
+        const strandedError = strandedInventoryMap.get(asin);
         if (strandedError) {
             invData.strandedInventoryErrorData = strandedError;
             errorCount++;
         }
 
-        // Check inbound non-compliance errors
-        const complianceError = activeInventoryAnalysis.inboundNonCompliance?.find((item) => item.asin === asin);
+        // Check inbound non-compliance errors (O(1) Map lookup)
+        const complianceError = inboundNonComplianceMap.get(asin);
         if (complianceError) {
             invData.inboundNonComplianceErrorData = complianceError;
             errorCount++;
         }
 
-        // Check replenishment/restock errors - get ALL errors for this ASIN (multiple SKUs possible)
-        const replenishmentErrors = activeInventoryAnalysis.replenishment?.filter((item) => item && item.asin === asin && item.status === "Error") || [];
+        // Check replenishment/restock errors (O(1) Map lookup, pre-filtered for status=Error)
+        const replenishmentErrors = replenishmentMap.get(asin) || [];
         if (replenishmentErrors.length > 0) {
             // Store all errors as an array
             invData.replenishmentErrorData = replenishmentErrors.length === 1 ? replenishmentErrors[0] : replenishmentErrors;
@@ -611,9 +705,10 @@ const analyseData = async (data, userId = null) => {
     let TotalRankingerrors = 0;
 
     // Helper function to check if A+ content is present for an ASIN
+    // OPTIMIZED: Uses Map for O(1) lookup instead of O(n) array.find()
     const hasAplusContent = (asin) => {
         if (!asin) return false;
-        const aplusData = data.ConversionData?.aPlusResult?.find((item) => item && item.asin === asin);
+        const aplusData = aplusResultMap.get(asin);
         return aplusData && aplusData.data && aplusData.data.status === "Success";
     };
 
@@ -693,7 +788,8 @@ const analyseData = async (data, userId = null) => {
             const filteredElm = filterDescriptionErrors(elm, asin);
 
             const title = filteredElm.data?.Title?.substring(0, 50) || "N/A";
-            const productDetails = activeSalesByProducts.find((p) => p.asin === asin);
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const productDetails = salesByAsinMap.get(asin);
             const sales = productDetails?.amount || 0;
             const quantity = productDetails?.quantity || 0;
 
@@ -704,8 +800,8 @@ const analyseData = async (data, userId = null) => {
             totalErrorInConversion += conversionErrors;
             totalInventoryErrors += inventoryErrors;
 
-            // Find the product in TotalProducts by ASIN
-            const totalProduct = TotalProducts.find((p) => p.asin === asin);
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const totalProduct = totalProductsByAsinMap.get(asin);
 
             const elmTotalErrors = filteredElm.data?.TotalErrors || 0;
             let productwiseTotalError = elmTotalErrors + conversionErrors + inventoryErrors;
@@ -730,12 +826,14 @@ const analyseData = async (data, userId = null) => {
                     : { asin, data: { Title: title } }
             );
             
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const imageItem = imageResultMap.get(asin);
             productWiseError.push({
                 asin,
                 sku: totalProduct?.sku || "N/A",
                 name: title,
                 price: totalProduct?.price || 0,
-                MainImage: data.ConversionData?.imageResult?.find((item) => item.asin === asin)?.data?.MainImage || null,
+                MainImage: imageItem?.data?.MainImage || null,
                 errors: productwiseTotalError,
                 rankingErrors: elmTotalErrors > 0 ? filteredElm : undefined,
                 conversionErrors: conversionData,
@@ -759,8 +857,8 @@ const analyseData = async (data, userId = null) => {
         totalInventoryErrors += inventoryErrors;
         
         if (inventoryErrors > 0) {
-            // Find the product details
-            const totalProduct = TotalProducts.find((p) => p.asin === asin);
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const totalProduct = totalProductsByAsinMap.get(asin);
             const title = totalProduct?.itemName?.substring(0, 50) || totalProduct?.title?.substring(0, 50) || "N/A";
             
             // Add to inventoryProductWiseErrors array
@@ -771,16 +869,19 @@ const analyseData = async (data, userId = null) => {
             
             // Also add to productWiseError array for completeness
             const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
-            const productDetails = activeSalesByProducts.find((p) => p.asin === asin);
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const productDetails = salesByAsinMap.get(asin);
             const sales = productDetails?.amount || 0;
             const quantity = productDetails?.quantity || 0;
             
+            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+            const imageItem = imageResultMap.get(asin);
             productWiseError.push({
                 asin,
                 sku: totalProduct?.sku || "N/A",
                 name: title,
                 price: totalProduct?.price || 0,
-                MainImage: data.ConversionData?.imageResult?.find((item) => item.asin === asin)?.data?.MainImage || null,
+                MainImage: imageItem?.data?.MainImage || null,
                 errors: inventoryErrors + conversionErrors,
                 rankingErrors: undefined,
                 conversionErrors: conversionData,
@@ -808,9 +909,11 @@ const analyseData = async (data, userId = null) => {
             if (numberOfErrors > 0) {
                 TotalRankingerrors += numberOfErrors;
 
-                const productWiseErrorElm = productWiseError.find((p) => p.asin === asin);
-                if (productWiseErrorElm) {
-                    productWiseErrorElm.errors += numberOfErrors;
+                // OPTIMIZED: Use index lookup for productWiseError instead of array.find()
+                // First, we'll check using the seenAsins Set (faster than array.find for large arrays)
+                const existingProductIndex = productWiseError.findIndex((p) => p.asin === asin);
+                if (existingProductIndex !== -1) {
+                    productWiseError[existingProductIndex].errors += numberOfErrors;
                 } else {
                     // If product doesn't exist in productWiseError array yet, create it
                     const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
@@ -822,15 +925,18 @@ const analyseData = async (data, userId = null) => {
                         totalInventoryErrors += inventoryErrors;
                         seenAsins.add(asin);
                     }
-                    const totalProduct = TotalProducts.find((p) => p.asin === asin);
+                    // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+                    const totalProduct = totalProductsByAsinMap.get(asin);
                     const title = totalProduct?.itemName || totalProduct?.title?.substring(0, 50) || "N/A";
                     
+                    // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+                    const imageItem = imageResultMap.get(asin);
                     productWiseError.push({
                         asin,
                         sku: totalProduct?.sku || "N/A",
                         name: title,
                         price: totalProduct?.price || 0,
-                        MainImage: data.ConversionData?.imageResult?.find((item) => item.asin === asin)?.data?.MainImage || null,
+                        MainImage: imageItem?.data?.MainImage || null,
                         errors: numberOfErrors + conversionErrors + inventoryErrors,
                         rankingErrors: undefined,
                         conversionErrors: conversionData,
@@ -840,11 +946,15 @@ const analyseData = async (data, userId = null) => {
                     });
                 }
 
+                // Note: rankingProductWiseErrors lookup still uses find since it's typically a smaller array
+                // and we need to modify it by reference
                 let rankingErrors = rankingProductWiseErrors.find((p) => p.asin === asin);
                 if (!rankingErrors) {
+                    // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+                    const totalProduct = totalProductsByAsinMap.get(asin);
                     const fallbackTitle =
-                        TotalProducts.find((p) => p.asin === asin)?.itemName?.substring(0, 50) ||
-                        TotalProducts.find((p) => p.asin === asin)?.title?.substring(0, 50) ||
+                        totalProduct?.itemName?.substring(0, 50) ||
+                        totalProduct?.title?.substring(0, 50) ||
                         elm.data?.Title?.substring(0, 50) ||
                         "N/A";
 

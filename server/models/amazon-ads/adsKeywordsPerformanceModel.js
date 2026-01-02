@@ -67,6 +67,9 @@ const adsKeywordsPerformanceSchema = new mongoose.Schema({
     }]
 }, { timestamps: true });
 
+// Compound index for efficient queries
+adsKeywordsPerformanceSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+
 const adsKeywordsPerformanceModel = mongoose.model('adsKeywordsPerformance', adsKeywordsPerformanceSchema);
 
 module.exports = adsKeywordsPerformanceModel;

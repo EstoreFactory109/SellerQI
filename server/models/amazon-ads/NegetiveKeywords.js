@@ -15,6 +15,9 @@ const negativeKeywordsSchema = new mongoose.Schema({
     ]
 }, {timestamps: true});
 
+// Compound index for efficient queries
+negativeKeywordsSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+
 const NegativeKeywords = mongoose.model('NegativeKeywords', negativeKeywordsSchema);
 
 module.exports = NegativeKeywords;

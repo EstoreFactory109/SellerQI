@@ -2,6 +2,30 @@ const AccountHistory = require('../../models/user-auth/AccountHistory.js')
 const dbConnect = require('../../config/dbConn.js')
 const logger = require('../../utils/Logger.js')
 
+/**
+ * Calculate the next Sunday at 23:59:59 UTC
+ * This ensures history entries expire at the end of each week (Sunday night)
+ * and new entries are added when the weekly worker runs
+ * 
+ * @returns {Date} Next Sunday at 23:59:59 UTC
+ */
+const getNextSundayExpiry = () => {
+    const now = new Date();
+    const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    
+    // Calculate days until next Sunday
+    // If today is Sunday (0), we want next Sunday (7 days)
+    // If today is Monday (1), we want 6 days
+    // If today is Saturday (6), we want 1 day
+    const daysUntilSunday = dayOfWeek === 0 ? 7 : 7 - dayOfWeek;
+    
+    const nextSunday = new Date(now);
+    nextSunday.setUTCDate(now.getUTCDate() + daysUntilSunday);
+    nextSunday.setUTCHours(23, 59, 59, 999);
+    
+    return nextSunday;
+}
+
 const addAccountHistory = async(userId, country, region, HealthScore, TotalProducts, ProductsWithIssues, TotalNumberOfIssues) => {
     try {
         logger.info("addAccountHistory called", {
@@ -36,9 +60,8 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
         const today = new Date();
 
         if (!getAccountHistory) {
-            // Create expiry date without mutating today
-            const expireDate = new Date();
-            expireDate.setDate(expireDate.getDate() + 7);
+            // Set expiry to next Sunday at 23:59:59 UTC
+            const expireDate = getNextSundayExpiry();
             
             logger.info("Creating new account history record", {
                 userId,
@@ -84,8 +107,8 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
                 region
             });
 
-            const expireDate = new Date();
-            expireDate.setDate(expireDate.getDate() + 7);
+            // Set expiry to next Sunday at 23:59:59 UTC
+            const expireDate = getNextSundayExpiry();
 
             getAccountHistory.accountHistory = [{
                 Date: today,
@@ -106,9 +129,8 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
         const ExpireDate = new Date(getAccountHistoryExpireDate);
 
         if (today > ExpireDate) {
-            // Create expiry date without mutating today
-            const expireDate = new Date();
-            expireDate.setDate(expireDate.getDate() + 7);
+            // Set expiry to next Sunday at 23:59:59 UTC
+            const expireDate = getNextSundayExpiry();
             
             const newHistory = {
                 Date: today,
@@ -127,7 +149,8 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
                 userId,
                 country,
                 region,
-                totalEntries: getAccountHistory.accountHistory.length
+                totalEntries: getAccountHistory.accountHistory.length,
+                nextExpiry: expireDate.toISOString()
             });
 
             return getAccountHistory;
@@ -155,6 +178,4 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
     }
 }
 
-
-
-module.exports = {addAccountHistory}
+module.exports = { addAccountHistory }

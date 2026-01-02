@@ -13,8 +13,25 @@ export default function SubscriptionSuccess() {
         const processPayment = async () => {
             try {
                 const sessionId = searchParams.get('session_id');
+                const gateway = searchParams.get('gateway');
                 
-                if (sessionId) {
+                if (gateway === 'razorpay') {
+                    // Razorpay payment was already verified in the payment flow
+                    // Just show success and redirect
+                    setPlanType('PRO');
+                    setStatus('success');
+                    
+                    // Clear any intended plan/package from localStorage
+                    localStorage.removeItem('intendedPlan');
+                    localStorage.removeItem('intendedPackage');
+                    localStorage.removeItem('intendedCountry');
+                    localStorage.removeItem('previousPlan');
+                    
+                    // Redirect to connect-to-amazon
+                    setTimeout(() => {
+                        navigate('/connect-to-amazon');
+                    }, 3000);
+                } else if (sessionId) {
                     // Handle Stripe payment success
                     setStatus('confirming');
                     const result = await stripeService.handlePaymentSuccess(sessionId);

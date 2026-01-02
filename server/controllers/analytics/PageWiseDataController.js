@@ -3,6 +3,10 @@
  * 
  * This controller provides separate endpoints for each dashboard page.
  * Data is calculated in the backend and sent to the frontend ready for display.
+ * 
+ * NOTE: History recording is NOT done here. History is recorded:
+ * 1. After first integration completes (in Integration.js)
+ * 2. Weekly via dedicated WeeklyHistoryWorker (runs on Sundays)
  */
 
 const { ApiError } = require('../../utils/ApiError.js');
@@ -10,8 +14,6 @@ const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const { AnalyseService } = require('../../Services/main/Analyse.js');
 const { analyseData } = require('../../Services/Calculations/DashboardCalculation.js');
-const { calculateHistoryData, extractHistoryParams } = require('../../Services/Calculations/HistoryCalculation.js');
-const { addAccountHistory } = require('../../Services/History/addAccountHistory.js');
 const CreateTaskService = require('../../Services/Calculations/CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
 
@@ -102,12 +104,10 @@ const getDashboardData = asyncHandler(async (req, res) => {
             );
         }
 
-        // Step 3: Record history (async, don't wait)
-        recordHistory(userId, Country, Region, analyseResult.message, calculatedData.dashboardData)
-            .catch(err => logger.error('Error recording history:', {
-                message: err.message,
-                stack: err.stack
-            }));
+        // NOTE: History recording removed from here
+        // History is now recorded only:
+        // 1. After first integration completes (Integration.js)
+        // 2. Weekly via WeeklyHistoryWorker (runs on Sundays)
 
         // Return calculated dashboard data
         return res.status(200).json(
@@ -551,51 +551,6 @@ const getInventoryData = asyncHandler(async (req, res) => {
         );
     }
 });
-
-/**
- * Helper function to record history asynchronously
- */
-async function recordHistory(userId, country, region, analyseData, dashboardData) {
-    try {
-        if (!userId || !country || !region) {
-            logger.warn('recordHistory: Missing required parameters', { userId, country, region });
-            return;
-        }
-
-        const historyParams = extractHistoryParams(analyseData, dashboardData);
-        
-        logger.info('recordHistory: Calling addAccountHistory', {
-            userId,
-            country,
-            region,
-            healthScore: historyParams.healthScore,
-            totalProducts: historyParams.totalProducts,
-            productsWithIssues: historyParams.productsWithIssues,
-            totalIssues: historyParams.totalIssues
-        });
-        
-        await addAccountHistory(
-            userId,
-            country,
-            region,
-            historyParams.healthScore,
-            historyParams.totalProducts,
-            historyParams.productsWithIssues,
-            historyParams.totalIssues
-        );
-        
-        logger.info(`History recorded successfully for user ${userId}`, { country, region });
-    } catch (error) {
-        logger.error('Error recording history', {
-            error: error.message,
-            stack: error.stack,
-            userId,
-            country,
-            region
-        });
-        // Don't throw - history recording should not affect main response
-    }
-}
 
 module.exports = {
     getDashboardData,
