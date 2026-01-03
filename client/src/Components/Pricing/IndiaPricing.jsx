@@ -13,6 +13,20 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
+            {/* SellerQI Logo */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="mb-6"
+            >
+              <img 
+                src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
+                alt="SellerQI Logo" 
+                className="h-12 w-auto mx-auto brightness-0 invert"
+              />
+            </motion.div>
+            
             <div className="inline-block bg-white/20 backdrop-blur-sm px-5 py-2 rounded-full text-sm font-semibold mb-5">
               🇮🇳 Special Pricing for Indian Sellers
             </div>
@@ -36,9 +50,14 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                   ₹1,999<span className="text-2xl font-normal">/month</span>
                 </div>
                 <div className="text-base text-gray-600 mb-3">For Indian registered sellers</div>
-                <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
-                  Save 78%
-                </span>
+                <div className="flex items-center justify-center gap-3 mb-3">
+                  <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
+                    Save 78%
+                  </span>
+                  <span className="inline-block bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md font-semibold text-sm">
+                    7-Day Free Trial
+                  </span>
+                </div>
               </div>
               <button
                 onClick={handleFreeTrial}
@@ -52,9 +71,10 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                 {loading.freeTrial ? (
                   <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                 ) : (
-                  'Start Your Free Trial'
+                  'Start Your 7-Day Free Trial'
                 )}
               </button>
+              <p className="text-sm text-gray-500 mt-3">No credit card required • Cancel anytime</p>
             </motion.div>
           </motion.div>
         </div>
@@ -269,9 +289,18 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
             {loading.freeTrial ? (
               <Loader2 className="w-5 h-5 animate-spin mx-auto" />
             ) : (
-              'Start Free Trial - ₹1,999/month after'
+              'Start 7-Day Free Trial - ₹1,999/month after'
             )}
           </motion.button>
+          <motion.p
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="text-sm mt-4 opacity-80"
+          >
+            No credit card required • Full access for 7 days • Cancel anytime
+          </motion.p>
         </div>
       </section>
     </div>
