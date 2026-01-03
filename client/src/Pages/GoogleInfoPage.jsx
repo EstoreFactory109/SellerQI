@@ -7,6 +7,7 @@ import { loginSuccess } from "../redux/slices/authSlice.js";
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from "../services/googleAuthService.js";
 import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
+import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -193,31 +194,26 @@ const GoogleInfoPage = () => {
         
         // Check subscription status and redirect accordingly
         const user = response.data;
-        const hasSelectedPlan = user.packageType;
-        const subscriptionStatus = user.subscriptionStatus;
         
         // Debug logging
         console.log('=== GOOGLE LOGIN DEBUG ===');
         console.log('Full user data:', user);
-        console.log('packageType:', hasSelectedPlan);
-        console.log('subscriptionStatus:', subscriptionStatus);
-        console.log('hasSelectedPlan?', !!hasSelectedPlan);
-        console.log('subscriptionStatus check:', subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus));
+        console.log('packageType:', user.packageType);
+        console.log('subscriptionStatus:', user.subscriptionStatus);
+        console.log('isInTrialPeriod:', user.isInTrialPeriod);
+        console.log('hasPremiumAccess:', hasPremiumAccess(user));
         
         setTimeout(() => {
-          if (!hasSelectedPlan) {
-            // User hasn't selected any plan, redirect to pricing
-            console.log('Google: Redirecting to pricing: No plan selected');
-            window.location.href = "/pricing";
-          } else if (subscriptionStatus && ['inactive', 'cancelled', 'past_due'].includes(subscriptionStatus) && user.packageType !== 'LITE') {
-            // User has a paid plan but subscription is explicitly inactive, redirect to pricing
-            // LITE users can access dashboard even with cancelled status since it's free
-            console.log('Google: Redirecting to pricing: Inactive paid subscription');
+          // Check if user has premium access (PRO, PRO trial, or AGENCY)
+          // LITE users should be redirected to pricing page
+          if (!hasPremiumAccess(user)) {
+            // User is on LITE plan or has no valid premium subscription
+            console.log('Google: Redirecting to pricing - no premium access');
             window.location.href = "/pricing";
           } else {
-            // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
-            // using the profile API which has the full sellerCentral data
-            console.log('Google: Redirecting to dashboard: Valid plan access');
+            // User has premium access, redirect to dashboard
+            // ProtectedRouteWrapper will handle SP-API check
+            console.log('Google: Premium access verified, redirecting to dashboard');
             window.location.href = "/seller-central-checker/dashboard";
           }
         }, 1000);

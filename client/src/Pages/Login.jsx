@@ -8,6 +8,7 @@ import { loginSuccess } from '../redux/slices/authSlice.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
 import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
+import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -125,14 +126,18 @@ export default function Login() {
         // Check subscription status and redirect accordingly
         const user = response.data.data;
         console.log("user: ",user);
-        const hasSelectedPlan = user.packageType;
         
-        if (!hasSelectedPlan) {
-          // User hasn't selected any plan, redirect to pricing
+        // Check if user has premium access (PRO, PRO trial, or AGENCY)
+        // LITE users should be redirected to pricing page
+        if (!hasPremiumAccess(user)) {
+          // User is on LITE plan or has no valid premium subscription
+          // Redirect to pricing page
+          console.log('Login: Redirecting to pricing - no premium access');
           navigate('/pricing');
         } else {
-          // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
-          // using the profile API which has the full sellerCentral data
+          // User has premium access, redirect to dashboard
+          // ProtectedRouteWrapper will handle SP-API check
+          console.log('Login: Premium access verified, redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
         }
       }
@@ -145,7 +150,7 @@ export default function Login() {
         } else if(error.response?.data?.message === "Seller central not found"){
           // Store auth data before redirecting
           localStorage.setItem('isAuth', 'true');
-          navigate('/connect-accounts');
+          navigate('/connect-to-amazon');
         } else {
           // Handle wrong password or invalid credentials
           setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
@@ -179,19 +184,20 @@ export default function Login() {
         localStorage.setItem("isAuth", true);
         dispatch(loginSuccess(response.data.data));
         
-        // Redirect to dashboard - ProtectedRouteWrapper will handle SP-API check
-        // using the profile API which has the full sellerCentral data
-        navigate('/seller-central-checker/dashboard');
+        // Check if user has premium access (PRO, PRO trial, or AGENCY)
+        const user = response.data.data;
+        if (!hasPremiumAccess(user)) {
+          // User is on LITE plan or has no valid premium subscription
+          console.log('Google Login: Redirecting to pricing - no premium access');
+          navigate('/pricing');
+        } else {
+          // User has premium access, redirect to dashboard
+          // ProtectedRouteWrapper will handle SP-API check
+          console.log('Google Login: Premium access verified, redirecting to dashboard');
+          navigate('/seller-central-checker/dashboard');
+        }
         
-      } /*else {
-        // Clear any cached auth state to force fresh checks
-        clearAuthCache();
-        
-        dispatch(loginSuccess(response.data));
-        localStorage.setItem("isAuth", true);
-        // For new user registration, redirect to pricing
-        navigate("/pricing");
-      }*/
+      }
     } catch (error) {
       console.error('Google login failed:', error);
       setErrorMessage(error.response?.data?.message || 'Google login failed. Please try again.');

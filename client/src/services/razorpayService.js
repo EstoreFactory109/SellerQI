@@ -97,7 +97,7 @@ class RazorpayService {
                 image: 'https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png',
                 prefill: subscriptionData.prefill,
                 theme: {
-                    color: '#667eea'
+                    color: '#4f46e5'
                 },
                 notes: {
                     plan: 'Pro Plan',
