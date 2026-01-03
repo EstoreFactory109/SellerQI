@@ -139,10 +139,92 @@ const handleWebhook = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Cancel Razorpay subscription
+ */
+const cancelSubscription = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        // Check if Razorpay is configured
+        if (!razorpayService.isConfigured()) {
+            return res.status(503).json(
+                new ApiResponse(503, null, 'Payment service is not configured')
+            );
+        }
+
+        // Cancel subscription
+        const result = await razorpayService.cancelSubscription(userId);
+
+        logger.info(`Razorpay subscription cancelled for user: ${userId}`);
+
+        return res.status(200).json(
+            new ApiResponse(200, result, 'Subscription cancelled successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error cancelling Razorpay subscription:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to cancel subscription')
+        );
+    }
+});
+
+/**
+ * Get user's Razorpay subscription details
+ */
+const getSubscription = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const subscription = await razorpayService.getSubscription(userId);
+
+        if (!subscription) {
+            return res.status(404).json(
+                new ApiResponse(404, null, 'No subscription found')
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, subscription, 'Subscription retrieved successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error getting Razorpay subscription:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get subscription')
+        );
+    }
+});
+
+/**
+ * Get payment history for Razorpay
+ */
+const getPaymentHistory = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const history = await razorpayService.getPaymentHistory(userId);
+
+        return res.status(200).json(
+            new ApiResponse(200, { paymentHistory: history }, 'Payment history retrieved successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error getting Razorpay payment history:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get payment history')
+        );
+    }
+});
+
 module.exports = {
     createOrder,
     verifyPayment,
     getConfig,
-    handleWebhook
+    handleWebhook,
+    cancelSubscription,
+    getSubscription,
+    getPaymentHistory
 };
 

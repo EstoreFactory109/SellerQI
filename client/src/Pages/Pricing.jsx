@@ -166,6 +166,39 @@ export default function PricingPage() {
     window.open('https://www.sellerqi.com/contact', '_blank');
   };
 
+  // Render India pricing with full-page layout
+  if (country === 'IN' && !isDetectingCountry) {
+    return (
+      <div className="min-h-screen w-full bg-white">
+        {/* Cancelled Payment Notification */}
+        <AnimatePresence>
+          {showCancelledMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -50 }}
+              className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+            >
+              <X className="w-5 h-5" />
+              <span className="text-sm font-medium">Payment was cancelled. You can try again anytime!</span>
+              <button onClick={() => setShowCancelledMessage(false)} className="ml-2 hover:bg-amber-100 rounded-full p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        <IndiaPricing 
+          loading={loading}
+          handleFreeTrial={handleFreeTrial}
+          handleSubscribe={handleIndiaSubscribe}
+          handleContactUs={handleContactUs}
+        />
+      </div>
+    );
+  }
+
+  // Default pricing page for other countries
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col overflow-hidden">
       {/* Decorative Background Elements */}
@@ -222,13 +255,6 @@ export default function PricingPage() {
           <div className="w-full max-w-5xl mx-auto flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
           </div>
-        ) : country === 'IN' ? (
-          <IndiaPricing 
-            loading={loading}
-            handleFreeTrial={handleFreeTrial}
-            handleSubscribe={handleIndiaSubscribe}
-            handleContactUs={handleContactUs}
-          />
         ) : (
           <div className="w-full max-w-5xl mx-auto">
             <div className="grid lg:grid-cols-3 gap-5 items-stretch">

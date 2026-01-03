@@ -61,7 +61,7 @@ class RazorpayService {
             const subscriptionOptions = {
                 plan_id: planId,
                 customer_notify: 1,
-                total_count: 12, // 12 billing cycles (1 year)
+                total_count: 60, // 60 billing cycles (5 years - until 2030)
                 notes: {
                     userId: userId.toString(),
                     planType: planType,
@@ -511,6 +511,126 @@ class RazorpayService {
         } catch (error) {
             logger.error('Error verifying webhook signature:', error);
             return false;
+        }
+    }
+
+    /**
+     * Cancel Razorpay subscription
+     */
+    async cancelSubscription(userId) {
+        try {
+            if (!this.isConfigured()) {
+                throw new Error('Razorpay is not configured');
+            }
+
+            // Find user's active subscription
+            const subscription = await Subscription.findOne({ 
+                userId, 
+                paymentGateway: 'razorpay',
+                status: { $in: ['active', 'authenticated'] }
+            });
+
+            if (!subscription) {
+                throw new Error('No active Razorpay subscription found');
+            }
+
+            if (!subscription.razorpaySubscriptionId) {
+                throw new Error('No Razorpay subscription ID found');
+            }
+
+            // Cancel subscription in Razorpay
+            await this.razorpay.subscriptions.cancel(subscription.razorpaySubscriptionId);
+
+            // Update subscription in database
+            await Subscription.findOneAndUpdate(
+                { userId, razorpaySubscriptionId: subscription.razorpaySubscriptionId },
+                {
+                    status: 'cancelled',
+                    cancelAtPeriodEnd: false
+                }
+            );
+
+            // Update user's package type to LITE
+            await User.findByIdAndUpdate(userId, {
+                packageType: 'LITE',
+                subscriptionStatus: 'cancelled'
+            });
+
+            logger.info(`Razorpay subscription cancelled for user: ${userId}, subscription: ${subscription.razorpaySubscriptionId}`);
+
+            return { 
+                success: true, 
+                message: 'Subscription cancelled successfully' 
+            };
+
+        } catch (error) {
+            logger.error('Error cancelling Razorpay subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get user's subscription details
+     */
+    async getSubscription(userId) {
+        try {
+            const subscription = await Subscription.findOne({ 
+                userId,
+                paymentGateway: 'razorpay'
+            });
+
+            if (!subscription) {
+                return null;
+            }
+
+            // Fetch latest details from Razorpay if subscription exists
+            let razorpayDetails = null;
+            if (subscription.razorpaySubscriptionId && this.isConfigured()) {
+                try {
+                    razorpayDetails = await this.razorpay.subscriptions.fetch(subscription.razorpaySubscriptionId);
+                } catch (fetchError) {
+                    logger.warn('Could not fetch Razorpay subscription details:', fetchError.message);
+                }
+            }
+
+            return {
+                planType: subscription.planType,
+                status: subscription.status,
+                paymentStatus: subscription.paymentStatus,
+                currency: subscription.currency || 'inr',
+                currentPeriodStart: subscription.currentPeriodStart,
+                currentPeriodEnd: subscription.currentPeriodEnd,
+                nextBillingDate: subscription.nextBillingDate || subscription.currentPeriodEnd,
+                paymentGateway: 'razorpay',
+                razorpaySubscriptionId: subscription.razorpaySubscriptionId,
+                razorpayDetails: razorpayDetails
+            };
+
+        } catch (error) {
+            logger.error('Error getting Razorpay subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get payment history for user
+     */
+    async getPaymentHistory(userId) {
+        try {
+            const subscription = await Subscription.findOne({ userId });
+
+            if (!subscription || !subscription.paymentHistory) {
+                return [];
+            }
+
+            // Filter to only show Razorpay payments
+            return subscription.paymentHistory.filter(
+                payment => payment.paymentGateway === 'razorpay'
+            );
+
+        } catch (error) {
+            logger.error('Error getting Razorpay payment history:', error);
+            throw error;
         }
     }
 }

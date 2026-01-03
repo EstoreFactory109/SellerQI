@@ -93,10 +93,15 @@ class RazorpayService {
                 key: subscriptionData.keyId,
                 subscription_id: subscriptionData.subscriptionId,
                 name: 'SellerQI',
-                description: subscriptionData.description,
+                description: subscriptionData.description || 'Pro Plan - Monthly Subscription',
+                image: 'https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png',
                 prefill: subscriptionData.prefill,
                 theme: {
-                    color: '#3B4A6B'
+                    color: '#667eea'
+                },
+                notes: {
+                    plan: 'Pro Plan',
+                    billing_cycle: 'Monthly'
                 },
                 modal: {
                     ondismiss: () => {
@@ -160,6 +165,45 @@ class RazorpayService {
      */
     isPaymentRequired(planType) {
         return planType === 'PRO';
+    }
+
+    /**
+     * Get user's Razorpay subscription details
+     */
+    async getSubscription() {
+        try {
+            const response = await axiosInstance.get('/app/razorpay/subscription');
+            return response.data.data;
+        } catch (error) {
+            console.error('Error getting Razorpay subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Cancel Razorpay subscription
+     */
+    async cancelSubscription() {
+        try {
+            const response = await axiosInstance.post('/app/razorpay/cancel-subscription');
+            return response.data;
+        } catch (error) {
+            console.error('Error cancelling Razorpay subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get payment history from Razorpay
+     */
+    async getPaymentHistory() {
+        try {
+            const response = await axiosInstance.get('/app/razorpay/payment-history');
+            return response.data.data.paymentHistory;
+        } catch (error) {
+            console.error('Error getting Razorpay payment history:', error);
+            throw error;
+        }
     }
 }
 

@@ -27,8 +27,13 @@ import {
 } from 'lucide-react';
 import stripeService from '../../../services/stripeService';
 import axiosInstance from '../../../config/axios.config';
+import { detectCountry } from '../../../utils/countryDetection';
+import IndiaBilling from './IndiaBilling';
 
 export default function PlansAndBilling() {
+  // Country detection state
+  const [country, setCountry] = useState(null);
+  const [isDetectingCountry, setIsDetectingCountry] = useState(true);
   const [currentPlan, setCurrentPlan] = useState('LITE');
   const [subscriptionStatus, setSubscriptionStatus] = useState('active');
   const [loading, setLoading] = useState({});
@@ -109,6 +114,22 @@ export default function PlansAndBilling() {
       limitations: []
     }
   };
+
+  // Detect country on mount
+  useEffect(() => {
+    const getCountry = async () => {
+      try {
+        const detectedCountry = await detectCountry();
+        setCountry(detectedCountry);
+      } catch (error) {
+        console.error('Error detecting country:', error);
+        setCountry('US'); // Default to US if detection fails
+      } finally {
+        setIsDetectingCountry(false);
+      }
+    };
+    getCountry();
+  }, []);
 
   useEffect(() => {
     fetchUserSubscription();
@@ -277,7 +298,25 @@ export default function PlansAndBilling() {
     return planOrder[plan] > planOrder[currentPlan];
   };
 
+  // Show loading spinner while detecting country
+  if (isDetectingCountry) {
     return (
+      <div className="min-h-screen bg-[#eeeeee] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="text-gray-600">Loading billing information...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render India billing component for Indian users
+  if (country === 'IN') {
+    return <IndiaBilling />;
+  }
+
+  // Default billing page for other countries (Stripe)
+  return (
     <div className="min-h-screen bg-[#eeeeee]">
       {/* Cancel Success/Error Message */}
       {cancelMessage && (

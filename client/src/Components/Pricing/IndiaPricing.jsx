@@ -1,179 +1,279 @@
 import React from 'react';
-import { Check, Loader2, Zap, Users, Crown, Sparkles, Mail } from 'lucide-react';
+import { Check, Loader2, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe, handleContactUs }) {
   return (
-    <div className="w-full max-w-5xl mx-auto">
-      <div className="grid lg:grid-cols-3 gap-5 items-stretch">
-        
-        {/* Free Trial Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
-        >
-          {/* Icon */}
-          <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/20">
-            <Zap className="w-6 h-6 text-white" />
-          </div>
+    <div className="w-full">
+      {/* Hero Section */}
+      <section className="bg-gradient-to-br from-indigo-600 via-purple-600 to-purple-700 text-white py-20 px-4">
+        <div className="max-w-6xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <div className="inline-block bg-white/20 backdrop-blur-sm px-5 py-2 rounded-full text-sm font-semibold mb-5">
+              🇮🇳 Special Pricing for Indian Sellers
+            </div>
+            <h1 className="text-4xl md:text-5xl font-bold mb-5">
+              Built for India,<br />Priced for Indian Sellers
+            </h1>
+            <p className="text-xl mb-10 opacity-90 max-w-2xl mx-auto">
+              World-class Amazon selling tools at prices that work for Indian entrepreneurs
+            </p>
+            
+            {/* Pricing Box */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="bg-white text-gray-900 p-10 rounded-xl max-w-md mx-auto shadow-2xl"
+            >
+              <div className="mb-6">
+                <div className="text-2xl line-through text-gray-400 mb-3">₹8,999/month</div>
+                <div className="text-5xl md:text-6xl font-bold text-indigo-600 mb-2">
+                  ₹1,999<span className="text-2xl font-normal">/month</span>
+                </div>
+                <div className="text-base text-gray-600 mb-3">For Indian registered sellers</div>
+                <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
+                  Save 78%
+                </span>
+              </div>
+              <button
+                onClick={handleFreeTrial}
+                disabled={loading.freeTrial}
+                className={`w-full py-4 px-8 rounded-lg text-lg font-semibold transition-all duration-300 ${
+                  loading.freeTrial
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg'
+                }`}
+              >
+                {loading.freeTrial ? (
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                ) : (
+                  'Start Your Free Trial'
+                )}
+              </button>
+            </motion.div>
+          </motion.div>
+        </div>
+      </section>
 
-          <h3 className="text-xl font-bold text-gray-900 mb-1">Free Trial</h3>
-          <div className="mb-4">
-            <span className="text-3xl font-bold text-gray-900">₹0</span>
-            <span className="text-gray-500 text-sm ml-1">for 7 days</span>
-          </div>
-          <p className="text-gray-600 text-sm mb-5">Try all Pro features free for 7 days. No credit card required.</p>
+      {/* Mission Section */}
+      <section className="bg-white py-20 px-4">
+        <div className="max-w-4xl mx-auto">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="text-4xl font-bold text-center mb-10"
+          >
+            Why We're Doing This
+          </motion.h2>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="text-lg leading-relaxed text-gray-600 space-y-5"
+          >
+            <p>
+              SellerQI is built in India, by Indians who understand the challenges of selling on Amazon.
+              We've been there - dealing with inventory headaches, PPC budgets that disappear, and reimbursements that take forever.
+            </p>
+            <p>
+              We're committed to <strong className="text-gray-900">Atmanirbhar Bharat</strong> by making world-class tools accessible to Indian sellers at Indian prices.
+              When local sellers succeed with better tools and insights, India's e-commerce ecosystem succeeds.
+            </p>
+            <p>
+              This isn't a trial or temporary discount. This is permanent pricing for Indian businesses, because we believe
+              Indian sellers deserve the same tools that international brands use, without paying international prices.
+            </p>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section className="bg-gray-50 py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="text-4xl font-bold text-center mb-5"
+          >
+            Everything You Need, Nothing Held Back
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="text-center text-lg text-emerald-600 font-semibold mb-12"
+          >
+            Full feature access at Indian pricing - no tier games
+          </motion.p>
           
-          <ul className="space-y-2.5 mb-6 flex-1">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              'Full Pro access for 7 days',
-              'Unlimited product analyses',
-              'Download detailed reports',
-              'AI-powered recommendations',
-              'Priority support'
+              {
+                title: 'Root Cause Analysis',
+                description: 'AI-powered insights that tell you exactly why your sales dropped or listings got suppressed'
+              },
+              {
+                title: 'Listing Optimization',
+                description: 'Per-ASIN keyword suggestions and content optimization based on real data'
+              },
+              {
+                title: 'PPC Management',
+                description: 'Smart bid adjustments and campaign recommendations that actually save money'
+              },
+              {
+                title: 'Reimbursement Detection',
+                description: 'Automatically find lost inventory, damaged units, and overcharged fees'
+              },
+              {
+                title: 'Account Health',
+                description: 'Real-time monitoring with alerts before issues become account risks'
+              },
+              {
+                title: 'Instant Alerts',
+                description: 'Email & WhatsApp notifications for suppressions, Buy Box loss, inventory issues'
+              }
             ].map((feature, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <Check className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                <span className="text-gray-700 text-sm">{feature}</span>
-              </li>
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: i * 0.1 }}
+                className="bg-white p-6 rounded-lg border-l-4 border-indigo-600"
+              >
+                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                <p className="text-gray-600">{feature.description}</p>
+              </motion.div>
             ))}
-          </ul>
-          
-          <button 
+          </div>
+        </div>
+      </section>
+
+      {/* Initiatives Section */}
+      <section className="bg-white py-16 px-4 border-t border-gray-200">
+        <div className="max-w-6xl mx-auto">
+          <motion.h3
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="text-center text-xl text-gray-600 mb-10"
+          >
+            Proudly Supporting Indian Initiatives
+          </motion.h3>
+          <div className="flex justify-center items-center gap-12 flex-wrap">
+            {[
+              { label: 'Atmanirbhar Bharat', icon: '🇮🇳' },
+              { label: 'Make in India', icon: '🏭' },
+              { label: 'Vocal for Local', icon: '🗣️' }
+            ].map((initiative, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: i * 0.1 }}
+                className="flex flex-col items-center gap-4"
+              >
+                <div className="w-20 h-20 bg-gray-100 border-2 border-dashed border-indigo-600 rounded-full flex items-center justify-center text-2xl">
+                  {initiative.icon}
+                </div>
+                <div className="text-sm font-semibold text-gray-900">{initiative.label}</div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Eligibility Section */}
+      <section className="bg-yellow-50 py-16 px-4">
+        <div className="max-w-3xl mx-auto">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="text-3xl font-bold text-center mb-10"
+          >
+            Who Gets This Pricing?
+          </motion.h2>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="bg-white p-10 rounded-lg"
+          >
+            <ul className="space-y-4">
+              {[
+                'Your business is registered in India',
+                'You have a valid GST registration number',
+                'Payment via Indian bank account, UPI, or Indian credit/debit card',
+                'Selling on Amazon.in or managing Indian inventory on global Amazon stores'
+              ].map((item, i) => (
+                <li key={i} className="flex items-start gap-3 text-base py-3 border-b border-gray-200 last:border-0">
+                  <Check className="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Final CTA Section */}
+      <section className="bg-indigo-600 text-white py-20 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="text-4xl font-bold mb-5"
+          >
+            Ready to Scale Smarter?
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="text-lg mb-8 opacity-90"
+          >
+            Join Indian sellers who are already using SellerQI to grow their Amazon business
+          </motion.p>
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.2 }}
             onClick={handleFreeTrial}
             disabled={loading.freeTrial}
-            className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
+            className={`max-w-md mx-auto w-full py-4 px-8 rounded-lg text-lg font-semibold transition-all duration-300 ${
               loading.freeTrial
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30'
+                : 'bg-white text-indigo-600 hover:bg-gray-100 shadow-lg'
             }`}
           >
             {loading.freeTrial ? (
               <Loader2 className="w-5 h-5 animate-spin mx-auto" />
             ) : (
-              'Start Free Trial'
+              'Start Free Trial - ₹1,999/month after'
             )}
-          </button>
-        </motion.div>
-
-        {/* Pro Plan - Featured */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="relative bg-gradient-to-br from-[#3B4A6B] to-[#2d3a52] rounded-2xl p-6 shadow-2xl flex flex-col lg:scale-105 z-10"
-        >
-          {/* Popular Badge */}
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-            <div className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3" />
-              MOST POPULAR
-            </div>
-          </div>
-
-          {/* Icon */}
-          <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center mb-4 mt-2">
-            <Crown className="w-6 h-6 text-white" />
-          </div>
-
-          <h3 className="text-xl font-bold text-white mb-1">Pro Plan</h3>
-          <div className="mb-4">
-            <span className="text-3xl font-bold text-white">₹1,999</span>
-            <span className="text-white/70 text-sm ml-1">/month</span>
-          </div>
-          <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business.</p>
-          
-          <ul className="space-y-2.5 mb-6 flex-1">
-            {[
-              'Unlimited product analyses',
-              'Download detailed reports',
-              'AI-powered fix recommendations',
-              'Track unlimited products',
-              'Priority support',
-              'Advanced analytics'
-            ].map((feature, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span className="text-white/90 text-sm">{feature}</span>
-              </li>
-            ))}
-          </ul>
-          
-          <button 
-            onClick={() => handleSubscribe('PRO')}
-            disabled={loading.PRO}
-            className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
-              loading.PRO
-                ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg'
-            }`}
-          >
-            {loading.PRO ? (
-              <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-            ) : (
-              'Subscribe to Pro'
-            )}
-          </button>
-        </motion.div>
-
-        {/* Agency Plan */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
-        >
-          {/* Icon */}
-          <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-purple-500/20">
-            <Users className="w-6 h-6 text-white" />
-          </div>
-
-          <h3 className="text-xl font-bold text-gray-900 mb-1">Agency</h3>
-          <div className="mb-4">
-            <span className="text-3xl font-bold text-gray-900">Custom</span>
-            <span className="text-gray-500 text-sm ml-1">pricing</span>
-          </div>
-          <p className="text-gray-600 text-sm mb-5">For agencies and consultants managing multiple clients.</p>
-          
-          <ul className="space-y-2.5 mb-6 flex-1">
-            {[
-              'Everything in Pro',
-              'Client management dashboard',
-              'White-label reports',
-              'Bulk operations',
-              'Dedicated support',
-              'Custom integrations'
-            ].map((feature, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <Check className="w-4 h-4 text-purple-500 flex-shrink-0 mt-0.5" />
-                <span className="text-gray-700 text-sm">{feature}</span>
-              </li>
-            ))}
-          </ul>
-          
-          <button 
-            onClick={() => handleContactUs('AGENCY')}
-            disabled={loading.AGENCY}
-            className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-              loading.AGENCY
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30'
-            }`}
-          >
-            {loading.AGENCY ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                <Mail className="w-5 h-5" />
-                Contact Us
-              </>
-            )}
-          </button>
-        </motion.div>
-      </div>
+          </motion.button>
+        </div>
+      </section>
     </div>
   );
 }
-

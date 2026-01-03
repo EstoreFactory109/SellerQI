@@ -6,7 +6,10 @@ const {
     createOrder,
     verifyPayment,
     getConfig,
-    handleWebhook
+    handleWebhook,
+    cancelSubscription,
+    getSubscription,
+    getPaymentHistory
 } = require('../controllers/payments/RazorpayController');
 
 // Import middleware
@@ -21,6 +24,11 @@ router.get('/config', getConfig);
 // Payment routes (auth required)
 router.post('/create-order', auth, createOrder);
 router.post('/verify-payment', auth, verifyPayment);
+
+// Subscription management routes (auth required)
+router.get('/subscription', auth, getSubscription);
+router.post('/cancel-subscription', auth, cancelSubscription);
+router.get('/payment-history', auth, getPaymentHistory);
 
 module.exports = router;
 

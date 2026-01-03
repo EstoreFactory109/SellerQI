@@ -68,6 +68,11 @@ class StripeService {
      */
     async createCheckoutSession(userId, planType, successUrl, cancelUrl) {
         try {
+            // Check if Stripe is configured
+            if (!process.env.STRIPE_SECRET_KEY) {
+                throw new Error('STRIPE_SECRET_KEY is not configured. Please set it in environment variables.');
+            }
+
             const user = await User.findById(userId);
             if (!user) {
                 throw new Error('User not found');
@@ -87,7 +92,7 @@ class StripeService {
             }
 
             if (!priceId) {
-                throw new Error(`Price ID not configured for plan: ${planType}`);
+                throw new Error(`STRIPE_${planType}_PRICE_ID is not configured. Please set it in environment variables.`);
             }
 
             // Create or get customer
