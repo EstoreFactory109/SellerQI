@@ -123,22 +123,35 @@ export default function Login() {
           token: 'stored_in_cookies' // Token is stored in HTTP-only cookies
         }));
 
-        // Check subscription status and redirect accordingly
+        // Check SP-API first, then subscription
         const user = response.data.data;
         console.log("user: ",user);
         
-        // Check if user has premium access (PRO, PRO trial, or AGENCY)
-        // LITE users should be redirected to pricing page
-        if (!hasPremiumAccess(user)) {
-          // User is on LITE plan or has no valid premium subscription
-          // Redirect to pricing page
-          console.log('Login: Redirecting to pricing - no premium access');
+        const hasPremium = hasPremiumAccess(user);
+        const spApiConnected = isSpApiConnected(user);
+        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
+        
+        console.log('Login: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        
+        // Flow: Check SP-API first, then subscription
+        // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+        if (spApiConnected) {
+          // SP-API is connected → always redirect to dashboard (regardless of subscription)
+          console.log('Login: SP-API connected - redirecting to dashboard');
+          navigate('/seller-central-checker/dashboard');
+        } else if (!hasSellerCentralData) {
+          // sellerCentral data not available in login response → redirect to dashboard
+          // ProtectedRouteWrapper will do full check with complete user data
+          console.log('Login: sellerCentral data not available - redirecting to dashboard for full check');
+          navigate('/seller-central-checker/dashboard');
+        } else if (!hasPremium) {
+          // SP-API not connected AND no subscription → redirect to pricing
+          console.log('Login: No SP-API and no subscription - redirecting to pricing');
           navigate('/pricing');
         } else {
-          // User has premium access, redirect to dashboard
-          // ProtectedRouteWrapper will handle SP-API check
-          console.log('Login: Premium access verified, redirecting to dashboard');
-          navigate('/seller-central-checker/dashboard');
+          // SP-API not connected BUT has subscription → redirect to connect-to-amazon
+          console.log('Login: Has subscription but no SP-API - redirecting to connect-to-amazon');
+          navigate('/connect-to-amazon');
         }
       }
     } catch (error) {
@@ -184,17 +197,33 @@ export default function Login() {
         localStorage.setItem("isAuth", true);
         dispatch(loginSuccess(response.data.data));
         
-        // Check if user has premium access (PRO, PRO trial, or AGENCY)
+        // Check SP-API first, then subscription
         const user = response.data.data;
-        if (!hasPremiumAccess(user)) {
-          // User is on LITE plan or has no valid premium subscription
-          console.log('Google Login: Redirecting to pricing - no premium access');
+        const hasPremium = hasPremiumAccess(user);
+        const spApiConnected = isSpApiConnected(user);
+        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
+        
+        console.log('Google Login: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        
+        // Flow: Check SP-API first, then subscription
+        // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+        if (spApiConnected) {
+          // SP-API is connected → always redirect to dashboard (regardless of subscription)
+          console.log('Google Login: SP-API connected - redirecting to dashboard');
+          navigate('/seller-central-checker/dashboard');
+        } else if (!hasSellerCentralData) {
+          // sellerCentral data not available in login response → redirect to dashboard
+          // ProtectedRouteWrapper will do full check with complete user data
+          console.log('Google Login: sellerCentral data not available - redirecting to dashboard for full check');
+          navigate('/seller-central-checker/dashboard');
+        } else if (!hasPremium) {
+          // SP-API not connected AND no subscription → redirect to pricing
+          console.log('Google Login: No SP-API and no subscription - redirecting to pricing');
           navigate('/pricing');
         } else {
-          // User has premium access, redirect to dashboard
-          // ProtectedRouteWrapper will handle SP-API check
-          console.log('Google Login: Premium access verified, redirecting to dashboard');
-          navigate('/seller-central-checker/dashboard');
+          // SP-API not connected BUT has subscription → redirect to connect-to-amazon
+          console.log('Google Login: Has subscription but no SP-API - redirecting to connect-to-amazon');
+          navigate('/connect-to-amazon');
         }
         
       }

@@ -61,34 +61,34 @@ const ProtectedRouteWrapper = ({ children }) => {
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
           
-          // Check if user has premium access (PRO, PRO trial, or AGENCY)
-          // LITE users should be redirected to pricing page - they don't have dashboard access
-          if (!hasPremiumAccess(userData)) {
-            // User is on LITE plan or has no valid premium subscription
-            // Redirect to pricing page
-            console.log('ProtectedRouteWrapper: Redirecting to pricing - no premium access');
-            localStorage.setItem("isAuth", "true"); // Keep them logged in
-            navigate("/pricing");
-            return;
-          }
-          
-          console.log('ProtectedRouteWrapper: Premium access verified');
-          
-          // Check if SP-API is connected
-          // ALWAYS redirect to connect-accounts if SP-API is not connected and user tries to access dashboard
+          // Check SP-API first, then subscription
+          const hasPremium = hasPremiumAccess(userData);
           const spApiConnected = isSpApiConnected(userData);
           const currentPath = window.location.pathname;
           const isDashboardRoute = currentPath.includes('/dashboard') || currentPath.includes('/seller-central-checker');
           
-          // ALWAYS redirect to connect-accounts if:
-          // 1. SP-API is not connected
-          // 2. User is on dashboard route
-          // 3. Not already on connect-accounts page
-          if (!spApiConnected && isDashboardRoute && !currentPath.includes('/connect-to-amazon')) {
-            // Redirect to connect to amazon page - dashboard should not be accessible without SP-API
-            localStorage.setItem("isAuth", "true"); // Keep them logged in
-            navigate("/connect-to-amazon", { replace: true }); // Use replace to prevent back navigation
-            return;
+          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected);
+          
+          // Flow: Check SP-API first, then subscription
+          // Only apply redirects if user is trying to access dashboard routes
+          if (isDashboardRoute) {
+            if (spApiConnected) {
+              // SP-API is connected → always allow dashboard access (regardless of subscription)
+              console.log('ProtectedRouteWrapper: SP-API connected - allowing dashboard access');
+              // Continue with normal flow
+            } else if (!hasPremium) {
+              // SP-API not connected AND no subscription → redirect to pricing
+              console.log('ProtectedRouteWrapper: No SP-API and no subscription - redirecting to pricing');
+              localStorage.setItem("isAuth", "true"); // Keep them logged in
+              navigate("/pricing", { replace: true });
+              return;
+            } else {
+              // SP-API not connected BUT has subscription → redirect to connect-to-amazon
+              console.log('ProtectedRouteWrapper: Has subscription but no SP-API - redirecting to connect-to-amazon');
+              localStorage.setItem("isAuth", "true"); // Keep them logged in
+              navigate("/connect-to-amazon", { replace: true });
+              return;
+            }
           }
           
           // All users with selected plans (LITE, PRO, AGENCY) can access dashboard

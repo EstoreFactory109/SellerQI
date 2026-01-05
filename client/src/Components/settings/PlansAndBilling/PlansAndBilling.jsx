@@ -38,6 +38,7 @@ export default function PlansAndBilling() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('active');
   const [loading, setLoading] = useState({});
   const [userSubscription, setUserSubscription] = useState(null);
+  const [isTrialPeriod, setIsTrialPeriod] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -140,8 +141,27 @@ export default function PlansAndBilling() {
     try {
       // Get user details to check packageType
       if (user) {
-        setCurrentPlan(user.packageType || 'LITE');
+        const userIsInTrial = user.isInTrialPeriod || false;
+        setIsTrialPeriod(userIsInTrial);
+        
+        // Only set currentPlan to PRO if not in trial period
+        // If in trial, treat as LITE for display purposes
+        if (user.packageType === 'PRO' && !userIsInTrial) {
+          setCurrentPlan('PRO');
+        } else if (user.packageType === 'AGENCY') {
+          setCurrentPlan('AGENCY');
+        } else {
+          // If in trial or packageType is LITE, set to LITE
+          setCurrentPlan('LITE');
+        }
         setSubscriptionStatus(user.subscriptionStatus || 'active');
+        
+        // Debug logging
+        console.log('🔍 PlansAndBilling - User subscription check:', {
+          packageType: user.packageType,
+          isInTrialPeriod: userIsInTrial,
+          currentPlan: user.packageType === 'PRO' && !userIsInTrial ? 'PRO' : (user.packageType === 'AGENCY' ? 'AGENCY' : 'LITE')
+        });
       }
 
       // Try to get detailed subscription info
@@ -292,7 +312,17 @@ export default function PlansAndBilling() {
     return colors[plans[plan].color] || colors.emerald;
   };
 
-  const isCurrentPlan = (plan) => plan === currentPlan;
+  // Only show PRO as current plan if not in trial period
+  // If in trial, don't show PRO as current plan
+  const isCurrentPlan = (plan) => {
+    // Double check: if user is in trial, never show PRO as current plan
+    if (plan === 'PRO' && (isTrialPeriod || user?.isInTrialPeriod)) {
+      return false;
+    }
+    // Check if plan matches currentPlan
+    if (plan !== currentPlan) return false;
+    return true;
+  };
   const canUpgrade = (plan) => {
     const planOrder = { LITE: 0, PRO: 1, AGENCY: 2 };
     return planOrder[plan] > planOrder[currentPlan];

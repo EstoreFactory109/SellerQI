@@ -53,9 +53,9 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                 </div>
                 <div className="text-base text-gray-600 mb-3">For Indian registered sellers</div>
                 <div className="flex items-center justify-center gap-3 mb-3">
-                  <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
-                    Save 78%
-                  </span>
+                <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
+                  Save 78%
+                </span>
                   <span className="inline-block bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md font-semibold text-sm">
                     7-Day Free Trial
                   </span>

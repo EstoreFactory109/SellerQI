@@ -192,7 +192,7 @@ const GoogleInfoPage = () => {
         
         setStatus('Checking subscription status...');
         
-        // Check subscription status and redirect accordingly
+        // Check SP-API first, then subscription
         const user = response.data;
         
         // Debug logging
@@ -201,20 +201,35 @@ const GoogleInfoPage = () => {
         console.log('packageType:', user.packageType);
         console.log('subscriptionStatus:', user.subscriptionStatus);
         console.log('isInTrialPeriod:', user.isInTrialPeriod);
-        console.log('hasPremiumAccess:', hasPremiumAccess(user));
+        
+        const hasPremium = hasPremiumAccess(user);
+        const spApiConnected = isSpApiConnected(user);
+        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
+        
+        console.log('hasPremiumAccess:', hasPremium);
+        console.log('spApiConnected:', spApiConnected);
+        console.log('hasSellerCentralData:', hasSellerCentralData);
         
         setTimeout(() => {
-          // Check if user has premium access (PRO, PRO trial, or AGENCY)
-          // LITE users should be redirected to pricing page
-          if (!hasPremiumAccess(user)) {
-            // User is on LITE plan or has no valid premium subscription
-            console.log('Google: Redirecting to pricing - no premium access');
+          // Flow: Check SP-API first, then subscription
+          // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+          if (spApiConnected) {
+            // SP-API is connected → always redirect to dashboard (regardless of subscription)
+            console.log('Google: SP-API connected - redirecting to dashboard');
+            window.location.href = "/seller-central-checker/dashboard";
+          } else if (!hasSellerCentralData) {
+            // sellerCentral data not available in login response → redirect to dashboard
+            // ProtectedRouteWrapper will do full check with complete user data
+            console.log('Google: sellerCentral data not available - redirecting to dashboard for full check');
+            window.location.href = "/seller-central-checker/dashboard";
+          } else if (!hasPremium) {
+            // SP-API not connected AND no subscription → redirect to pricing
+            console.log('Google: No SP-API and no subscription - redirecting to pricing');
             window.location.href = "/pricing";
           } else {
-            // User has premium access, redirect to dashboard
-            // ProtectedRouteWrapper will handle SP-API check
-            console.log('Google: Premium access verified, redirecting to dashboard');
-            window.location.href = "/seller-central-checker/dashboard";
+            // SP-API not connected BUT has subscription → redirect to connect-to-amazon
+            console.log('Google: Has subscription but no SP-API - redirecting to connect-to-amazon');
+            window.location.href = "/connect-to-amazon";
           }
         }, 1000);
         

@@ -120,9 +120,27 @@ export default function IndiaBilling() {
   const fetchUserSubscription = async () => {
     try {
       if (user) {
-        setCurrentPlan(user.packageType || 'LITE');
+        const userIsInTrial = user.isInTrialPeriod || false;
+        setIsTrialPeriod(userIsInTrial);
+        
+        // Only set currentPlan to PRO if not in trial period
+        // If in trial, treat as LITE for display purposes
+        if (user.packageType === 'PRO' && !userIsInTrial) {
+          setCurrentPlan('PRO');
+        } else if (user.packageType === 'AGENCY') {
+          setCurrentPlan('AGENCY');
+        } else {
+          // If in trial or packageType is LITE, set to LITE
+          setCurrentPlan('LITE');
+        }
         setSubscriptionStatus(user.subscriptionStatus || 'active');
-        setIsTrialPeriod(user.isInTrialPeriod || false);
+        
+        // Debug logging
+        console.log('🔍 IndiaBilling - User subscription check:', {
+          packageType: user.packageType,
+          isInTrialPeriod: userIsInTrial,
+          currentPlan: user.packageType === 'PRO' && !userIsInTrial ? 'PRO' : (user.packageType === 'AGENCY' ? 'AGENCY' : 'LITE')
+        });
       }
 
       // Try to get detailed subscription info from Razorpay
