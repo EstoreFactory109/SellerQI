@@ -18,13 +18,15 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="mb-6"
+              className="mb-8"
             >
-              <img 
-                src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
-                alt="SellerQI Logo" 
-                className="h-12 w-auto mx-auto brightness-0 invert"
-              />
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-6 py-3 inline-block">
+                <img 
+                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
+                  alt="SellerQI Logo" 
+                  className="h-10 w-auto mx-auto"
+                />
+              </div>
             </motion.div>
             
             <div className="inline-block bg-white/20 backdrop-blur-sm px-5 py-2 rounded-full text-sm font-semibold mb-5">
