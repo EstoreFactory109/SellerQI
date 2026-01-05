@@ -27,9 +27,18 @@ export default function SubscriptionSuccess() {
                     localStorage.removeItem('intendedCountry');
                     localStorage.removeItem('previousPlan');
                     
-                    // Redirect to connect-to-amazon
+                    // Check if this is a trial upgrade from URL params
+                    const isTrialUpgrade = searchParams.get('isTrialUpgrade') === 'true';
+                    
+                    // Redirect based on payment context
                     setTimeout(() => {
-                        navigate('/connect-to-amazon');
+                        if (isTrialUpgrade) {
+                            // User upgraded from trial → redirect to dashboard
+                            navigate('/seller-central-checker/dashboard');
+                        } else {
+                            // New signup payment → redirect to connect-to-amazon
+                            navigate('/connect-to-amazon');
+                        }
                     }, 3000);
                 } else if (sessionId) {
                     // Handle Stripe payment success
@@ -45,14 +54,16 @@ export default function SubscriptionSuccess() {
                         localStorage.removeItem('intendedPackage');
                         localStorage.removeItem('previousPlan');
                         
-                        // Redirect based on plan type
+                        // Redirect based on plan type and payment context
                         setTimeout(() => {
                             if (result.data.planType === 'AGENCY') {
                                 // User purchased AGENCY plan, redirect to client registration
                                 navigate('/agency-client-registration');
+                            } else if (result.data.isTrialUpgrade) {
+                                // User upgraded from trial to PRO → redirect to dashboard
+                                navigate('/seller-central-checker/dashboard');
                             } else {
-                                // PRO plan: Always redirect to connect-to-amazon for new users
-                                // This is where they connect their Amazon account
+                                // New signup payment → redirect to connect-to-amazon
                                 navigate('/connect-to-amazon');
                             }
                         }, 3000);

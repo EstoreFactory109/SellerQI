@@ -114,8 +114,9 @@ export default function PricingPage() {
         (result) => {
           console.log('Payment successful:', result);
           setLoading(prev => ({ ...prev, [planType]: false }));
-          // Navigate to success page
-          navigate('/subscription-success?gateway=razorpay');
+          // Navigate to success page with payment context
+          const isTrialUpgrade = result?.isTrialUpgrade ? 'true' : 'false';
+          navigate(`/subscription-success?gateway=razorpay&isTrialUpgrade=${isTrialUpgrade}`);
         },
         // Error callback
         (error) => {

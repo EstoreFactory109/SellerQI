@@ -149,6 +149,19 @@ class RazorpayService {
 
             const planType = subscription.planType;
 
+            // Get user's current state BEFORE updating to determine if this is a trial upgrade
+            const user = await User.findById(userId);
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Capture previous state to determine payment type
+            const wasInTrial = user.isInTrialPeriod === true;
+            const previousPackageType = user.packageType;
+            const isTrialUpgrade = wasInTrial && previousPackageType === 'PRO';
+
+            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}`);
+
             // Fetch subscription details from Razorpay to get billing cycle dates
             let currentPeriodStart = new Date();
             let currentPeriodEnd = new Date();
@@ -214,6 +227,7 @@ class RazorpayService {
                 success: true, 
                 planType, 
                 userId,
+                isTrialUpgrade: isTrialUpgrade,  // Flag to indicate if user upgraded from trial
                 message: 'Payment verified and subscription activated successfully'
             };
 
