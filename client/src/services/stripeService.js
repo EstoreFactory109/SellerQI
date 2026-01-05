@@ -21,12 +21,17 @@ class StripeService {
 
     /**
      * Create checkout session and redirect to Stripe
+     * @param {string} planType - Plan type (PRO or AGENCY)
+     * @param {string} [couponCode] - Optional coupon/promo code to apply automatically
      */
-    async createCheckoutSession(planType) {
+    async createCheckoutSession(planType, couponCode = null) {
         try {
-            const response = await axiosInstance.post('/app/stripe/create-checkout-session', {
-                planType: planType
-            });
+            const requestBody = { planType };
+            if (couponCode) {
+                requestBody.couponCode = couponCode;
+            }
+            
+            const response = await axiosInstance.post('/app/stripe/create-checkout-session', requestBody);
 
             const { url } = response.data.data;
             

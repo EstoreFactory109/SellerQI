@@ -12,7 +12,7 @@ const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const createCheckoutSession = asyncHandler(async (req, res) => {
     try {
         const userId = req.userId;
-        const { planType } = req.body;
+        const { planType, couponCode } = req.body;
 
         // Validate plan type
         if (!planType || !['PRO', 'AGENCY'].includes(planType)) {
@@ -41,12 +41,13 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
         const successUrl = `${baseUrl}/subscription-success?session_id={CHECKOUT_SESSION_ID}`;
         const cancelUrl = `${baseUrl}/payment-failed`;
 
-        // Create checkout session
+        // Create checkout session (with optional coupon code)
         const checkoutSession = await stripeService.createCheckoutSession(
             userId,
             planType,
             successUrl,
-            cancelUrl
+            cancelUrl,
+            couponCode || null  // Pass coupon code if provided
         );
 
         logger.info(`Checkout session created for user: ${userId}, plan: ${planType}`);

@@ -65,8 +65,13 @@ class StripeService {
 
     /**
      * Create checkout session for subscription
+     * @param {string} userId - User ID
+     * @param {string} planType - Plan type (PRO or AGENCY)
+     * @param {string} successUrl - Success redirect URL
+     * @param {string} cancelUrl - Cancel redirect URL
+     * @param {string} [couponCode] - Optional coupon/promo code to apply
      */
-    async createCheckoutSession(userId, planType, successUrl, cancelUrl) {
+    async createCheckoutSession(userId, planType, successUrl, cancelUrl, couponCode = null) {
         try {
             // Check if Stripe is configured
             if (!process.env.STRIPE_SECRET_KEY) {
@@ -102,8 +107,8 @@ class StripeService {
                 `${user.firstName} ${user.lastName}`
             );
 
-            // Create checkout session
-            const session = await this.stripe.checkout.sessions.create({
+            // Prepare checkout session options
+            const sessionOptions = {
                 customer: customer.id,
                 payment_method_types: ['card'],
                 line_items: [
@@ -115,6 +120,8 @@ class StripeService {
                 mode: 'subscription',
                 success_url: successUrl,
                 cancel_url: cancelUrl,
+                // Enable promotion codes - allows users to enter coupon codes in Stripe checkout
+                allow_promotion_codes: true,
                 metadata: {
                     userId: userId.toString(),
                     planType: planType,
@@ -125,7 +132,27 @@ class StripeService {
                         planType: planType,
                     },
                 },
-            });
+            };
+
+            // If a coupon code is provided, apply it automatically
+            if (couponCode) {
+                try {
+                    // Verify the coupon exists and is valid
+                    const coupon = await this.stripe.coupons.retrieve(couponCode);
+                    if (coupon.valid) {
+                        sessionOptions.discounts = [{ coupon: couponCode }];
+                        logger.info(`Applying coupon code ${couponCode} to checkout session for user: ${userId}`);
+                    } else {
+                        logger.warn(`Invalid or expired coupon code ${couponCode} for user: ${userId}`);
+                    }
+                } catch (error) {
+                    logger.warn(`Error applying coupon code ${couponCode}: ${error.message}`);
+                    // Continue without coupon if it's invalid
+                }
+            }
+
+            // Create checkout session
+            const session = await this.stripe.checkout.sessions.create(sessionOptions);
 
             // Save session info to subscription
             await this.updateOrCreateSubscription(userId, {
