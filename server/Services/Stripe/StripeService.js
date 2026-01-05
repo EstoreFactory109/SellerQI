@@ -250,8 +250,14 @@ class StripeService {
             const wasInTrial = user.isInTrialPeriod === true;
             const previousPackageType = user.packageType;
             const isTrialUpgrade = wasInTrial && previousPackageType === 'PRO';
+            
+            // Check if this is an upgrade (existing user) vs new signup
+            // If user had LITE or PRO (trial), it's an upgrade → redirect to dashboard
+            // If user had no package or this is first payment, it's new signup → redirect to connect-to-amazon
+            const isUpgrade = previousPackageType === 'LITE' || previousPackageType === 'PRO' || wasInTrial;
+            const isNewSignup = !previousPackageType || previousPackageType === null || (!isUpgrade && planType === 'PRO');
 
-            logger.info(`User payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}`);
+            logger.info(`User payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}`);
 
             // Get subscription details from Stripe
             const stripeSubscription = session.subscription;
@@ -325,13 +331,41 @@ class StripeService {
                 }
             }
 
-            // Add to payment history
+            // Get invoice URL if available
+            let invoiceUrl = null;
+            let invoicePdf = null;
+            let invoiceId = null;
+            let invoiceNumber = null;
+
+            try {
+                // Try to get invoice from subscription
+                const invoices = await this.stripe.invoices.list({
+                    subscription: stripeSubscription.id,
+                    limit: 1
+                });
+                if (invoices.data.length > 0) {
+                    const invoice = invoices.data[0];
+                    invoiceUrl = invoice.hosted_invoice_url || null;
+                    invoicePdf = invoice.invoice_pdf || null;
+                    invoiceId = invoice.id;
+                    invoiceNumber = invoice.number || null;
+                }
+            } catch (invoiceError) {
+                logger.warn(`Could not fetch invoice for subscription: ${stripeSubscription.id}`);
+            }
+
+            // Add to payment history with invoice URLs
             await this.addPaymentHistory(userId, {
                 sessionId: sessionId,
                 amount: priceItem.price.unit_amount,
                 currency: priceItem.price.currency,
                 status: 'paid',
-                stripePaymentIntentId: session.payment_intent
+                stripePaymentIntentId: session.payment_intent,
+                stripeInvoiceId: invoiceId,
+                invoiceUrl: invoiceUrl,
+                invoicePdf: invoicePdf,
+                invoiceNumber: invoiceNumber,
+                paymentGateway: 'stripe'
             });
 
             logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}`);
@@ -341,7 +375,9 @@ class StripeService {
                 planType, 
                 userId, 
                 adminToken,
-                isTrialUpgrade: isTrialUpgrade  // Flag to indicate if user upgraded from trial
+                isTrialUpgrade: isTrialUpgrade,  // Flag to indicate if user upgraded from trial
+                isUpgrade: isUpgrade, // Flag to indicate if this is an upgrade (existing user)
+                isNewSignup: isNewSignup // Flag to indicate if this is a new signup
             };
 
         } catch (error) {
@@ -365,6 +401,140 @@ class StripeService {
             );
         } catch (error) {
             logger.error('Error adding payment history:', error);
+        }
+    }
+
+    /**
+     * Get invoice download URL for a payment
+     * @param {string} userId - User ID
+     * @param {string} paymentIntentId - Stripe payment intent ID or invoice ID
+     * @returns {Promise<{invoiceUrl: string, invoicePdf: string}>}
+     */
+    async getInvoiceDownloadUrl(userId, paymentIntentId) {
+        try {
+            // Find subscription to verify user ownership
+            const subscription = await Subscription.findOne({ userId });
+            if (!subscription) {
+                throw new Error('Subscription not found');
+            }
+
+            let actualPaymentIntentId = paymentIntentId;
+            
+            // Check if the ID is a checkout session ID (starts with cs_)
+            // If so, retrieve the checkout session to get the payment intent
+            if (paymentIntentId && paymentIntentId.startsWith('cs_')) {
+                try {
+                    logger.info(`Detected checkout session ID, retrieving session: ${paymentIntentId}`);
+                    const session = await this.stripe.checkout.sessions.retrieve(paymentIntentId, {
+                        expand: ['payment_intent']
+                    });
+                    
+                    // Get payment intent from session
+                    if (session.payment_intent) {
+                        if (typeof session.payment_intent === 'string') {
+                            actualPaymentIntentId = session.payment_intent;
+                        } else {
+                            actualPaymentIntentId = session.payment_intent.id;
+                        }
+                        logger.info(`Retrieved payment intent from checkout session: ${actualPaymentIntentId}`);
+                    } else {
+                        // Try to get from subscription if available
+                        if (session.subscription) {
+                            const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
+                            logger.info(`Checkout session has subscription, will search invoices by subscription: ${subId}`);
+                            // We'll search by subscription ID instead
+                            actualPaymentIntentId = null;
+                        } else {
+                            throw new Error('No payment intent found in checkout session');
+                        }
+                    }
+                } catch (sessionError) {
+                    logger.error(`Error retrieving checkout session: ${sessionError.message}`);
+                    throw new Error(`Invalid checkout session ID: ${paymentIntentId}`);
+                }
+            }
+
+            // Try to find invoice by payment intent ID first
+            let invoice = null;
+            
+            if (actualPaymentIntentId) {
+                try {
+                    const invoices = await this.stripe.invoices.list({
+                        payment_intent: actualPaymentIntentId,
+                        limit: 1
+                    });
+                    if (invoices.data.length > 0) {
+                        invoice = invoices.data[0];
+                        logger.info(`Found invoice via payment_intent lookup: ${invoice.id}`);
+                    }
+                } catch (error) {
+                    logger.warn(`Payment intent lookup failed for ${actualPaymentIntentId}, trying direct invoice ID:`, error.message);
+                    // If payment intent lookup fails, try direct invoice ID
+                    try {
+                        invoice = await this.stripe.invoices.retrieve(actualPaymentIntentId);
+                        logger.info(`Found invoice via direct retrieve: ${invoice.id}`);
+                    } catch (retrieveError) {
+                        logger.warn(`Could not find invoice for paymentIntentId: ${actualPaymentIntentId}`, retrieveError.message);
+                    }
+                }
+            }
+            
+            // If no invoice found and we have a subscription, try searching by subscription
+            if (!invoice && subscription.stripeSubscriptionId) {
+                try {
+                    logger.info(`Searching for invoices by subscription ID: ${subscription.stripeSubscriptionId}`);
+                    const invoices = await this.stripe.invoices.list({
+                        subscription: subscription.stripeSubscriptionId,
+                        limit: 10
+                    });
+                    // Get the most recent paid invoice
+                    const paidInvoices = invoices.data.filter(inv => inv.status === 'paid');
+                    if (paidInvoices.length > 0) {
+                        // Sort by created date, most recent first
+                        paidInvoices.sort((a, b) => b.created - a.created);
+                        invoice = paidInvoices[0];
+                        logger.info(`Found invoice via subscription lookup: ${invoice.id}`);
+                    }
+                } catch (subError) {
+                    logger.warn(`Could not find invoice by subscription: ${subError.message}`);
+                }
+            }
+
+            if (!invoice) {
+                throw new Error(`Invoice not found for paymentIntentId: ${paymentIntentId}`);
+            }
+
+            // Verify invoice belongs to user's subscription
+            if (subscription.stripeSubscriptionId && invoice.subscription !== subscription.stripeSubscriptionId) {
+                logger.warn(`Invoice ${invoice.id} does not match user's subscription ${subscription.stripeSubscriptionId}`);
+                throw new Error('Invoice does not belong to user');
+            }
+
+            // Check if invoice PDF is available
+            // Note: invoice_pdf is only available after invoice is finalized and paid
+            if (!invoice.invoice_pdf && invoice.status !== 'paid') {
+                logger.warn(`Invoice ${invoice.id} PDF not available yet. Status: ${invoice.status}`);
+            }
+
+            const result = {
+                invoiceUrl: invoice.hosted_invoice_url || null,
+                invoicePdf: invoice.invoice_pdf || null,
+                invoiceNumber: invoice.number || null,
+                invoiceId: invoice.id
+            };
+
+            logger.info(`Invoice download URL retrieved for user ${userId}: invoice ${invoice.id}, PDF available: ${!!invoice.invoice_pdf}`);
+
+            return result;
+
+        } catch (error) {
+            logger.error('Error getting invoice download URL:', {
+                error: error.message,
+                userId: userId,
+                paymentIntentId: paymentIntentId,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 

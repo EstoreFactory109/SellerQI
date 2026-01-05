@@ -22,7 +22,7 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
             >
               <div className="bg-white/10 backdrop-blur-sm rounded-xl px-6 py-3 inline-block">
                 <img 
-                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
+                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png" 
                   alt="SellerQI Logo" 
                   className="h-10 w-auto mx-auto"
                 />

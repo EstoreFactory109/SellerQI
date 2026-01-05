@@ -204,6 +204,34 @@ const getPaymentHistory = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get invoice download URL
+ */
+const getInvoiceDownloadUrl = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { paymentIntentId } = req.query;
+
+        if (!paymentIntentId) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Payment intent ID is required')
+            );
+        }
+
+        const invoiceData = await stripeService.getInvoiceDownloadUrl(userId, paymentIntentId);
+
+        return res.status(200).json(
+            new ApiResponse(200, invoiceData, 'Invoice URL retrieved successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error getting invoice download URL:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get invoice URL')
+        );
+    }
+});
+
+/**
  * Get subscription configuration (for frontend)
  */
 const getSubscriptionConfig = asyncHandler(async (req, res) => {
@@ -243,5 +271,6 @@ module.exports = {
     cancelSubscription,
     reactivateSubscription,
     getPaymentHistory,
+    getInvoiceDownloadUrl,
     getSubscriptionConfig
 }; 

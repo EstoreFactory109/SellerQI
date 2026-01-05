@@ -749,13 +749,41 @@ export default function PlansAndBilling() {
               {/* Download all history button */}
               <button
                 className="flex items-center space-x-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
-                onClick={() => {
-                  // TODO: Implement download functionality
-                  console.log('Download payment history');
+                onClick={async () => {
+                  try {
+                    // Download all available invoices
+                    const downloadPromises = paymentHistory
+                      .filter(p => p.invoiceUrl || p.invoicePdf || p.stripePaymentIntentId || p.razorpayPaymentId)
+                      .map(async (payment) => {
+                        try {
+                          if (payment.invoicePdf || payment.invoiceUrl) {
+                            window.open(payment.invoicePdf || payment.invoiceUrl, '_blank');
+                          } else if (payment.stripePaymentIntentId) {
+                            await stripeService.downloadInvoice(payment.stripePaymentIntentId);
+                          } else if (payment.razorpayPaymentId) {
+                            const razorpayService = (await import('../../../services/razorpayService')).default;
+                            await razorpayService.downloadInvoice(payment.razorpayPaymentId);
+                          }
+                        } catch (error) {
+                          console.error(`Error downloading invoice for payment ${payment.sessionId}:`, error);
+                        }
+                      });
+                    
+                    // Open invoices with slight delay to avoid popup blockers
+                    for (let i = 0; i < downloadPromises.length; i++) {
+                      await downloadPromises[i];
+                      if (i < downloadPromises.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between downloads
+                      }
+                    }
+                  } catch (error) {
+                    console.error('Error downloading payment history:', error);
+                    alert('Some invoices could not be downloaded. Please try downloading them individually.');
+                  }
                 }}
               >
                 <Download className="w-4 h-4" />
-                <span>Download</span>
+                <span>Download All</span>
               </button>
             </div>
 
@@ -804,13 +832,46 @@ export default function PlansAndBilling() {
                         </div>
                       </div>
                       
-                      <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900 mb-2">
-                          {formatAmount(payment.amount, payment.currency)}
+                      <div className="text-right flex items-center space-x-4">
+                        <div>
+                          <div className="text-xl font-bold text-gray-900 mb-2">
+                            {formatAmount(payment.amount, payment.currency)}
+                          </div>
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(payment.status)}`}>
+                            {payment.status?.charAt(0).toUpperCase() + payment.status?.slice(1) || 'Unknown'}
+                          </span>
                         </div>
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(payment.status)}`}>
-                          {payment.status?.charAt(0).toUpperCase() + payment.status?.slice(1) || 'Unknown'}
-                        </span>
+                        {/* Download Invoice Button - Always show for all payments */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              if (payment.invoicePdf || payment.invoiceUrl) {
+                                // Direct download if URL is already available
+                                window.open(payment.invoicePdf || payment.invoiceUrl, '_blank');
+                              } else if (payment.stripePaymentIntentId) {
+                                // Fetch invoice URL from Stripe
+                                await stripeService.downloadInvoice(payment.stripePaymentIntentId);
+                              } else if (payment.razorpayPaymentId) {
+                                // Fetch invoice URL from Razorpay
+                                const razorpayService = (await import('../../../services/razorpayService')).default;
+                                await razorpayService.downloadInvoice(payment.razorpayPaymentId);
+                              } else if (payment.sessionId) {
+                                // Try to get invoice using session ID (for Stripe)
+                                await stripeService.downloadInvoice(payment.sessionId);
+                              } else {
+                                alert('Invoice information not available for this payment. Please contact support.');
+                              }
+                            } catch (error) {
+                              console.error('Error downloading invoice:', error);
+                              alert('Failed to download invoice. Please try again or contact support.');
+                            }
+                          }}
+                          className="flex items-center space-x-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
+                          title="Download Invoice"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span className="text-sm">Invoice</span>
+                        </button>
                       </div>
                     </div>
                   </motion.div>

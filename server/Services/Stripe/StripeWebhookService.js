@@ -246,13 +246,18 @@ class StripeWebhookService {
 
             logger.info(`Invoice payment succeeded for user: ${userId}, amount: ${invoice.amount_paid}`);
 
-            // Add payment to history
+            // Add payment to history with invoice URLs
             await this.addPaymentToHistory(userId, {
                 amount: invoice.amount_paid,
                 currency: invoice.currency,
                 status: 'paid',
                 paymentDate: this.safeDate(invoice.status_transitions.paid_at),
-                stripePaymentIntentId: invoice.payment_intent
+                stripePaymentIntentId: invoice.payment_intent,
+                stripeInvoiceId: invoice.id,
+                invoiceUrl: invoice.hosted_invoice_url || null,
+                invoicePdf: invoice.invoice_pdf || null,
+                invoiceNumber: invoice.number || null,
+                paymentGateway: 'stripe'
             });
 
             // Update subscription payment status

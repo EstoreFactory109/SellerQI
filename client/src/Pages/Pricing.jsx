@@ -116,14 +116,18 @@ export default function PricingPage() {
           setLoading(prev => ({ ...prev, [planType]: false }));
           // Navigate to success page with payment context
           const isTrialUpgrade = result?.isTrialUpgrade ? 'true' : 'false';
-          navigate(`/subscription-success?gateway=razorpay&isTrialUpgrade=${isTrialUpgrade}`);
+          const isUpgrade = result?.isUpgrade ? 'true' : 'false';
+          const isNewSignup = result?.isNewSignup ? 'true' : 'false';
+          navigate(`/subscription-success?gateway=razorpay&isTrialUpgrade=${isTrialUpgrade}&isUpgrade=${isUpgrade}&isNewSignup=${isNewSignup}`);
         },
         // Error callback
         (error) => {
           console.error('Payment failed:', error);
           setLoading(prev => ({ ...prev, [planType]: false }));
           if (error.message !== 'Payment cancelled by user') {
-            alert(error.message || 'Payment failed. Please try again.');
+            // Show more detailed error message
+            const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
+            alert(errorMsg);
           }
         }
       );
@@ -201,7 +205,7 @@ export default function PricingPage() {
 
   // Default pricing page for other countries
   return (
-    <div className="h-screen w-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col overflow-hidden">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col overflow-y-auto">
       {/* Decorative Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-[#3B4A6B]/10 to-emerald-500/10 rounded-full blur-3xl" />
@@ -238,7 +242,7 @@ export default function PricingPage() {
         >
           {/* Logo */}
           <img 
-            src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
+            src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png" 
             alt="SellerQI Logo" 
             className="h-10 mx-auto mb-6"
           />

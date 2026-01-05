@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { updatePackageType } from '../../../redux/slices/authSlice';
+import { updatePackageType, loginSuccess } from '../../../redux/slices/authSlice';
+import axiosInstance from '../../../config/axios.config';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Check, 
@@ -38,6 +39,7 @@ export default function IndiaBilling() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [visiblePayments, setVisiblePayments] = useState(5);
   const [isTrialPeriod, setIsTrialPeriod] = useState(false);
+  const [loadingInvoice, setLoadingInvoice] = useState({}); // Track loading state per payment
   const user = useSelector((state) => state.Auth.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -117,6 +119,24 @@ export default function IndiaBilling() {
     fetchPaymentHistory();
   }, []);
 
+  // Watch for changes in Redux user state and update local state
+  useEffect(() => {
+    if (user) {
+      const userIsInTrial = user.isInTrialPeriod || false;
+      setIsTrialPeriod(userIsInTrial);
+      
+      // Only set currentPlan to PRO if not in trial period
+      if (user.packageType === 'PRO' && !userIsInTrial) {
+        setCurrentPlan('PRO');
+      } else if (user.packageType === 'AGENCY') {
+        setCurrentPlan('AGENCY');
+      } else {
+        setCurrentPlan('LITE');
+      }
+      setSubscriptionStatus(user.subscriptionStatus || 'active');
+    }
+  }, [user]);
+
   const fetchUserSubscription = async () => {
     try {
       if (user) {
@@ -167,15 +187,50 @@ export default function IndiaBilling() {
         // Use Razorpay for India
         await razorpayService.initiatePayment(
           planType,
-          (result) => {
-            // Success callback
-            dispatch(updatePackageType({
-              packageType: 'PRO',
-              subscriptionStatus: 'active'
-            }));
-            setCurrentPlan('PRO');
-            setSubscriptionStatus('active');
-            setIsTrialPeriod(false);
+          async (result) => {
+            // Success callback - fetch fresh user data from server
+            try {
+              // Fetch fresh user data from server to ensure we have latest state
+              const response = await axiosInstance.get('/app/profile');
+              if (response.status === 200 && response.data?.data) {
+                const freshUserData = response.data.data;
+                // Update Redux with complete fresh user data
+                dispatch(loginSuccess(freshUserData));
+                
+                // Update local state based on fresh data
+                const userIsInTrial = freshUserData.isInTrialPeriod || false;
+                setIsTrialPeriod(userIsInTrial);
+                
+                if (freshUserData.packageType === 'PRO' && !userIsInTrial) {
+                  setCurrentPlan('PRO');
+                } else if (freshUserData.packageType === 'AGENCY') {
+                  setCurrentPlan('AGENCY');
+                } else {
+                  setCurrentPlan('LITE');
+                }
+                setSubscriptionStatus(freshUserData.subscriptionStatus || 'active');
+              } else {
+                // Fallback: update Redux manually if API call fails
+                dispatch(updatePackageType({
+                  packageType: 'PRO',
+                  subscriptionStatus: 'active'
+                }));
+                setCurrentPlan('PRO');
+                setSubscriptionStatus('active');
+                setIsTrialPeriod(false);
+              }
+            } catch (error) {
+              console.error('Error fetching fresh user data after payment:', error);
+              // Fallback: update Redux manually if API call fails
+              dispatch(updatePackageType({
+                packageType: 'PRO',
+                subscriptionStatus: 'active'
+              }));
+              setCurrentPlan('PRO');
+              setSubscriptionStatus('active');
+              setIsTrialPeriod(false);
+            }
+            
             fetchUserSubscription();
             fetchPaymentHistory();
             setLoading(prev => ({ ...prev, [planType]: false }));
@@ -183,7 +238,9 @@ export default function IndiaBilling() {
           (error) => {
             // Error callback
             if (error.message !== 'Payment cancelled by user') {
-              alert(error.message || 'Payment failed. Please try again.');
+              // Show more detailed error message
+              const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
+              alert(errorMsg);
             }
             setLoading(prev => ({ ...prev, [planType]: false }));
           }
@@ -266,10 +323,12 @@ export default function IndiaBilling() {
   };
 
   const formatAmount = (amount, currency = 'INR') => {
+    // Amount is already in rupees (converted from paise on backend)
+    // No need to divide by 100 again
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: currency.toUpperCase()
-    }).format(amount / 100);
+    }).format(amount);
   };
 
   const getStatusColor = (status) => {
@@ -691,10 +750,38 @@ export default function IndiaBilling() {
               
               <button
                 className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
-                onClick={() => console.log('Download payment history')}
+                onClick={async () => {
+                  try {
+                    // Download all available invoices
+                    const downloadPromises = paymentHistory
+                      .filter(p => p.invoiceUrl || p.invoicePdf || p.razorpayPaymentId)
+                      .map(async (payment) => {
+                        try {
+                          if (payment.invoicePdf || payment.invoiceUrl) {
+                            window.open(payment.invoicePdf || payment.invoiceUrl, '_blank');
+                          } else if (payment.razorpayPaymentId) {
+                            await razorpayService.downloadInvoice(payment.razorpayPaymentId);
+                          }
+                        } catch (error) {
+                          console.error(`Error downloading invoice for payment ${payment.paymentId}:`, error);
+                        }
+                      });
+                    
+                    // Open invoices with slight delay to avoid popup blockers
+                    for (let i = 0; i < downloadPromises.length; i++) {
+                      await downloadPromises[i];
+                      if (i < downloadPromises.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between downloads
+                      }
+                    }
+                  } catch (error) {
+                    console.error('Error downloading payment history:', error);
+                    alert('Some invoices could not be downloaded. Please try downloading them individually.');
+                  }
+                }}
               >
                 <Download className="w-4 h-4" />
-                <span>Download</span>
+                <span>Download All</span>
               </button>
             </div>
 
@@ -743,13 +830,59 @@ export default function IndiaBilling() {
                         </div>
                       </div>
                       
-                      <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900 mb-2">
-                          {formatAmount(payment.amount, payment.currency || 'INR')}
+                      <div className="text-right flex items-center space-x-4">
+                        <div>
+                          <div className="text-xl font-bold text-gray-900 mb-2">
+                            {formatAmount(payment.amount, payment.currency || 'INR')}
+                          </div>
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(payment.status)}`}>
+                            {payment.status?.charAt(0).toUpperCase() + payment.status?.slice(1) || 'Unknown'}
+                          </span>
                         </div>
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(payment.status)}`}>
-                          {payment.status?.charAt(0).toUpperCase() + payment.status?.slice(1) || 'Unknown'}
-                        </span>
+                        {/* Download Invoice Button - Always show for all payments */}
+                        <button
+                          onClick={async () => {
+                            const paymentId = payment.razorpayPaymentId || payment.paymentId || payment.id;
+                            setLoadingInvoice(prev => ({ ...prev, [paymentId]: true }));
+                            
+                            try {
+                              if (payment.invoicePdf || payment.invoiceUrl) {
+                                // Direct download if URL is already available
+                                const invoiceUrl = payment.invoicePdf || payment.invoiceUrl;
+                                const newWindow = window.open(invoiceUrl, '_blank');
+                                
+                                // Wait a moment for the window to open, then stop loading
+                                setTimeout(() => {
+                                  setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                                }, 500);
+                              } else if (payment.razorpayPaymentId) {
+                                // Fetch invoice URL from Razorpay
+                                await razorpayService.downloadInvoice(payment.razorpayPaymentId);
+                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                              } else if (payment.paymentId) {
+                                // Try using paymentId for Razorpay
+                                await razorpayService.downloadInvoice(payment.paymentId);
+                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                              } else {
+                                alert('Invoice information not available for this payment. Please contact support.');
+                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                              }
+                            } catch (error) {
+                              console.error('Error downloading invoice:', error);
+                              alert('Failed to download invoice. Please try again or contact support.');
+                              setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                            }
+                          }}
+                          disabled={loadingInvoice[payment.razorpayPaymentId || payment.paymentId || payment.id]}
+                          className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Download Invoice"
+                        >
+                          {loadingInvoice[payment.razorpayPaymentId || payment.paymentId || payment.id] ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <span className="text-sm">Invoice</span>
+                          )}
+                        </button>
                       </div>
                     </div>
                   </motion.div>

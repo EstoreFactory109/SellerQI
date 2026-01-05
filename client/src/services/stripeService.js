@@ -113,6 +113,45 @@ class StripeService {
     }
 
     /**
+     * Get invoice download URL
+     * @param {string} paymentIntentId - Stripe payment intent ID or invoice ID
+     * @returns {Promise<{invoiceUrl: string, invoicePdf: string}>}
+     */
+    async getInvoiceDownloadUrl(paymentIntentId) {
+        try {
+            const response = await axiosInstance.get(`/app/stripe/invoice-download?paymentIntentId=${paymentIntentId}`);
+            return response.data.data;
+        } catch (error) {
+            console.error('Error getting invoice download URL:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Download invoice
+     * @param {string} paymentIntentId - Stripe payment intent ID or invoice ID
+     */
+    async downloadInvoice(paymentIntentId) {
+        try {
+            const invoiceData = await this.getInvoiceDownloadUrl(paymentIntentId);
+            
+            // Prefer PDF URL, fallback to hosted invoice URL
+            const downloadUrl = invoiceData.invoicePdf || invoiceData.invoiceUrl;
+            
+            if (downloadUrl) {
+                // Open in new tab for download
+                window.open(downloadUrl, '_blank');
+                return { success: true, url: downloadUrl };
+            } else {
+                throw new Error('Invoice URL not available');
+            }
+        } catch (error) {
+            console.error('Error downloading invoice:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Check if plan requires payment
      */
     isPaymentRequired(planType) {

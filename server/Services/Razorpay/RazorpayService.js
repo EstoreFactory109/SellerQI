@@ -11,6 +11,11 @@ class RazorpayService {
             logger.warn('Razorpay credentials not set. Razorpay functionality will not work.');
             this.razorpay = null;
         } else {
+            // Log which key type is being used (for debugging)
+            const keyType = process.env.RAZOR_PAY_ID.startsWith('rzp_test_') ? 'TEST' : 
+                           process.env.RAZOR_PAY_ID.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
+            logger.info(`Razorpay initialized with ${keyType} mode. Key ID: ${process.env.RAZOR_PAY_ID.substring(0, 15)}...`);
+            
             this.razorpay = new Razorpay({
                 key_id: process.env.RAZOR_PAY_ID,
                 key_secret: process.env.RAZOR_PAY_SECRET
@@ -54,8 +59,11 @@ class RazorpayService {
             // Get Plan ID from environment
             const planId = this.getPlanId(planType);
             if (!planId) {
-                throw new Error(`Plan ID not configured for: ${planType}. Only PRO plan is available for India.`);
+                logger.error(`RAZOR_PAY_PLAN_ID is not set in environment variables for plan: ${planType}`);
+                throw new Error(`Plan ID not configured for: ${planType}. Please set RAZOR_PAY_PLAN_ID in environment variables.`);
             }
+
+            logger.info(`Creating Razorpay subscription for user ${userId} with plan ID: ${planId}`);
 
             // Create Razorpay subscription using the Plan ID
             const subscriptionOptions = {
@@ -69,7 +77,18 @@ class RazorpayService {
                 }
             };
 
-            const razorpaySubscription = await this.razorpay.subscriptions.create(subscriptionOptions);
+            let razorpaySubscription;
+            try {
+                razorpaySubscription = await this.razorpay.subscriptions.create(subscriptionOptions);
+            } catch (razorpayError) {
+                logger.error('Razorpay API error creating subscription:', {
+                    error: razorpayError.message,
+                    statusCode: razorpayError.statusCode,
+                    errorDescription: razorpayError.error?.description,
+                    planId: planId
+                });
+                throw new Error(`Failed to create Razorpay subscription: ${razorpayError.error?.description || razorpayError.message}`);
+            }
 
             logger.info(`Razorpay subscription created: ${razorpaySubscription.id} for user: ${userId}, plan: ${planType}`);
 
@@ -83,9 +102,15 @@ class RazorpayService {
                 currency: 'inr'
             });
 
+            const keyId = process.env.RAZOR_PAY_ID;
+            // Log which key is being sent to frontend
+            const keyType = keyId?.startsWith('rzp_test_') ? 'TEST' : 
+                           keyId?.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
+            logger.info(`Sending Razorpay ${keyType} key to frontend in createOrder: ${keyId?.substring(0, 15)}...`);
+            
             return {
                 subscriptionId: razorpaySubscription.id,
-                keyId: process.env.RAZOR_PAY_ID,
+                keyId: keyId,
                 planName: 'Pro Plan',
                 description: 'SellerQI Pro Plan - Monthly Subscription',
                 prefill: {
@@ -159,8 +184,14 @@ class RazorpayService {
             const wasInTrial = user.isInTrialPeriod === true;
             const previousPackageType = user.packageType;
             const isTrialUpgrade = wasInTrial && previousPackageType === 'PRO';
+            
+            // Check if this is an upgrade (existing user) vs new signup
+            // If user had LITE or PRO (trial), it's an upgrade → redirect to dashboard
+            // If user had no package or this is first payment, it's new signup → redirect to connect-to-amazon
+            const isUpgrade = previousPackageType === 'LITE' || previousPackageType === 'PRO' || wasInTrial;
+            const isNewSignup = !previousPackageType || previousPackageType === null || (!isUpgrade && planType === 'PRO');
 
-            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}`);
+            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}`);
 
             // Fetch subscription details from Razorpay to get billing cycle dates
             let currentPeriodStart = new Date();
@@ -210,29 +241,83 @@ class RazorpayService {
 
             await User.findByIdAndUpdate(userId, updateData);
 
-            // Add to payment history
+            // Try to get invoice URL and payment amount from Razorpay
+            let invoiceUrl = null;
+            let invoiceNumber = null;
+            let paymentAmount = subscription.amount || 0; // Fallback to subscription amount
+
+            try {
+                const razorpayPayment = await this.razorpay.payments.fetch(paymentId);
+                
+                // Razorpay returns amount in paise (smallest currency unit)
+                // For INR: ₹1,999.00 = 199900 paise
+                // Convert paise to rupees by dividing by 100
+                if (razorpayPayment.amount) {
+                    // Check if amount is already in rupees (if it's less than 10000, it's likely already in rupees)
+                    // For ₹1,999.00, if it's in paise it would be 199900, if in rupees it would be 1999
+                    // If amount > 1000, assume it's in paise and divide by 100
+                    // If amount <= 1000, it might already be in rupees, but for ₹1,999 it should be > 1000
+                    // So we'll always divide by 100 for safety
+                    const rawAmount = razorpayPayment.amount;
+                    
+                    // If the amount is very large (like 199900), it's in paise - divide by 100
+                    // If the amount is reasonable (like 1999), it might already be in rupees
+                    // For subscription payments, Razorpay typically returns in paise
+                    // Let's check: if amount > 10000, it's definitely in paise
+                    if (rawAmount > 10000) {
+                        paymentAmount = rawAmount / 100; // Convert paise to rupees
+                        logger.info(`Razorpay payment amount: ${rawAmount} paise = ₹${paymentAmount}`);
+                    } else {
+                        // Amount is already in rupees (for test mode or certain cases)
+                        paymentAmount = rawAmount;
+                        logger.info(`Razorpay payment amount: ${rawAmount} (already in rupees) = ₹${paymentAmount}`);
+                    }
+                }
+                
+                if (razorpayPayment.invoice_id) {
+                    const invoice = await this.razorpay.invoices.fetch(razorpayPayment.invoice_id);
+                    invoiceUrl = invoice.short_url || null;
+                    invoiceNumber = invoice.id || null;
+                }
+            } catch (invoiceError) {
+                logger.warn(`Could not fetch Razorpay payment details: ${invoiceError.message}`);
+            }
+
+            // Add to payment history with invoice URLs
+            // Note: For subscriptions, we use paymentId as orderId since Razorpay subscriptions don't have separate orders
             await this.addPaymentHistory(userId, {
-                orderId: orderId,
+                orderId: paymentId, // Use paymentId as orderId for subscriptions
                 paymentId: paymentId,
-                amount: subscription.amount,
-                currency: subscription.currency,
+                amount: paymentAmount, // Use actual payment amount from Razorpay (in rupees)
+                currency: subscription.currency || 'inr',
                 status: 'paid',
                 razorpayPaymentId: paymentId,
+                invoiceUrl: invoiceUrl,
+                invoiceNumber: invoiceNumber,
                 paymentGateway: 'razorpay'
             });
 
-            logger.info(`Razorpay payment successful for user: ${userId}, order: ${orderId}, plan: ${planType}`);
+            logger.info(`Razorpay payment successful for user: ${userId}, payment: ${paymentId}, plan: ${planType}`);
 
             return { 
                 success: true, 
                 planType, 
                 userId,
                 isTrialUpgrade: isTrialUpgrade,  // Flag to indicate if user upgraded from trial
+                isUpgrade: isUpgrade, // Flag to indicate if this is an upgrade (existing user)
+                isNewSignup: isNewSignup, // Flag to indicate if this is a new signup
                 message: 'Payment verified and subscription activated successfully'
             };
 
         } catch (error) {
-            logger.error('Error handling Razorpay payment success:', error);
+            logger.error('Error handling Razorpay payment success:', {
+                message: error.message,
+                stack: error.stack,
+                userId: userId,
+                subscriptionId: razorpaySubscriptionId,
+                paymentId: paymentId,
+                errorName: error.name
+            });
             throw error;
         }
     }
@@ -288,8 +373,16 @@ class RazorpayService {
      * Get Razorpay configuration for frontend
      */
     getConfig() {
+        const keyId = process.env.RAZOR_PAY_ID;
+        // Log which key is being sent to frontend (for debugging)
+        if (keyId) {
+            const keyType = keyId.startsWith('rzp_test_') ? 'TEST' : 
+                           keyId.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
+            logger.info(`Sending Razorpay ${keyType} key to frontend: ${keyId.substring(0, 15)}...`);
+        }
+        
         return {
-            keyId: process.env.RAZOR_PAY_ID,
+            keyId: keyId,
             plans: {
                 PRO: {
                     planId: process.env.RAZOR_PAY_PLAN_ID,
@@ -409,10 +502,23 @@ class RazorpayService {
                 );
 
                 // Add to payment history
+                // Razorpay returns amount in paise (smallest currency unit)
+                // For INR: ₹1,999.00 = 199900 paise
+                // Convert paise to rupees by dividing by 100
+                // But check if it's already in rupees (amount <= 10000)
+                let paymentAmountInRupees = 0;
+                if (payment.amount) {
+                    if (payment.amount > 10000) {
+                        paymentAmountInRupees = payment.amount / 100; // Convert paise to rupees
+                    } else {
+                        paymentAmountInRupees = payment.amount; // Already in rupees
+                    }
+                }
+                
                 await this.addPaymentHistory(dbSubscription.userId, {
                     subscriptionId: subscriptionId,
                     paymentId: paymentId,
-                    amount: payment.amount,
+                    amount: paymentAmountInRupees, // Convert paise to rupees
                     currency: payment.currency,
                     status: 'paid',
                     razorpayPaymentId: paymentId,
@@ -644,6 +750,75 @@ class RazorpayService {
 
         } catch (error) {
             logger.error('Error getting Razorpay payment history:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get invoice download URL for a payment
+     * @param {string} userId - User ID
+     * @param {string} paymentId - Razorpay payment ID
+     * @returns {Promise<{invoiceUrl: string, invoicePdf: string}>}
+     */
+    async getInvoiceDownloadUrl(userId, paymentId) {
+        try {
+            // Check if Razorpay is configured
+            if (!this.isConfigured()) {
+                throw new Error('Razorpay is not configured');
+            }
+
+            // Find subscription to verify user ownership
+            const subscription = await Subscription.findOne({ userId });
+            if (!subscription) {
+                throw new Error('Subscription not found');
+            }
+
+            // Verify payment belongs to user
+            const paymentInHistory = subscription.paymentHistory?.find(
+                p => p.razorpayPaymentId === paymentId && p.paymentGateway === 'razorpay'
+            );
+
+            if (!paymentInHistory) {
+                throw new Error('Payment not found in user history');
+            }
+
+            // Fetch payment details from Razorpay
+            const razorpayPayment = await this.razorpay.payments.fetch(paymentId);
+
+            // Razorpay provides invoice details in payment object
+            // For subscriptions, invoice is usually available
+            let invoiceUrl = null;
+            let invoicePdf = null;
+            let invoiceNumber = null;
+
+            // Check if payment has invoice_id
+            if (razorpayPayment.invoice_id) {
+                try {
+                    const invoice = await this.razorpay.invoices.fetch(razorpayPayment.invoice_id);
+                    invoiceUrl = invoice.short_url || null;
+                    invoicePdf = invoice.short_url || null; // Razorpay uses same URL for PDF
+                    invoiceNumber = invoice.id || null;
+                } catch (invoiceError) {
+                    logger.warn(`Could not fetch Razorpay invoice: ${invoiceError.message}`);
+                }
+            }
+
+            // If no invoice, generate receipt URL (Razorpay provides receipt URLs)
+            if (!invoiceUrl && razorpayPayment.receipt) {
+                // Razorpay receipt can be used as invoice reference
+                invoiceNumber = razorpayPayment.receipt;
+            }
+
+            return {
+                invoiceUrl: invoiceUrl,
+                invoicePdf: invoicePdf,
+                invoiceNumber: invoiceNumber || paymentId,
+                paymentId: paymentId,
+                receiptUrl: razorpayPayment.receipt ? `https://dashboard.razorpay.com/app/payments/${paymentId}` : null
+            };
+
+        } catch (error) {
+            logger.error('Error getting Razorpay invoice download URL:', error);
             throw error;
         }
     }

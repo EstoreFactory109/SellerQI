@@ -51,10 +51,25 @@ class RazorpayService {
             const response = await axiosInstance.post('/app/razorpay/create-order', {
                 planType: planType
             });
+            
+            // Log the key being received from backend
+            const keyId = response.data.data?.keyId;
+            if (keyId) {
+                const keyType = keyId.startsWith('rzp_test_') ? 'TEST' : 
+                               keyId.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
+                console.log(`Received Razorpay ${keyType} key from backend: ${keyId.substring(0, 15)}...`);
+            }
+            
             return response.data.data;
         } catch (error) {
             console.error('Error creating Razorpay subscription:', error);
-            throw error;
+            // Extract and log the actual error message from server
+            const errorMessage = error.response?.data?.message || error.message || 'Failed to create subscription';
+            console.error('Server error message:', errorMessage);
+            // Throw a more descriptive error
+            const enhancedError = new Error(errorMessage);
+            enhancedError.originalError = error;
+            throw enhancedError;
         }
     }
 
@@ -88,9 +103,20 @@ class RazorpayService {
             // Create subscription
             const subscriptionData = await this.createSubscription(planType);
 
+            // Verify the key before using it
+            const keyId = subscriptionData.keyId;
+            if (!keyId) {
+                throw new Error('Razorpay key ID not received from server');
+            }
+            
+            // Log warning if live key is detected in what appears to be a development environment
+            if (keyId.startsWith('rzp_live_') && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+                console.warn('⚠️ WARNING: Using LIVE Razorpay key in localhost! This should be a TEST key.');
+            }
+
             // Configure Razorpay options for subscription
             const options = {
-                key: subscriptionData.keyId,
+                key: keyId,
                 subscription_id: subscriptionData.subscriptionId,
                 name: 'SellerQI',
                 description: subscriptionData.description || 'Pro Plan - Monthly Subscription',
@@ -142,10 +168,34 @@ class RazorpayService {
             razorpay.on('payment.failed', (response) => {
                 console.error('Payment failed:', response.error);
                 if (onError) {
+                    const error = response.error || {};
+                    let errorMessage = error.description || 'Payment failed';
+                    
+                    // Provide more specific error messages based on error type
+                    if (error.reason === 'card_mandate_card_not_supported' || 
+                        (error.description && error.description.includes('Card not supported for recurring payments'))) {
+                        errorMessage = 'This card does not support recurring payments. Please use a different card that supports automatic payments, or use UPI/Netbanking for subscription payments.';
+                    } else if (error.description && error.description.includes('bank or wallet gateway')) {
+                        errorMessage = 'Payment failed at the bank or wallet gateway. Please try a different payment method or contact your bank.';
+                    } else if (error.code === 'BAD_REQUEST_ERROR') {
+                        if (error.reason && error.reason !== 'NA') {
+                            errorMessage = `${error.description || 'Payment failed'}. Reason: ${error.reason}. Please try a different payment method.`;
+                        } else {
+                            errorMessage = 'Payment request was invalid. Please try again or use a different payment method.';
+                        }
+                    } else if (error.code === 'GATEWAY_ERROR') {
+                        errorMessage = 'Payment gateway error. Please try again in a few moments or use a different payment method.';
+                    } else if (error.reason && error.reason !== 'NA') {
+                        errorMessage = `${error.description || 'Payment failed'}. Reason: ${error.reason}`;
+                    }
+                    
                     onError({
-                        message: response.error.description || 'Payment failed',
-                        code: response.error.code,
-                        reason: response.error.reason
+                        message: errorMessage,
+                        code: error.code,
+                        reason: error.reason,
+                        source: error.source,
+                        step: error.step,
+                        metadata: error.metadata || {}
                     });
                 }
             });
@@ -154,8 +204,13 @@ class RazorpayService {
 
         } catch (error) {
             console.error('Error initiating Razorpay payment:', error);
+            // Extract the actual error message
+            const errorMessage = error.message || error.response?.data?.message || 'Failed to initiate payment';
             if (onError) {
-                onError(error);
+                onError({
+                    message: errorMessage,
+                    originalError: error
+                });
             }
         }
     }
@@ -202,6 +257,45 @@ class RazorpayService {
             return response.data.data.paymentHistory;
         } catch (error) {
             console.error('Error getting Razorpay payment history:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get invoice download URL
+     * @param {string} paymentId - Razorpay payment ID
+     * @returns {Promise<{invoiceUrl: string, invoicePdf: string}>}
+     */
+    async getInvoiceDownloadUrl(paymentId) {
+        try {
+            const response = await axiosInstance.get(`/app/razorpay/invoice-download?paymentId=${paymentId}`);
+            return response.data.data;
+        } catch (error) {
+            console.error('Error getting Razorpay invoice download URL:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Download invoice
+     * @param {string} paymentId - Razorpay payment ID
+     */
+    async downloadInvoice(paymentId) {
+        try {
+            const invoiceData = await this.getInvoiceDownloadUrl(paymentId);
+            
+            // Prefer PDF URL, fallback to invoice URL, then receipt URL
+            const downloadUrl = invoiceData.invoicePdf || invoiceData.invoiceUrl || invoiceData.receiptUrl;
+            
+            if (downloadUrl) {
+                // Open in new tab for download
+                window.open(downloadUrl, '_blank');
+                return { success: true, url: downloadUrl };
+            } else {
+                throw new Error('Invoice URL not available');
+            }
+        } catch (error) {
+            console.error('Error downloading Razorpay invoice:', error);
             throw error;
         }
     }

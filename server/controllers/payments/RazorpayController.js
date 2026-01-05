@@ -35,7 +35,12 @@ const createOrder = asyncHandler(async (req, res) => {
         );
 
     } catch (error) {
-        logger.error('Error creating Razorpay order:', error);
+        logger.error('Error creating Razorpay order:', {
+            error: error.message,
+            stack: error.stack,
+            userId: req.userId,
+            planType: req.body?.planType
+        });
         return res.status(500).json(
             new ApiResponse(500, null, error.message || 'Failed to create order')
         );
@@ -72,7 +77,14 @@ const verifyPayment = asyncHandler(async (req, res) => {
         );
 
     } catch (error) {
-        logger.error('Error verifying Razorpay payment:', error);
+        logger.error('Error verifying Razorpay payment:', {
+            message: error.message,
+            stack: error.stack,
+            userId: req.userId,
+            subscriptionId: req.body?.razorpay_subscription_id,
+            paymentId: req.body?.razorpay_payment_id,
+            errorName: error.name
+        });
         return res.status(500).json(
             new ApiResponse(500, null, error.message || 'Failed to verify payment')
         );
@@ -218,6 +230,34 @@ const getPaymentHistory = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get invoice download URL for Razorpay payment
+ */
+const getInvoiceDownloadUrl = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { paymentId } = req.query;
+
+        if (!paymentId) {
+            return res.status(400).json(
+                new ApiResponse(400, null, 'Payment ID is required')
+            );
+        }
+
+        const invoiceData = await razorpayService.getInvoiceDownloadUrl(userId, paymentId);
+
+        return res.status(200).json(
+            new ApiResponse(200, invoiceData, 'Invoice URL retrieved successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error getting Razorpay invoice download URL:', error);
+        return res.status(500).json(
+            new ApiResponse(500, null, error.message || 'Failed to get invoice URL')
+        );
+    }
+});
+
 module.exports = {
     createOrder,
     verifyPayment,
@@ -225,6 +265,7 @@ module.exports = {
     handleWebhook,
     cancelSubscription,
     getSubscription,
-    getPaymentHistory
+    getPaymentHistory,
+    getInvoiceDownloadUrl
 };
 

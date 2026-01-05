@@ -27,16 +27,22 @@ export default function SubscriptionSuccess() {
                     localStorage.removeItem('intendedCountry');
                     localStorage.removeItem('previousPlan');
                     
-                    // Check if this is a trial upgrade from URL params
+                    // Check if this is an upgrade or new signup from URL params
                     const isTrialUpgrade = searchParams.get('isTrialUpgrade') === 'true';
+                    const isUpgrade = searchParams.get('isUpgrade') === 'true';
+                    const isNewSignup = searchParams.get('isNewSignup') === 'true';
                     
                     // Redirect based on payment context
                     setTimeout(() => {
-                        if (isTrialUpgrade) {
-                            // User upgraded from trial → redirect to dashboard
+                        if (isTrialUpgrade || isUpgrade) {
+                            // User upgraded (from trial or LITE) → redirect to dashboard
                             navigate('/seller-central-checker/dashboard');
-                        } else {
+                        } else if (isNewSignup) {
                             // New signup payment → redirect to connect-to-amazon
+                            navigate('/connect-to-amazon');
+                        } else {
+                            // Default: if unsure, check if user already exists (upgrade) or new signup
+                            // For now, default to connect-to-amazon for safety
                             navigate('/connect-to-amazon');
                         }
                     }, 3000);
@@ -59,12 +65,15 @@ export default function SubscriptionSuccess() {
                             if (result.data.planType === 'AGENCY') {
                                 // User purchased AGENCY plan, redirect to client registration
                                 navigate('/agency-client-registration');
-                            } else if (result.data.isTrialUpgrade) {
-                                // User upgraded from trial to PRO → redirect to dashboard
+                            } else if (result.data.isTrialUpgrade || result.data.isUpgrade) {
+                                // User upgraded (from trial or LITE) → redirect to dashboard
                                 navigate('/seller-central-checker/dashboard');
-                            } else {
+                            } else if (result.data.isNewSignup) {
                                 // New signup payment → redirect to connect-to-amazon
                                 navigate('/connect-to-amazon');
+                            } else {
+                                // Default: if unsure, redirect to dashboard (safer for existing users)
+                                navigate('/seller-central-checker/dashboard');
                             }
                         }, 3000);
                     } else {

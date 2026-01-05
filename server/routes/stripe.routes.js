@@ -9,6 +9,7 @@ const {
     cancelSubscription,
     reactivateSubscription,
     getPaymentHistory,
+    getInvoiceDownloadUrl,
     getSubscriptionConfig
 } = require('../controllers/payments/StripeController');
 
@@ -31,6 +32,7 @@ router.get('/subscription', auth, getSubscription);
 router.post('/cancel-subscription', auth, cancelSubscription);
 router.post('/reactivate-subscription', auth, reactivateSubscription);
 router.get('/payment-history', auth, getPaymentHistory);
+router.get('/invoice-download', auth, getInvoiceDownloadUrl);
 
 // Configuration routes (no auth required for config)
 router.get('/config', getSubscriptionConfig);
