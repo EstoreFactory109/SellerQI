@@ -186,6 +186,10 @@ async function startWorker() {
             connection,
             prefix: 'bullmq', // Same prefix as queue
             concurrency: WORKER_CONCURRENCY, // Process N jobs concurrently
+            // Stall detection: Set to 4 hours to accommodate long-running report API jobs
+            // Jobs can take hours waiting for report API responses, so we need a longer interval
+            stallInterval: 4 * 60 * 60 * 1000, // 4 hours in milliseconds
+            maxStalledCount: 2, // Allow 2 stalls before failing (handles worker restarts)
             limiter: {
                 // Optional: Rate limiting
                 max: 10, // Max 10 jobs
