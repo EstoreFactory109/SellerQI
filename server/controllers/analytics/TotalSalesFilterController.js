@@ -13,6 +13,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
  * Filter total sales data based on date range
@@ -77,7 +78,11 @@ const filterTotalSales = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get last 30 days data - return total values from latest document
+ * Get last 30 days data - calculate totals by summing datewise values
+ * 
+ * IMPORTANT: To ensure consistency with custom range filter, we calculate
+ * totalSales by summing datewiseSales instead of using stored pre-aggregated values.
+ * This guarantees: same dates → same result, regardless of filter type.
  */
 async function getLast30DaysData(userId, country, region) {
     // Get the latest economics metrics document
@@ -92,41 +97,118 @@ async function getLast30DaysData(userId, country, region) {
         return createEmptyResult();
     }
 
-    // Return total values from the document
+    const currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
+    
+    // Get datewise data from the document
+    const datewiseSales = latestMetrics.datewiseSales || [];
+    const datewiseFeesAndRefunds = latestMetrics.datewiseFeesAndRefunds || [];
+    const datewiseAmazonFees = latestMetrics.datewiseAmazonFees || [];
+    
+    // Calculate totals by summing datewise values (same method as custom range)
+    let totalSales = 0;
+    let totalFbaFees = 0;
+    let totalAmazonFees = 0; // Changed from totalStorageFees to totalAmazonFees
+    let totalRefunds = 0;
+    
+    datewiseSales.forEach(item => {
+        totalSales += item.sales?.amount || 0;
+    });
+    
+    datewiseFeesAndRefunds.forEach(item => {
+        totalFbaFees += item.fbaFulfillmentFee?.amount || 0;
+        totalRefunds += item.refunds?.amount || 0;
+    });
+    
+    // Calculate total Amazon fees from datewiseAmazonFees
+    datewiseAmazonFees.forEach(item => {
+        totalAmazonFees += item.totalAmount?.amount || 0;
+    });
+    
+    // Prepare datewise chart data
+    const datewiseChartData = datewiseSales.map(item => {
+        const itemDate = new Date(item.date);
+        const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        return {
+            date: dateKey,
+            totalSales: item.sales?.amount || 0,
+            grossProfit: item.grossProfit?.amount || 0,
+            originalDate: item.date
+        };
+    }).sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
+
+    // Get PPC spent from actual datewise PPC data (not estimated)
+    // Use the same date range as the economics metrics
+    const dateRange = latestMetrics.dateRange || {};
+    let ppcSpent = 0;
+    
+    if (dateRange.startDate && dateRange.endDate) {
+        ppcSpent = await getDatewisePPCSpend(userId, country, region, dateRange.startDate, dateRange.endDate);
+    }
+    
+    // Fallback to stored value if no datewise PPC data found
+    if (ppcSpent === 0) {
+        ppcSpent = latestMetrics.ppcSpent?.amount || 0;
+    }
+    
+    // Calculate gross profit: Sales - Amazon Fees - Refunds
+    // Note: Amazon Fees includes FBA fees, storage fees, referral fees, etc.
+    // PPC is subtracted in frontend for display, not in backend calculation
+    const calculatedGrossProfit = totalSales - totalAmazonFees - totalRefunds;
+    
+    // Calculate Other Amazon Fees = Total Amazon Fees - FBA Fees (for Total Sales component)
+    const otherAmazonFees = Math.max(0, totalAmazonFees - totalFbaFees);
+
+    // Return calculated totals (sum of datewise values)
     return {
-        totalSales: latestMetrics.totalSales || { amount: 0, currencyCode: 'USD' },
-        grossProfit: latestMetrics.grossProfit || { amount: 0, currencyCode: 'USD' },
-        ppcSpent: latestMetrics.ppcSpent || { amount: 0, currencyCode: 'USD' },
-        fbaFees: latestMetrics.fbaFees || { amount: 0, currencyCode: 'USD' },
-        storageFees: latestMetrics.storageFees || { amount: 0, currencyCode: 'USD' },
-        refunds: latestMetrics.refunds || { amount: 0, currencyCode: 'USD' },
+        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
+        grossProfit: { amount: parseFloat(calculatedGrossProfit.toFixed(2)), currencyCode },
+        ppcSpent: { amount: parseFloat(ppcSpent.toFixed(2)), currencyCode },
+        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
+        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
+        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (for Total Sales component)
+        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
         dateRange: latestMetrics.dateRange || { startDate: null, endDate: null },
-        currencyCode: latestMetrics.totalSales?.currencyCode || 'USD'
+        datewiseChartData: datewiseChartData,
+        currencyCode: currencyCode
     };
 }
 
 /**
  * Get last 7 days data - get datewise values from latest document, sum them
  * Uses dates from frontend if provided, otherwise calculates default (7 days ending yesterday)
+ * 
+ * IMPORTANT: When custom dates are provided (startDateParam, endDateParam), this function
+ * delegates to getCustomRangeData to ensure all historical documents are queried.
+ * This is necessary because the "7 days" filter with custom dates might need data
+ * from multiple documents (e.g., historical date ranges).
+ * 
+ * All totals are calculated by summing datewise values for consistency.
  */
 async function getLast7DaysData(userId, country, region, startDateParam = null, endDateParam = null) {
+    // If custom dates are provided, delegate to getCustomRangeData for full historical support
+    // This ensures we query ALL documents, not just the latest one
+    if (startDateParam && endDateParam) {
+        logger.info('7-day filter with custom dates - delegating to getCustomRangeData for historical data support', {
+            userId,
+            country,
+            region,
+            startDate: startDateParam,
+            endDate: endDateParam
+        });
+        return await getCustomRangeData(userId, country, region, startDateParam, endDateParam);
+    }
+    
+    // Default behavior: Calculate last 7 days from yesterday and use latest document
     let startDate, endDate;
     
-    // Use dates from frontend if provided
-    if (startDateParam && endDateParam) {
-        startDate = new Date(startDateParam);
-        startDate.setHours(0, 0, 0, 0);
-        endDate = new Date(endDateParam);
-        endDate.setHours(23, 59, 59, 999);
-    } else {
-        // Default: Calculate last 7 days date range (6 days before yesterday to yesterday)
-        endDate = new Date();
-        endDate.setDate(endDate.getDate() - 1); // Yesterday
-        endDate.setHours(23, 59, 59, 999);
-        startDate = new Date(endDate);
-        startDate.setDate(endDate.getDate() - 6); // 6 days before yesterday = 7 days total
-        startDate.setHours(0, 0, 0, 0);
-    }
+    // Default: Calculate last 7 days date range (6 days before yesterday to yesterday)
+    endDate = new Date();
+    endDate.setDate(endDate.getDate() - 1); // Yesterday
+    endDate.setHours(23, 59, 59, 999);
+    startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 6); // 6 days before yesterday = 7 days total
+    startDate.setHours(0, 0, 0, 0);
 
     const startDateStr = formatDate(startDate);
     const endDateStr = formatDate(endDate);
@@ -146,6 +228,7 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
     // Get datewise data from the document
     const datewiseSales = latestMetrics.datewiseSales || [];
     const datewiseFeesAndRefunds = latestMetrics.datewiseFeesAndRefunds || [];
+    const datewiseAmazonFees = latestMetrics.datewiseAmazonFees || [];
 
     // Filter and sum data for last 7 days
     const filteredSales = datewiseSales.filter(item => {
@@ -158,35 +241,67 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
         return itemDate >= startDate && itemDate <= endDate;
     });
 
+    const filteredAmazonFees = datewiseAmazonFees.filter(item => {
+        const itemDate = new Date(item.date);
+        return itemDate >= startDate && itemDate <= endDate;
+    });
+
     // Sum up the values
     let totalSales = 0;
-    let totalGrossProfit = 0;
     let totalFbaFees = 0;
-    let totalStorageFees = 0;
+    let totalAmazonFees = 0; // Changed from totalStorageFees to totalAmazonFees
     let totalRefunds = 0;
     let currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
 
     filteredSales.forEach(item => {
         totalSales += item.sales?.amount || 0;
-        totalGrossProfit += item.grossProfit?.amount || 0;
     });
 
     filteredFeesAndRefunds.forEach(item => {
         totalFbaFees += item.fbaFulfillmentFee?.amount || 0;
-        totalStorageFees += item.storageFee?.amount || 0;
         totalRefunds += item.refunds?.amount || 0;
     });
 
-    // Get PPC spent from datewise data if available, otherwise use total
-    // Note: PPC spent might not be in datewise data, so we'll need to calculate proportionally
-    const totalPpcSpent = calculateProportionalPPC(
-        latestMetrics.ppcSpent?.amount || 0,
-        filteredSales.length,
-        datewiseSales.length
-    );
+    // Calculate total Amazon fees and Other Amazon Fees from filtered datewiseAmazonFees
+    // For Total Sales component: Sum fees that are NOT FbaFulfilmentFee from feeBreakdown
+    let otherAmazonFees = 0;
+    filteredAmazonFees.forEach(item => {
+        totalAmazonFees += item.totalAmount?.amount || 0;
+        
+        // Calculate Other Amazon Fees by summing non-FBA fees from feeBreakdown
+        if (Array.isArray(item.feeBreakdown)) {
+            item.feeBreakdown.forEach(fee => {
+                // Exclude FBA Fulfillment fees (check various naming conventions)
+                const feeType = fee.feeType || '';
+                const isFbaFee = feeType.toLowerCase().includes('fbafulfil') || 
+                                 feeType.toLowerCase().includes('fba_fulfil') ||
+                                 feeType === 'FbaFulfilmentFee' ||
+                                 feeType === 'FbaFulfillmentFee';
+                if (!isFbaFee && fee.amount > 0) {
+                    otherAmazonFees += fee.amount;
+                }
+            });
+        }
+    });
+
+    // Get PPC spent from actual datewise PPC data (not estimated)
+    let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
+    
+    // Fallback to proportional calculation if no datewise PPC data found
+    if (totalPpcSpent === 0 && latestMetrics.ppcSpent?.amount > 0) {
+        totalPpcSpent = calculateProportionalPPC(
+            latestMetrics.ppcSpent?.amount || 0,
+            filteredSales.length,
+            datewiseSales.length
+        );
+    }
+
+    // Calculate gross profit: Sales - Amazon Fees - Refunds
+    // Note: Amazon Fees includes FBA fees, storage fees, referral fees, etc.
+    // PPC is subtracted in frontend for display, not in backend calculation
+    const calculatedGrossProfit = totalSales - totalAmazonFees - totalRefunds;
 
     // Prepare datewise data for chart
-    // Use existing grossProfit from datewiseSales (already calculated as netSales - cogs)
     const datewiseChartData = filteredSales.map(item => {
         const itemDate = new Date(item.date);
         const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -194,18 +309,19 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
         return {
             date: dateKey,
             totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0, // Use existing grossProfit from database (netSales - cogs)
+            grossProfit: item.grossProfit?.amount || 0, // Chart uses Amazon's gross profit for daily breakdown
             originalDate: item.date
         };
     });
 
     return {
-        totalSales: { amount: totalSales, currencyCode },
-        grossProfit: { amount: totalGrossProfit, currencyCode },
-        ppcSpent: { amount: totalPpcSpent, currencyCode },
-        fbaFees: { amount: totalFbaFees, currencyCode },
-        storageFees: { amount: totalStorageFees, currencyCode },
-        refunds: { amount: totalRefunds, currencyCode },
+        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
+        grossProfit: { amount: parseFloat(calculatedGrossProfit.toFixed(2)), currencyCode },
+        ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
+        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
+        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
+        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (for Total Sales component)
+        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
         dateRange: {
             startDate: startDateStr,
             endDate: endDateStr
@@ -217,6 +333,16 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
 
 /**
  * Get custom range data - check all documents, get datewise values for range, sum them
+ * 
+ * IMPORTANT: All totals are calculated by summing datewise values.
+ * This ensures consistency across all filter types since:
+ * - Stored totalSales = sum(datewiseSales) (guaranteed by our calculation fix)
+ * - Custom range totalSales = sum(filtered datewiseSales)
+ * 
+ * When dates match exactly, the result will be identical to getLast30DaysData
+ * because we're summing the same datewise values.
+ * 
+ * Also aggregates ASIN-wise data from all documents for the date range.
  */
 async function getCustomRangeData(userId, country, region, startDateStr, endDateStr) {
     // Parse dates
@@ -237,16 +363,26 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
         return createEmptyResult();
     }
 
+    logger.info('Processing custom date range - calculating from datewise data', {
+        userId,
+        country,
+        region,
+        requestedRange: { startDate: startDateStr, endDate: endDateStr }
+    });
+
     // Aggregate data from all documents that overlap with the date range
     let totalSales = 0;
-    let totalGrossProfit = 0;
     let totalFbaFees = 0;
-    let totalStorageFees = 0;
+    let totalAmazonFees = 0; // Total Amazon fees (for Profitability page)
+    let otherAmazonFees = 0; // Amazon fees excluding FBA (for Total Sales component)
     let totalRefunds = 0;
-    let totalPpcSpent = 0;
     let currencyCode = 'USD';
     const processedDates = new Set(); // Track processed dates to avoid duplicates for sales
     const processedFeeDates = new Set(); // Track processed dates to avoid duplicates for fees
+    const processedAmazonFeeDates = new Set(); // Track processed dates to avoid duplicates for Amazon fees
+    
+    // ASIN-wise aggregation: Map of "asin-date" -> asin data (to avoid duplicates)
+    const asinDateMap = new Map();
 
     for (const metrics of allMetrics) {
         // Check if document's date range overlaps with requested range
@@ -271,7 +407,6 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
                 // Only process if within range and not already processed
                 if (itemDate >= startDate && itemDate <= endDate && !processedDates.has(dateKey)) {
                     totalSales += item.sales?.amount || 0;
-                    totalGrossProfit += item.grossProfit?.amount || 0;
                     processedDates.add(dateKey);
                 }
             });
@@ -285,18 +420,126 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
                 // Only process if within range and not already processed for fees
                 if (itemDate >= startDate && itemDate <= endDate && !processedFeeDates.has(dateKey)) {
                     totalFbaFees += item.fbaFulfillmentFee?.amount || 0;
-                    totalStorageFees += item.storageFee?.amount || 0;
                     totalRefunds += item.refunds?.amount || 0;
                     processedFeeDates.add(dateKey);
                 }
             });
 
-            // Calculate proportional PPC spent based on date range overlap
-            const overlapDays = calculateOverlapDays(startDate, endDate, docStartDate, docEndDate);
-            const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
-            if (docTotalDays > 0) {
-                const proportion = overlapDays / docTotalDays;
-                totalPpcSpent += (metrics.ppcSpent?.amount || 0) * proportion;
+            // Process datewise Amazon fees
+            const datewiseAmazonFees = metrics.datewiseAmazonFees || [];
+            datewiseAmazonFees.forEach(item => {
+                const itemDate = new Date(item.date);
+                const dateKey = itemDate.toISOString().split('T')[0];
+
+                // Only process if within range and not already processed for Amazon fees
+                if (itemDate >= startDate && itemDate <= endDate && !processedAmazonFeeDates.has(dateKey)) {
+                    totalAmazonFees += item.totalAmount?.amount || 0;
+                    
+                    // Calculate Other Amazon Fees by summing non-FBA fees from feeBreakdown
+                    if (Array.isArray(item.feeBreakdown)) {
+                        item.feeBreakdown.forEach(fee => {
+                            // Exclude FBA Fulfillment fees (check various naming conventions)
+                            const feeType = fee.feeType || '';
+                            const isFbaFee = feeType.toLowerCase().includes('fbafulfil') || 
+                                             feeType.toLowerCase().includes('fba_fulfil') ||
+                                             feeType === 'FbaFulfilmentFee' ||
+                                             feeType === 'FbaFulfillmentFee';
+                            if (!isFbaFee && fee.amount > 0) {
+                                otherAmazonFees += fee.amount;
+                            }
+                        });
+                    }
+                    
+                    processedAmazonFeeDates.add(dateKey);
+                }
+            });
+            
+            // Process ASIN-wise sales data
+            const asinWiseSales = metrics.asinWiseSales || [];
+            asinWiseSales.forEach(item => {
+                // Check if item has a date field (for daily breakdown)
+                if (item.date) {
+                    const itemDate = new Date(item.date);
+                    const dateKey = itemDate.toISOString().split('T')[0];
+                    
+                    // Only process if within date range
+                    if (itemDate >= startDate && itemDate <= endDate) {
+                        // Use "asin-date" as unique key to avoid duplicates
+                        const uniqueKey = `${item.asin}-${dateKey}`;
+                        
+                        if (!asinDateMap.has(uniqueKey)) {
+                            asinDateMap.set(uniqueKey, {
+                                date: item.date,
+                                asin: item.asin,
+                                parentAsin: item.parentAsin || null,
+                                sales: item.sales || { amount: 0, currencyCode: 'USD' },
+                                grossProfit: item.grossProfit || { amount: 0, currencyCode: 'USD' },
+                                unitsSold: item.unitsSold || 0,
+                                refunds: item.refunds || { amount: 0, currencyCode: 'USD' },
+                                ppcSpent: item.ppcSpent || { amount: 0, currencyCode: 'USD' },
+                                fbaFees: item.fbaFees || { amount: 0, currencyCode: 'USD' },
+                                storageFees: item.storageFees || { amount: 0, currencyCode: 'USD' },
+                                amazonFees: item.amazonFees || { amount: 0, currencyCode: 'USD' },
+                                totalFees: item.totalFees || { amount: 0, currencyCode: 'USD' }
+                            });
+                        }
+                    }
+                } else {
+                    // For data without dates (aggregated), include if document overlaps with range
+                    // Use just ASIN as key since there's no date
+                    const uniqueKey = `${item.asin}-nodatе`;
+                    
+                    if (!asinDateMap.has(uniqueKey)) {
+                        asinDateMap.set(uniqueKey, {
+                            date: null,
+                            asin: item.asin,
+                            parentAsin: item.parentAsin || null,
+                            sales: item.sales || { amount: 0, currencyCode: 'USD' },
+                            grossProfit: item.grossProfit || { amount: 0, currencyCode: 'USD' },
+                            unitsSold: item.unitsSold || 0,
+                            refunds: item.refunds || { amount: 0, currencyCode: 'USD' },
+                            ppcSpent: item.ppcSpent || { amount: 0, currencyCode: 'USD' },
+                            fbaFees: item.fbaFees || { amount: 0, currencyCode: 'USD' },
+                            storageFees: item.storageFees || { amount: 0, currencyCode: 'USD' },
+                            amazonFees: item.amazonFees || { amount: 0, currencyCode: 'USD' },
+                            totalFees: item.totalFees || { amount: 0, currencyCode: 'USD' }
+                        });
+                    }
+                }
+            });
+        }
+    }
+    
+    // Convert ASIN-wise data map to array
+    const asinWiseSalesArray = Array.from(asinDateMap.values());
+    
+    logger.info('ASIN-wise data aggregated for custom range', {
+        userId,
+        country,
+        region,
+        totalAsinRecords: asinWiseSalesArray.length,
+        dateRange: { startDate: startDateStr, endDate: endDateStr }
+    });
+    
+    // Get PPC spent from actual datewise PPC data (not estimated)
+    let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
+    
+    // Fallback to proportional calculation if no datewise PPC data found
+    if (totalPpcSpent === 0) {
+        // Calculate proportional PPC from economics metrics as fallback
+        for (const metrics of allMetrics) {
+            const docStartDate = new Date(metrics.dateRange?.startDate);
+            const docEndDate = new Date(metrics.dateRange?.endDate);
+            docStartDate.setHours(0, 0, 0, 0);
+            docEndDate.setHours(23, 59, 59, 999);
+
+            if (startDate <= docEndDate && endDate >= docStartDate) {
+                const overlapDays = calculateOverlapDays(startDate, endDate, docStartDate, docEndDate);
+                const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
+                if (docTotalDays > 0) {
+                    const proportion = overlapDays / docTotalDays;
+                    totalPpcSpent += (metrics.ppcSpent?.amount || 0) * proportion;
+                }
             }
         }
     }
@@ -339,24 +582,81 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     const datewiseChartData = Array.from(datewiseChartDataMap.values())
         .sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
 
+    // Calculate gross profit: Sales - Amazon Fees - Refunds
+    // Note: Amazon Fees includes FBA fees, storage fees, referral fees, etc.
+    // PPC is subtracted in frontend for display, not in backend calculation
+    const calculatedGrossProfit = totalSales - totalAmazonFees - totalRefunds;
+
     return {
-        totalSales: { amount: totalSales, currencyCode },
-        grossProfit: { amount: totalGrossProfit, currencyCode },
-        ppcSpent: { amount: totalPpcSpent, currencyCode },
-        fbaFees: { amount: totalFbaFees, currencyCode },
-        storageFees: { amount: totalStorageFees, currencyCode },
-        refunds: { amount: totalRefunds, currencyCode },
+        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
+        grossProfit: { amount: parseFloat(calculatedGrossProfit.toFixed(2)), currencyCode },
+        ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
+        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
+        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
+        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (from feeBreakdown, for Total Sales component)
+        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
         dateRange: {
             startDate: formatDate(startDate),
             endDate: formatDate(endDate)
         },
         datewiseChartData: datewiseChartData,
+        asinWiseSales: asinWiseSalesArray, // ASIN-wise data aggregated from all documents for the date range
         currencyCode
     };
 }
 
 /**
- * Calculate proportional PPC spent for last 7 days
+ * Get actual datewise PPC spend from PPCMetrics model
+ * Uses the calculateMetricsForDateRange method which searches ALL documents
+ * and sums actual datewise spend values for the requested date range.
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region code
+ * @param {string} startDate - Start date (YYYY-MM-DD)
+ * @param {string} endDate - End date (YYYY-MM-DD)
+ * @returns {Promise<number>} Total PPC spend for the date range
+ */
+async function getDatewisePPCSpend(userId, country, region, startDate, endDate) {
+    try {
+        // Use PPCMetrics model's calculateMetricsForDateRange to get actual datewise PPC
+        const ppcResult = await PPCMetrics.calculateMetricsForDateRange(
+            userId,
+            country,
+            region,
+            startDate,
+            endDate
+        );
+        
+        if (ppcResult && ppcResult.found && ppcResult.summary?.totalSpend > 0) {
+            logger.info('Got actual datewise PPC spend from PPCMetrics', {
+                userId,
+                country,
+                region,
+                startDate,
+                endDate,
+                totalSpend: ppcResult.summary.totalSpend,
+                daysWithData: ppcResult.numberOfDays
+            });
+            return ppcResult.summary.totalSpend;
+        }
+        
+        return 0;
+    } catch (error) {
+        logger.warn('Error fetching datewise PPC spend, will use fallback', {
+            userId,
+            country,
+            region,
+            startDate,
+            endDate,
+            error: error.message
+        });
+        return 0;
+    }
+}
+
+/**
+ * Calculate proportional PPC spent for last 7 days (fallback when no datewise PPC data)
  */
 function calculateProportionalPPC(totalPpcSpent, filteredDays, totalDays) {
     if (totalDays === 0) return 0;
@@ -394,9 +694,11 @@ function createEmptyResult() {
         grossProfit: { amount: 0, currencyCode: 'USD' },
         ppcSpent: { amount: 0, currencyCode: 'USD' },
         fbaFees: { amount: 0, currencyCode: 'USD' },
-        storageFees: { amount: 0, currencyCode: 'USD' },
+        amazonFees: { amount: 0, currencyCode: 'USD' }, // Total Amazon fees (for Profitability page)
+        otherAmazonFees: { amount: 0, currencyCode: 'USD' }, // Amazon fees excluding FBA (for Total Sales component)
         refunds: { amount: 0, currencyCode: 'USD' },
         dateRange: { startDate: null, endDate: null },
+        asinWiseSales: [], // Empty ASIN-wise data
         currencyCode: 'USD'
     };
 }

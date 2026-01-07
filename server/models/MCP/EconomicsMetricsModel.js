@@ -107,6 +107,47 @@ const datewiseFeesAndRefundsSchema = new mongoose.Schema({
     _id: false
 });
 
+// Schema for fee breakdown (fee type and amount)
+const feeBreakdownItemSchema = new mongoose.Schema({
+    feeType: {
+        type: String,
+        required: true
+    },
+    amount: {
+        type: Number,
+        required: true,
+        default: 0
+    }
+}, {
+    _id: false
+});
+
+// Schema for datewise Amazon fees with breakdown
+const datewiseAmazonFeesSchema = new mongoose.Schema({
+    date: {
+        type: String,
+        required: true
+    },
+    totalAmount: {
+        amount: {
+            type: Number,
+            required: true,
+            default: 0
+        },
+        currencyCode: {
+            type: String,
+            required: true,
+            default: 'USD'
+        }
+    },
+    feeBreakdown: {
+        type: [feeBreakdownItemSchema],
+        default: []
+    }
+}, {
+    _id: false
+});
+
 // Schema for ASIN-wise sales data (with date for daily breakdown)
 const asinWiseSalesSchema = new mongoose.Schema({
     date: {
@@ -314,6 +355,11 @@ const economicsMetricsSchema = new mongoose.Schema({
         type: monetaryAmountSchema,
         default: { amount: 0, currencyCode: 'USD' }
     },
+    // Amazon fees breakdown by fee type (total for the date range)
+    amazonFeesBreakdown: {
+        type: [feeBreakdownItemSchema],
+        default: []
+    },
     refunds: {
         type: monetaryAmountSchema,
         required: true
@@ -329,6 +375,11 @@ const economicsMetricsSchema = new mongoose.Schema({
     },
     datewiseFeesAndRefunds: {
         type: [datewiseFeesAndRefundsSchema],
+        default: []
+    },
+    // Datewise Amazon fees with breakdown
+    datewiseAmazonFees: {
+        type: [datewiseAmazonFeesSchema],
         default: []
     },
     // ASIN-wise breakdown
@@ -374,6 +425,7 @@ economicsMetricsSchema.methods.getSummary = function() {
         storageFees: this.storageFees,
         totalFees: this.totalFees,
         amazonFees: this.amazonFees,
+        amazonFeesBreakdown: this.amazonFeesBreakdown,
         refunds: this.refunds,
         dateRange: this.dateRange,
         country: this.country // country = marketplace (US, UK, DE, etc.)

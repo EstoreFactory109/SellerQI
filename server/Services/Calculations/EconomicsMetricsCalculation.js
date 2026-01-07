@@ -4,15 +4,20 @@
  * Service for calculating economics metrics from Amazon Data Kiosk API JSONL data
  * Processes raw economics data and calculates:
  * - Total Sales (orderedProductSales)
- * - Gross Profit (netProceeds.total - actual profit after all fees)
- * - PPC Spent (from ads data)
+ * - Gross Profit (Total Sales - Total Amazon Fees - Total Refunds)
+ * - PPC Spent (from ads data - stored separately, subtracted in frontend)
  * - Amazon Fees (FBA fulfillment, storage, referral, closing, per-item fees)
  * - Refunds (orderedProductSales - netProductSales)
  * - Datewise breakdowns
  * - ASIN-wise breakdowns
  * 
- * IMPORTANT: This uses netProceeds.total from Amazon API as the gross profit,
- * which is the actual profit after all fees are deducted.
+ * IMPORTANT: Gross Profit Formula for storage:
+ *   Gross Profit = Total Sales - Total Amazon Fees - Total Refunds
+ * 
+ * For display in frontend, PPC is subtracted:
+ *   Display Gross Profit = Gross Profit - PPC Spent
+ * 
+ * PPC comes from a separate model and is subtracted in the frontend.
  */
 
 const logger = require('../../utils/Logger');
@@ -22,7 +27,7 @@ const logger = require('../../utils/Logger');
  */
 const FEE_TYPE_CATEGORIES = {
     FBA_FULFILLMENT: ['FbaFulfilmentFee', 'FbaFulfillmentFee', 'FBA_FULFILLMENT_FEE', 'FBA_FULFILLMENT_FEES'],
-    STORAGE: ['FbaStorageFee', 'FBA_STORAGE_FEE', 'MONTHLY_INVENTORY_STORAGE_FEES', 'BASE_MONTHLY_STORAGE_FEE', 'STORAGE_UTILIZATION_SURCHARGE', 'AGED_INVENTORY_SURCHARGE'],
+    STORAGE: ['FbaStorageFee', 'FBA_STORAGE_FEE', 'MONTHLY_INVENTORY_STORAGE_FEES', 'BASE_MONTHLY_STORAGE_FEE', 'STORAGE_UTILIZATION_SURCHARGE', 'AGED_INVENTORY_SURCHARGE', 'LongTermStorageFee'],
     REFERRAL: ['ReferralFee', 'REFERRAL_FEE', 'REFERRAL_FEES'],
     REFUND_RELATED: ['RefundedReferralFee', 'RefundCommissionFee', 'REFUND_ADMINISTRATION'],
     REIMBURSEMENT: ['FBAInventoryReimbursement', 'FBA_INVENTORY_REIMBURSEMENT'],
@@ -39,10 +44,27 @@ const FEE_TYPE_CATEGORIES = {
 function isFeeType(feeTypeName, category) {
     if (!feeTypeName || !FEE_TYPE_CATEGORIES[category]) return false;
     const normalizedName = feeTypeName.toLowerCase().replace(/[_-]/g, '');
-    return FEE_TYPE_CATEGORIES[category].some(typeName => 
-        normalizedName === typeName.toLowerCase().replace(/[_-]/g, '') ||
-        normalizedName.includes(typeName.toLowerCase().replace(/[_-]/g, ''))
-    );
+    
+    // Check against all fee types in the category
+    const matches = FEE_TYPE_CATEGORIES[category].some(typeName => {
+        const normalizedType = typeName.toLowerCase().replace(/[_-]/g, '');
+        // Exact match
+        if (normalizedName === normalizedType) return true;
+        // Substring match: fee name contains the category type
+        // This handles cases like "FbaFulfilmentFee" matching "FBA_FULFILLMENT_FEE"
+        if (normalizedName.includes(normalizedType)) return true;
+        return false;
+    });
+    
+    // For storage fees, also check if fee type contains "storage" or "aged" keywords
+    // This catches variations like "LongTermStorageFee" that might not be in the list
+    if (!matches && category === 'STORAGE') {
+        if (normalizedName.includes('storage') || normalizedName.includes('aged')) {
+            return true;
+        }
+    }
+    
+    return matches;
 }
 
 /**
@@ -79,7 +101,8 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
 
     // Initialize totals
     let totalSales = 0;
-    let totalGrossProfit = 0; // This will be netProceeds.total (actual profit)
+    // NOTE: Gross Profit is now calculated as: Total Sales - Total Amazon Fees - Total Refunds
+    // PPC is subtracted in the frontend (comes from separate model)
     let totalPPCSpent = 0;
     let totalFBAFees = 0;
     let totalStorageFees = 0;
@@ -89,10 +112,13 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
     let currencyCode = 'USD';
     
     // Data structures for datewise and ASIN-wise breakdowns
-    const datewiseSales = {}; // { date: { sales, grossProfit } }
-    const datewiseGrossProfit = {}; // { date: amount }
+    // NOTE: grossProfit in datewise is calculated as: sales - amazonFees - refunds (for that date)
+    const datewiseSales = {}; // { date: { sales, amazonFees, refunds } } - grossProfit calculated at the end
+    const datewiseGrossProfit = {}; // { date: amount } - will be recalculated
     const datewiseFeesAndRefunds = {}; // { date: { fbaFulfillmentFee, storageFee, refunds: { units, amount } } }
-    const asinWiseSales = {}; // { asin: { sales, grossProfit, unitsSold, ppcSpent, fbaFees, storageFees, amazonFees } }
+    const datewiseAmazonFees = {}; // { date: { totalAmount, feeBreakdown: { feeType: amount } } }
+    const amazonFeesBreakdown = {}; // { feeType: amount } - total breakdown for the entire date range
+    const asinWiseSales = {}; // { asin: { sales, amazonFees, refunds, unitsSold, ppcSpent, fbaFees, storageFees } }
 
     /**
      * Process a single economics item
@@ -118,35 +144,28 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         const unitsSold = parseFloat(item.sales?.netUnitsSold || 0);
         const unitsRefunded = parseFloat(item.sales?.unitsRefunded || 0);
         
-        // CRITICAL FIX: Use netProceeds.total as gross profit (actual profit after all fees)
-        // This is the accurate profit value from Amazon
-        const grossProfit = parseFloat(item.netProceeds?.total?.amount || 0);
-        
-        // CRITICAL FIX: Calculate refunds as the difference between ordered and net sales
+        // Calculate refunds as the difference between ordered and net sales
         // This accurately captures the refund amount
-        const refundAmount = orderedSales - netSales;
+        const refundAmount = Math.max(0, orderedSales - netSales);
         
-        // Update totals
+        // Update totals - grossProfit will be calculated at the end using the new formula
         totalSales += orderedSales;
-        totalGrossProfit += grossProfit;
         
         // Only count positive refund amounts (refunds should be positive)
         if (refundAmount > 0) {
             totalRefunds += refundAmount;
         }
         
-        // Update datewise data
+        // Update datewise data - track sales, amazonFees (tracked in fee processing), and refunds
+        // grossProfit will be calculated at the end as: sales - amazonFees - refunds
         if (date) {
             if (!datewiseSales[date]) {
-                datewiseSales[date] = { sales: 0, grossProfit: 0 };
+                datewiseSales[date] = { sales: 0, amazonFees: 0, refunds: 0 };
             }
             datewiseSales[date].sales += orderedSales;
-            datewiseSales[date].grossProfit += grossProfit;
-            
-            if (!datewiseGrossProfit[date]) {
-                datewiseGrossProfit[date] = 0;
+            if (refundAmount > 0) {
+                datewiseSales[date].refunds += refundAmount;
             }
-            datewiseGrossProfit[date] += grossProfit;
             
             // Initialize datewise fees and refunds if not exists
             if (!datewiseFeesAndRefunds[date]) {
@@ -154,6 +173,14 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                     fbaFulfillmentFee: 0,
                     storageFee: 0,
                     refunds: { units: 0, amount: 0 }
+                };
+            }
+            
+            // Initialize datewise Amazon fees if not exists
+            if (!datewiseAmazonFees[date]) {
+                datewiseAmazonFees[date] = {
+                    totalAmount: 0,
+                    feeBreakdown: {}
                 };
             }
             
@@ -165,11 +192,12 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         }
         
         // Initialize ASIN-wise data structure if needed
+        // NOTE: grossProfit for ASIN will be calculated at the end as: sales - amazonFees - refunds
         if (asin && asin !== 'UNKNOWN') {
             if (!asinWiseSales[asin]) {
                 asinWiseSales[asin] = { 
                     sales: 0, 
-                    grossProfit: 0, 
+                    // grossProfit will be calculated at the end
                     unitsSold: 0,
                     ppcSpent: 0,
                     fbaFees: 0,
@@ -182,9 +210,8 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                     parentAsin: parentAsin  // Store parent ASIN for grouping
                 };
             }
-            // Update ASIN-wise sales and profit
+            // Update ASIN-wise sales - grossProfit calculated at the end
             asinWiseSales[asin].sales += orderedSales;
-            asinWiseSales[asin].grossProfit += grossProfit;
             asinWiseSales[asin].unitsSold += unitsSold;
             if (refundAmount > 0) {
                 asinWiseSales[asin].refunds += refundAmount;
@@ -249,6 +276,26 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 if (isAmazonFee(feeTypeName) && feeAmount > 0) {
                     itemAmazonFees += feeAmount;
                     totalAmazonFees += feeAmount;
+                    
+                    // Track total Amazon fees breakdown by fee type
+                    if (!amazonFeesBreakdown[feeTypeName]) {
+                        amazonFeesBreakdown[feeTypeName] = 0;
+                    }
+                    amazonFeesBreakdown[feeTypeName] += feeAmount;
+                    
+                    // Track datewise Amazon fees for gross profit calculation
+                    if (date && datewiseSales[date]) {
+                        datewiseSales[date].amazonFees += feeAmount;
+                    }
+                    
+                    // Track datewise Amazon fees and breakdown
+                    if (date && datewiseAmazonFees[date]) {
+                        datewiseAmazonFees[date].totalAmount += feeAmount;
+                        if (!datewiseAmazonFees[date].feeBreakdown[feeTypeName]) {
+                            datewiseAmazonFees[date].feeBreakdown[feeTypeName] = 0;
+                        }
+                        datewiseAmazonFees[date].feeBreakdown[feeTypeName] += feeAmount;
+                    }
                 }
 
                 // Categorize specific fee types using improved matching
@@ -256,8 +303,15 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 if (isFeeType(feeTypeName, 'FBA_FULFILLMENT') && feeAmount > 0) {
                     itemFBAFees += feeAmount;
                     totalFBAFees += feeAmount;
-                    // Update datewise FBA fulfillment fee
-                    if (date && datewiseFeesAndRefunds[date]) {
+                    // Update datewise FBA fulfillment fee - initialize if needed
+                    if (date) {
+                        if (!datewiseFeesAndRefunds[date]) {
+                            datewiseFeesAndRefunds[date] = {
+                                fbaFulfillmentFee: 0,
+                                storageFee: 0,
+                                refunds: { units: 0, amount: 0 }
+                            };
+                        }
                         datewiseFeesAndRefunds[date].fbaFulfillmentFee += feeAmount;
                     }
                 }
@@ -265,8 +319,15 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 else if (isFeeType(feeTypeName, 'STORAGE') && feeAmount > 0) {
                     itemStorageFees += feeAmount;
                     totalStorageFees += feeAmount;
-                    // Update datewise storage fee
-                    if (date && datewiseFeesAndRefunds[date]) {
+                    // Update datewise storage fee - initialize if needed
+                    if (date) {
+                        if (!datewiseFeesAndRefunds[date]) {
+                            datewiseFeesAndRefunds[date] = {
+                                fbaFulfillmentFee: 0,
+                                storageFee: 0,
+                                refunds: { units: 0, amount: 0 }
+                            };
+                        }
                         datewiseFeesAndRefunds[date].storageFee += feeAmount;
                     }
                 }
@@ -324,12 +385,15 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         }
     });
     
+    // Calculate gross profit for logging (will be recalculated properly at the end)
+    const calculatedGrossProfitForLog = totalSales - totalAmazonFees - totalRefunds;
+    
     logger.info(`Finished processing records`, {
         totalRecords: data.length,
         processedRecords: processedCount,
         totals: {
             totalSales,
-            grossProfit: totalGrossProfit,
+            grossProfit: calculatedGrossProfitForLog, // Calculated as: Sales - Amazon Fees - Refunds
             ppcSpent: totalPPCSpent,
             fbaFees: totalFBAFees,
             storageFees: totalStorageFees,
@@ -341,30 +405,48 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         asinCount: Object.keys(asinWiseSales).length
     });
 
-    // Convert datewise data to sorted arrays
+    // Convert datewise data to sorted arrays with rounded values
+    // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
     const datewiseSalesArray = Object.keys(datewiseSales)
         .sort()
-        .map(date => ({
-            date,
-            sales: {
-                amount: parseFloat(datewiseSales[date].sales.toFixed(2)),
-                currencyCode
-            },
-            grossProfit: {
-                amount: parseFloat(datewiseSales[date].grossProfit.toFixed(2)),
-                currencyCode
-            }
-        }));
+        .map(date => {
+            const sales = parseFloat(datewiseSales[date].sales.toFixed(2));
+            const amazonFees = parseFloat(datewiseSales[date].amazonFees.toFixed(2));
+            const refunds = parseFloat(datewiseSales[date].refunds.toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+            
+            return {
+                date,
+                sales: {
+                    amount: sales,
+                    currencyCode
+                },
+                grossProfit: {
+                    amount: grossProfit,
+                    currencyCode
+                }
+            };
+        });
 
-    const datewiseGrossProfitArray = Object.keys(datewiseGrossProfit)
+    // datewiseGrossProfit is also calculated using the new formula
+    const datewiseGrossProfitArray = Object.keys(datewiseSales)
         .sort()
-        .map(date => ({
-            date,
-            grossProfit: {
-                amount: parseFloat(datewiseGrossProfit[date].toFixed(2)),
-                currencyCode
-            }
-        }));
+        .map(date => {
+            const sales = parseFloat(datewiseSales[date].sales.toFixed(2));
+            const amazonFees = parseFloat(datewiseSales[date].amazonFees.toFixed(2));
+            const refunds = parseFloat(datewiseSales[date].refunds.toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+            
+            return {
+                date,
+                grossProfit: {
+                    amount: grossProfit,
+                    currencyCode
+                }
+            };
+        });
 
     // Convert datewise fees and refunds to sorted array
     const datewiseFeesAndRefundsArray = Object.keys(datewiseFeesAndRefunds)
@@ -385,8 +467,50 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 currencyCode
             }
         }));
+    
+    // Convert datewise Amazon fees to sorted array
+    const datewiseAmazonFeesArray = Object.keys(datewiseAmazonFees)
+        .sort()
+        .map(date => {
+            // Convert feeBreakdown object to array format
+            const feeBreakdownArray = Object.entries(datewiseAmazonFees[date].feeBreakdown || {})
+                .map(([feeType, amount]) => ({
+                    feeType: feeType,
+                    amount: parseFloat(amount.toFixed(2))
+                }))
+                .filter(item => item.amount !== 0)
+                .sort((a, b) => b.amount - a.amount); // Sort by amount descending
+
+            return {
+                date,
+                totalAmount: {
+                    amount: parseFloat(datewiseAmazonFees[date].totalAmount.toFixed(2)),
+                    currencyCode
+                },
+                feeBreakdown: feeBreakdownArray
+            };
+        });
+
+    // Convert total Amazon fees breakdown to array format
+    const amazonFeesBreakdownArray = Object.entries(amazonFeesBreakdown)
+        .map(([feeType, amount]) => ({
+            feeType: feeType,
+            amount: parseFloat(amount.toFixed(2))
+        }))
+        .filter(item => item.amount !== 0)
+        .sort((a, b) => b.amount - a.amount); // Sort by amount descending
+
+    // CRITICAL: Recalculate totals by summing the rounded datewise arrays
+    // This ensures totalSales === sum(datewiseSales) with no discrepancy
+    const recalculatedTotalSales = datewiseSalesArray.reduce((sum, item) => sum + item.sales.amount, 0);
+    const recalculatedTotalGrossProfit = datewiseSalesArray.reduce((sum, item) => sum + item.grossProfit.amount, 0);
+    const recalculatedTotalFbaFees = datewiseFeesAndRefundsArray.reduce((sum, item) => sum + item.fbaFulfillmentFee.amount, 0);
+    const recalculatedTotalStorageFees = datewiseFeesAndRefundsArray.reduce((sum, item) => sum + item.storageFee.amount, 0);
+    const recalculatedTotalRefunds = datewiseFeesAndRefundsArray.reduce((sum, item) => sum + item.refunds.amount, 0);
+    const recalculatedTotalAmazonFees = datewiseAmazonFeesArray.reduce((sum, item) => sum + item.totalAmount.amount, 0);
 
     // Convert ASIN-wise data to array and sort by sales (descending)
+    // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
     const asinWiseSalesArray = Object.values(asinWiseSales)
         .map(asinData => {
             // Convert feeBreakdown object to array format
@@ -397,40 +521,46 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 }))
                 .filter(item => item.amount !== 0); // Remove zero amounts
 
+            const sales = parseFloat(asinData.sales.toFixed(2));
+            const amazonFees = parseFloat(asinData.amazonFees.toFixed(2));
+            const refunds = parseFloat((asinData.refunds || 0).toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds (PPC subtracted in frontend)
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+
             return {
-            asin: asinData.asin,
-            parentAsin: asinData.parentAsin || null,  // Include parent ASIN for grouping
-            sales: {
-                amount: parseFloat(asinData.sales.toFixed(2)),
-                currencyCode
-            },
-            grossProfit: {
-                amount: parseFloat(asinData.grossProfit.toFixed(2)),
-                currencyCode
-            },
-            unitsSold: asinData.unitsSold,
-                refunds: {
-                    amount: parseFloat((asinData.refunds || 0).toFixed(2)),
+                asin: asinData.asin,
+                parentAsin: asinData.parentAsin || null,  // Include parent ASIN for grouping
+                sales: {
+                    amount: sales,
                     currencyCode
                 },
-            ppcSpent: {
-                amount: parseFloat(asinData.ppcSpent.toFixed(2)),
-                currencyCode
-            },
-            fbaFees: {
-                amount: parseFloat(asinData.fbaFees.toFixed(2)),
-                currencyCode
-            },
-            storageFees: {
-                amount: parseFloat(asinData.storageFees.toFixed(2)),
-                currencyCode
+                grossProfit: {
+                    amount: grossProfit,
+                    currencyCode
+                },
+                unitsSold: asinData.unitsSold,
+                refunds: {
+                    amount: refunds,
+                    currencyCode
+                },
+                ppcSpent: {
+                    amount: parseFloat(asinData.ppcSpent.toFixed(2)),
+                    currencyCode
+                },
+                fbaFees: {
+                    amount: parseFloat(asinData.fbaFees.toFixed(2)),
+                    currencyCode
+                },
+                storageFees: {
+                    amount: parseFloat(asinData.storageFees.toFixed(2)),
+                    currencyCode
                 },
                 totalFees: {
                     amount: parseFloat(asinData.totalFees.toFixed(2)),
                     currencyCode
                 },
                 amazonFees: {
-                    amount: parseFloat(asinData.amazonFees.toFixed(2)),
+                    amount: amazonFees,
                     currencyCode
                 },
                 feeBreakdown: feeBreakdownArray
@@ -439,6 +569,8 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         .sort((a, b) => b.sales.amount - a.sales.amount);
 
     // Build and return the metrics object
+    // IMPORTANT: Use recalculated totals (from summing rounded datewise values) 
+    // to ensure consistency: totalSales === sum(datewiseSales)
     const metrics = {
         dateRange: {
             startDate,
@@ -446,11 +578,11 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         },
         marketplace,
         totalSales: {
-            amount: parseFloat(totalSales.toFixed(2)),
+            amount: parseFloat(recalculatedTotalSales.toFixed(2)),
             currencyCode
         },
         grossProfit: {
-            amount: parseFloat(totalGrossProfit.toFixed(2)),
+            amount: parseFloat(recalculatedTotalGrossProfit.toFixed(2)),
             currencyCode
         },
         ppcSpent: {
@@ -458,11 +590,11 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             currencyCode
         },
         fbaFees: {
-            amount: parseFloat(totalFBAFees.toFixed(2)),
+            amount: parseFloat(recalculatedTotalFbaFees.toFixed(2)),
             currencyCode
         },
         storageFees: {
-            amount: parseFloat(totalStorageFees.toFixed(2)),
+            amount: parseFloat(recalculatedTotalStorageFees.toFixed(2)),
             currencyCode
         },
         totalFees: {
@@ -470,16 +602,18 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
             currencyCode
         },
         amazonFees: {
-            amount: parseFloat(totalAmazonFees.toFixed(2)),
+            amount: parseFloat(recalculatedTotalAmazonFees.toFixed(2)),
             currencyCode
         },
+        amazonFeesBreakdown: amazonFeesBreakdownArray,
         refunds: {
-            amount: parseFloat(totalRefunds.toFixed(2)),
+            amount: parseFloat(recalculatedTotalRefunds.toFixed(2)),
             currencyCode
         },
         datewiseSales: datewiseSalesArray,
         datewiseGrossProfit: datewiseGrossProfitArray,
         datewiseFeesAndRefunds: datewiseFeesAndRefundsArray,
+        datewiseAmazonFees: datewiseAmazonFeesArray,
         asinWiseSales: asinWiseSalesArray
     };
 
@@ -507,9 +641,10 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
     logger.info(`Parsed ${data.length} records from JSONL for datewise`);
 
     // Data structures for datewise breakdowns
-    const datewiseSales = {}; // { date: { sales, grossProfit } }
-    const datewiseGrossProfit = {}; // { date: amount }
+    // NOTE: grossProfit is calculated as: sales - amazonFees - refunds (PPC subtracted in frontend)
+    const datewiseSales = {}; // { date: { sales, amazonFees, refunds } } - grossProfit calculated at the end
     const datewiseFeesAndRefunds = {}; // { date: { fbaFulfillmentFee, storageFee, refunds: { units, amount } } }
+    const datewiseAmazonFees = {}; // { date: { totalAmount, feeBreakdown: { feeType: amount } } }
     let currencyCode = 'USD';
 
     /**
@@ -529,16 +664,13 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
         // Calculate values
         const orderedSales = parseFloat(item.sales?.orderedProductSales?.amount || 0);
         const netSales = parseFloat(item.sales?.netProductSales?.amount || 0);
-        const grossProfit = parseFloat(item.netProceeds?.total?.amount || 0);
         const unitsRefunded = parseFloat(item.sales?.unitsRefunded || 0);
         const refundAmount = Math.max(0, orderedSales - netSales);
         
         // Initialize date entry if not exists
+        // grossProfit will be calculated at the end as: sales - amazonFees - refunds
         if (!datewiseSales[date]) {
-            datewiseSales[date] = { sales: 0, grossProfit: 0 };
-        }
-        if (!datewiseGrossProfit[date]) {
-            datewiseGrossProfit[date] = 0;
+            datewiseSales[date] = { sales: 0, amazonFees: 0, refunds: 0 };
         }
         if (!datewiseFeesAndRefunds[date]) {
             datewiseFeesAndRefunds[date] = {
@@ -547,11 +679,16 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
                 refunds: { units: 0, amount: 0 }
             };
         }
+        if (!datewiseAmazonFees[date]) {
+            datewiseAmazonFees[date] = {
+                totalAmount: 0,
+                feeBreakdown: {}
+            };
+        }
         
-        // Aggregate sales and profit
+        // Aggregate sales and refunds - grossProfit calculated at the end
         datewiseSales[date].sales += orderedSales;
-        datewiseSales[date].grossProfit += grossProfit;
-        datewiseGrossProfit[date] += grossProfit;
+        datewiseSales[date].refunds += refundAmount;
         
         // Aggregate refunds
         datewiseFeesAndRefunds[date].refunds.units += unitsRefunded;
@@ -581,6 +718,19 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
                     } else if (isFeeType(feeTypeName, 'STORAGE')) {
                         datewiseFeesAndRefunds[date].storageFee += feeAmount;
                     }
+                    
+                    // Track ALL Amazon fees (excludes reimbursements)
+                    if (isAmazonFee(feeTypeName)) {
+                        // Track for gross profit calculation
+                        datewiseSales[date].amazonFees += feeAmount;
+                        
+                        // Track detailed breakdown
+                        datewiseAmazonFees[date].totalAmount += feeAmount;
+                        if (!datewiseAmazonFees[date].feeBreakdown[feeTypeName]) {
+                            datewiseAmazonFees[date].feeBreakdown[feeTypeName] = 0;
+                        }
+                        datewiseAmazonFees[date].feeBreakdown[feeTypeName] += feeAmount;
+                    }
                 }
             });
         }
@@ -596,29 +746,47 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
     });
 
     // Convert to sorted arrays
+    // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
     const datewiseSalesArray = Object.keys(datewiseSales)
         .sort()
-        .map(date => ({
-            date,
-            sales: {
-                amount: parseFloat(datewiseSales[date].sales.toFixed(2)),
-                currencyCode
-            },
-            grossProfit: {
-                amount: parseFloat(datewiseSales[date].grossProfit.toFixed(2)),
-                currencyCode
-            }
-        }));
+        .map(date => {
+            const sales = parseFloat(datewiseSales[date].sales.toFixed(2));
+            const amazonFees = parseFloat(datewiseSales[date].amazonFees.toFixed(2));
+            const refunds = parseFloat(datewiseSales[date].refunds.toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+            
+            return {
+                date,
+                sales: {
+                    amount: sales,
+                    currencyCode
+                },
+                grossProfit: {
+                    amount: grossProfit,
+                    currencyCode
+                }
+            };
+        });
 
-    const datewiseGrossProfitArray = Object.keys(datewiseGrossProfit)
+    // datewiseGrossProfit also uses the new formula
+    const datewiseGrossProfitArray = Object.keys(datewiseSales)
         .sort()
-        .map(date => ({
-            date,
-            grossProfit: {
-                amount: parseFloat(datewiseGrossProfit[date].toFixed(2)),
-                currencyCode
-            }
-        }));
+        .map(date => {
+            const sales = parseFloat(datewiseSales[date].sales.toFixed(2));
+            const amazonFees = parseFloat(datewiseSales[date].amazonFees.toFixed(2));
+            const refunds = parseFloat(datewiseSales[date].refunds.toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+            
+            return {
+                date,
+                grossProfit: {
+                    amount: grossProfit,
+                    currencyCode
+                }
+            };
+        });
 
     const datewiseFeesAndRefundsArray = Object.keys(datewiseFeesAndRefunds)
         .sort()
@@ -639,6 +807,29 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
             }
         }));
 
+    // Convert datewise Amazon fees to sorted array with fee breakdown
+    const datewiseAmazonFeesArray = Object.keys(datewiseAmazonFees)
+        .sort()
+        .map(date => {
+            // Convert feeBreakdown object to array format
+            const feeBreakdownArray = Object.entries(datewiseAmazonFees[date].feeBreakdown || {})
+                .map(([feeType, amount]) => ({
+                    feeType: feeType,
+                    amount: parseFloat(amount.toFixed(2))
+                }))
+                .filter(item => item.amount !== 0)
+                .sort((a, b) => b.amount - a.amount); // Sort by amount descending
+
+            return {
+                date,
+                totalAmount: {
+                    amount: parseFloat(datewiseAmazonFees[date].totalAmount.toFixed(2)),
+                    currencyCode
+                },
+                feeBreakdown: feeBreakdownArray
+            };
+        });
+
     logger.info(`Finished processing datewise records`, {
         datewiseCount: datewiseSalesArray.length,
         dateRange: datewiseSalesArray.length > 0 ? 
@@ -650,6 +841,7 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
         datewiseSales: datewiseSalesArray,
         datewiseGrossProfit: datewiseGrossProfitArray,
         datewiseFeesAndRefunds: datewiseFeesAndRefundsArray,
+        datewiseAmazonFees: datewiseAmazonFeesArray,
         currencyCode
     };
 }
@@ -702,13 +894,14 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
         const key = `${date}|${asin}`;
         
         // Initialize entry if not exists
+        // NOTE: grossProfit will be calculated at the end as: sales - amazonFees - refunds
         if (!asinDailyData[key]) {
             asinDailyData[key] = {
                 date: date,
                 asin: asin,
                 parentAsin: parentAsin,  // Store parent ASIN for grouping
                 sales: 0,
-                grossProfit: 0,
+                // grossProfit calculated at the end
                 unitsSold: 0,
                 unitsRefunded: 0,
                 refunds: 0,
@@ -724,14 +917,13 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
         // Calculate values
         const orderedSales = parseFloat(item.sales?.orderedProductSales?.amount || 0);
         const netSales = parseFloat(item.sales?.netProductSales?.amount || 0);
-        const grossProfit = parseFloat(item.netProceeds?.total?.amount || 0);
         const netUnitsSold = parseFloat(item.sales?.netUnitsSold || 0);
         const unitsRefunded = parseFloat(item.sales?.unitsRefunded || 0);
         const refundAmount = Math.max(0, orderedSales - netSales);
         
-        // Aggregate sales and profit
+        // Aggregate sales - grossProfit calculated at the end using new formula
+        // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
         asinDailyData[key].sales += orderedSales;
-        asinDailyData[key].grossProfit += grossProfit;
         asinDailyData[key].unitsSold += netUnitsSold;
         asinDailyData[key].unitsRefunded += unitsRefunded;
         asinDailyData[key].refunds += refundAmount;
@@ -803,6 +995,7 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
     });
 
     // Convert to sorted array format matching the schema
+    // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
     const asinWiseSalesArray = Object.values(asinDailyData)
         .map(item => {
             // Convert feeBreakdown object to array format
@@ -813,21 +1006,27 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
                 }))
                 .filter(fb => fb.amount !== 0);
 
+            const sales = parseFloat(item.sales.toFixed(2));
+            const amazonFees = parseFloat(item.amazonFees.toFixed(2));
+            const refunds = parseFloat(item.refunds.toFixed(2));
+            // Gross Profit = Sales - Amazon Fees - Refunds (PPC subtracted in frontend)
+            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+
             return {
                 date: item.date,
                 asin: item.asin,
                 parentAsin: item.parentAsin || null,  // Include parent ASIN for grouping
                 sales: {
-                    amount: parseFloat(item.sales.toFixed(2)),
+                    amount: sales,
                     currencyCode
                 },
                 grossProfit: {
-                    amount: parseFloat(item.grossProfit.toFixed(2)),
+                    amount: grossProfit,
                     currencyCode
                 },
                 unitsSold: item.unitsSold,
                 refunds: {
-                    amount: parseFloat(item.refunds.toFixed(2)),
+                    amount: refunds,
                     currencyCode
                 },
                 ppcSpent: {
@@ -847,7 +1046,7 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
                     currencyCode
                 },
                 amazonFees: {
-                    amount: parseFloat(item.amazonFees.toFixed(2)),
+                    amount: amazonFees,
                     currencyCode
                 },
                 feeBreakdown: feeBreakdownArray

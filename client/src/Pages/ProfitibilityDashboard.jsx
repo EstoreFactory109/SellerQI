@@ -301,7 +301,7 @@ const ProfitabilityDashboard = () => {
       totalCOGS += cogsPerUnit * quantity;
     });
     
-    // Calculate ad spend using PPCMetrics model as PRIMARY source
+    // Calculate ad spend - use filtered API data for consistency when available
     let adSpend = 0;
     const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
     
@@ -322,8 +322,14 @@ const ProfitabilityDashboard = () => {
         .reduce((sum, item) => sum + (item.spend || 0), 0);
     };
     
-    if (isDateRangeSelected) {
-      // PRIMARY: Use filtered PPCMetrics data when date range is selected
+    if (useFilteredData && filteredData?.ppcSpent?.amount !== undefined) {
+      // PRIMARY: Use PPC spent from the filtered API response for consistency
+      // This ensures the same value is shown regardless of how the date range was selected
+      adSpend = Number(filteredData.ppcSpent.amount || 0);
+      console.log('=== Profitability Dashboard: Using filtered API PPC spend for consistency ===');
+      console.log('Filtered API ad spend:', adSpend);
+    } else if (isDateRangeSelected) {
+      // FALLBACK: Use filtered PPCMetrics data when date range is selected
       const filteredPPCSpend = getFilteredPPCSpend();
       if (filteredPPCSpend > 0) {
         adSpend = filteredPPCSpend;
@@ -375,12 +381,17 @@ const ProfitabilityDashboard = () => {
       ? Number(filteredData?.totalSales?.amount || 0)
       : Number(info?.TotalWeeklySale || 0);
     
-    const originalGrossProfit = useFilteredData
+    // Get gross profit from backend (Sales - Amazon Fees - Refunds)
+    const grossProfitFromBackend = useFilteredData
       ? Number(filteredData?.grossProfit?.amount || 0)
       : Number(filteredAccountFinance?.Gross_Profit) || 0;
     
-    // Adjust gross profit by subtracting total COGS (only for profitability page)
-    const adjustedGrossProfit = originalGrossProfit - totalCOGS;
+    // Calculate displayed gross profit: Backend Gross Profit - Ad Spend
+    // This matches the Total Sales component display
+    const grossProfit = grossProfitFromBackend - adSpend;
+    
+    // Calculate COGS-adjusted profit for product-level analysis (separate from displayed gross profit)
+    const cogsAdjustedProfit = grossProfit - totalCOGS;
     
     // Use Amazon_Fees if available (from EconomicsMetrics), otherwise calculate from FBA + Storage
     // Use filtered fees when available
@@ -402,12 +413,12 @@ const ProfitabilityDashboard = () => {
       }
     }
     
-    // Calculate adjusted profit margin using COGS-adjusted gross profit
-    const adjustedProfitMargin = totalSales > 0 ? ((adjustedGrossProfit / totalSales) * 100) : 0;
+    // Calculate profit margin using gross profit (matching Total Sales component)
+    const profitMargin = totalSales > 0 ? ((grossProfit / totalSales) * 100) : 0;
     
     return [
       { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `${currency}${adjustedGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'Gross Profit', value: `${currency}${grossProfit.toFixed(2)}`, icon: 'dollar-sign' }, // Matches Total Sales component (Backend GP - PPC)
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
       { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
     ];

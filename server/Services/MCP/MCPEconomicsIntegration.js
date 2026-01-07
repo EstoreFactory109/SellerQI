@@ -236,7 +236,8 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
                             logger.info('DAY metrics calculated', { 
                                 datewiseSalesCount: datewiseMetrics.datewiseSales?.length,
                                 datewiseGrossProfitCount: datewiseMetrics.datewiseGrossProfit?.length,
-                                datewiseFeesAndRefundsCount: datewiseMetrics.datewiseFeesAndRefunds?.length
+                                datewiseFeesAndRefundsCount: datewiseMetrics.datewiseFeesAndRefunds?.length,
+                                datewiseAmazonFeesCount: datewiseMetrics.datewiseAmazonFees?.length
                             });
                         }
                     }
@@ -346,38 +347,65 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         }
 
         // ============================================================
-        // Merge results: 
-        // - Sales API for Total Sales and Date-wise Sales (more complete)
-        // - Economics API for Gross Profit, Fees, Refunds
-        // - ASIN Daily query for accurate ASIN-wise breakdown with dates
+        // Merge results - SINGLE SOURCE for sales data to ensure consistency
         // ============================================================
-        const finalMetrics = {
-            ...calculatedMetrics,
-            // Use Sales API total sales if available (more accurate - includes all orders)
-            totalSales: salesApiData?.totalSales || calculatedMetrics.totalSales,
-            // Use Sales API datewise sales if available, else DAY economics, else RANGE
-            datewiseSales: salesApiData?.datewiseSales?.map(item => ({
+        // IMPORTANT: Use SAME source for both totalSales and datewiseSales
+        // This prevents discrepancies between total and sum of datewise values
+        // 
+        // Priority: Sales API (more complete) -> Economics API (fallback)
+        // NO MIXING: If Sales API is used for totalSales, it's also used for datewiseSales
+        
+        let salesSource = 'Economics API';
+        let finalTotalSales;
+        let finalDatewiseSales;
+        
+        if (salesApiData?.totalSales && salesApiData?.datewiseSales?.length > 0) {
+            // Use Sales API for both totalSales and datewiseSales (with grossProfit from Economics)
+            salesSource = 'Sales API';
+            finalTotalSales = salesApiData.totalSales;
+            finalDatewiseSales = salesApiData.datewiseSales.map(item => ({
                 date: item.date,
                 sales: item.sales,
                 grossProfit: datewiseMetrics?.datewiseSales?.find(d => d.date === item.date)?.grossProfit || 
                             calculatedMetrics.datewiseSales?.find(d => d.date === item.date)?.grossProfit ||
                             { amount: 0, currencyCode: item.sales.currencyCode }
-            })) || datewiseMetrics?.datewiseSales || calculatedMetrics.datewiseSales,
+            }));
+        } else {
+            // Use Economics API for both totalSales and datewiseSales
+            // Priority: DAY granularity -> RANGE granularity
+            salesSource = datewiseMetrics ? 'Economics API (DAY)' : 'Economics API (RANGE)';
+            finalDatewiseSales = datewiseMetrics?.datewiseSales || calculatedMetrics.datewiseSales;
+            
+            // CRITICAL: Calculate totalSales by summing datewiseSales to ensure consistency
+            const summedTotal = finalDatewiseSales.reduce((sum, item) => sum + (item.sales?.amount || 0), 0);
+            finalTotalSales = {
+                amount: parseFloat(summedTotal.toFixed(2)),
+                currencyCode: finalDatewiseSales[0]?.sales?.currencyCode || calculatedMetrics.totalSales?.currencyCode || 'USD'
+            };
+        }
+        
+        const finalMetrics = {
+            ...calculatedMetrics,
+            totalSales: finalTotalSales,
+            datewiseSales: finalDatewiseSales,
             datewiseGrossProfit: datewiseMetrics?.datewiseGrossProfit || calculatedMetrics.datewiseGrossProfit,
             datewiseFeesAndRefunds: datewiseMetrics?.datewiseFeesAndRefunds || calculatedMetrics.datewiseFeesAndRefunds,
+            // Datewise Amazon fees with breakdown - use DAY query data if available (more accurate)
+            datewiseAmazonFees: datewiseMetrics?.datewiseAmazonFees || calculatedMetrics.datewiseAmazonFees,
             // Use ASIN Daily query data if available (with dates), else fallback to RANGE data (without dates)
             asinWiseSales: asinWiseDailyMetrics?.asinWiseSales || calculatedMetrics.asinWiseSales
         };
 
-        logger.info('Final merged metrics', { 
+        logger.info('Final merged metrics (single source for sales consistency)', { 
             totalSales: finalMetrics.totalSales?.amount,
-            totalSalesSource: salesApiData ? 'Sales API' : 'Economics API',
+            salesSource: salesSource,
             grossProfit: finalMetrics.grossProfit?.amount,
             fbaFees: finalMetrics.fbaFees?.amount,
             storageFees: finalMetrics.storageFees?.amount,
+            amazonFees: finalMetrics.amazonFees?.amount,
             refunds: finalMetrics.refunds?.amount,
             datewiseSalesCount: finalMetrics.datewiseSales?.length,
-            datewiseSalesSource: salesApiData ? 'Sales API' : (datewiseMetrics ? 'DAY Economics' : 'RANGE Economics'),
+            datewiseAmazonFeesCount: finalMetrics.datewiseAmazonFees?.length,
             asinCount: finalMetrics.asinWiseSales?.length,
             asinWiseSalesSource: asinWiseDailyMetrics ? 'DAY + CHILD_ASIN (with dates)' : 'RANGE + PARENT_ASIN (without dates)',
             asinWiseHasDates: asinWiseDailyMetrics ? true : false

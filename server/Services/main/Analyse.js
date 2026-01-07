@@ -498,6 +498,7 @@ class AnalyseService {
                 Storage: 0,
                 Amazon_Charges: 0,
                 Amazon_Fees: 0,
+                Other_Amazon_Fees: 0, // Amazon fees excluding FBA fees (for Total Sales component)
                 Refunds: 0
             };
         }
@@ -505,34 +506,85 @@ class AnalyseService {
         // Use Amazon Ads API PPC spend as PRIMARY source for ProductAdsPayment
         const ppcSpend = adsPPCSpend || 0;
         
-        // Calculate gross profit using: Sales - FBA Fees - Storage Fees - PPC Spend (from Ads API) - Refunds
-        const totalSales = economicsMetrics.totalSales?.amount || 0;
-        const fbaFees = economicsMetrics.fbaFees?.amount || 0;
-        const storageFees = economicsMetrics.storageFees?.amount || 0;
-        const refunds = economicsMetrics.refunds?.amount || 0;
+        // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
+        // This ensures page load shows same value as custom filter for same dates
+        let totalSales = 0;
+        let totalGrossProfit = 0;
+        let fbaFees = 0;
+        let storageFees = 0;
+        let refunds = 0;
         
-        // Get Amazon fees
-        // First try to get from summary level
-        let amazonFees = economicsMetrics.amazonFees?.amount || 0;
-        
-        // If summary-level amazonFees is 0, calculate from ASIN-wise data
-        if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
-            economicsMetrics.asinWiseSales.forEach(item => {
-                amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+        if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
+            economicsMetrics.datewiseSales.forEach(item => {
+                totalSales += item.sales?.amount || 0;
+                totalGrossProfit += item.grossProfit?.amount || 0;
             });
-            logger.info('Calculated amazonFees from ASIN-wise data', {
+            // Round to 2 decimal places for consistency
+            totalSales = parseFloat(totalSales.toFixed(2));
+            totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
+        } else {
+            // Fallback to stored value if datewiseSales not available
+            totalSales = economicsMetrics.totalSales?.amount || 0;
+            totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
+        }
+        
+        // Calculate fees from datewise data for consistency
+        if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
+            economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
+                fbaFees += item.fbaFulfillmentFee?.amount || 0;
+                storageFees += item.storageFee?.amount || 0;
+                refunds += item.refunds?.amount || 0;
+            });
+            fbaFees = parseFloat(fbaFees.toFixed(2));
+            storageFees = parseFloat(storageFees.toFixed(2));
+            refunds = parseFloat(refunds.toFixed(2));
+        } else {
+            // Fallback to stored values
+            fbaFees = economicsMetrics.fbaFees?.amount || 0;
+            storageFees = economicsMetrics.storageFees?.amount || 0;
+            refunds = economicsMetrics.refunds?.amount || 0;
+        }
+        
+        // Get Amazon fees - calculate from datewiseAmazonFees for consistency
+        let amazonFees = 0;
+        if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
+            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
+            economicsMetrics.datewiseAmazonFees.forEach(item => {
+                amazonFees += item.totalAmount?.amount || 0;
+            });
+            amazonFees = parseFloat(amazonFees.toFixed(2));
+            logger.info('Calculated amazonFees from datewiseAmazonFees', {
                 amazonFees,
-                asinCount: economicsMetrics.asinWiseSales.length
+                dateCount: economicsMetrics.datewiseAmazonFees.length
             });
+        } else {
+            // Fallback 1: Get from summary level
+            amazonFees = economicsMetrics.amazonFees?.amount || 0;
+            
+            // Fallback 2: Calculate from ASIN-wise data if still 0
+            if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
+                economicsMetrics.asinWiseSales.forEach(item => {
+                    amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+                });
+                amazonFees = parseFloat(amazonFees.toFixed(2));
+                logger.info('Calculated amazonFees from ASIN-wise data', {
+                    amazonFees,
+                    asinCount: economicsMetrics.asinWiseSales.length
+                });
+            }
+            
+            // Final fallback: use fbaFees + storageFees if still 0
+            if (amazonFees === 0) {
+                amazonFees = fbaFees + storageFees;
+            }
         }
         
-        // Final fallback: use fbaFees + storageFees if still 0
-        if (amazonFees === 0) {
-            amazonFees = fbaFees + storageFees;
-        }
+        // Calculate gross profit: Sales - Amazon Fees - Refunds
+        // Note: PPC is subtracted in frontend for display, not in backend calculation
+        const grossProfit = totalSales - amazonFees - refunds;
         
-        // Recalculate gross profit with Ads API PPC spend
-        const grossProfit = totalSales - fbaFees - storageFees - ppcSpend - refunds;
+        // Calculate Other Amazon Fees = Total Amazon Fees - FBA Fees (for Total Sales component)
+        const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
 
         return {
             createdAt: economicsMetrics.createdAt || new Date(),
@@ -541,8 +593,9 @@ class AnalyseService {
             ProductAdsPayment: ppcSpend, // PRIMARY: Amazon Ads API PPC spend
             FBA_Fees: fbaFees,
             Storage: storageFees,
-            Amazon_Charges: fbaFees + storageFees,
+            Amazon_Charges: amazonFees, // Total Amazon fees (for Profitability page)
             Amazon_Fees: amazonFees, // Total Amazon fees (FBA, storage, referral, etc.)
+            Other_Amazon_Fees: parseFloat(otherAmazonFees.toFixed(2)), // Amazon fees excluding FBA (for Total Sales component)
             Refunds: refunds
         };
     }
@@ -1231,6 +1284,10 @@ class AnalyseService {
     /**
      * Process custom date range
      * Uses EconomicsMetrics for accurate fee and gross profit data
+     * 
+     * IMPORTANT: If the custom date range exactly matches the stored date range in the latest document,
+     * we return the pre-aggregated totals to ensure consistency with the default "Last 30 Days" view.
+     * This prevents discrepancies between default and custom views for the same date range.
      */
     static async processCustomDateRange(userId, country, region, start, end, daysDifference) {
         try {
@@ -1251,6 +1308,114 @@ class AnalyseService {
                 region: region
             }).sort({ createdAt: -1 });
 
+            // If no metrics found, return empty result early
+            if (!allMetrics || allMetrics.length === 0) {
+                logger.warn('No EconomicsMetrics found for custom date range', { userId, country, region });
+                return {
+                    status: 200,
+                    message: {
+                        startDate: formatDateStr(start),
+                        endDate: formatDateStr(end),
+                        Country: country,
+                        FinanceData: {
+                            Gross_Profit: 0,
+                            ProductAdsPayment: 0,
+                            FBA_Fees: 0,
+                            Storage: 0,
+                            Amazon_Charges: 0,
+                            Refunds: 0
+                        },
+                        reimburstmentData: 0,
+                        TotalSales: {
+                            totalSales: 0,
+                            dateWiseSales: []
+                        }
+                    }
+                };
+            }
+
+            // Get the latest metrics document
+            const latestMetrics = allMetrics[0];
+            
+            // Check if the custom date range exactly matches the stored date range in the latest document
+            // If it does, return the pre-aggregated totals for consistency with default view
+            const storedStartDate = latestMetrics.dateRange?.startDate;
+            const storedEndDate = latestMetrics.dateRange?.endDate;
+            
+            if (storedStartDate && storedEndDate) {
+                const storedStart = new Date(storedStartDate);
+                storedStart.setHours(0, 0, 0, 0);
+                const storedEnd = new Date(storedEndDate);
+                storedEnd.setHours(0, 0, 0, 0);
+                
+                const requestedStart = new Date(start);
+                requestedStart.setHours(0, 0, 0, 0);
+                const requestedEnd = new Date(end);
+                requestedEnd.setHours(0, 0, 0, 0);
+                
+                // Compare dates (ignoring time)
+                const datesMatch = storedStart.getTime() === requestedStart.getTime() && 
+                                  storedEnd.getTime() === requestedEnd.getTime();
+                
+                if (datesMatch) {
+                    logger.info('Custom date range matches stored date range - using pre-aggregated totals for consistency', {
+                        userId,
+                        country,
+                        region,
+                        requestedRange: { startDate: formatDateStr(start), endDate: formatDateStr(end) },
+                        storedRange: { startDate: storedStartDate, endDate: storedEndDate }
+                    });
+                    
+                    // Get currency code
+                    const currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
+                    
+                    // Build dateWiseSales from datewiseSales array for chart display
+                    const datewiseSalesArr = latestMetrics.datewiseSales || [];
+                    const dateWiseSales = datewiseSalesArr.map(item => {
+                        const itemDate = new Date(item.date);
+                        return {
+                            interval: itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                            TotalAmount: item.sales?.amount || 0,
+                            Profit: parseFloat((item.grossProfit?.amount || 0).toFixed(2)),
+                            date: item.date
+                        };
+                    }).sort((a, b) => new Date(a.date) - new Date(b.date));
+                    
+                    // Return pre-aggregated totals from the latest document (same as default view)
+                    return {
+                        status: 200,
+                        message: {
+                            startDate: storedStartDate,
+                            endDate: storedEndDate,
+                            Country: country,
+                            FinanceData: {
+                                Gross_Profit: parseFloat((latestMetrics.grossProfit?.amount || 0).toFixed(2)),
+                                ProductAdsPayment: parseFloat((latestMetrics.ppcSpent?.amount || 0).toFixed(2)),
+                                FBA_Fees: parseFloat((latestMetrics.fbaFees?.amount || 0).toFixed(2)),
+                                Storage: parseFloat((latestMetrics.storageFees?.amount || 0).toFixed(2)),
+                                Amazon_Charges: parseFloat(((latestMetrics.fbaFees?.amount || 0) + (latestMetrics.storageFees?.amount || 0)).toFixed(2)),
+                                Refunds: parseFloat((latestMetrics.refunds?.amount || 0).toFixed(2))
+                            },
+                            reimburstmentData: 0, // Not calculated for custom periods
+                            TotalSales: {
+                                totalSales: parseFloat((latestMetrics.totalSales?.amount || 0).toFixed(2)),
+                                dateWiseSales: dateWiseSales
+                            },
+                            GetOrderData: [] // Will be populated separately if needed
+                        }
+                    };
+                }
+            }
+            
+            // Date range doesn't match - proceed with datewise aggregation
+            logger.info('Custom date range differs from stored range - calculating from datewise data', {
+                userId,
+                country,
+                region,
+                requestedRange: { startDate: formatDateStr(start), endDate: formatDateStr(end) },
+                storedRange: { startDate: storedStartDate, endDate: storedEndDate }
+            });
+
             // Initialize financial data
             let financialEvents = {
                 ProductAdsPayment: 0,
@@ -1262,17 +1427,15 @@ class AnalyseService {
 
             let totalSales = 0;
             let totalGrossProfit = 0;
-            let currencyCode = 'AUD';
+            let currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
             const processedDates = new Set();
             const dateWiseSales = [];
 
-            // Process EconomicsMetrics data if available
-            if (allMetrics && allMetrics.length > 0) {
-                // Build a map of date -> grossProfit from datewiseGrossProfit array
-                const grossProfitByDate = new Map();
-                const processedGrossProfitDates = new Set();
+            // Process EconomicsMetrics data - build a map of date -> grossProfit from datewiseGrossProfit array
+            const grossProfitByDate = new Map();
+            const processedGrossProfitDates = new Set();
 
-                for (const metrics of allMetrics) {
+            for (const metrics of allMetrics) {
                     // Get currency code
                     if (metrics.totalSales?.currencyCode) {
                         currencyCode = metrics.totalSales.currencyCode;
@@ -1354,13 +1517,12 @@ class AnalyseService {
                             }
                         }
                     }
-                }
-
-                // Amazon_Charges is the sum of FBA fees and storage fees
-                financialEvents.Amazon_Charges = financialEvents.FBA_Fees + financialEvents.Storage;
-
-                logger.info(`Processed EconomicsMetrics: Sales dates: ${processedDates.size}, GrossProfit dates: ${processedGrossProfitDates.size}`);
             }
+
+            // Amazon_Charges is the sum of FBA fees and storage fees
+            financialEvents.Amazon_Charges = financialEvents.FBA_Fees + financialEvents.Storage;
+
+            logger.info(`Processed EconomicsMetrics: Sales dates: ${processedDates.size}, GrossProfit dates: ${processedGrossProfitDates.size}`);
 
             // Sort dateWiseSales by date
             dateWiseSales.sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));

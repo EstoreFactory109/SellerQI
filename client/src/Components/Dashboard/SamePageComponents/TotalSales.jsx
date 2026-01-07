@@ -138,25 +138,29 @@ const TotalSales = () => {
     "Gross Profit",
     "PPC Spent",
     "FBA Fees",
-    "Storage Fees",
+    "Other Amazon Fees",
     "Refunds",
   ];
 
   const useFilteredData = filteredData !== null && calendarMode !== 'default';
   const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
   
-  const grossProfitRaw = useFilteredData 
+  // Get gross profit from backend (Sales - Amazon Fees - Refunds)
+  const grossProfitFromBackend = useFilteredData 
     ? Number(filteredData?.grossProfit?.amount || 0)
     : Number(info?.accountFinance?.Gross_Profit) || 0;
-  const grossProfit = Math.abs(grossProfitRaw);
   const totalSales = useFilteredData
     ? Number(filteredData?.totalSales?.amount || 0)
     : Number(info?.TotalWeeklySale || 0);
 
-  // Calculate PPC Spent - use PPCMetrics model as PRIMARY source
+  // Calculate PPC Spent - use filtered data from API when available for consistency
   let ppcSpent = 0;
-  if (isDateRangeSelected) {
-    // Use filtered PPCMetrics data when date range is selected
+  if (useFilteredData && filteredData?.ppcSpent?.amount !== undefined) {
+    // PRIMARY: Use PPC spent from the filtered API response for consistency
+    // This ensures the same value is shown regardless of how the date range was selected
+    ppcSpent = Number(filteredData.ppcSpent.amount || 0);
+  } else if (isDateRangeSelected) {
+    // FALLBACK: Calculate from filtered PPCMetrics data when API data not available
     if (filteredPPCMetrics.length > 0) {
       ppcSpent = filteredPPCMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
     } else if (filteredDateWiseTotalCosts.length > 0) {
@@ -174,15 +178,29 @@ const TotalSales = () => {
     }
   }
 
+  // Calculate FBA Fees
+  const fbaFees = useFilteredData
+    ? Number(filteredData?.fbaFees?.amount || 0)
+    : Number(info?.accountFinance?.FBA_Fees || 0);
+
+  // Calculate Other Amazon Fees (Total Amazon Fees - FBA Fees)
+  // For filters: Use otherAmazonFees directly from API (already calculated in backend)
+  // For first load: Use Other_Amazon_Fees from accountFinance (calculated in backend)
+  const otherAmazonFees = useFilteredData
+    ? Number(filteredData?.otherAmazonFees?.amount || 0)
+    : Number(info?.accountFinance?.Other_Amazon_Fees || 0);
+
+  // Calculate displayed gross profit: Backend Gross Profit - PPC Spent
+  // Backend stores: Sales - Amazon Fees - Refunds
+  // Display shows: Sales - Amazon Fees - Refunds - PPC Spent
+  const grossProfitRaw = grossProfitFromBackend - ppcSpent;
+  const grossProfit = Math.abs(grossProfitRaw);
+
   const saleValues = [
     grossProfit,
     ppcSpent,
-    useFilteredData
-      ? Number(filteredData?.fbaFees?.amount || 0)
-      : Number(info?.accountFinance?.FBA_Fees || 0),
-    useFilteredData
-      ? Number(filteredData?.storageFees?.amount || 0)
-      : Number(info?.accountFinance?.Storage || 0),
+    fbaFees,
+    otherAmazonFees, // Other Amazon Fees (Total Amazon Fees - FBA Fees) - directly from backend
     useFilteredData
       ? Number(filteredData?.refunds?.amount || 0)
       : Number(info?.accountFinance?.Refunds || 0),

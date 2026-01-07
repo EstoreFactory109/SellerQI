@@ -353,7 +353,7 @@ export default function IndiaBilling() {
   };
 
   return (
-    <div className="min-h-screen bg-[#eeeeee]">
+    <div className="min-h-screen bg-white">
       {/* Cancel Success/Error Message */}
       <AnimatePresence>
         {cancelMessage && (
@@ -439,57 +439,92 @@ export default function IndiaBilling() {
         </div>
       )}
 
-      {/* Header Section */}
-      <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/10 via-purple-600/10 to-pink-600/10"></div>
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-gradient-to-r from-pink-400 to-red-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse delay-1000"></div>
-        
-        <div className="relative px-6 py-12">
-          <motion.div 
+      {/* Hero Section - Matching IndiaPricing Style */}
+      <section className="bg-gradient-to-br from-indigo-600 via-purple-600 to-purple-700 text-white py-20 px-4">
+        <div className="max-w-6xl mx-auto text-center">
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center max-w-4xl mx-auto"
+            transition={{ duration: 0.5 }}
           >
-            <div className="inline-flex items-center space-x-2 bg-white/80 backdrop-blur-sm rounded-full px-6 py-2 mb-6 shadow-lg">
-              <span className="text-lg">🇮🇳</span>
-              <span className="text-sm font-semibold text-gray-700">Plans & Billing - India</span>
-            </div>
+            {/* SellerQI Logo */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="mb-8"
+            >
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-6 py-3 inline-block">
+                <img 
+                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png" 
+                  alt="SellerQI Logo" 
+                  className="h-10 w-auto mx-auto"
+                />
+              </div>
+            </motion.div>
             
-            <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-gray-900 via-indigo-900 to-purple-900 bg-clip-text text-transparent mb-6">
-              Choose Your Perfect Plan
+            <div className="inline-block bg-white/20 backdrop-blur-sm px-5 py-2 rounded-full text-sm font-semibold mb-5">
+              🇮🇳 Plans & Billing - India
+            </div>
+            <h1 className="text-4xl md:text-5xl font-bold mb-5">
+              Manage Your Plan & Billing
             </h1>
-            <p className="text-xl text-gray-600 mb-4 max-w-2xl mx-auto">
-              Unlock powerful insights and scale your Amazon business with our comprehensive analytics platform
+            <p className="text-xl mb-10 opacity-90 max-w-2xl mx-auto">
+              {isTrialPeriod 
+                ? 'Your free trial is active. Upgrade to continue enjoying all features after the trial ends.'
+                : `Current Plan: ${plans[currentPlan]?.displayName || currentPlan} - Manage your subscription and view payment history`
+              }
             </p>
             
             {/* Current Plan Badge */}
-            <div className="inline-flex items-center space-x-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full">
-              <Crown className="w-4 h-4" />
-              <span className="font-medium">
-                Current Plan: {plans[currentPlan]?.displayName || currentPlan}
-                {isTrialPeriod && ' (Trial)'}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="inline-flex items-center space-x-2 bg-white/20 backdrop-blur-sm px-6 py-3 rounded-full"
+            >
+              <Crown className="w-5 h-5" />
+              <span className="font-semibold text-lg">
+                {plans[currentPlan]?.displayName || currentPlan}
+                {isTrialPeriod && ' (Free Trial)'}
               </span>
-            </div>
+            </motion.div>
           </motion.div>
         </div>
-      </div>
+      </section>
 
-      <div className="max-w-7xl mx-auto px-6 pb-16">
-        {/* Plans Grid */}
-        <motion.div 
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.2 }}
-          className="mb-16"
-        >
-          <div className="text-center mb-12 mt-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              {isTrialPeriod ? 'Upgrade Before Trial Ends' : 'Upgrade Your Experience'}
-            </h2>
-            <p className="text-xl text-gray-600">Choose the plan that fits your business needs</p>
-          </div>
+      {/* Plans Section */}
+      <section className="bg-white py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.2 }}
+            className="mb-16"
+          >
+            <div className="text-center mb-12">
+              <motion.h2
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5 }}
+                className="text-4xl font-bold mb-5"
+              >
+                {isTrialPeriod ? 'Upgrade Before Trial Ends' : 'Choose Your Plan'}
+              </motion.h2>
+              <motion.p
+                initial={{ opacity: 0 }}
+                whileInView={{ opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                className="text-xl text-gray-600"
+              >
+                {isTrialPeriod 
+                  ? 'Upgrade now to continue enjoying all features after your trial ends'
+                  : 'Select the perfect plan for your business needs'
+                }
+              </motion.p>
+            </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
             {/* PRO Plan Card */}
@@ -510,13 +545,19 @@ export default function IndiaBilling() {
                     <p className="text-gray-600 mb-4">{plans.PRO.description}</p>
                     
                     <div className="mb-4">
-                      <span className="text-5xl font-bold text-gray-900">₹1,999</span>
-                      <span className="text-xl text-gray-500">/month</span>
-                    </div>
-                    
-                    <div className="inline-flex items-center space-x-1 text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full text-sm font-medium">
-                      <Sparkles className="w-4 h-4" />
-                      <span>Save 78% vs US pricing</span>
+                      <div className="text-2xl line-through text-gray-400 mb-3">₹8,999/month</div>
+                      <div className="text-5xl md:text-6xl font-bold text-indigo-600 mb-2">
+                        ₹1,999<span className="text-2xl font-normal">/month</span>
+                      </div>
+                      <div className="text-base text-gray-600 mb-3">For Indian registered sellers</div>
+                      <div className="flex items-center justify-center gap-3 mb-3">
+                        <span className="inline-block bg-emerald-500 text-white px-4 py-2 rounded-md font-semibold text-sm">
+                          Save 78%
+                        </span>
+                        <span className="inline-block bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md font-semibold text-sm">
+                          7-Day Free Trial
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -624,22 +665,30 @@ export default function IndiaBilling() {
             </motion.div>
           </div>
         </motion.div>
+        </div>
+      </section>
 
-        {/* Billing Information - Only show for active PRO subscription */}
-        {currentPlan === 'PRO' && !isTrialPeriod && (
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.4 }}
-            className="mb-16"
-          >
-            <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
-                  <CreditCard className="w-6 h-6 text-indigo-600" />
-                  <span>Billing Information</span>
-                </h3>
-                
+      {/* Billing Information Section - Only show for active PRO subscription */}
+      {currentPlan === 'PRO' && !isTrialPeriod && (
+        <section className="bg-gray-50 py-20 px-4">
+          <div className="max-w-6xl mx-auto">
+            <motion.div 
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.4 }}
+            >
+              <motion.h2
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5 }}
+                className="text-4xl font-bold text-center mb-12"
+              >
+                Billing Information
+              </motion.h2>
+              
+              <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+              <div className="flex items-center justify-end mb-6">
                 {/* Cancel Subscription Button */}
                 <div className="relative group">
                   <button
@@ -732,22 +781,30 @@ export default function IndiaBilling() {
               </div>
             </div>
           </motion.div>
-        )}
+        </div>
+        </section>
+      )}
 
-        {/* Payment History Section */}
-        <motion.div 
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.5 }}
-          className="mb-16"
-        >
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-2xl font-bold text-gray-900 flex items-center space-x-3">
-                <Receipt className="w-6 h-6 text-indigo-600" />
-                <span>Payment History</span>
-              </h3>
-              
+      {/* Payment History Section */}
+      <section className="bg-white py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.5 }}
+          >
+            <motion.h2
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5 }}
+              className="text-4xl font-bold text-center mb-12"
+            >
+              Payment History
+            </motion.h2>
+            
+            <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+            <div className="flex items-center justify-end mb-8">
               <button
                 className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
                 onClick={async () => {
@@ -917,37 +974,52 @@ export default function IndiaBilling() {
             )}
           </div>
         </motion.div>
+      </div>
+      </section>
 
-        {/* Support Section */}
-        <motion.div 
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.7 }}
-          className="text-center"
-        >
-          <div className="bg-gradient-to-r from-gray-800 via-indigo-800 to-purple-800 rounded-xl p-8 text-white">
-            <div className="max-w-2xl mx-auto">
-              <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <MessageCircle className="w-8 h-8 text-white" />
-              </div>
-              
-              <h3 className="text-3xl font-bold mb-4">Need Help with Your Plan?</h3>
-              <p className="text-xl text-white/80 mb-8">
-                Our dedicated support team is here to help you choose the right plan and answer any billing questions.
-              </p>
-              
-              <button 
-                onClick={() => navigate('/seller-central-checker/settings?tab=support')}
-                className="inline-flex items-center space-x-3 bg-white text-gray-900 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-100 transition-all duration-300 transform hover:scale-105 hover:shadow-xl"
-              >
+      {/* Support Section */}
+      <section className="bg-indigo-600 text-white py-20 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.7 }}
+          >
+            <motion.h2
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5 }}
+              className="text-4xl font-bold mb-5"
+            >
+              Need Help with Your Plan?
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              whileInView={{ opacity: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-lg mb-8 opacity-90"
+            >
+              Our dedicated support team is here to help you choose the right plan and answer any billing questions.
+            </motion.p>
+            <motion.button
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              onClick={() => navigate('/seller-central-checker/settings?tab=support')}
+              className="max-w-md mx-auto w-full py-4 px-8 rounded-lg text-lg font-semibold transition-all duration-300 bg-white text-indigo-600 hover:bg-gray-100 shadow-lg"
+            >
+              <div className="flex items-center justify-center space-x-3">
                 <MessageCircle className="w-5 h-5" />
                 <span>Contact Support</span>
                 <ArrowRight className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      </div>
+              </div>
+            </motion.button>
+          </motion.div>
+        </div>
+      </section>
     </div>
   );
 }

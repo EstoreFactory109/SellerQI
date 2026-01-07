@@ -17,17 +17,41 @@ const logger = require('../../utils/Logger.js');
 
 /**
  * Get PPC sales from EconomicsMetrics for ACOS/TACOS calculations
+ * 
+ * IMPORTANT: To ensure consistency with custom date range filters,
+ * totalSales is calculated by summing datewiseSales instead of using
+ * the stored pre-aggregated value. This guarantees that:
+ * - Page load totalSales === Custom filter totalSales (for same dates)
+ * 
  * @param {Object} economicsMetrics - EconomicsMetrics data
  * @returns {Object} PPC sales data with total and per-ASIN breakdown
  */
 const getPpcSalesFromEconomics = (economicsMetrics) => {
     if (!economicsMetrics) {
-        return { totalPpcSales: 0, asinPpcSales: {} };
+        return { totalPpcSales: 0, asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
     }
     
     // Get total PPC spent from economics (this is used for ACOS/TACOS)
     const totalPpcSpent = economicsMetrics.ppcSpent?.amount || 0;
-    const totalSales = economicsMetrics.totalSales?.amount || 0;
+    
+    // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
+    // This ensures page load shows same value as custom filter for same dates
+    let totalSales = 0;
+    let totalGrossProfit = 0;
+    
+    if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
+        economicsMetrics.datewiseSales.forEach(item => {
+            totalSales += item.sales?.amount || 0;
+            totalGrossProfit += item.grossProfit?.amount || 0;
+        });
+        // Round to 2 decimal places for consistency
+        totalSales = parseFloat(totalSales.toFixed(2));
+        totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
+    } else {
+        // Fallback to stored value if datewiseSales not available
+        totalSales = economicsMetrics.totalSales?.amount || 0;
+        totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
+    }
     
     // Get ASIN-wise PPC data
     const asinPpcSales = {};
@@ -56,7 +80,8 @@ const getPpcSalesFromEconomics = (economicsMetrics) => {
     
     return { 
         totalPpcSpent, 
-        totalSales, 
+        totalSales,
+        totalGrossProfit,
         asinPpcSales 
     };
 };

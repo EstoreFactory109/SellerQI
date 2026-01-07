@@ -63,10 +63,12 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
             storageFees: metrics.storageFees,
             totalFees: metrics.totalFees,
             amazonFees: metrics.amazonFees || { amount: 0, currencyCode: 'USD' }, // Amazon-specific fees (FBA, storage, referral, etc.)
+            amazonFeesBreakdown: metrics.amazonFeesBreakdown || [], // Breakdown of Amazon fees by fee type
             refunds: metrics.refunds,
             datewiseSales: metrics.datewiseSales || [],
             datewiseGrossProfit: metrics.datewiseGrossProfit || [],
             datewiseFeesAndRefunds: metrics.datewiseFeesAndRefunds || [],
+            datewiseAmazonFees: metrics.datewiseAmazonFees || [], // Datewise Amazon fees with breakdown
             asinWiseSales: metrics.asinWiseSales || [],
             queryId: queryId,
             documentId: documentId,
