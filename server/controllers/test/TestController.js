@@ -647,7 +647,7 @@ const testLedgerSummaryReport = async (req, res) => {
 
         let report;
         try {
-            report = await getLedgerSummaryReport(accessToken, marketplaceIdsArray, baseURI, userId, country, region, dataStartTime, dataEndTime);
+            report = await getLedgerSummaryReport(accessToken, marketplaceIdsArray, userId, baseURI, country, region);
         } catch (error) {
             // Handle authorization and other errors
             if (error.message.includes('Access denied') || error.message.includes('Unauthorized')) {

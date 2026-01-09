@@ -290,11 +290,9 @@ const SignUp = () => {
           }
           
         } else {
-            // Clear any cached auth state to force fresh checks
-            clearAuthCache();
-            dispatch(loginSuccess(response.data));
-            localStorage.setItem("isAuth", true);
-            navigate("/connect-to-amazon");
+            // Non-200/201 response - treat as error
+            console.error('Google sign-up returned unexpected status:', response.status);
+            setErrorMessage('Google sign-up failed. Please try again.');
         }
     } catch (error) {
         console.error('Google sign-up failed:', error);

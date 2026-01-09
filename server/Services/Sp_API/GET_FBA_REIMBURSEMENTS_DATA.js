@@ -146,13 +146,23 @@ const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, region) => {
+const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     if (!userId || !country || !region) {
         throw new ApiError(400, "userId, country, and region are required");
+    }
+
+    // Validate baseuri to prevent DNS errors (userId being passed as baseuri)
+    if (!baseuri || typeof baseuri !== 'string' || baseuri.length < 10 || !baseuri.includes('amazon')) {
+        logger.error("Invalid baseuri detected in GET_FBA_REIMBURSEMENTS_DATA", { 
+            baseuri, 
+            userId, 
+            baseuriType: typeof baseuri 
+        });
+        throw new ApiError(400, `Invalid baseuri: ${baseuri}. Expected Amazon SP-API endpoint.`);
     }
 
     try {

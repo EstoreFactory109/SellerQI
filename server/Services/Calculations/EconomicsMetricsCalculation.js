@@ -996,6 +996,7 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
 
     // Convert to sorted array format matching the schema
     // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
+    // IMPORTANT: Store unrounded values to avoid cumulative rounding errors when frontend sums daily records
     const asinWiseSalesArray = Object.values(asinDailyData)
         .map(item => {
             // Convert feeBreakdown object to array format
@@ -1006,11 +1007,14 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
                 }))
                 .filter(fb => fb.amount !== 0);
 
-            const sales = parseFloat(item.sales.toFixed(2));
-            const amazonFees = parseFloat(item.amazonFees.toFixed(2));
-            const refunds = parseFloat(item.refunds.toFixed(2));
+            // Store unrounded sales to avoid cumulative rounding errors
+            // Frontend will sum these and round the final total
+            const sales = item.sales; // Keep unrounded for accurate aggregation
+            const amazonFees = item.amazonFees; // Keep unrounded
+            const refunds = item.refunds; // Keep unrounded
             // Gross Profit = Sales - Amazon Fees - Refunds (PPC subtracted in frontend)
-            const grossProfit = parseFloat((sales - amazonFees - refunds).toFixed(2));
+            // Keep unrounded for accurate aggregation
+            const grossProfit = sales - amazonFees - refunds;
 
             return {
                 date: item.date,
@@ -1030,19 +1034,19 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
                     currencyCode
                 },
                 ppcSpent: {
-                    amount: parseFloat(item.ppcSpent.toFixed(2)),
+                    amount: item.ppcSpent, // Keep unrounded
                     currencyCode
                 },
                 fbaFees: {
-                    amount: parseFloat(item.fbaFees.toFixed(2)),
+                    amount: item.fbaFees, // Keep unrounded
                     currencyCode
                 },
                 storageFees: {
-                    amount: parseFloat(item.storageFees.toFixed(2)),
+                    amount: item.storageFees, // Keep unrounded
                     currencyCode
                 },
                 totalFees: {
-                    amount: parseFloat(item.totalFees.toFixed(2)),
+                    amount: item.totalFees, // Keep unrounded
                     currencyCode
                 },
                 amazonFees: {

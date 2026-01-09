@@ -161,9 +161,20 @@ export default function Login() {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
         } else if(error.response?.data?.message === "Seller central not found"){
-          // Store auth data before redirecting
-          localStorage.setItem('isAuth', 'true');
-          navigate('/connect-to-amazon');
+          // Check if user has premium access before redirecting to connect-to-amazon
+          // If LITE user, they need to subscribe first
+          const user = error.response?.data?.user;
+          const hasPremium = user ? hasPremiumAccess(user) : false;
+          
+          if (hasPremium) {
+            // User has subscription, redirect to connect-to-amazon
+            localStorage.setItem('isAuth', 'true');
+            navigate('/connect-to-amazon');
+          } else {
+            // LITE user or no subscription, redirect to pricing
+            localStorage.setItem('isAuth', 'true');
+            navigate('/pricing');
+          }
         } else {
           // Handle wrong password or invalid credentials
           setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');

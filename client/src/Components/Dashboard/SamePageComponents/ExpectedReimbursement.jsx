@@ -101,8 +101,7 @@ const ExpectedReimbursement = () => {
                               (reimbursementData?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0) +
                               (reimbursementData?.backendLostInventory?.totalExpectedAmount || 0) +
                               (reimbursementData?.backendDamagedInventory?.totalExpectedAmount || 0) +
-                              (reimbursementData?.backendDisposedInventory?.totalExpectedAmount || 0) +
-                              (reimbursementData?.backendFeeReimbursement?.totalExpectedAmount || 0)
+                              (reimbursementData?.backendDisposedInventory?.totalExpectedAmount || 0)
 
   const totalPotential = reimbursementData?.totalPotential || 0
   const totalReceived = reimbursementData?.totalReceived || 0

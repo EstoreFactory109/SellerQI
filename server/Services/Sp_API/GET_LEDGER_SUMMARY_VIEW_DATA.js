@@ -9,7 +9,7 @@ const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     try {
         // Fixed date range: Last 9 months (for Lost Inventory reimbursement calculations)
         // Custom date ranges are NOT supported - always uses 9 months
-        const now = new Date();
+            const now = new Date();
         const EndTime = new Date(now);
         EndTime.setHours(23, 59, 59, 999); // End of today
         
@@ -130,13 +130,23 @@ const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, region) => {
+const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
 
     if (!userId || !country || !region) {
         throw new ApiError(400, "userId, country, and region are required");
+    }
+
+    // Validate baseuri to prevent DNS errors (userId being passed as baseuri)
+    if (!baseuri || typeof baseuri !== 'string' || baseuri.length < 10 || !baseuri.includes('amazon')) {
+        logger.error("Invalid baseuri detected in GET_LEDGER_SUMMARY_VIEW_DATA", { 
+            baseuri, 
+            userId, 
+            baseuriType: typeof baseuri 
+        });
+        throw new ApiError(400, `Invalid baseuri: ${baseuri}. Expected Amazon SP-API endpoint.`);
     }
 
     try {
@@ -295,12 +305,12 @@ function convertTSVToJson(tsvBuffer) {
                 
                 // Normalize: lowercase, replace hyphens and spaces with underscores
                 return headers.map(h => {
-                    let header = h.trim();
-                    if (header.startsWith('"') && header.endsWith('"')) {
-                        header = header.slice(1, -1);
-                    }
-                    // Normalize: lowercase, replace hyphens and spaces with underscores
-                    return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
+                let header = h.trim();
+                if (header.startsWith('"') && header.endsWith('"')) {
+                    header = header.slice(1, -1);
+                }
+                // Normalize: lowercase, replace hyphens and spaces with underscores
+                return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
                 });
             },
             delimiter: '\t',

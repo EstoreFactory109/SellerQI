@@ -166,11 +166,6 @@ const SATURDAY_FUNCTIONS = {
         service: require('../Calculations/Reimbursement.js'),
         functionName: 'calculateDisposedInventoryReimbursement',
         description: 'Disposed Inventory Reimbursement'
-    },
-    'calculateFeeReimbursement': {
-        service: require('../Calculations/Reimbursement.js'),
-        functionName: 'calculateFeeReimbursement',
-        description: 'Fee Reimbursement'
     }
 };
 

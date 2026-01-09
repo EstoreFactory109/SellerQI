@@ -2,15 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, Loader2, Zap, Users, Crown, Sparkles } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import axiosInstance from '../config/axios.config.js';
 import stripeService from '../services/stripeService.js';
 import razorpayService from '../services/razorpayService.js';
 import { detectCountry } from '../utils/countryDetection.js';
 import IndiaPricing from '../Components/Pricing/IndiaPricing.jsx';
+import { updateTrialStatus } from '../redux/slices/authSlice.js';
 
 export default function PricingPage() {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState({});
   const [showCancelledMessage, setShowCancelledMessage] = useState(false);
@@ -152,6 +154,17 @@ export default function PricingPage() {
       
       if (response.status === 200) {
         localStorage.removeItem('intendedAction');
+        
+        // Update Redux state with new subscription info
+        if (response.data?.data) {
+          dispatch(updateTrialStatus({
+            packageType: response.data.data.packageType,
+            subscriptionStatus: response.data.data.subscriptionStatus,
+            isInTrialPeriod: response.data.data.isInTrialPeriod,
+            trialEndsDate: response.data.data.trialEndsDate
+          }));
+        }
+        
         setTimeout(() => {
           navigate('/connect-to-amazon');
         }, 500);

@@ -4,7 +4,7 @@ const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel.j
 const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
 const ProductWiseFBAData = require('../../models/inventory/ProductWiseFBADataModel.js');
-const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
+const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const { calculateFees } = require('./ActualFeesCalculations.js');
 const logger = require('../../utils/Logger.js');
 
@@ -576,23 +576,23 @@ const calculateLostInventoryReimbursement = async (userId, country, region) => {
                 // Exclude negative or zero expected amounts (as per Refunds system)
                 // Refunds system deletes records with ExpectedAmount <= 0
                 if (expectedAmount > 0) {
-                    calculations.push({
-                        asin: asin,
-                        fnsku: lostFoundData.fnsku,
-                        title: lostFoundData.title,
+                calculations.push({
+                    asin: asin,
+                    fnsku: lostFoundData.fnsku,
+                    title: lostFoundData.title,
                         date: lostFoundData.latestDate || null, // Most recent date from ledger items (stored in MM/YYYY format)
                         lostUnits: lostFoundData.lost,
                         foundUnits: lostFoundData.found,
                         reimbursedUnits: reimbursedUnits,
                         discrepancyUnits: discrepancyUnits,
-                        salesPrice: parseFloat(salesPrice.toFixed(2)),
-                        estimatedFees: parseFloat(estimatedFees.toFixed(2)),
-                        reimbursementPerUnit: parseFloat(reimbursementPerUnit.toFixed(2)),
-                        expectedAmount: parseFloat(expectedAmount.toFixed(2))
-                    });
+                    salesPrice: parseFloat(salesPrice.toFixed(2)),
+                    estimatedFees: parseFloat(estimatedFees.toFixed(2)),
+                    reimbursementPerUnit: parseFloat(reimbursementPerUnit.toFixed(2)),
+                    expectedAmount: parseFloat(expectedAmount.toFixed(2))
+                });
 
                     totalLostUnits += discrepancyUnits;
-                    totalExpectedAmount += expectedAmount;
+                totalExpectedAmount += expectedAmount;
                 }
             }
         });
@@ -754,7 +754,7 @@ const calculateDamagedInventoryReimbursement = async (userId, country, region) =
 
             // Use Unreconciled Quantity (as per Refunds system)
             const unreconciledQty = parseFloat(ledgerItem.unreconciled_quantity?.toString().replace(/[^0-9.-]/g, '') || '0') || 0;
-            
+
             // Only process if unreconciled quantity > 0
             if (unreconciledQty <= 0) return;
 
@@ -768,20 +768,20 @@ const calculateDamagedInventoryReimbursement = async (userId, country, region) =
             const asin = ledgerItem.asin.trim();
             const fnsku = ledgerItem.fnsku?.trim() || '';
 
-            // Get sales price from seller model
-            const salesPrice = asinToPriceMap.get(asin) || 0;
+                // Get sales price from seller model
+                const salesPrice = asinToPriceMap.get(asin) || 0;
 
-            // Get estimated fees - try fnsku first, then asin
-            let estimatedFees = 0;
+                // Get estimated fees - try fnsku first, then asin
+                let estimatedFees = 0;
             if (fnsku) {
                 estimatedFees = fnskuToEstimatedFeesMap.get(fnsku) || 0;
-            }
-            if (estimatedFees === 0) {
-                estimatedFees = asinToEstimatedFeesMap.get(asin) || 0;
-            }
+                }
+                if (estimatedFees === 0) {
+                    estimatedFees = asinToEstimatedFeesMap.get(asin) || 0;
+                }
 
             // Calculate reimbursement per unit = Sales Price - Estimated Fees
-            const reimbursementPerUnit = salesPrice - estimatedFees;
+                const reimbursementPerUnit = salesPrice - estimatedFees;
 
             // Calculate expected amount = Unreconciled Quantity × Reimbursement Per Unit
             const expectedAmount = unreconciledQty * reimbursementPerUnit;
@@ -1121,20 +1121,20 @@ const calculateDisposedInventoryReimbursement = async (userId, country, region) 
             const asin = ledgerItem.asin.trim();
             const fnsku = ledgerItem.fnsku?.trim() || '';
 
-            // Get sales price from seller model
-            const salesPrice = asinToPriceMap.get(asin) || 0;
+                // Get sales price from seller model
+                const salesPrice = asinToPriceMap.get(asin) || 0;
 
-            // Get estimated fees - try fnsku first, then asin
-            let estimatedFees = 0;
+                // Get estimated fees - try fnsku first, then asin
+                let estimatedFees = 0;
             if (fnsku) {
                 estimatedFees = fnskuToEstimatedFeesMap.get(fnsku) || 0;
-            }
-            if (estimatedFees === 0) {
-                estimatedFees = asinToEstimatedFeesMap.get(asin) || 0;
-            }
+                }
+                if (estimatedFees === 0) {
+                    estimatedFees = asinToEstimatedFeesMap.get(asin) || 0;
+                }
 
             // Calculate reimbursement per unit = Sales Price - Estimated Fees
-            const reimbursementPerUnit = salesPrice - estimatedFees;
+                const reimbursementPerUnit = salesPrice - estimatedFees;
 
             // Calculate expected amount = Quantity × Reimbursement Per Unit
             const expectedAmount = quantity * reimbursementPerUnit;
@@ -1390,7 +1390,54 @@ const mapRegionForFees = (region) => {
 };
 
 /**
+ * Convert weight to the correct unit for fee calculation based on region
+ * Matches Refunds system logic:
+ * - AUS: weight in grams (converts kg to grams, otherwise assumes grams)
+ * - USA: weight in pounds (converts oz to pounds, otherwise assumes pounds)
+ * @param {string} weightValue - Weight value as string
+ * @param {string} unitOfWeight - Weight unit (grams, kg, oz, lbs, etc.)
+ * @param {string} feesRegion - Region code ("US" or "AU")
+ * @returns {number} Weight in the correct unit for fee calculation
+ */
+const convertWeightForFeeCalculation = (weightValue, unitOfWeight, feesRegion) => {
+    if (!weightValue || isNaN(parseFloat(weightValue))) return 0;
+    
+    const numValue = parseFloat(weightValue);
+    const unitLower = (unitOfWeight || '').toLowerCase().trim();
+    
+    if (feesRegion === "AU") {
+        // For AUS region: CalculateFees expects weight in GRAMS
+        if (unitLower === 'kg' || unitLower === 'kgs' || unitLower === 'kilogram' || unitLower === 'kilograms') {
+            return numValue * 1000; // Convert kg to grams
+        } else {
+            // Otherwise assume grams (matches Refunds system logic)
+            return numValue;
+        }
+    } else if (feesRegion === "US") {
+        // For USA region: CalculateFees expects weight in POUNDS
+        if (unitLower === 'oz' || unitLower === 'ozs' || unitLower === 'ounce' || unitLower === 'ounces') {
+            return numValue / 16; // Convert oz to pounds (matches Refunds system)
+        } else if (unitLower === 'lbs' || unitLower === 'pounds' || unitLower === 'lb') {
+            return numValue; // Already in pounds
+        } else if (unitLower === 'kg' || unitLower === 'kgs' || unitLower === 'kilogram' || unitLower === 'kilograms') {
+            return numValue * 2.20462; // Convert kg to pounds
+        } else if (unitLower === 'grams' || unitLower === 'gram' || unitLower === 'g') {
+            return numValue / 453.592; // Convert grams to pounds
+        } else {
+            // Default assume pounds (matches Refunds system logic)
+            return numValue;
+        }
+    }
+    
+    // Default fallback (shouldn't reach here)
+    return numValue;
+};
+
+/**
  * Calculate fee reimbursement amounts
+ * Uses EconomicsMetrics.asinWiseSales for units sold data (from MCP Data Kiosk API)
+ * This provides more accurate and up-to-date sales data compared to legacy ProductWiseSales
+ * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region code
@@ -1398,7 +1445,7 @@ const mapRegionForFees = (region) => {
  */
 const calculateFeeReimbursement = async (userId, country, region) => {
     try {
-        // 1. Get product wise FBA data
+        // 1. Get product wise FBA data (contains charged fees and dimensions)
         const productWiseFBAData = await ProductWiseFBAData.findOne({
             userId: userId,
             country: country,
@@ -1416,28 +1463,36 @@ const calculateFeeReimbursement = async (userId, country, region) => {
             };
         }
 
-        // 2. Get product wise sales data to get units sold
-        const productWiseSalesData = await ProductWiseSales.findOne({
+        // 2. Get units sold from EconomicsMetrics (MCP Data Kiosk API)
+        // This provides ASIN-wise daily sales data with accurate units sold
+        const economicsMetrics = await EconomicsMetrics.findOne({
             User: userId,
             country: country,
             region: region
         }).sort({ createdAt: -1 });
 
-        // Create a map of ASIN to total quantity sold
+        // Create a map of ASIN to total units sold (summed across all dates)
         const asinToUnitsSoldMap = new Map();
-        if (productWiseSalesData && productWiseSalesData.productWiseSales && Array.isArray(productWiseSalesData.productWiseSales)) {
-            productWiseSalesData.productWiseSales.forEach(sale => {
+        if (economicsMetrics && economicsMetrics.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
+            logger.info(`Processing ${economicsMetrics.asinWiseSales.length} ASIN-wise sales records from EconomicsMetrics`);
+            
+            economicsMetrics.asinWiseSales.forEach(sale => {
                 if (sale.asin) {
                     const asin = sale.asin.trim();
-                    const quantity = parseInt(sale.quantity) || 0;
+                    // unitsSold is per day per ASIN, so we sum across all dates
+                    const unitsSold = parseInt(sale.unitsSold) || 0;
                     
                     if (asinToUnitsSoldMap.has(asin)) {
-                        asinToUnitsSoldMap.set(asin, asinToUnitsSoldMap.get(asin) + quantity);
+                        asinToUnitsSoldMap.set(asin, asinToUnitsSoldMap.get(asin) + unitsSold);
                     } else {
-                        asinToUnitsSoldMap.set(asin, quantity);
+                        asinToUnitsSoldMap.set(asin, unitsSold);
                     }
                 }
             });
+            
+            logger.info(`Built units sold map with ${asinToUnitsSoldMap.size} unique ASINs from EconomicsMetrics`);
+        } else {
+            logger.warn(`No EconomicsMetrics data found for userId: ${userId}, country: ${country}, region: ${region}. Units sold will be 0.`);
         }
 
         // 3. Map region for calculateFees function
@@ -1470,13 +1525,15 @@ const calculateFeeReimbursement = async (userId, country, region) => {
             const medianCm = convertToRequiredUnits(medianSide, unitOfDimension, 'dimension');
             const shortestCm = convertToRequiredUnits(shortestSide, unitOfDimension, 'dimension');
 
-            // Convert weight to grams
-            const weightGrams = convertToRequiredUnits(itemPackageWeight, unitOfWeight, 'weight');
+            // Convert weight to the correct unit for fee calculation based on region
+            // AUS: grams, USA: pounds (matching Refunds system logic)
+            const weightForCalculation = convertWeightForFeeCalculation(itemPackageWeight, unitOfWeight, feesRegion);
 
             // Only process if we have required data
-            if (longestCm > 0 && medianCm > 0 && shortestCm > 0 && weightGrams > 0) {
+            if (longestCm > 0 && medianCm > 0 && shortestCm > 0 && weightForCalculation > 0) {
                 // Step 1: Calculate actual fees using ActualFeesCalculations
-                const actualFees = calculateFees(feesRegion, longestCm, medianCm, shortestCm, weightGrams, productGroup);
+                // Note: weightForCalculation is in grams for AU, pounds for US (matching Refunds system)
+                const actualFees = calculateFees(feesRegion, longestCm, medianCm, shortestCm, weightForCalculation, productGroup);
 
                 // Step 2: Calculate fee difference = Charged Fee - Actual Fee
                 const feeDifference = chargedFees - actualFees;
@@ -1548,6 +1605,6 @@ module.exports = {
     calculateShipmentDiscrepancy,
     calculateLostInventoryReimbursement,
     calculateDamagedInventoryReimbursement,
-    calculateDisposedInventoryReimbursement,
-    calculateFeeReimbursement
+    calculateDisposedInventoryReimbursement
+    // calculateFeeReimbursement - Temporarily disabled
 };

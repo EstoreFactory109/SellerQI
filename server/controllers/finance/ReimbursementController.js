@@ -7,8 +7,7 @@ const {
     calculateShipmentDiscrepancy,
     calculateLostInventoryReimbursement,
     calculateDamagedInventoryReimbursement,
-    calculateDisposedInventoryReimbursement,
-    calculateFeeReimbursement
+    calculateDisposedInventoryReimbursement
 } = require('../../Services/Calculations/Reimbursement.js');
 
 /**
@@ -27,14 +26,12 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
             shipmentResult,
             lostInventoryResult,
             damagedInventoryResult,
-            disposedInventoryResult,
-            feeReimbursementResult
+            disposedInventoryResult
         ] = await Promise.all([
             calculateShipmentDiscrepancy(userId, country, region),
             calculateLostInventoryReimbursement(userId, country, region),
             calculateDamagedInventoryReimbursement(userId, country, region),
-            calculateDisposedInventoryReimbursement(userId, country, region),
-            calculateFeeReimbursement(userId, country, region)
+            calculateDisposedInventoryReimbursement(userId, country, region)
         ]);
 
         // Get seller data to map SKU to ASIN for shipment data
@@ -99,17 +96,17 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
             .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
             .map(item => ({
                 date: item.date || '', // Date from ledger item (MM/YYYY format, most recent per ASIN)
-                asin: item.asin || '',
-                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-                fnsku: item.fnsku || '',
-                lostUnits: item.lostUnits || 0,
+            asin: item.asin || '',
+            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+            fnsku: item.fnsku || '',
+            lostUnits: item.lostUnits || 0,
                 foundUnits: item.foundUnits || 0,
                 reimbursedUnits: item.reimbursedUnits || 0, // Now from FBA Reimbursements report
                 discrepancyUnits: item.discrepancyUnits || 0, // Now calculated as: lost - found - reimbursed
-                expectedAmount: item.expectedAmount || 0,
-                isUnderpaid: false, // This would need to be calculated based on actual reimbursements
-                underpaidExpectedAmount: 0
-            }));
+            expectedAmount: item.expectedAmount || 0,
+            isUnderpaid: false, // This would need to be calculated based on actual reimbursements
+            underpaidExpectedAmount: 0
+        }));
 
         // Format damaged inventory data for frontend
         // Now includes referenceId and reasonCode from Ledger Detail report
@@ -119,16 +116,16 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
             .map(item => ({
                 date: item.date || new Date().toISOString().split('T')[0],
                 referenceId: item.referenceId || '',
-                asin: item.asin || '',
-                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-                fnsku: item.fnsku || '',
+            asin: item.asin || '',
+            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+            fnsku: item.fnsku || '',
                 reasonCode: item.reasonCode || '',
-                damagedUnits: item.damagedUnits || 0,
-                salesPrice: item.salesPrice || 0,
-                fees: item.estimatedFees || 0,
-                reimbursementPerUnit: item.reimbursementPerUnit || 0,
-                expectedAmount: item.expectedAmount || 0
-            }));
+            damagedUnits: item.damagedUnits || 0,
+            salesPrice: item.salesPrice || 0,
+            fees: item.estimatedFees || 0,
+            reimbursementPerUnit: item.reimbursementPerUnit || 0,
+            expectedAmount: item.expectedAmount || 0
+        }));
 
         // Format disposed inventory data for frontend
         // Now includes referenceId and disposition from Ledger Detail report
@@ -138,40 +135,23 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
             .map(item => ({
                 date: item.date || new Date().toISOString().split('T')[0],
                 referenceId: item.referenceId || '',
-                asin: item.asin || '',
-                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-                fnsku: item.fnsku || '',
+            asin: item.asin || '',
+            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+            fnsku: item.fnsku || '',
                 disposition: item.disposition || '',
-                disposedUnits: item.disposedUnits || 0,
-                salesPrice: item.salesPrice || 0,
-                fees: item.estimatedFees || 0,
-                reimbursementPerUnit: item.reimbursementPerUnit || 0,
-                expectedAmount: item.expectedAmount || 0
-            }));
-
-        // Format fee reimbursement data for frontend
-        const feeReimbursementData = feeReimbursementResult.data || [];
-        const formattedFeeReimbursementData = feeReimbursementData
-            .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
-            .map(item => ({
-                date: new Date().toISOString().split('T')[0],
-                asin: item.asin || '',
-                fnsku: item.fnsku || '',
-                productName: item.productName || '',
-                chargedFees: item.chargedFees || 0,
-                actualFees: item.actualFees || 0,
-                feeDifference: item.feeDifference || 0,
-                unitsSold: item.unitsSold || 0,
-                expectedAmount: item.expectedAmount || 0
-            }));
+            disposedUnits: item.disposedUnits || 0,
+            salesPrice: item.salesPrice || 0,
+            fees: item.estimatedFees || 0,
+            reimbursementPerUnit: item.reimbursementPerUnit || 0,
+            expectedAmount: item.expectedAmount || 0
+        }));
 
         // Calculate total recoverable (sum of all types)
         const totalRecoverable = 
             (shipmentResult.totalReimbursement || 0) +
             (lostInventoryResult.totalExpectedAmount || 0) +
             (damagedInventoryResult.totalExpectedAmount || 0) +
-            (disposedInventoryResult.totalExpectedAmount || 0) +
-            (feeReimbursementResult.totalExpectedAmount || 0);
+            (disposedInventoryResult.totalExpectedAmount || 0);
 
         // Build response matching frontend expectations
         const responseData = {
@@ -181,8 +161,7 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
                 formattedShipmentData.length +
                 formattedLostInventoryData.length +
                 formattedDamagedInventoryData.length +
-                formattedDisposedInventoryData.length +
-                formattedFeeReimbursementData.length,
+                formattedDisposedInventoryData.length,
             claimSuccessRate: 0, // This would need to be calculated from actual claims
             avgResolutionTime: 0, // This would need to be calculated from actual claims
             feeProtector: {
@@ -206,11 +185,6 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
                 data: formattedDisposedInventoryData,
                 itemCount: formattedDisposedInventoryData.length,
                 totalExpectedAmount: disposedInventoryResult.totalExpectedAmount || 0
-            },
-            backendFeeReimbursement: {
-                data: formattedFeeReimbursementData,
-                itemCount: formattedFeeReimbursementData.length,
-                totalExpectedAmount: feeReimbursementResult.totalExpectedAmount || 0
             }
         };
 

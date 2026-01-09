@@ -873,7 +873,7 @@ class ScheduledIntegration {
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement', 
-                 'calculateDisposedInventoryReimbursement', 'calculateFeeReimbursement'].includes(functionKey)) {
+                 'calculateDisposedInventoryReimbursement'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP Economics, MCP BuyBox

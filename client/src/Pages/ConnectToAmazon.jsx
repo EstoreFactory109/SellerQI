@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
 import { Globe, ChevronDown, ArrowRight, Loader2, Package, ShoppingCart, Zap, Search } from 'lucide-react';
 import axios from 'axios';
+import { useSelector } from 'react-redux';
+import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 // Complete list of Amazon marketplaces with region mapping
 const COUNTRY_DATA = [
@@ -49,7 +51,75 @@ const AmazonConnect = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkingSubscription, setCheckingSubscription] = useState(true);
   const navigate = useNavigate();
+  
+  // Get user data from Redux
+  const userData = useSelector(state => state.Auth?.user);
+  const isAuthenticated = useSelector(state => state.Auth?.isAuthenticated) || localStorage.getItem('isAuth') === 'true';
+
+  // Check subscription status on mount - redirect LITE users to pricing
+  useEffect(() => {
+    const checkSubscription = async () => {
+      // If not authenticated, redirect to login
+      if (!isAuthenticated) {
+        console.log('ConnectToAmazon: Not authenticated - redirecting to login');
+        navigate('/', { replace: true });
+        return;
+      }
+
+      // Wait a bit for Redux state to propagate if coming from pricing page
+      // This handles the race condition when user just activated free trial
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Check if user has premium access (PRO, PRO trial, or AGENCY)
+      const hasPremium = hasPremiumAccess(userData);
+      
+      console.log('ConnectToAmazon: Subscription check', {
+        userData,
+        hasPremium,
+        packageType: userData?.packageType
+      });
+
+      // If userData shows premium access, allow through
+      if (hasPremium) {
+        setCheckingSubscription(false);
+        return;
+      }
+
+      // If userData doesn't show premium but user just came from pricing,
+      // they may have just activated trial - fetch fresh user data
+      try {
+        const response = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/profile`, { 
+          withCredentials: true 
+        });
+        
+        if (response.data?.data) {
+          const freshUserData = response.data.data;
+          const freshHasPremium = hasPremiumAccess(freshUserData);
+          
+          console.log('ConnectToAmazon: Fresh user data check', {
+            freshUserData,
+            freshHasPremium,
+            packageType: freshUserData?.packageType
+          });
+
+          if (freshHasPremium) {
+            setCheckingSubscription(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('ConnectToAmazon: Error fetching fresh user data', error);
+      }
+
+      // LITE users or users without valid subscription should go to pricing
+      console.log('ConnectToAmazon: No premium access - redirecting to pricing');
+      navigate('/pricing', { replace: true });
+    };
+
+    checkSubscription();
+  }, [isAuthenticated, navigate]); // Removed userData from deps to prevent re-running on update
   
   // Get selected country data
   const selectedCountry = useMemo(() => {
@@ -117,6 +187,18 @@ const AmazonConnect = () => {
       alert("Failed to save marketplace details. Please try again.");
     }
   };
+
+  // Show loading state while checking subscription
+  if (checkingSubscription) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
+          <p className="text-gray-600">Verifying subscription...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50 flex items-center justify-center font-roboto relative overflow-hidden">

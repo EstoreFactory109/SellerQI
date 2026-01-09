@@ -62,7 +62,6 @@ const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA = require('../Sp_API/GET_FB
 const { addAccountHistory } = require('../History/addAccountHistory.js');
 const { AnalyseService } = require('./Analyse.js');
 
-const GetProductWiseFBAData = require('../Sp_API/GetProductWiseFBAData.js');
 const GET_LEDGER_SUMMARY_VIEW_DATA = require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
 const GET_LEDGER_DETAIL_VIEW_DATA = require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js');
 const GET_FBA_REIMBURSEMENTS_DATA = require('../Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js');

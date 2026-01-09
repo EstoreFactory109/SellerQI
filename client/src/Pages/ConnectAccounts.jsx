@@ -13,6 +13,7 @@ import { useSelector } from 'react-redux';
 import axiosInstance from '../config/axios.config.js';
 import { isSpApiConnected, isSpApiConnectedFromAccounts } from '../utils/spApiConnectionCheck.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
+import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 // Marketplace configuration mapping
 const MARKETPLACE_CONFIG = {
@@ -152,15 +153,77 @@ const ConnectAccounts = () => {
   const [isSellerCentralConnected, setIsSellerCentralConnected] = useState(false);
   const [isSpApiConnectedState, setIsSpApiConnectedState] = useState(false);
   const [checkingSpApi, setCheckingSpApi] = useState(true);
+  const [checkingSubscription, setCheckingSubscription] = useState(true);
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const allAccounts = useSelector(state => state.AllAccounts?.AllAccounts) || [];
   const userData = useSelector(state => state.Auth?.user);
+  const isAuthenticated = useSelector(state => state.Auth?.isAuthenticated) || localStorage.getItem('isAuth') === 'true';
   
   // Get country code and region from URL parameters
   const countryCode = searchParams.get('country') || searchParams.get('countryCode');
   const region = searchParams.get('region');
+
+  // Check subscription status on mount - redirect LITE users to pricing
+  useEffect(() => {
+    const checkSubscription = async () => {
+      // If not authenticated, redirect to login
+      if (!isAuthenticated) {
+        console.log('ConnectAccounts: Not authenticated - redirecting to login');
+        navigate('/', { replace: true });
+        return;
+      }
+
+      // Wait a bit for Redux state to propagate if coming from pricing page
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Check if user has premium access (PRO, PRO trial, or AGENCY)
+      const hasPremium = hasPremiumAccess(userData);
+      
+      console.log('ConnectAccounts: Subscription check', {
+        userData,
+        hasPremium,
+        packageType: userData?.packageType
+      });
+
+      // If userData shows premium access, allow through
+      if (hasPremium) {
+        setCheckingSubscription(false);
+        return;
+      }
+
+      // If userData doesn't show premium but user just came from pricing,
+      // they may have just activated trial - fetch fresh user data
+      try {
+        const response = await axiosInstance.get('/app/profile');
+        
+        if (response.data?.data) {
+          const freshUserData = response.data.data;
+          const freshHasPremium = hasPremiumAccess(freshUserData);
+          
+          console.log('ConnectAccounts: Fresh user data check', {
+            freshUserData,
+            freshHasPremium,
+            packageType: freshUserData?.packageType
+          });
+
+          if (freshHasPremium) {
+            setCheckingSubscription(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('ConnectAccounts: Error fetching fresh user data', error);
+      }
+
+      // LITE users or users without valid subscription should go to pricing
+      console.log('ConnectAccounts: No premium access - redirecting to pricing');
+      navigate('/pricing', { replace: true });
+    };
+
+    checkSubscription();
+  }, [isAuthenticated, navigate]); // Removed userData from deps to prevent re-running on update
 
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
@@ -476,6 +539,18 @@ const ConnectAccounts = () => {
   const navigateToDashboard = () => {
     navigate('/seller-central-checker/dashboard');
   };
+
+  // Show loading state while checking subscription
+  if (checkingSubscription) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
+          <p className="text-gray-600">Verifying subscription...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">

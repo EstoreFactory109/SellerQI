@@ -18,15 +18,13 @@ const {
     calculateShipmentDiscrepancy,
     calculateLostInventoryReimbursement,
     calculateDamagedInventoryReimbursement,
-    calculateDisposedInventoryReimbursement,
-    calculateFeeReimbursement
+    calculateDisposedInventoryReimbursement
 } = require('../../Services/Calculations/Reimbursement.js');
 
 // Import SP-API services for data fetching
 const getLedgerSummaryViewData = require('../../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
 const getLedgerDetailViewData = require('../../Services/Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js');
 const getFBAReimbursementsData = require('../../Services/Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js');
-const getProductWiseFBAData = require('../../Services/Sp_API/GetProductWiseFBAData.js');
 const getMerchantListingsAllData = require('../../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const getShipmentData = require('../../Services/Sp_API/shipment.js');
 const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredentials.js');
@@ -134,11 +132,10 @@ const testReimbursementData = asyncHandler(async (req, res) => {
     });
 
     const startTime = Date.now();
-        const fetchResults = {
+    const fetchResults = {
         ledger: { success: false, message: '' },
         ledgerDetail: { success: false, message: '' },
         fbaReimbursements: { success: false, message: '' },
-        fba: { success: false, message: '' },
         shipment: { success: false, message: '' },
         listings: { success: false, message: '' }
     };
@@ -169,7 +166,7 @@ const testReimbursementData = asyncHandler(async (req, res) => {
 
         const fetchPromises = [
             // Ledger Summary View Data (for Lost Inventory) - Fixed 9 months
-            getLedgerSummaryViewData(accessToken, marketplaceIds, baseURI, userId, country, region)
+            getLedgerSummaryViewData(accessToken, marketplaceIds, userId, baseURI, country, region)
                 .then(result => {
                     fetchResults.ledger = { success: true, message: 'Ledger summary data fetched successfully' };
                     logger.info('Ledger summary data fetched successfully');
@@ -182,7 +179,7 @@ const testReimbursementData = asyncHandler(async (req, res) => {
                 }),
 
             // Ledger Detail View Data (for Damaged/Disposed Inventory) - Fixed 9 months
-            getLedgerDetailViewData(accessToken, marketplaceIds, baseURI, userId, country, region)
+            getLedgerDetailViewData(accessToken, marketplaceIds, userId, baseURI, country, region)
                 .then(result => {
                     fetchResults.ledgerDetail = { success: true, message: 'Ledger detail data fetched successfully' };
                     logger.info('Ledger detail data fetched successfully');
@@ -195,7 +192,7 @@ const testReimbursementData = asyncHandler(async (req, res) => {
                 }),
 
             // FBA Reimbursements Data (for Lost Inventory Reimbursed Units) - Fixed 9 months
-            getFBAReimbursementsData(accessToken, marketplaceIds, baseURI, userId, country, region)
+            getFBAReimbursementsData(accessToken, marketplaceIds, userId, baseURI, country, region)
                 .then(result => {
                     fetchResults.fbaReimbursements = { success: true, message: 'FBA reimbursements data fetched successfully' };
                     logger.info('FBA reimbursements data fetched successfully');
@@ -207,18 +204,6 @@ const testReimbursementData = asyncHandler(async (req, res) => {
                     return null;
                 }),
 
-            // Product Wise FBA Data (Estimated Fees)
-            getProductWiseFBAData(accessToken, marketplaceIds, userId, baseURI, country, region)
-                .then(result => {
-                    fetchResults.fba = { success: true, message: 'FBA data fetched successfully' };
-                    logger.info('FBA data fetched successfully');
-                    return result;
-                })
-                .catch(error => {
-                    fetchResults.fba = { success: false, message: error.message };
-                    logger.warn('FBA data fetch failed:', error.message);
-                    return null;
-                }),
 
             // Merchant Listings (Product prices)
             getMerchantListingsAllData(accessToken, marketplaceIds, userId, country, region, baseURI)
@@ -280,14 +265,12 @@ const testReimbursementData = asyncHandler(async (req, res) => {
             shipmentResult,
             lostInventoryResult,
             damagedInventoryResult,
-            disposedInventoryResult,
-            feeReimbursementResult
+            disposedInventoryResult
         ] = await Promise.all([
             calculateShipmentDiscrepancy(userId, country, region),
             calculateLostInventoryReimbursement(userId, country, region),
             calculateDamagedInventoryReimbursement(userId, country, region),
-            calculateDisposedInventoryReimbursement(userId, country, region),
-            calculateFeeReimbursement(userId, country, region)
+            calculateDisposedInventoryReimbursement(userId, country, region)
         ]);
 
         const calcDuration = Date.now() - calcStartTime;
@@ -402,27 +385,12 @@ const testReimbursementData = asyncHandler(async (req, res) => {
             expectedAmount: item.expectedAmount || 0
         }));
 
-        // Format fee reimbursement data for frontend
-        const feeReimbursementData = feeReimbursementResult.data || [];
-        const formattedFeeReimbursementData = feeReimbursementData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
-            asin: item.asin || '',
-            fnsku: item.fnsku || '',
-            productName: item.productName || '',
-            chargedFees: item.chargedFees || 0,
-            actualFees: item.actualFees || 0,
-            feeDifference: item.feeDifference || 0,
-            unitsSold: item.unitsSold || 0,
-            expectedAmount: item.expectedAmount || 0
-        }));
-
         // Calculate total recoverable (sum of all types)
         const totalRecoverable = 
             (shipmentResult.totalReimbursement || 0) +
             (lostInventoryResult.totalExpectedAmount || 0) +
             (damagedInventoryResult.totalExpectedAmount || 0) +
-            (disposedInventoryResult.totalExpectedAmount || 0) +
-            (feeReimbursementResult.totalExpectedAmount || 0);
+            (disposedInventoryResult.totalExpectedAmount || 0);
 
         // Build response matching frontend expectations (exact same format)
         const responseData = {
@@ -432,8 +400,7 @@ const testReimbursementData = asyncHandler(async (req, res) => {
                 formattedShipmentData.length +
                 formattedLostInventoryData.length +
                 formattedDamagedInventoryData.length +
-                formattedDisposedInventoryData.length +
-                formattedFeeReimbursementData.length,
+                formattedDisposedInventoryData.length,
             claimSuccessRate: 0,
             avgResolutionTime: 0,
             feeProtector: {
@@ -457,11 +424,6 @@ const testReimbursementData = asyncHandler(async (req, res) => {
                 data: formattedDisposedInventoryData,
                 itemCount: formattedDisposedInventoryData.length,
                 totalExpectedAmount: disposedInventoryResult.totalExpectedAmount || 0
-            },
-            backendFeeReimbursement: {
-                data: formattedFeeReimbursementData,
-                itemCount: formattedFeeReimbursementData.length,
-                totalExpectedAmount: feeReimbursementResult.totalExpectedAmount || 0
             },
             // Additional metadata for testing
             _meta: {
