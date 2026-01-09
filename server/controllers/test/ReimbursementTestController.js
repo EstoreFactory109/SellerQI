@@ -24,6 +24,8 @@ const {
 
 // Import SP-API services for data fetching
 const getLedgerSummaryViewData = require('../../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
+const getLedgerDetailViewData = require('../../Services/Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js');
+const getFBAReimbursementsData = require('../../Services/Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js');
 const getProductWiseFBAData = require('../../Services/Sp_API/GetProductWiseFBAData.js');
 const getMerchantListingsAllData = require('../../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const getShipmentData = require('../../Services/Sp_API/shipment.js');
@@ -132,8 +134,10 @@ const testReimbursementData = asyncHandler(async (req, res) => {
     });
 
     const startTime = Date.now();
-    const fetchResults = {
+        const fetchResults = {
         ledger: { success: false, message: '' },
+        ledgerDetail: { success: false, message: '' },
+        fbaReimbursements: { success: false, message: '' },
         fba: { success: false, message: '' },
         shipment: { success: false, message: '' },
         listings: { success: false, message: '' }
@@ -155,21 +159,51 @@ const testReimbursementData = asyncHandler(async (req, res) => {
             hasCredentials: !!credentials
         });
 
-        // Step 2: Fetch fresh data from SP-API in parallel
+        // Step 2: Reimbursement reports use fixed 9-month date range (hardcoded in the services)
+        // No custom date range is supported for Lost, Damaged, Disposed inventory reports
+        logger.info('Fetching reimbursement data (fixed 9-month date range)');
+
+        // Step 3: Fetch fresh data from SP-API in parallel
         logger.info('Fetching fresh data from SP-API...');
         const fetchStartTime = Date.now();
 
         const fetchPromises = [
-            // Ledger Summary View Data
+            // Ledger Summary View Data (for Lost Inventory) - Fixed 9 months
             getLedgerSummaryViewData(accessToken, marketplaceIds, baseURI, userId, country, region)
                 .then(result => {
-                    fetchResults.ledger = { success: true, message: 'Ledger data fetched successfully' };
-                    logger.info('Ledger data fetched successfully');
+                    fetchResults.ledger = { success: true, message: 'Ledger summary data fetched successfully' };
+                    logger.info('Ledger summary data fetched successfully');
                     return result;
                 })
                 .catch(error => {
                     fetchResults.ledger = { success: false, message: error.message };
-                    logger.warn('Ledger data fetch failed:', error.message);
+                    logger.warn('Ledger summary data fetch failed:', error.message);
+                    return null;
+                }),
+
+            // Ledger Detail View Data (for Damaged/Disposed Inventory) - Fixed 9 months
+            getLedgerDetailViewData(accessToken, marketplaceIds, baseURI, userId, country, region)
+                .then(result => {
+                    fetchResults.ledgerDetail = { success: true, message: 'Ledger detail data fetched successfully' };
+                    logger.info('Ledger detail data fetched successfully');
+                    return result;
+                })
+                .catch(error => {
+                    fetchResults.ledgerDetail = { success: false, message: error.message };
+                    logger.warn('Ledger detail data fetch failed:', error.message);
+                    return null;
+                }),
+
+            // FBA Reimbursements Data (for Lost Inventory Reimbursed Units) - Fixed 9 months
+            getFBAReimbursementsData(accessToken, marketplaceIds, baseURI, userId, country, region)
+                .then(result => {
+                    fetchResults.fbaReimbursements = { success: true, message: 'FBA reimbursements data fetched successfully' };
+                    logger.info('FBA reimbursements data fetched successfully');
+                    return result;
+                })
+                .catch(error => {
+                    fetchResults.fbaReimbursements = { success: false, message: error.message };
+                    logger.warn('FBA reimbursements data fetch failed:', error.message);
                     return null;
                 }),
 
@@ -234,10 +268,11 @@ const testReimbursementData = asyncHandler(async (req, res) => {
         logger.info('SP-API data fetch completed', {
             userId,
             fetchDurationMs: fetchDuration,
-            results: fetchResults
+            results: fetchResults,
+            dateRange: 'Fixed 9 months (hardcoded in services)'
         });
 
-        // Step 3: Calculate all reimbursement types in parallel
+        // Step 4: Calculate all reimbursement types in parallel
         logger.info('Calculating reimbursements...');
         const calcStartTime = Date.now();
 
@@ -261,7 +296,7 @@ const testReimbursementData = asyncHandler(async (req, res) => {
             calcDurationMs: calcDuration
         });
 
-        // Step 4: Get seller data to map SKU to ASIN
+        // Step 5: Get seller data to map SKU to ASIN
         let skuToAsinMap = new Map();
         try {
             const sellerData = await Seller.findOne({ User: userId });
@@ -316,28 +351,33 @@ const testReimbursementData = asyncHandler(async (req, res) => {
         }
 
         // Format lost inventory data for frontend
+        // Now includes reimbursedUnits from FBA Reimbursements report
+        // Date comes from ledger items (stored in MM/YYYY format, using most recent date per ASIN)
         const lostInventoryData = lostInventoryResult.data || [];
         const formattedLostInventoryData = lostInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
+            date: item.date || '', // Date from ledger item (MM/YYYY format, most recent per ASIN)
             asin: item.asin || '',
             sku: asinToSkuMap.get(item.asin) || '',
             fnsku: item.fnsku || '',
             lostUnits: item.lostUnits || 0,
-            foundUnits: item.found || 0,
-            reimbursedUnits: 0,
-            discrepancyUnits: item.lostUnits || 0,
+            foundUnits: item.foundUnits || 0,
+            reimbursedUnits: item.reimbursedUnits || 0, // Now from FBA Reimbursements report
+            discrepancyUnits: item.discrepancyUnits || 0, // Now calculated as: lost - found - reimbursed
             expectedAmount: item.expectedAmount || 0,
             isUnderpaid: false,
             underpaidExpectedAmount: 0
         }));
 
         // Format damaged inventory data for frontend
+        // Now includes referenceId and reasonCode from Ledger Detail report
         const damagedInventoryData = damagedInventoryResult.data || [];
         const formattedDamagedInventoryData = damagedInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
+            date: item.date || new Date().toISOString().split('T')[0],
+            referenceId: item.referenceId || '',
             asin: item.asin || '',
             sku: asinToSkuMap.get(item.asin) || '',
             fnsku: item.fnsku || '',
+            reasonCode: item.reasonCode || '',
             damagedUnits: item.damagedUnits || 0,
             salesPrice: item.salesPrice || 0,
             fees: item.estimatedFees || 0,
@@ -346,12 +386,15 @@ const testReimbursementData = asyncHandler(async (req, res) => {
         }));
 
         // Format disposed inventory data for frontend
+        // Now includes referenceId and disposition from Ledger Detail report
         const disposedInventoryData = disposedInventoryResult.data || [];
         const formattedDisposedInventoryData = disposedInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
+            date: item.date || new Date().toISOString().split('T')[0],
+            referenceId: item.referenceId || '',
             asin: item.asin || '',
             sku: asinToSkuMap.get(item.asin) || '',
             fnsku: item.fnsku || '',
+            disposition: item.disposition || '',
             disposedUnits: item.disposedUnits || 0,
             salesPrice: item.salesPrice || 0,
             fees: item.estimatedFees || 0,

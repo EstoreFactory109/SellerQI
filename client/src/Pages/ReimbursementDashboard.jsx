@@ -49,6 +49,101 @@ const ReimbursementDashboard = () => {
     });
   };
 
+  // Format MM/YYYY date as month name (e.g., "12/2025" -> "December 2025")
+  const formatMonthName = (dateValue) => {
+    if (!dateValue || dateValue === 'N/A' || dateValue === '') {
+      return 'N/A';
+    }
+
+    // Check if it's MM/YYYY format (e.g., "12/2025" or "01/2026")
+    const mmYYYYMatch = dateValue.match(/^(\d{1,2})\/(\d{4})$/);
+    if (mmYYYYMatch) {
+      const month = parseInt(mmYYYYMatch[1], 10);
+      const year = parseInt(mmYYYYMatch[2], 10);
+      
+      // Create a date object for the first day of that month
+      const date = new Date(year, month - 1, 1);
+      
+      // Format as "Month Year" (e.g., "December 2025")
+      return date.toLocaleDateString('en-US', { 
+        month: 'long', 
+        year: 'numeric' 
+      });
+    }
+
+    // For other date formats, try to parse and format as month name
+    try {
+      const date = new Date(dateValue);
+      if (isNaN(date.getTime())) {
+        return dateValue; // Return original if parsing fails
+      }
+      return date.toLocaleDateString('en-US', { 
+        month: 'long', 
+        year: 'numeric' 
+      });
+    } catch {
+      return dateValue; // Return original if error
+    }
+  };
+
+  /**
+   * Check if a date is within the last 30 days
+   * Handles multiple date formats:
+   * - MM/YYYY format (e.g., "12/2025") - checks if month is within last 30 days
+   * - YYYY-MM-DD format (e.g., "2025-12-15")
+   * - ISO format (e.g., "2025-12-15T00:00:00.000Z")
+   * - Empty/null dates - returns true (include items without dates)
+   */
+  const isWithinLast30Days = (dateValue) => {
+    if (!dateValue || dateValue === 'N/A' || dateValue === '') {
+      // If no date, include the item (don't filter out)
+      return true;
+    }
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    
+    // Check if it's MM/YYYY format (e.g., "12/2025" or "01/2026")
+    const mmYYYYMatch = dateValue.match(/^(\d{1,2})\/(\d{4})$/);
+    if (mmYYYYMatch) {
+      const month = parseInt(mmYYYYMatch[1], 10);
+      const year = parseInt(mmYYYYMatch[2], 10);
+      
+      // Create date for the first day of that month
+      const itemDate = new Date(year, month - 1, 1);
+      // Create date for the last day of that month
+      const lastDayOfMonth = new Date(year, month, 0);
+      
+      // Check if the month overlaps with the last 30 days
+      // The month is within range if its last day is >= thirtyDaysAgo AND first day is <= now
+      return lastDayOfMonth >= thirtyDaysAgo && itemDate <= now;
+    }
+
+    // For other date formats (YYYY-MM-DD, ISO, etc.), try to parse directly
+    try {
+      const itemDate = new Date(dateValue);
+      if (isNaN(itemDate.getTime())) {
+        // Invalid date, include the item
+        return true;
+      }
+      return itemDate >= thirtyDaysAgo && itemDate <= now;
+    } catch {
+      // If parsing fails, include the item
+      return true;
+    }
+  };
+
+  /**
+   * Filter data array to only include items from the last 30 days
+   * @param {Array} data - Array of items with date field
+   * @param {string} dateField - Name of the date field (default: 'date')
+   * @returns {Array} Filtered array
+   */
+  const filterLast30Days = (data, dateField = 'date') => {
+    if (!Array.isArray(data)) return [];
+    return data.filter(item => isWithinLast30Days(item[dateField]));
+  };
+
   // Export to CSV - includes summary totals and all table data
   const exportToCSV = () => {
     const csvRows = [];
@@ -100,10 +195,10 @@ const ReimbursementDashboard = () => {
     const lostData = summary?.backendLostInventory?.data || [];
     if (lostData.length > 0) {
       csvRows.push('LOST INVENTORY DETAILS');
-      csvRows.push('Date,ASIN,SKU,FNSKU,Lost Units,Found Units,Reimbursed Units,Discrepancy Units,Expected Amount,Underpaid Amount,Status');
+      csvRows.push('Month,ASIN,SKU,FNSKU,Lost Units,Found Units,Reimbursed Units,Discrepancy Units,Expected Amount,Underpaid Amount,Status');
       lostData.forEach(item => {
         csvRows.push([
-          formatDate(item.date),
+          formatMonthName(item.date),
           item.asin || '',
           `"${(item.sku || '').replace(/"/g, '""')}"`,
           item.fnsku || '',
@@ -255,14 +350,58 @@ const ReimbursementDashboard = () => {
 
   const totalPages = Math.ceil(filteredReimbursements.length / itemsPerPage);
 
-  // Calculate totals for each reimbursement type
+  // Filter inventory data to last 30 days for display in tables
+  // Also exclude negative expected amounts (as per Refunds system)
+  // Note: Shipment data is NOT filtered (as requested)
+  const filteredLostInventoryData = useMemo(() => {
+    const rawData = summary?.backendLostInventory?.data || [];
+    const dateFiltered = filterLast30Days(rawData, 'date');
+    // Exclude negative or zero expected amounts (matching Refunds system behavior)
+    return dateFiltered.filter(item => (item.expectedAmount || 0) > 0);
+  }, [summary?.backendLostInventory?.data]);
+
+  const filteredDamagedInventoryData = useMemo(() => {
+    const rawData = summary?.backendDamagedInventory?.data || [];
+    const dateFiltered = filterLast30Days(rawData, 'date');
+    // Exclude negative or zero expected amounts (matching Refunds system behavior)
+    return dateFiltered.filter(item => (item.expectedAmount || 0) > 0);
+  }, [summary?.backendDamagedInventory?.data]);
+
+  const filteredDisposedInventoryData = useMemo(() => {
+    const rawData = summary?.backendDisposedInventory?.data || [];
+    const dateFiltered = filterLast30Days(rawData, 'date');
+    // Exclude negative or zero expected amounts (matching Refunds system behavior)
+    return dateFiltered.filter(item => (item.expectedAmount || 0) > 0);
+  }, [summary?.backendDisposedInventory?.data]);
+
+  const filteredFeeReimbursementData = useMemo(() => {
+    const rawData = summary?.backendFeeReimbursement?.data || [];
+    const dateFiltered = filterLast30Days(rawData, 'date');
+    // Exclude negative or zero expected amounts (matching Refunds system behavior)
+    return dateFiltered.filter(item => (item.expectedAmount || 0) > 0);
+  }, [summary?.backendFeeReimbursement?.data]);
+
+  // Calculate totals for each reimbursement type (using filtered data for display totals)
   const shipmentTotal = summary?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0;
-  const lostInventoryTotal = summary?.backendLostInventory?.totalExpectedAmount || 0;
-  const damagedInventoryTotal = summary?.backendDamagedInventory?.totalExpectedAmount || 0;
-  const disposedInventoryTotal = summary?.backendDisposedInventory?.totalExpectedAmount || 0;
-  const feeReimbursementTotal = summary?.backendFeeReimbursement?.totalExpectedAmount || 0;
   
-  // Calculate total reimbursement (sum of all types)
+  // Calculate totals from filtered data (last 30 days only)
+  const lostInventoryTotal = useMemo(() => {
+    return filteredLostInventoryData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+  }, [filteredLostInventoryData]);
+
+  const damagedInventoryTotal = useMemo(() => {
+    return filteredDamagedInventoryData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+  }, [filteredDamagedInventoryData]);
+
+  const disposedInventoryTotal = useMemo(() => {
+    return filteredDisposedInventoryData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+  }, [filteredDisposedInventoryData]);
+
+  const feeReimbursementTotal = useMemo(() => {
+    return filteredFeeReimbursementData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+  }, [filteredFeeReimbursementData]);
+  
+  // Calculate total reimbursement (sum of all types - using filtered totals)
   const totalReimbursement = shipmentTotal + lostInventoryTotal + damagedInventoryTotal + disposedInventoryTotal + feeReimbursementTotal;
 
   // Summary boxes data - One for total and one for each type
@@ -531,9 +670,9 @@ const ReimbursementDashboard = () => {
                   }`}
                 >
                   Lost Inventory
-                  {summary?.backendLostInventory?.data?.length > 0 && (
+                  {filteredLostInventoryData.length > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-600 rounded-full">
-                      {summary.backendLostInventory.data.length}
+                      {filteredLostInventoryData.length}
                     </span>
                   )}
                 </button>
@@ -546,9 +685,9 @@ const ReimbursementDashboard = () => {
                   }`}
                 >
                   Damaged Inventory
-                  {summary?.backendDamagedInventory?.data?.length > 0 && (
+                  {filteredDamagedInventoryData.length > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">
-                      {summary.backendDamagedInventory.data.length}
+                      {filteredDamagedInventoryData.length}
                     </span>
                   )}
                 </button>
@@ -561,9 +700,9 @@ const ReimbursementDashboard = () => {
                   }`}
                 >
                   Disposed Inventory
-                  {summary?.backendDisposedInventory?.data?.length > 0 && (
+                  {filteredDisposedInventoryData.length > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
-                      {summary.backendDisposedInventory.data.length}
+                      {filteredDisposedInventoryData.length}
                     </span>
                   )}
                 </button>
@@ -576,9 +715,9 @@ const ReimbursementDashboard = () => {
                   }`}
                 >
                   Fee Reimbursement
-                  {summary?.backendFeeReimbursement?.data?.length > 0 && (
+                  {filteredFeeReimbursementData.length > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-100 text-indigo-600 rounded-full">
-                      {summary.backendFeeReimbursement.data.length}
+                      {filteredFeeReimbursementData.length}
                     </span>
                   )}
                 </button>
@@ -641,14 +780,14 @@ const ReimbursementDashboard = () => {
               {/* Lost Inventory Tab */}
               {activeTab === 'lost' && (
                   <div>
-                  {summary?.backendLostInventory?.data?.length > 0 ? (
+                  {filteredLostInventoryData.length > 0 ? (
                     <>
                     <div className="flex items-center justify-between mb-4">
                         <p className="text-sm text-gray-600">
-                          {summary.backendLostInventory.itemCount || summary.backendLostInventory.data.length} items • {formatCurrency(summary.backendLostInventory.totalExpectedAmount || 0)} total
-                          {summary.backendLostInventory.data.filter(item => item.isUnderpaid).length > 0 && (
+                          {filteredLostInventoryData.length} items (last 30 days) • {formatCurrency(lostInventoryTotal)} total
+                          {filteredLostInventoryData.filter(item => item.isUnderpaid).length > 0 && (
                             <span className="ml-2 text-orange-600 font-medium">
-                              • {summary.backendLostInventory.data.filter(item => item.isUnderpaid).length} underpaid
+                              • {filteredLostInventoryData.filter(item => item.isUnderpaid).length} underpaid
                             </span>
                           )}
                         </p>
@@ -667,7 +806,7 @@ const ReimbursementDashboard = () => {
                       <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lost</th>
@@ -679,11 +818,11 @@ const ReimbursementDashboard = () => {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {summary.backendLostInventory.data
+                            {filteredLostInventoryData
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
                               <tr key={index} className={`hover:bg-gray-50 transition-colors ${item.isUnderpaid ? 'bg-orange-50' : ''}`}>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatMonthName(item.date)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.lostUnits || 0}</td>
@@ -728,11 +867,11 @@ const ReimbursementDashboard = () => {
               {/* Damaged Inventory Tab */}
               {activeTab === 'damaged' && (
                   <div>
-                  {summary?.backendDamagedInventory?.data?.length > 0 ? (
+                  {filteredDamagedInventoryData.length > 0 ? (
                     <>
                       <div className="mb-4">
                         <p className="text-sm text-gray-600">
-                          {summary.backendDamagedInventory.itemCount || summary.backendDamagedInventory.data.length} items • {formatCurrency(summary.backendDamagedInventory.totalExpectedAmount || 0)} total
+                          {filteredDamagedInventoryData.length} items (last 30 days) • {formatCurrency(damagedInventoryTotal)} total
                         </p>
                     </div>
                     <div className="overflow-x-auto">
@@ -751,7 +890,7 @@ const ReimbursementDashboard = () => {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {summary.backendDamagedInventory.data.map((item, index) => (
+                            {filteredDamagedInventoryData.map((item, index) => (
                               <tr key={index} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
@@ -779,11 +918,11 @@ const ReimbursementDashboard = () => {
               {/* Disposed Inventory Tab */}
               {activeTab === 'disposed' && (
                 <div>
-                  {summary?.backendDisposedInventory?.data?.length > 0 ? (
+                  {filteredDisposedInventoryData.length > 0 ? (
                     <>
                       <div className="mb-4">
                         <p className="text-sm text-gray-600">
-                          {summary.backendDisposedInventory.itemCount || summary.backendDisposedInventory.data.length} items • {formatCurrency(summary.backendDisposedInventory.totalExpectedAmount || 0)} total
+                          {filteredDisposedInventoryData.length} items (last 30 days) • {formatCurrency(disposedInventoryTotal)} total
                         </p>
             </div>
             <div className="overflow-x-auto">
@@ -802,7 +941,7 @@ const ReimbursementDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                            {summary.backendDisposedInventory.data.map((item, index) => (
+                            {filteredDisposedInventoryData.map((item, index) => (
                       <tr key={index} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
@@ -830,11 +969,11 @@ const ReimbursementDashboard = () => {
               {/* Fee Reimbursement Tab */}
               {activeTab === 'fee' && (
                 <div>
-                  {summary?.backendFeeReimbursement?.data?.length > 0 ? (
+                  {filteredFeeReimbursementData.length > 0 ? (
                     <>
                       <div className="mb-4">
                         <p className="text-sm text-gray-600">
-                          {summary.backendFeeReimbursement.itemCount || summary.backendFeeReimbursement.data.length} items • {formatCurrency(summary.backendFeeReimbursement.totalExpectedAmount || 0)} total
+                          {filteredFeeReimbursementData.length} items (last 30 days) • {formatCurrency(feeReimbursementTotal)} total
                         </p>
                       </div>
                       <div className="overflow-x-auto">
@@ -853,7 +992,7 @@ const ReimbursementDashboard = () => {
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
-                            {summary.backendFeeReimbursement.data.map((item, index) => (
+                            {filteredFeeReimbursementData.map((item, index) => (
                               <tr key={index} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>

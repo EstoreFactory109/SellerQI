@@ -869,8 +869,9 @@ class ScheduledIntegration {
             if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'].includes(functionKey)) {
                 return 1;
             }
-            // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursements
+            // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursement Data & Calculations
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
+                 'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement', 
                  'calculateDisposedInventoryReimbursement', 'calculateFeeReimbursement'].includes(functionKey)) {
                 return 2;

@@ -64,6 +64,8 @@ const { AnalyseService } = require('./Analyse.js');
 
 const GetProductWiseFBAData = require('../Sp_API/GetProductWiseFBAData.js');
 const GET_LEDGER_SUMMARY_VIEW_DATA = require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
+const GET_LEDGER_DETAIL_VIEW_DATA = require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js');
+const GET_FBA_REIMBURSEMENTS_DATA = require('../Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js');
 
 // MCP Services for Economics data
 const { fetchAndStoreEconomicsData } = require('../MCP/MCPEconomicsIntegration.js');
@@ -919,13 +921,23 @@ class Integration {
                 tokenManager.wrapSpApiFunction(GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken)
                     (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
                 tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                // Reimbursement data fetching (for complete reimbursement calculations on first sign-in)
+                tokenManager.wrapSpApiFunction(GET_LEDGER_SUMMARY_VIEW_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_LEDGER_DETAIL_VIEW_DATA, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_FBA_REIMBURSEMENTS_DATA, userId, RefreshToken, AdsRefreshToken)
                     (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
             );
             secondBatchServiceNames.push(
                 "Restock Inventory Recommendations",
                 "FBA Inventory Planning",
                 "Stranded Inventory",
-                "Inbound Non-Compliance"
+                "Inbound Non-Compliance",
+                "Ledger Summary View Data",
+                "Ledger Detail View Data",
+                "FBA Reimbursements Data"
             );
         }
 
@@ -952,11 +964,19 @@ class Integration {
             apiData.fbaInventoryPlanningData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
             apiData.strandedInventoryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
             apiData.inboundNonComplianceData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            // Reimbursement data results
+            apiData.ledgerSummaryData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.ledgerDetailViewData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
+            apiData.fbaReimbursementsData = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
         } else {
             apiData.RestockinventoryData = { success: false, data: null, error: "SP-API token not available" };
             apiData.fbaInventoryPlanningData = { success: false, data: null, error: "SP-API token not available" };
             apiData.strandedInventoryData = { success: false, data: null, error: "SP-API token not available" };
             apiData.inboundNonComplianceData = { success: false, data: null, error: "SP-API token not available" };
+            // Reimbursement data fallbacks
+            apiData.ledgerSummaryData = { success: false, data: null, error: "SP-API token not available" };
+            apiData.ledgerDetailViewData = { success: false, data: null, error: "SP-API token not available" };
+            apiData.fbaReimbursementsData = { success: false, data: null, error: "SP-API token not available" };
         }
 
         apiData.productReview = processApiResult(secondBatchResults[secondResultIndex++], secondBatchServiceNames[secondResultIndex - 1]);
@@ -1138,7 +1158,7 @@ class Integration {
         apiData.feesResult = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
         apiData.financeDataFromAPI = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
         apiData.feeProtectorData = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
-        apiData.ledgerSummaryData = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
+        // Note: ledgerSummaryData is now fetched in Second Batch for reimbursement calculations
         
         logger.info("Third Batch Ends");
 

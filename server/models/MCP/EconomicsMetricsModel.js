@@ -313,7 +313,6 @@ const economicsMetricsSchema = new mongoose.Schema({
     country: {
         type: String,
         required: true,
-        enum: ['US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU'],
         index: true
     },
     dateRange: {

@@ -1289,8 +1289,8 @@ const PPCDashboard = () => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `$${keyword.sales.toFixed(2)}`,
-          `$${keyword.spend.toFixed(2)}`
+          `${currency}${keyword.sales.toFixed(2)}`,
+          `${currency}${keyword.spend.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -1304,8 +1304,8 @@ const PPCDashboard = () => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `$${keyword.sales.toFixed(2)}`,
-          `$${keyword.spend.toFixed(2)}`,
+          `${currency}${keyword.sales.toFixed(2)}`,
+          `${currency}${keyword.spend.toFixed(2)}`,
           `${keyword.acos.toFixed(2)}%`,
           keyword.impressions.toLocaleString(),
           keyword.matchType || 'N/A',
@@ -1323,8 +1323,8 @@ const PPCDashboard = () => {
         csvData.push([
           insight.searchTerm,
           insight.campaignName,
-          `$${insight.sales.toFixed(2)}`,
-          `$${insight.spend.toFixed(2)}`,
+          `${currency}${insight.sales.toFixed(2)}`,
+          `${currency}${insight.spend.toFixed(2)}`,
           insight.clicks,
           `${insight.acos.toFixed(2)}%`,
           insight.action || 'Monitor Performance'
@@ -1341,8 +1341,8 @@ const PPCDashboard = () => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `$${keyword.sales.toFixed(2)}`,
-          `$${keyword.spend.toFixed(2)}`,
+          `${currency}${keyword.sales.toFixed(2)}`,
+          `${currency}${keyword.spend.toFixed(2)}`,
           keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`
         ]);
       });
@@ -1363,8 +1363,8 @@ const PPCDashboard = () => {
           term.searchTerm,
           term.campaignName,
           getAdGroupName(term),
-          `$${term.sales.toFixed(2)}`,
-          `$${term.spend.toFixed(2)}`,
+          `${currency}${term.sales.toFixed(2)}`,
+          `${currency}${term.spend.toFixed(2)}`,
           term.clicks || 0,
           term.impressions || 0,
           `${acos.toFixed(2)}%`
@@ -1381,7 +1381,7 @@ const PPCDashboard = () => {
         csvData.push([
           keyword.keywordText,
           keyword.campaignId,
-          `$${(keyword.bid || 0).toFixed(2)}`,
+          `${currency}${(keyword.bid || 0).toFixed(2)}`,
           keyword.matchType || 'N/A',
           keyword.state || 'N/A'
         ]);
@@ -1396,8 +1396,8 @@ const PPCDashboard = () => {
       chartData.forEach(day => {
         csvData.push([
           day.date,
-          `$${day.ppcSales.toFixed(2)}`,
-          `$${day.spend.toFixed(2)}`
+          `${currency}${day.ppcSales.toFixed(2)}`,
+          `${currency}${day.spend.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -1414,7 +1414,7 @@ const PPCDashboard = () => {
       costsForExport.forEach(item => {
         csvData.push([
           item.date,
-          `$${item.totalCost.toFixed(2)}`
+          `${currency}${item.totalCost.toFixed(2)}`
         ]);
       });
       csvData.push([]);
@@ -1569,7 +1569,7 @@ const PPCDashboard = () => {
                     }}
                     formatter={(value, name) => {
                       if (name === 'PPC Sales' || name === 'PPC Spend') {
-                        return [`$${parseFloat(value).toFixed(2)}`, name];
+                        return [formatCurrencyWithLocale(parseFloat(value), currency), name];
                       }
                       return [parseFloat(value).toFixed(2), name];
                     }}
@@ -1701,8 +1701,8 @@ const PPCDashboard = () => {
                                 return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
                                   <tr key={idx} className="border-b border-gray-200">
                                     <td className="w-2/5 py-4 px-2 text-sm text-gray-900 truncate">{campaign.campaignName}</td>
-                                    <td className="w-1/5 py-4 px-2 text-sm text-center">${campaign.totalSpend.toFixed(2)}</td>
-                                    <td className="w-1/5 py-4 px-2 text-sm text-center">${campaign.totalSales.toFixed(2)}</td>
+                                    <td className="w-1/5 py-4 px-2 text-sm text-center">{formatCurrencyWithLocale(campaign.totalSpend, currency)}</td>
+                                    <td className="w-1/5 py-4 px-2 text-sm text-center">{formatCurrencyWithLocale(campaign.totalSales, currency)}</td>
                                     <td className="w-1/5 py-4 px-2 text-sm text-center font-medium text-red-600">
                                       {campaign.acos.toFixed(2)}%
                                     </td>
@@ -1777,9 +1777,9 @@ const PPCDashboard = () => {
                                 <tr key={idx} className="border-b border-gray-200">
                                   <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
                                   <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                                  <td className="py-4 text-sm text-center">${keyword.sales.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
                                   <td className="py-4 text-sm text-center font-medium text-red-600">
-                                    ${keyword.spend.toFixed(2)}
+                                    {formatCurrencyWithLocale(keyword.spend, currency)}
                                   </td>
                                 </tr>
                               ));
@@ -1909,10 +1909,10 @@ const PPCDashboard = () => {
                                   <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
                                   <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
                                   <td className="py-4 text-sm text-center font-medium text-green-600">
-                                    ${keyword.sales.toFixed(2)}
+                                    {formatCurrencyWithLocale(keyword.sales, currency)}
                                   </td>
                                   <td className="py-4 text-sm text-center">
-                                    ${keyword.spend.toFixed(2)}
+                                    {formatCurrencyWithLocale(keyword.spend, currency)}
                                   </td>
                                   <td className="py-4 text-sm text-center font-medium text-green-600">
                                     {keyword.acos.toFixed(2)}%
@@ -1977,9 +1977,9 @@ const PPCDashboard = () => {
                                   <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
                                   <td className="py-4 text-sm text-gray-600">{getAdGroupName(term)}</td>
                                   <td className="py-4 text-sm text-center">{term.clicks}</td>
-                                  <td className="py-4 text-sm text-center">${term.sales.toFixed(2)}</td>
+                                  <td className="py-4 text-sm text-center">{formatCurrencyWithLocale(term.sales, currency)}</td>
                                   <td className="py-4 text-sm text-center font-medium text-red-600">
-                                    ${term.spend.toFixed(2)}
+                                    {formatCurrencyWithLocale(term.spend, currency)}
                                   </td>
                                 </tr>
                               ));
@@ -2040,7 +2040,7 @@ const PPCDashboard = () => {
                                     <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
                                     <td className="py-4 text-sm text-gray-600">{originalTerm ? getAdGroupName(originalTerm) : 'N/A'}</td>
                                     <td className="py-4 text-sm text-center font-medium text-green-600">
-                                      ${insight.sales.toFixed(2)}
+                                      {formatCurrencyWithLocale(insight.sales, currency)}
                                     </td>
                                     <td className="py-4 text-sm text-center font-medium">
                                       {insight.acos.toFixed(2)}%

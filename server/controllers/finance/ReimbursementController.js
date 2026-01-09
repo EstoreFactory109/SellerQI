@@ -92,62 +92,78 @@ const getReimbursementSummary = asyncHandler(async (req, res) => {
         }
 
         // Format lost inventory data for frontend
+        // Now includes reimbursedUnits from FBA Reimbursements report
+        // Date comes from ledger items (stored in MM/YYYY format, using most recent date per ASIN)
         const lostInventoryData = lostInventoryResult.data || [];
-        const formattedLostInventoryData = lostInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
-            asin: item.asin || '',
-            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-            fnsku: item.fnsku || '',
-            lostUnits: item.lostUnits || 0,
-            foundUnits: item.found || 0,
-            reimbursedUnits: 0, // This would come from actual reimbursement records
-            discrepancyUnits: item.lostUnits || 0,
-            expectedAmount: item.expectedAmount || 0,
-            isUnderpaid: false, // This would need to be calculated based on actual reimbursements
-            underpaidExpectedAmount: 0
-        }));
+        const formattedLostInventoryData = lostInventoryData
+            .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
+            .map(item => ({
+                date: item.date || '', // Date from ledger item (MM/YYYY format, most recent per ASIN)
+                asin: item.asin || '',
+                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+                fnsku: item.fnsku || '',
+                lostUnits: item.lostUnits || 0,
+                foundUnits: item.foundUnits || 0,
+                reimbursedUnits: item.reimbursedUnits || 0, // Now from FBA Reimbursements report
+                discrepancyUnits: item.discrepancyUnits || 0, // Now calculated as: lost - found - reimbursed
+                expectedAmount: item.expectedAmount || 0,
+                isUnderpaid: false, // This would need to be calculated based on actual reimbursements
+                underpaidExpectedAmount: 0
+            }));
 
         // Format damaged inventory data for frontend
+        // Now includes referenceId and reasonCode from Ledger Detail report
         const damagedInventoryData = damagedInventoryResult.data || [];
-        const formattedDamagedInventoryData = damagedInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
-            asin: item.asin || '',
-            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-            fnsku: item.fnsku || '',
-            damagedUnits: item.damagedUnits || 0,
-            salesPrice: item.salesPrice || 0,
-            fees: item.estimatedFees || 0,
-            reimbursementPerUnit: item.reimbursementPerUnit || 0,
-            expectedAmount: item.expectedAmount || 0
-        }));
+        const formattedDamagedInventoryData = damagedInventoryData
+            .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
+            .map(item => ({
+                date: item.date || new Date().toISOString().split('T')[0],
+                referenceId: item.referenceId || '',
+                asin: item.asin || '',
+                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+                fnsku: item.fnsku || '',
+                reasonCode: item.reasonCode || '',
+                damagedUnits: item.damagedUnits || 0,
+                salesPrice: item.salesPrice || 0,
+                fees: item.estimatedFees || 0,
+                reimbursementPerUnit: item.reimbursementPerUnit || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
 
         // Format disposed inventory data for frontend
+        // Now includes referenceId and disposition from Ledger Detail report
         const disposedInventoryData = disposedInventoryResult.data || [];
-        const formattedDisposedInventoryData = disposedInventoryData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
-            asin: item.asin || '',
-            sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
-            fnsku: item.fnsku || '',
-            disposedUnits: item.disposedUnits || 0,
-            salesPrice: item.salesPrice || 0,
-            fees: item.estimatedFees || 0,
-            reimbursementPerUnit: item.reimbursementPerUnit || 0,
-            expectedAmount: item.expectedAmount || 0
-        }));
+        const formattedDisposedInventoryData = disposedInventoryData
+            .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
+            .map(item => ({
+                date: item.date || new Date().toISOString().split('T')[0],
+                referenceId: item.referenceId || '',
+                asin: item.asin || '',
+                sku: asinToSkuMap.get(item.asin) || '', // Get SKU from ASIN mapping
+                fnsku: item.fnsku || '',
+                disposition: item.disposition || '',
+                disposedUnits: item.disposedUnits || 0,
+                salesPrice: item.salesPrice || 0,
+                fees: item.estimatedFees || 0,
+                reimbursementPerUnit: item.reimbursementPerUnit || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
 
         // Format fee reimbursement data for frontend
         const feeReimbursementData = feeReimbursementResult.data || [];
-        const formattedFeeReimbursementData = feeReimbursementData.map(item => ({
-            date: new Date().toISOString().split('T')[0],
-            asin: item.asin || '',
-            fnsku: item.fnsku || '',
-            productName: item.productName || '',
-            chargedFees: item.chargedFees || 0,
-            actualFees: item.actualFees || 0,
-            feeDifference: item.feeDifference || 0,
-            unitsSold: item.unitsSold || 0,
-            expectedAmount: item.expectedAmount || 0
-        }));
+        const formattedFeeReimbursementData = feeReimbursementData
+            .filter(item => (item.expectedAmount || 0) > 0) // Exclude negative or zero amounts (matching Refunds system)
+            .map(item => ({
+                date: new Date().toISOString().split('T')[0],
+                asin: item.asin || '',
+                fnsku: item.fnsku || '',
+                productName: item.productName || '',
+                chargedFees: item.chargedFees || 0,
+                actualFees: item.actualFees || 0,
+                feeDifference: item.feeDifference || 0,
+                unitsSold: item.unitsSold || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
 
         // Calculate total recoverable (sum of all types)
         const totalRecoverable = 

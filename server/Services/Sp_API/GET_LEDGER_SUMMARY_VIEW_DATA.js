@@ -5,26 +5,17 @@ const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel');
 
-const generateReport = async (accessToken, marketplaceIds, baseuri, dataStartTime = null, dataEndTime = null) => {
+const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     try {
-        // Use provided dates or calculate dynamic default dates
-        // Default: Last 31 days ending yesterday (due to 24h data delay)
-        let StartTime, EndTime;
-        if (dataStartTime && dataEndTime) {
-            StartTime = new Date(dataStartTime);
-            EndTime = new Date(dataEndTime);
-        } else {
-            // Dynamic dates: yesterday as end, 31 days before today as start
-            // Example: If today is Dec 27, EndTime is Dec 26, StartTime is Nov 26
-            const now = new Date();
-            EndTime = new Date(now);
-            EndTime.setDate(EndTime.getDate() - 1);
-            EndTime.setHours(23, 59, 59, 999); // End of yesterday
-            
-            StartTime = new Date(now);
-            StartTime.setDate(StartTime.getDate() - 31);
-            StartTime.setHours(0, 0, 0, 0); // Start of 31 days ago
-        }
+        // Fixed date range: Last 9 months (for Lost Inventory reimbursement calculations)
+        // Custom date ranges are NOT supported - always uses 9 months
+        const now = new Date();
+        const EndTime = new Date(now);
+        EndTime.setHours(23, 59, 59, 999); // End of today
+        
+        const StartTime = new Date(now);
+        StartTime.setMonth(StartTime.getMonth() - 9);
+        StartTime.setHours(0, 0, 0, 0); // Start of 9 months ago
         
         const requestBody = {
             reportType: "GET_LEDGER_SUMMARY_VIEW_DATA",
@@ -139,7 +130,7 @@ const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
     }
 };
 
-const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, region, dataStartTime = null, dataEndTime = null) => {
+const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, region) => {
     if (!accessToken || !marketplaceIds) {
         throw new ApiError(400, "Credentials are missing");
     }
@@ -151,7 +142,8 @@ const getReport = async (accessToken, marketplaceIds, baseuri, userId, country, 
     try {
         logger.info("GET_LEDGER_SUMMARY_VIEW_DATA starting");
         
-        const reportId = await generateReport(accessToken, marketplaceIds, baseuri, dataStartTime, dataEndTime);
+        // Fixed 9-month date range - no custom dates accepted
+        const reportId = await generateReport(accessToken, marketplaceIds, baseuri);
         if (!reportId) {
             logger.error(new ApiError(408, "Report generation failed"));
             return {
@@ -283,15 +275,34 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         // Use csv-parse with custom column transformation to normalize headers
+        let originalHeaders = [];
         const records = parse(tsv, {
-            columns: (headers) => headers.map(h => {
-                let header = h.trim();
-                if (header.startsWith('"') && header.endsWith('"')) {
-                    header = header.slice(1, -1);
-                }
+            columns: (headers) => {
+                // Store original headers for logging
+                originalHeaders = headers.map(h => {
+                    let header = h.trim();
+                    if (header.startsWith('"') && header.endsWith('"')) {
+                        header = header.slice(1, -1);
+                    }
+                    return header;
+                });
+                
+                // Log original headers to verify date column exists
+                logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Original TSV headers:', originalHeaders);
+                logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Looking for date column (case-insensitive):', 
+                    originalHeaders.filter(h => h.toLowerCase().includes('date')).join(', ') || 'NOT FOUND'
+                );
+                
                 // Normalize: lowercase, replace hyphens and spaces with underscores
-                return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
-            }),
+                return headers.map(h => {
+                    let header = h.trim();
+                    if (header.startsWith('"') && header.endsWith('"')) {
+                        header = header.slice(1, -1);
+                    }
+                    // Normalize: lowercase, replace hyphens and spaces with underscores
+                    return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
+                });
+            },
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,
@@ -299,6 +310,24 @@ function convertTSVToJson(tsvBuffer) {
             skip_records_with_error: true,
             relax_quotes: true
         });
+
+        // Log normalized headers and sample record to verify date field
+        if (records.length > 0) {
+            const normalizedHeaders = Object.keys(records[0]);
+            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Normalized headers:', normalizedHeaders);
+            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Date field in normalized headers:', 
+                normalizedHeaders.filter(h => h.includes('date')).join(', ') || 'NOT FOUND'
+            );
+            
+            // Log sample record to see actual data structure
+            const sampleRecord = records[0];
+            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Sample record keys:', Object.keys(sampleRecord).join(', '));
+            if (sampleRecord.date) {
+                logger.info(`[GET_LEDGER_SUMMARY_VIEW_DATA] ✅ Date field found! Sample date value: "${sampleRecord.date}"`);
+            } else {
+                logger.warn(`[GET_LEDGER_SUMMARY_VIEW_DATA] ⚠️ Date field NOT found in sample record. Available fields: ${Object.keys(sampleRecord).join(', ')}`);
+            }
+        }
 
         logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV parsed successfully', { 
             totalRecords: records.length 

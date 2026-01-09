@@ -118,8 +118,35 @@ const OTHER_DAYS_FUNCTIONS = {
     }
 };
 
-// Saturday (weekly) - Reimbursement calculation functions
+// Saturday (weekly) - Reimbursement data fetching and calculation functions
+// Note: Data fetching functions run first to ensure fresh data for calculations
 const SATURDAY_FUNCTIONS = {
+    // Data fetching for reimbursement calculations
+    'ledgerSummaryViewData': {
+        service: require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js'),
+        functionName: null, // Default export
+        description: 'Ledger Summary View Data (for Lost/Found Units)',
+        requiresAccessToken: true,
+        apiDataKey: 'ledgerSummaryViewData',
+        isDefaultExport: true
+    },
+    'ledgerDetailViewData': {
+        service: require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js'),
+        functionName: null, // Default export
+        description: 'Ledger Detail View Data (for Damaged/Disposed)',
+        requiresAccessToken: true,
+        apiDataKey: 'ledgerDetailViewData',
+        isDefaultExport: true
+    },
+    'fbaReimbursementsData': {
+        service: require('../Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js'),
+        functionName: null, // Default export
+        description: 'FBA Reimbursements Data (for Lost Inventory)',
+        requiresAccessToken: true,
+        apiDataKey: 'fbaReimbursementsData',
+        isDefaultExport: true
+    },
+    // Reimbursement calculation functions
     'calculateShipmentDiscrepancy': {
         service: require('../Calculations/Reimbursement.js'),
         functionName: 'calculateShipmentDiscrepancy',
