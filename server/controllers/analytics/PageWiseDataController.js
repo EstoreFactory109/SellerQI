@@ -16,6 +16,8 @@ const { AnalyseService } = require('../../Services/main/Analyse.js');
 const { analyseData } = require('../../Services/Calculations/DashboardCalculation.js');
 const CreateTaskService = require('../../Services/Calculations/CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
+const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 
 /**
  * Get full dashboard data - calculates all data in backend
@@ -552,6 +554,136 @@ const getInventoryData = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get ASIN-wise sales data for profitability table
+ * This is a separate endpoint to handle big accounts where asinWiseSales is stored separately
+ * to avoid memory issues with the main dashboard endpoint.
+ * 
+ * For normal accounts: Returns asinWiseSales from EconomicsMetrics
+ * For big accounts (isBig=true): Returns asinWiseSales from AsinWiseSalesForBigAccounts collection
+ */
+const getAsinWiseSalesData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const region = req.region;
+    const country = req.country;
+
+    try {
+        logger.info(`Getting ASIN-wise sales data for user ${userId}`, { country, region });
+
+        // Get the latest EconomicsMetrics document
+        const economicsMetrics = await EconomicsMetrics.findOne({
+            User: userId,
+            country: country,
+            region: region
+        }).sort({ createdAt: -1 });
+
+        if (!economicsMetrics) {
+            logger.warn('No economics metrics found for ASIN-wise sales', { userId, country, region });
+            return res.status(200).json(
+                new ApiResponse(200, { asinWiseSales: [], isBig: false }, "No economics metrics data found")
+            );
+        }
+
+        let asinWiseSales = [];
+        const totalSalesAmount = economicsMetrics.totalSales?.amount || 0;
+
+        logger.info('ASIN-wise sales endpoint - checking data source', {
+            userId,
+            country,
+            region,
+            isBig: economicsMetrics.isBig,
+            totalSales: totalSalesAmount,
+            asinWiseSalesInDoc: economicsMetrics.asinWiseSales?.length || 0
+        });
+
+        // Try to fetch from separate collection if:
+        // 1. isBig is explicitly true, OR
+        // 2. totalSales > 5000 and asinWiseSales is empty (legacy data that might have been migrated)
+        const shouldTrySeparateCollection = economicsMetrics.isBig === true || 
+            (totalSalesAmount > 5000 && (!economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0));
+
+        if (shouldTrySeparateCollection) {
+            // Try fetching from separate collection for big accounts
+            try {
+                const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
+                
+                if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
+                    // Flatten all ASIN sales from all date documents
+                    bigAccountAsinDocs.forEach(doc => {
+                        const docDate = doc.date;
+                        if (doc.asinSales && Array.isArray(doc.asinSales)) {
+                            doc.asinSales.forEach(asinSale => {
+                                asinWiseSales.push({
+                                    date: docDate === 'no_date' ? null : docDate,
+                                    asin: asinSale.asin,
+                                    parentAsin: asinSale.parentAsin,
+                                    sales: asinSale.sales,
+                                    grossProfit: asinSale.grossProfit,
+                                    unitsSold: asinSale.unitsSold,
+                                    refunds: asinSale.refunds,
+                                    ppcSpent: asinSale.ppcSpent,
+                                    fbaFees: asinSale.fbaFees,
+                                    storageFees: asinSale.storageFees,
+                                    amazonFees: asinSale.amazonFees,
+                                    totalFees: asinSale.totalFees,
+                                    feeBreakdown: asinSale.feeBreakdown
+                                });
+                            });
+                        }
+                    });
+                    
+                    logger.info('Fetched ASIN-wise sales from separate collection for big account', {
+                        userId,
+                        country,
+                        region,
+                        totalRecords: asinWiseSales.length,
+                        totalDates: bigAccountAsinDocs.length
+                    });
+                } else {
+                    // No data in separate collection - fall back to main document (legacy data)
+                    logger.info('No data in separate collection, falling back to main document', {
+                        userId,
+                        country,
+                        region
+                    });
+                    asinWiseSales = economicsMetrics.asinWiseSales || [];
+                }
+            } catch (fetchError) {
+                logger.error('Error fetching ASIN data for big account, falling back to main document', {
+                    metricsId: economicsMetrics._id,
+                    error: fetchError.message
+                });
+                // Fallback to main document
+                asinWiseSales = economicsMetrics.asinWiseSales || [];
+            }
+        } else {
+            // Normal account - get from main document
+            asinWiseSales = economicsMetrics.asinWiseSales || [];
+            logger.info('Returning ASIN-wise sales from main document', {
+                userId,
+                country,
+                region,
+                totalRecords: asinWiseSales.length
+            });
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                asinWiseSales: asinWiseSales,
+                isBig: economicsMetrics.isBig || false,
+                dateRange: economicsMetrics.dateRange,
+                metricsId: economicsMetrics._id
+            }, "ASIN-wise sales data retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getAsinWiseSalesData:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting ASIN-wise sales data: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     getDashboardData,
     getProfitabilityData,
@@ -562,6 +694,7 @@ module.exports = {
     getReimbursementData,
     getTasksData,
     updateTaskStatus,
-    getInventoryData
+    getInventoryData,
+    getAsinWiseSalesData
 };
 

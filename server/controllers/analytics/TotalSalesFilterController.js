@@ -13,6 +13,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
@@ -455,7 +456,49 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
             });
             
             // Process ASIN-wise sales data
-            const asinWiseSales = metrics.asinWiseSales || [];
+            // For big accounts (isBig=true), asinWiseSales is stored in a separate collection
+            let asinWiseSales = metrics.asinWiseSales || [];
+            
+            // If this is a big account and asinWiseSales is empty, fetch from separate collection
+            if (metrics.isBig && asinWiseSales.length === 0) {
+                try {
+                    const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(metrics._id);
+                    if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
+                        // Flatten all ASIN sales from all date documents
+                        bigAccountAsinDocs.forEach(doc => {
+                            const docDate = doc.date;
+                            if (doc.asinSales && Array.isArray(doc.asinSales)) {
+                                doc.asinSales.forEach(asinSale => {
+                                    asinWiseSales.push({
+                                        date: docDate === 'no_date' ? null : docDate,
+                                        asin: asinSale.asin,
+                                        parentAsin: asinSale.parentAsin,
+                                        sales: asinSale.sales,
+                                        grossProfit: asinSale.grossProfit,
+                                        unitsSold: asinSale.unitsSold,
+                                        refunds: asinSale.refunds,
+                                        ppcSpent: asinSale.ppcSpent,
+                                        fbaFees: asinSale.fbaFees,
+                                        storageFees: asinSale.storageFees,
+                                        amazonFees: asinSale.amazonFees,
+                                        totalFees: asinSale.totalFees
+                                    });
+                                });
+                            }
+                        });
+                        logger.debug('Fetched ASIN-wise sales from separate collection for big account', {
+                            metricsId: metrics._id,
+                            totalAsinRecords: asinWiseSales.length
+                        });
+                    }
+                } catch (fetchError) {
+                    logger.error('Error fetching ASIN data for big account', {
+                        metricsId: metrics._id,
+                        error: fetchError.message
+                    });
+                }
+            }
+            
             asinWiseSales.forEach(item => {
                 // Check if item has a date field (for daily breakdown)
                 if (item.date) {

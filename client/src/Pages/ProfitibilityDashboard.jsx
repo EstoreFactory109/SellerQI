@@ -153,8 +153,11 @@ const ProfitabilityDashboard = () => {
   // Get profitability data to calculate net profit
   const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
   
-  // Get total sales data
+  // Get total sales data (legacy)
   const totalSalesData = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalSales) || [];
+  
+  // Get EconomicsMetrics data (new source for datewise sales and gross profit)
+  const economicsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.economicsMetrics);
   
   // Get account finance data for fees
   const accountFinance = useSelector((state) => state.Dashboard.DashBoardInfo?.accountFinance) || {};
@@ -213,7 +216,34 @@ const ProfitabilityDashboard = () => {
       }));
     }
     
-    // Prioritize filtered TotalSales data from Redux (calendar selection)
+    // PRIMARY: Use EconomicsMetrics datewiseSales (includes grossProfit directly)
+    // For legacy data, backend aggregates from asinWiseSales automatically
+    if (economicsMetrics?.datewiseSales && Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
+      
+      // Transform datewiseSales for the chart - grossProfit is included in datewiseSales directly
+      return economicsMetrics.datewiseSales
+        .map(item => {
+          if (!item.date) return null;
+          
+          const date = new Date(item.date);
+          const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const totalSales = item.sales?.amount || 0;
+          const grossProfit = item.grossProfit?.amount || 0;
+          
+          return {
+            date: dateKey,
+            originalDate: item.date, // Keep original date for sorting
+            grossProfit: parseFloat(grossProfit.toFixed(2)),
+            totalSales: parseFloat(totalSales.toFixed(2))
+          };
+        })
+        .filter(item => item !== null)
+        .sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate))
+        .map(({ originalDate, ...rest }) => rest); // Remove originalDate from final output
+    }
+    
+    // FALLBACK 1: Use filtered TotalSales data from Redux (legacy calendar selection)
+    // This provides actual daily variations, so use it before even distribution
     if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
       // Calculate total fees from account finance data
       const filteredAccountFinance = info?.accountFinance || accountFinance;
@@ -246,7 +276,8 @@ const ProfitabilityDashboard = () => {
       }).filter(item => item !== null);
     }
     
-    // Fallback to original TotalSales data if available
+    // FALLBACK 2: Use original TotalSales data if available (legacy)
+    // This also provides actual daily variations
     if (Array.isArray(info?.TotalSales) && info.TotalSales.length > 0) {
       // Calculate total fees from account finance data
       const totalFees = (parseFloat(accountFinance.FBA_Fees) || 0) + 
@@ -276,9 +307,39 @@ const ProfitabilityDashboard = () => {
       }).filter(item => item !== null);
     }
     
+    // FALLBACK 3 (LAST RESORT): EconomicsMetrics has totals but no daily breakdown
+    // Generate approximate daily data by distributing totals evenly (shows as straight line)
+    // This is the worst-case fallback when no actual daily data exists
+    if (economicsMetrics?.totalSales?.amount && economicsMetrics?.dateRange?.startDate && economicsMetrics?.dateRange?.endDate) {
+      console.log('Using economicsMetrics totals to generate chart data (even distribution - last resort)');
+      
+      const startDate = new Date(economicsMetrics.dateRange.startDate);
+      const endDate = new Date(economicsMetrics.dateRange.endDate);
+      const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      
+      if (daysDiff > 0 && daysDiff <= 60) { // Reasonable range (max 60 days)
+        const dailySales = (economicsMetrics.totalSales?.amount || 0) / daysDiff;
+        const dailyGrossProfit = (economicsMetrics.grossProfit?.amount || 0) / daysDiff;
+        
+        const chartDataFromTotals = [];
+        for (let i = 0; i < daysDiff; i++) {
+          const currentDate = new Date(startDate);
+          currentDate.setDate(startDate.getDate() + i);
+          
+          chartDataFromTotals.push({
+            date: currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            totalSales: parseFloat(dailySales.toFixed(2)),
+            grossProfit: parseFloat(dailyGrossProfit.toFixed(2))
+          });
+        }
+        
+        return chartDataFromTotals;
+      }
+    }
+    
     // Final fallback: Return empty data with zero values
     return createEmptyProfitabilityData();
-  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode]);
+  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode, economicsMetrics]);
 
   // Get COGs values from Redux store
   const cogsValues = useSelector((state) => state.cogs.cogsValues);

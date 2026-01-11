@@ -405,6 +405,12 @@ const economicsMetricsSchema = new mongoose.Schema({
         type: String,
         enum: ['DataKiosk', 'SP-API'],
         default: 'DataKiosk'
+    },
+    // Flag for big accounts (totalSales > 5000)
+    // When true, asinWiseSales is stored in a separate collection (AsinWiseSalesForBigAccounts)
+    isBig: {
+        type: Boolean,
+        default: false
     }
 }, {
     timestamps: true

@@ -21,7 +21,8 @@ const {
     getReimbursementData,
     getTasksData,
     updateTaskStatus,
-    getInventoryData
+    getInventoryData,
+    getAsinWiseSalesData
 } = require('../controllers/analytics/PageWiseDataController.js');
 
 const {
@@ -45,6 +46,11 @@ router.get('/dashboard', auth, getLocation, analyseDataCache(3600, 'dashboard'),
 // ===== PROFITABILITY DASHBOARD =====
 // Returns profitability-specific calculated data
 router.get('/profitability', auth, getLocation, analyseDataCache(3600, 'profitability'), getProfitabilityData);
+
+// ===== ASIN-WISE SALES DATA =====
+// Returns ASIN-wise sales data for profitability table
+// Separate endpoint to handle big accounts where data is stored in separate collection
+router.get('/asin-wise-sales', auth, getLocation, getAsinWiseSalesData);
 
 // ===== PPC/SPONSORED ADS DASHBOARD =====
 // Returns PPC/sponsored ads specific calculated data

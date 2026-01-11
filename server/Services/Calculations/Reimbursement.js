@@ -5,6 +5,7 @@ const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js'
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
 const ProductWiseFBAData = require('../../models/inventory/ProductWiseFBADataModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const { calculateFees } = require('./ActualFeesCalculations.js');
 const logger = require('../../utils/Logger.js');
 
@@ -1473,10 +1474,44 @@ const calculateFeeReimbursement = async (userId, country, region) => {
 
         // Create a map of ASIN to total units sold (summed across all dates)
         const asinToUnitsSoldMap = new Map();
-        if (economicsMetrics && economicsMetrics.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
-            logger.info(`Processing ${economicsMetrics.asinWiseSales.length} ASIN-wise sales records from EconomicsMetrics`);
+        
+        // Get asinWiseSales - either from main document or separate collection (for big accounts)
+        let asinWiseSales = [];
+        
+        if (economicsMetrics) {
+            // For big accounts (isBig=true), asinWiseSales is stored in a separate collection
+            if (economicsMetrics.isBig && (!economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0)) {
+                try {
+                    const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
+                    if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
+                        // Flatten all ASIN sales from all date documents
+                        bigAccountAsinDocs.forEach(doc => {
+                            if (doc.asinSales && Array.isArray(doc.asinSales)) {
+                                doc.asinSales.forEach(asinSale => {
+                                    asinWiseSales.push({
+                                        asin: asinSale.asin,
+                                        unitsSold: asinSale.unitsSold
+                                    });
+                                });
+                            }
+                        });
+                        logger.info(`Fetched ${asinWiseSales.length} ASIN-wise sales from separate collection for big account`);
+                    }
+                } catch (fetchError) {
+                    logger.error('Error fetching ASIN data for big account in Reimbursement', {
+                        metricsId: economicsMetrics._id,
+                        error: fetchError.message
+                    });
+                }
+            } else if (economicsMetrics.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
+                asinWiseSales = economicsMetrics.asinWiseSales;
+            }
+        }
+        
+        if (asinWiseSales.length > 0) {
+            logger.info(`Processing ${asinWiseSales.length} ASIN-wise sales records from EconomicsMetrics`);
             
-            economicsMetrics.asinWiseSales.forEach(sale => {
+            asinWiseSales.forEach(sale => {
                 if (sale.asin) {
                     const asin = sale.asin.trim();
                     // unitsSold is per day per ASIN, so we sum across all dates

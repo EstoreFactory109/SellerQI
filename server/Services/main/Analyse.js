@@ -369,8 +369,31 @@ class AnalyseService {
         // Convert single ProductWiseSponsoredAds result to array format for backward compatibility
         const ProductWiseSponsoredAdsArray = ProductWiseSponsoredAds ? [ProductWiseSponsoredAds] : [];
 
+        // For big accounts (totalSales > 5000), asinWiseSales is stored in a separate collection
+        // NOTE: We do NOT combine asinWiseSales here to avoid memory issues with large accounts
+        // The asinWiseSales array can have 15,000+ records for big accounts, causing heap overflow
+        // Instead, we pass the metrics as-is and handle big accounts in specific calculations that need it
+        let processedEconomicsMetricsData = economicsMetricsData;
+        if (economicsMetricsData && economicsMetricsData.toObject) {
+            processedEconomicsMetricsData = economicsMetricsData.toObject();
+        }
+        
+        // Debug: Log ASIN data availability
+        if (processedEconomicsMetricsData) {
+            logger.info('Analyse.js - EconomicsMetrics ASIN data check', {
+                userId,
+                country,
+                region,
+                isBig: processedEconomicsMetricsData.isBig,
+                totalSales: processedEconomicsMetricsData.totalSales?.amount,
+                asinWiseSalesLength: processedEconomicsMetricsData.asinWiseSales?.length || 0,
+                hasAsinWiseSales: !!processedEconomicsMetricsData.asinWiseSales,
+                isArray: Array.isArray(processedEconomicsMetricsData.asinWiseSales)
+            });
+        }
+
         console.log("v2Data: ", v2Data);
-        console.log("economicsMetricsData: ", economicsMetricsData ? 'Found' : 'Not Found');
+        console.log("economicsMetricsData: ", processedEconomicsMetricsData ? 'Found' : 'Not Found');
         
         // DEBUG: Log adsKeywordsPerformanceData query result
         logger.info('=== DEBUG: adsKeywordsPerformanceData in Analyse.js ===');
@@ -397,16 +420,16 @@ class AnalyseService {
         
         // Convert EconomicsMetrics to legacy financeData format for backward compatibility
         // Uses Ads API PPC spend as PRIMARY source (not MCP Economics ppcSpent)
-        const financeData = this.convertEconomicsToFinanceFormat(economicsMetricsData, adsPPCSpend);
+        const financeData = this.convertEconomicsToFinanceFormat(processedEconomicsMetricsData, adsPPCSpend);
         
         // Convert EconomicsMetrics to legacy TotalSales format for backward compatibility
-        const TotalSales = this.convertEconomicsToTotalSalesFormat(economicsMetricsData);
+        const TotalSales = this.convertEconomicsToTotalSalesFormat(processedEconomicsMetricsData);
 
         // Log missing data warnings
         const missingDataWarnings = [];
         if (!v2Data) missingDataWarnings.push('v2Data');
         if (!v1Data) missingDataWarnings.push('v1Data');
-        if (!economicsMetricsData) missingDataWarnings.push('economicsMetricsData');
+        if (!processedEconomicsMetricsData) missingDataWarnings.push('economicsMetricsData');
         // ... add other checks as needed
 
         if (missingDataWarnings.length > 0) {
@@ -429,7 +452,7 @@ class AnalyseService {
             v2Data,
             v1Data,
             financeData,
-            economicsMetricsData, // New: raw economics data for profitability calculations
+            economicsMetricsData: processedEconomicsMetricsData, // Raw economics data with asinWiseSales combined for big accounts
             buyBoxData: buyBoxDataPlain, // Already a plain object from .lean()
             restockInventoryRecommendationsData,
             numberOfProductReviews,
@@ -861,6 +884,10 @@ class AnalyseService {
                 datewiseGrossProfit: economicsMetrics.datewiseGrossProfit,
                 asinWiseSales: economicsMetrics.asinWiseSales,
                 dateRange: economicsMetrics.dateRange,
+                // Flag for big accounts (totalSales > 10000) - asinWiseSales stored in separate collection
+                isBig: economicsMetrics.isBig || false,
+                // Metrics document ID needed for fetching ASIN data from separate collection
+                _id: economicsMetrics._id,
                 // When this data was fetched (from DataFetchTracking)
                 fetchInfo: trackingInfo
             } : null,

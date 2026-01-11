@@ -5,6 +5,7 @@ import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Search, Filter, ChevronDown, Package, Eye, Activity, Star, TrendingUp, BarChart3, ArrowRight, Download } from 'lucide-react';
+import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import noImage from '../assets/Icons/no-image.png';
 
 // Helper function to format messages with important details highlighted on separate line
@@ -441,6 +442,7 @@ const InventoryIssuesTable = ({ product }) => {
 
 const IssuesByProduct = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+    const currency = useSelector(state => state.currency?.currency) || '$';
     const navigate = useNavigate();
     // Enhanced state management
     const [currentPage, setCurrentPage] = useState(0);
@@ -1100,7 +1102,7 @@ const IssuesByProduct = () => {
                                                                 <span className="font-medium">SKU:</span> {product.sku}
                                                             </span>
                                                             <span className="flex items-center gap-1">
-                                                                <span className="font-medium">Price:</span> ${product.price}
+                                                                <span className="font-medium">Price:</span> {formatCurrencyWithLocale(product.price || 0, currency)}
                                                             </span>
                                                         </div>
                                                         <div className="flex items-center gap-3 mt-3">

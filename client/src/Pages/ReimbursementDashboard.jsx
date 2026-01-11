@@ -353,10 +353,11 @@ const ReimbursementDashboard = () => {
   }, [summary?.backendDisposedInventory?.data]);
 
 
-  // Calculate totals for each reimbursement type (using filtered data for display totals)
+  // Calculate totals for each reimbursement type
+  // Shipment: Use backend all-time total (no filtering)
   const shipmentTotal = summary?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0;
   
-  // Calculate totals from filtered data (last 30 days only)
+  // Lost, Damaged, Disposed: Calculate from filtered data (last 30 days only)
   const lostInventoryTotal = useMemo(() => {
     return filteredLostInventoryData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
   }, [filteredLostInventoryData]);
@@ -369,7 +370,7 @@ const ReimbursementDashboard = () => {
     return filteredDisposedInventoryData.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
   }, [filteredDisposedInventoryData]);
   
-  // Calculate total reimbursement (sum of all types - using filtered totals)
+  // Calculate total reimbursement (sum of all types)
   const totalReimbursement = shipmentTotal + lostInventoryTotal + damagedInventoryTotal + disposedInventoryTotal;
 
   // Summary boxes data - One for total and one for each type

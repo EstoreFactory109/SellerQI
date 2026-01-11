@@ -14,6 +14,7 @@ const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = requi
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
+const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 
 /**
  * Get PPC sales from EconomicsMetrics for ACOS/TACOS calculations
@@ -23,10 +24,13 @@ const logger = require('../../utils/Logger.js');
  * the stored pre-aggregated value. This guarantees that:
  * - Page load totalSales === Custom filter totalSales (for same dates)
  * 
+ * NOTE: For big accounts (isBig=true), asinWiseSales is fetched from separate collection
+ * to avoid memory issues. The data is aggregated to asinPpcSales (smaller object).
+ * 
  * @param {Object} economicsMetrics - EconomicsMetrics data
- * @returns {Object} PPC sales data with total and per-ASIN breakdown
+ * @returns {Promise<Object>} PPC sales data with total and per-ASIN breakdown
  */
-const getPpcSalesFromEconomics = (economicsMetrics) => {
+const getPpcSalesFromEconomics = async (economicsMetrics) => {
     if (!economicsMetrics) {
         return { totalPpcSales: 0, asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
     }
@@ -54,26 +58,110 @@ const getPpcSalesFromEconomics = (economicsMetrics) => {
     }
     
     // Get ASIN-wise PPC data
+    // For big accounts, aggregate from separate collection to avoid loading full array into memory
     const asinPpcSales = {};
-    if (Array.isArray(economicsMetrics.asinWiseSales)) {
+    
+    // Debug: Log what we're receiving
+    logger.debug('getPpcSalesFromEconomics - ASIN data check', {
+        isBig: economicsMetrics.isBig,
+        hasAsinWiseSales: !!economicsMetrics.asinWiseSales,
+        isArray: Array.isArray(economicsMetrics.asinWiseSales),
+        asinWiseSalesLength: economicsMetrics.asinWiseSales?.length || 0,
+        totalSales: economicsMetrics.totalSales?.amount || 0,
+        metricsId: economicsMetrics._id?.toString()
+    });
+    
+    // Check if this is a big account with data in separate collection
+    // Also handle legacy data: if totalSales > 5000 but no asinWiseSales, try fetching from separate collection
+    const isBigAccount = economicsMetrics.isBig === true;
+    const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
+    const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
+    
+    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
+        try {
+            // Fetch and aggregate ASIN data from separate collection for big accounts
+            const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
+            
+            if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
+                bigAccountAsinDocs.forEach(doc => {
+                    if (doc.asinSales && Array.isArray(doc.asinSales)) {
+                        doc.asinSales.forEach(item => {
+                            if (item.asin) {
+                                const asin = item.asin;
+                                const fbaFees = item.fbaFees?.amount || 0;
+                                const storageFees = item.storageFees?.amount || 0;
+                                const totalFees = item.totalFees?.amount || 0;
+                                const amazonFees = item.amazonFees?.amount || totalFees;
+                                
+                                // Aggregate values for same ASIN across dates
+                                if (asinPpcSales[asin]) {
+                                    asinPpcSales[asin].sales += item.sales?.amount || 0;
+                                    asinPpcSales[asin].ppcSpent += item.ppcSpent?.amount || 0;
+                                    asinPpcSales[asin].grossProfit += item.grossProfit?.amount || 0;
+                                    asinPpcSales[asin].fbaFees += fbaFees;
+                                    asinPpcSales[asin].storageFees += storageFees;
+                                    asinPpcSales[asin].totalFees += totalFees;
+                                    asinPpcSales[asin].amazonFees += amazonFees;
+                                    asinPpcSales[asin].unitsSold += item.unitsSold || 0;
+                                } else {
+                                    asinPpcSales[asin] = {
+                                        sales: item.sales?.amount || 0,
+                                        ppcSpent: item.ppcSpent?.amount || 0,
+                                        grossProfit: item.grossProfit?.amount || 0,
+                                        fbaFees: fbaFees,
+                                        storageFees: storageFees,
+                                        totalFees: totalFees,
+                                        amazonFees: amazonFees,
+                                        unitsSold: item.unitsSold || 0
+                                    };
+                                }
+                            }
+                        });
+                    }
+                });
+                logger.debug('Aggregated ASIN PPC sales for big account', {
+                    metricsId: economicsMetrics._id,
+                    uniqueAsins: Object.keys(asinPpcSales).length
+                });
+            }
+        } catch (error) {
+            logger.error('Error fetching ASIN data for big account in DashboardCalculation', {
+                metricsId: economicsMetrics._id,
+                error: error.message
+            });
+        }
+    } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
+        // Normal account - process from main document
         economicsMetrics.asinWiseSales.forEach(item => {
             if (item.asin) {
-                // Extract fees - amazonFees for display
+                const asin = item.asin;
                 const fbaFees = item.fbaFees?.amount || 0;
                 const storageFees = item.storageFees?.amount || 0;
                 const totalFees = item.totalFees?.amount || 0;
-                const amazonFees = item.amazonFees?.amount || totalFees; // Fallback to totalFees
+                const amazonFees = item.amazonFees?.amount || totalFees;
                 
-                asinPpcSales[item.asin] = {
-                    sales: item.sales?.amount || 0,
-                    ppcSpent: item.ppcSpent?.amount || 0,
-                    grossProfit: item.grossProfit?.amount || 0,
-                    fbaFees: fbaFees,
-                    storageFees: storageFees,
-                    totalFees: totalFees,
-                    amazonFees: amazonFees, // Amazon-specific fees (FBA, storage, referral, etc.)
-                    unitsSold: item.unitsSold || 0
-                };
+                // Aggregate values for same ASIN across dates
+                if (asinPpcSales[asin]) {
+                    asinPpcSales[asin].sales += item.sales?.amount || 0;
+                    asinPpcSales[asin].ppcSpent += item.ppcSpent?.amount || 0;
+                    asinPpcSales[asin].grossProfit += item.grossProfit?.amount || 0;
+                    asinPpcSales[asin].fbaFees += fbaFees;
+                    asinPpcSales[asin].storageFees += storageFees;
+                    asinPpcSales[asin].totalFees += totalFees;
+                    asinPpcSales[asin].amazonFees += amazonFees;
+                    asinPpcSales[asin].unitsSold += item.unitsSold || 0;
+                } else {
+                    asinPpcSales[asin] = {
+                        sales: item.sales?.amount || 0,
+                        ppcSpent: item.ppcSpent?.amount || 0,
+                        grossProfit: item.grossProfit?.amount || 0,
+                        fbaFees: fbaFees,
+                        storageFees: storageFees,
+                        totalFees: totalFees,
+                        amazonFees: amazonFees,
+                        unitsSold: item.unitsSold || 0
+                    };
+                }
             }
         });
     }
@@ -366,7 +454,8 @@ const analyseData = async (data, userId = null) => {
     logger.info("Valid data found, proceeding with analysis");
     
     // Get PPC and sales data from EconomicsMetrics for ACOS/TACOS calculations
-    const economicsData = getPpcSalesFromEconomics(data.EconomicsMetrics);
+    // Note: This is now async to handle big accounts fetching from separate collection
+    const economicsData = await getPpcSalesFromEconomics(data.EconomicsMetrics);
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
         totalSales: economicsData.totalSales,
@@ -1126,6 +1215,8 @@ const analyseData = async (data, userId = null) => {
         dataAvailabilityStatus: 'DATA_AVAILABLE',
         DifferenceData: data.DifferenceData || 0,
         // New: EconomicsMetrics data for dashboard boxes and profitability page
+        // NOTE: For big accounts (isBig=true), asinWiseSales is NOT included to avoid memory issues
+        // The aggregated asinPpcSales is used instead for calculations
         economicsMetrics: data.EconomicsMetrics ? {
             totalSales: data.EconomicsMetrics.totalSales,
             grossProfit: data.EconomicsMetrics.grossProfit,
@@ -1137,8 +1228,10 @@ const analyseData = async (data, userId = null) => {
             refunds: data.EconomicsMetrics.refunds,
             datewiseSales: data.EconomicsMetrics.datewiseSales,
             datewiseGrossProfit: data.EconomicsMetrics.datewiseGrossProfit,
-            asinWiseSales: data.EconomicsMetrics.asinWiseSales,
-            dateRange: data.EconomicsMetrics.dateRange
+            // For big accounts, don't include asinWiseSales to avoid memory issues (can be 15,000+ records)
+            asinWiseSales: data.EconomicsMetrics.isBig ? [] : (data.EconomicsMetrics.asinWiseSales || []),
+            dateRange: data.EconomicsMetrics.dateRange,
+            isBig: data.EconomicsMetrics.isBig || false
         } : null,
         // New: ACOS and TACOS calculated from EconomicsMetrics PPC data
         acos: sponsoredAdsMetrics.acos || 0,

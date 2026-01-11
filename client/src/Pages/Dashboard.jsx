@@ -25,9 +25,66 @@ const Dashboard = () => {
   
   // Get reimbursement data from Redux (cached)
   const reimbursementData = useSelector(state => state.reimbursement)
-  const expectedReimbursement = reimbursementData?.summary?.totalReimbursement || 0
+  const reimbursementRawData = reimbursementData?.summary?.rawData
   const reimbursementLoading = reimbursementData?.loading || false
   const reimbursementLastFetched = reimbursementData?.lastFetched
+  
+  // Calculate last 30 days total (matching ReimbursementDashboard logic)
+  const expectedReimbursement = useMemo(() => {
+    if (!reimbursementRawData) return 0;
+    
+    // Helper function to check if date is within last 30 days
+    const isWithinLast30Days = (dateValue) => {
+      if (!dateValue || dateValue === 'N/A' || dateValue === '') {
+        return true; // Include items without dates
+      }
+      
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+      
+      // Check if it's MM/YYYY format
+      const mmYYYYMatch = dateValue.match(/^(\d{1,2})\/(\d{4})$/);
+      if (mmYYYYMatch) {
+        const month = parseInt(mmYYYYMatch[1], 10);
+        const year = parseInt(mmYYYYMatch[2], 10);
+        const itemDate = new Date(year, month - 1, 1);
+        const lastDayOfMonth = new Date(year, month, 0);
+        return lastDayOfMonth >= thirtyDaysAgo && itemDate <= now;
+      }
+      
+      try {
+        const itemDate = new Date(dateValue);
+        if (isNaN(itemDate.getTime())) return true;
+        return itemDate >= thirtyDaysAgo && itemDate <= now;
+      } catch {
+        return true;
+      }
+    };
+    
+    // Shipment: Use all-time total (no filtering)
+    const shipmentTotal = reimbursementRawData?.feeProtector?.backendShipmentItems?.totalExpectedAmount || 0;
+    
+    // Lost, Damaged, Disposed: Filter to last 30 days and calculate totals
+    const lostInventoryData = reimbursementRawData?.backendLostInventory?.data || [];
+    const filteredLost = lostInventoryData.filter(item => 
+      isWithinLast30Days(item.date) && (item.expectedAmount || 0) > 0
+    );
+    const lostTotal = filteredLost.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+    
+    const damagedInventoryData = reimbursementRawData?.backendDamagedInventory?.data || [];
+    const filteredDamaged = damagedInventoryData.filter(item => 
+      isWithinLast30Days(item.date) && (item.expectedAmount || 0) > 0
+    );
+    const damagedTotal = filteredDamaged.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+    
+    const disposedInventoryData = reimbursementRawData?.backendDisposedInventory?.data || [];
+    const filteredDisposed = disposedInventoryData.filter(item => 
+      isWithinLast30Days(item.date) && (item.expectedAmount || 0) > 0
+    );
+    const disposedTotal = filteredDisposed.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
+    
+    return shipmentTotal + lostTotal + damagedTotal + disposedTotal;
+  }, [reimbursementRawData]);
 
   // Get dashboard data from Redux
   const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)

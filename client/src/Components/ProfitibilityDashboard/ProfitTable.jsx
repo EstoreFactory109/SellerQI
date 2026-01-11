@@ -6,6 +6,7 @@ import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
 import { parseLocalDate } from '../../utils/dateUtils';
+import axiosInstance from '../../config/axios.config';
 
 // Currency symbol mapping by country code
 const CURRENCY_SYMBOLS = {
@@ -39,6 +40,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
     const dispatch = useDispatch();
     const productsPerPage = 10;
     
+    // State for ASIN-wise sales data (fetched separately for big accounts)
+    const [asinWiseSalesData, setAsinWiseSalesData] = useState([]);
+    const [isLoadingAsinData, setIsLoadingAsinData] = useState(false);
+    const [asinDataError, setAsinDataError] = useState(null);
+    
     // Get profitability data from Redux store
     const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
     const totalProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
@@ -54,6 +60,67 @@ const ProfitTable = ({ setSuggestionsData }) => {
     
     // Check if date range is selected
     const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
+    
+    // Fetch ASIN-wise sales data for big accounts
+    // When economicsMetrics.isBig is true, the asinWiseSales array is empty to save memory
+    // We need to fetch it from a separate endpoint
+    // Also check if totalSales > 5000 and asinWiseSales is empty (for legacy data before isBig was added)
+    useEffect(() => {
+        const fetchAsinWiseSalesForBigAccount = async () => {
+            // Skip if economicsMetrics is not available yet
+            if (!economicsMetrics) {
+                console.log('ProfitTable: economicsMetrics not available yet');
+                return;
+            }
+            
+            const hasAsinData = economicsMetrics?.asinWiseSales && economicsMetrics.asinWiseSales.length > 0;
+            const isBigAccount = economicsMetrics?.isBig === true;
+            const totalSales = economicsMetrics?.totalSales?.amount || 0;
+            
+            // Check if this might be a big account that needs data fetched
+            // - Explicitly marked as big (isBig=true) with no asinWiseSales
+            // - OR has high totalSales (>5000) but empty asinWiseSales (legacy data issue)
+            const needsFetch = (!hasAsinData && isBigAccount) || 
+                              (!hasAsinData && totalSales > 5000);
+            
+            console.log('ProfitTable ASIN data check:', {
+                hasAsinData,
+                isBigAccount,
+                totalSales,
+                needsFetch,
+                asinWiseSalesLength: economicsMetrics?.asinWiseSales?.length || 0
+            });
+            
+            if (needsFetch) {
+                setIsLoadingAsinData(true);
+                setAsinDataError(null);
+                
+                try {
+                    console.log('Fetching ASIN-wise sales data for big account...');
+                    const response = await axiosInstance.get('/page-data/asin-wise-sales');
+                    
+                    if (response.data?.success && response.data?.data?.asinWiseSales) {
+                        console.log('Fetched ASIN-wise sales:', response.data.data.asinWiseSales.length, 'records');
+                        setAsinWiseSalesData(response.data.data.asinWiseSales);
+                    } else {
+                        console.warn('No ASIN-wise sales data in response');
+                        setAsinWiseSalesData([]);
+                    }
+                } catch (error) {
+                    console.error('Error fetching ASIN-wise sales data:', error);
+                    setAsinDataError(error.message);
+                    setAsinWiseSalesData([]);
+                } finally {
+                    setIsLoadingAsinData(false);
+                }
+            } else if (hasAsinData) {
+                // Normal account with data - use data from Redux
+                setAsinWiseSalesData(economicsMetrics.asinWiseSales);
+            }
+        };
+        
+        fetchAsinWiseSalesForBigAccount();
+    }, [economicsMetrics?.isBig, economicsMetrics?.asinWiseSales?.length, economicsMetrics?.totalSales?.amount]);
     
     // Calculate total active products
     const totalActiveProducts = totalProducts.filter(product => product.status === "Active").length;
@@ -137,10 +204,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
     
     // Debug logging
     useEffect(() => {
-        if (economicsMetrics?.asinWiseSales?.length > 0) {
-            const sample = economicsMetrics.asinWiseSales.slice(0, 5);
+        if (asinWiseSalesData?.length > 0) {
+            const sample = asinWiseSalesData.slice(0, 5);
             console.log('=== ProfitTable Debug ===');
-            console.log('Total asinWiseSales records:', economicsMetrics.asinWiseSales.length);
+            console.log('Total asinWiseSales records:', asinWiseSalesData.length);
+            console.log('Is big account:', economicsMetrics?.isBig);
             console.log('Sample data:', sample);
             console.log('Has date field:', sample.some(item => item.date));
             console.log('Has parentAsin field:', sample.some(item => item.parentAsin));
@@ -149,7 +217,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 console.log('Date range:', startDate, 'to', endDate);
             }
         }
-    }, [economicsMetrics, isDateRangeSelected, startDate, endDate]);
+    }, [asinWiseSalesData, economicsMetrics?.isBig, isDateRangeSelected, startDate, endDate]);
     
     /**
      * MAIN DATA PROCESSING:
@@ -197,9 +265,9 @@ const ProfitTable = ({ setSuggestionsData }) => {
             };
         };
         
-        // If we have economicsMetrics with asinWiseSales, use that
-        if (economicsMetrics?.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
-            const asinWiseSales = economicsMetrics.asinWiseSales;
+        // Use asinWiseSalesData (either from Redux for normal accounts, or fetched separately for big accounts)
+        if (asinWiseSalesData && Array.isArray(asinWiseSalesData) && asinWiseSalesData.length > 0) {
+            const asinWiseSales = asinWiseSalesData;
             
             // Check if data has dates (for daily breakdown)
             const hasDateData = asinWiseSales.some(item => item.date);
@@ -397,7 +465,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 childrenCount: 0
             };
         }).sort((a, b) => b.sales - a.sales);
-    }, [economicsMetrics, profitibilityData, totalProducts, cogsValues, isDateRangeSelected, startDate, endDate]);
+    }, [asinWiseSalesData, profitibilityData, totalProducts, cogsValues, isDateRangeSelected, startDate, endDate]);
     
     // Generate suggestions based on profitability metrics
     const generateSuggestions = (product) => {
@@ -497,6 +565,30 @@ const ProfitTable = ({ setSuggestionsData }) => {
       };
     }, [processedProducts]);
   
+    // Show loading state when fetching ASIN data for big accounts
+    if (isLoadingAsinData) {
+      return (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-6 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                <Table className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Product Profitability Analysis</h3>
+                <p className="text-sm text-gray-600">Loading ASIN-wise sales data...</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 text-purple-500 animate-spin mb-4" />
+            <p className="text-gray-600">Loading product data for analysis...</p>
+            <p className="text-sm text-gray-400 mt-2">This may take a moment for accounts with many products</p>
+          </div>
+        </div>
+      );
+    }
+    
     return (
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         {/* Enhanced Header */}
@@ -555,12 +647,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 <th className="w-1/5 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">Product</th>
                 <th className="w-28 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
                 <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
-                <th className="w-28 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
-                <th className="w-20 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Net</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
+                <th className="w-32 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Net</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -611,8 +703,10 @@ const ProfitTable = ({ setSuggestionsData }) => {
                         <td className="px-3 py-5 text-center align-middle">
                           <span className="text-sm font-semibold text-gray-900">{product.units.toLocaleString()}</span>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
-                          <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.sales, currency)}</span>
+                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.sales, currency)}>
+                            {formatCurrencyWithLocale(product.sales, currency)}
+                          </div>
                         </td>
                         <td className="px-3 py-5 text-center align-middle">
                           {/* For parents with children: show expand button instead of COGS */}
@@ -692,18 +786,22 @@ const ProfitTable = ({ setSuggestionsData }) => {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
-                          <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.adSpend, currency)}</span>
+                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.adSpend, currency)}>
+                            {formatCurrencyWithLocale(product.adSpend, currency)}
+                          </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
-                          <span className="text-sm font-semibold text-gray-900">{formatCurrencyWithLocale(product.amazonFees, currency)}</span>
+                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.amazonFees, currency)}>
+                            {formatCurrencyWithLocale(product.amazonFees, currency)}
+                          </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
-                          <span className={`text-sm font-bold ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
+                          <div className={`text-sm font-bold whitespace-nowrap overflow-hidden text-ellipsis ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`} title={formatCurrencyWithLocale(product.grossProfit, currency)}>
                             {formatCurrencyWithLocale(product.grossProfit, currency)}
-                          </span>
+                          </div>
                         </td>
-                        <td className="px-3 py-5 text-center relative align-middle">
+                        <td className="px-3 py-5 text-center relative align-middle min-w-0 overflow-hidden">
                           {/* For parents: show hint to expand for Net Profit */}
                           {product.isExpandable ? (
                             <span className="text-xs text-gray-400 italic">See children</span>
@@ -715,13 +813,13 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                   ? 'filter blur-sm' 
                                   : ''
                               }`}>
-                                <span className={`text-sm font-bold ${
+                                <div className={`text-sm font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
                                   !cogsValues[product.asin] || cogsValues[product.asin] === 0 
                                     ? 'text-gray-400' 
                                     : product.netProfit < 0 ? 'text-red-600' : 'text-emerald-600'
-                                }`}>
+                                }`} title={formatCurrencyWithLocale(product.netProfit, currency)}>
                                   {formatCurrencyWithLocale(product.netProfit, currency)}
-                                </span>
+                                </div>
                               </div>
                               {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -769,8 +867,10 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                 <td className="px-3 py-4 text-center align-middle">
                                   <span className="text-sm text-gray-700">{child.units?.toLocaleString() || 0}</span>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
-                                  <span className="text-sm text-gray-700">{formatCurrencyWithLocale(child.sales || 0, currency)}</span>
+                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.sales || 0, currency)}>
+                                    {formatCurrencyWithLocale(child.sales || 0, currency)}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-4 text-center align-middle">
                                   <div className="flex items-center justify-center gap-1">
@@ -810,24 +910,28 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                     </button>
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
-                                  <span className="text-sm text-gray-700">{formatCurrencyWithLocale(child.adSpend || 0, currency)}</span>
+                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.adSpend || 0, currency)}>
+                                    {formatCurrencyWithLocale(child.adSpend || 0, currency)}
+                                  </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
-                                  <span className="text-sm text-gray-700">{formatCurrencyWithLocale(child.amazonFees || 0, currency)}</span>
+                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.amazonFees || 0, currency)}>
+                                    {formatCurrencyWithLocale(child.amazonFees || 0, currency)}
+                                  </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
-                                  <span className={`text-sm font-medium ${(child.grossProfit || 0) < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${(child.grossProfit || 0) < 0 ? 'text-red-600' : 'text-emerald-600'}`} title={formatCurrencyWithLocale(child.grossProfit || 0, currency)}>
                                     {formatCurrencyWithLocale(child.grossProfit || 0, currency)}
-                                  </span>
+                                  </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle relative">
+                                <td className="px-3 py-4 text-center align-middle relative min-w-0 overflow-hidden">
                                   {cogsValues[child.asin] ? (
-                                    <span className={`text-sm font-medium ${
+                                    <div className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
                                       (child.netProfit || 0) < 0 ? 'text-red-600' : 'text-emerald-600'
-                                    }`}>
+                                    }`} title={formatCurrencyWithLocale(child.netProfit || 0, currency)}>
                                       {formatCurrencyWithLocale(child.netProfit || 0, currency)}
-                                    </span>
+                                    </div>
                                   ) : (
                                     <span className="text-xs text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
                                       +COGS
