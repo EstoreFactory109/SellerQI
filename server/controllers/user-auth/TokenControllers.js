@@ -14,34 +14,70 @@ const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegiste
 const SaveAllDetails = asyncHandler(async (req, res) => {
     const { region, country } = req.body;
     const userId = req.userId;
-    // console.log(req.userId);
+    
     if (!country || !region) {
         return res.status(400).json(new ApiResponse(400, "", "Credentials are missing"));
     }
-    // console.log(region,country);
+    
     const getUser = await User.findById(userId);
     if (!getUser) {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
-    console.log(region,country);
-    const sellerCentral = [{
-        selling_partner_id: uuidv4(),
-        country: country,
-        region: region,
-    }]
-
+    console.log(`SaveAllDetails: region=${region}, country=${country}, userId=${userId}`);
     
-
-    const createSellerCentral = await Seller.create({ User: userId,selling_partner_id:uuidv4(), sellerAccount: sellerCentral });
-    console.log(createSellerCentral);
-    if (!createSellerCentral) {
-        logger.error(new ApiError(500, "Error in creating sellercentral"));
-        return res.status(500).json(new ApiResponse(500, "", "Error in creating sellercentral"));
+    // Check if SellerCentral already exists for this user
+    let sellerCentralDoc = await Seller.findOne({ User: userId }).sort({ createdAt: -1 });
+    
+    if (!sellerCentralDoc) {
+        // Create new SellerCentral if it doesn't exist
+        console.log('SaveAllDetails: No existing SellerCentral found, creating new one');
+        const sellerAccount = [{
+            selling_partner_id: uuidv4(),
+            country: country,
+            region: region,
+        }];
+        
+        sellerCentralDoc = await Seller.create({ 
+            User: userId,
+            selling_partner_id: uuidv4(), 
+            sellerAccount: sellerAccount 
+        });
+        
+        if (!sellerCentralDoc) {
+            logger.error(new ApiError(500, "Error in creating sellercentral"));
+            return res.status(500).json(new ApiResponse(500, "", "Error in creating sellercentral"));
+        }
+        
+        getUser.sellerCentral = sellerCentralDoc._id;
+        await getUser.save();
+        console.log('SaveAllDetails: Created new SellerCentral:', sellerCentralDoc._id);
+    } else {
+        // SellerCentral exists - check if sellerAccount with same country/region exists
+        const existingAccount = sellerCentralDoc.sellerAccount.find(
+            acc => acc.country === country && acc.region === region
+        );
+        
+        if (!existingAccount) {
+            // Add new sellerAccount if it doesn't exist for this country/region
+            console.log(`SaveAllDetails: Adding new sellerAccount for ${country}/${region}`);
+            sellerCentralDoc.sellerAccount.push({
+                selling_partner_id: uuidv4(),
+                country: country,
+                region: region,
+            });
+            await sellerCentralDoc.save();
+        } else {
+            // Account already exists for this country/region - use existing
+            console.log(`SaveAllDetails: Seller account for ${country}/${region} already exists, using existing account`);
+        }
+        
+        // Ensure user has reference to sellerCentral (in case it was missing)
+        if (!getUser.sellerCentral || getUser.sellerCentral.toString() !== sellerCentralDoc._id.toString()) {
+            getUser.sellerCentral = sellerCentralDoc._id;
+            await getUser.save();
+        }
     }
-
-    getUser.sellerCentral = createSellerCentral._id;
-    await getUser.save();
 
     // Update user's seller accounts in scheduling system
     try {
@@ -86,8 +122,20 @@ const saveDetailsOfOtherAccounts = asyncHandler(async (req, res) => {
             .cookie("IBEXLocationToken", locationToken, getHttpCookieOptions())
             .json(new ApiResponse(201, "", "New account added successfully"));
     }
-    sellerCentral.sellerAccount.push({ country: country, region: region });
-    await sellerCentral.save();
+    
+    // Check if sellerAccount with same country/region already exists
+    const existingAccount = sellerCentral.sellerAccount.find(
+        acc => acc.country === country && acc.region === region
+    );
+    
+    if (!existingAccount) {
+        // Only add if it doesn't exist
+        sellerCentral.sellerAccount.push({ country: country, region: region });
+        await sellerCentral.save();
+        console.log(`saveDetailsOfOtherAccounts: Added new sellerAccount for ${country}/${region}`);
+    } else {
+        console.log(`saveDetailsOfOtherAccounts: Seller account for ${country}/${region} already exists, using existing`);
+    }
 
     // Update user's seller accounts in scheduling system
     try {
@@ -119,8 +167,20 @@ const addNewSellerCentralAccount = asyncHandler(async (req, res) => {
     if (!sellerCentral) {
         return res.status(404).json(new ApiResponse(404, "", "Seller central not found"));
     }
-    sellerCentral.sellerAccount.push({ region: region, country: country });
-    await sellerCentral.save();
+    
+    // Check if sellerAccount with same country/region already exists
+    const existingAccount = sellerCentral.sellerAccount.find(
+        acc => acc.country === country && acc.region === region
+    );
+    
+    if (!existingAccount) {
+        // Only add if it doesn't exist
+        sellerCentral.sellerAccount.push({ region: region, country: country });
+        await sellerCentral.save();
+        console.log(`addNewSellerCentralAccount: Added new sellerAccount for ${country}/${region}`);
+    } else {
+        console.log(`addNewSellerCentralAccount: Seller account for ${country}/${region} already exists, using existing`);
+    }
 
     // Update user's seller accounts in scheduling system
     try {
