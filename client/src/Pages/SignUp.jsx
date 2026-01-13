@@ -300,22 +300,33 @@ const SignUp = () => {
           } else if (isPROTrial) {
             // PRO-Trial: Different flow for India vs non-India
             if (isIndianUser) {
-              // Indian users: Use old manual trial (no payment method required)
-              try {
-                const trialResponse = await axiosInstance.post('/app/activate-free-trial');
-                if (trialResponse.status === 200 && trialResponse.data?.data) {
-                  dispatch(updateTrialStatus({
-                    packageType: trialResponse.data.data.packageType,
-                    subscriptionStatus: trialResponse.data.data.subscriptionStatus,
-                    isInTrialPeriod: trialResponse.data.data.isInTrialPeriod,
-                    trialEndsDate: trialResponse.data.data.trialEndsDate
-                  }));
-                }
-                navigate('/connect-to-amazon');
-              } catch (trialError) {
-                console.error('Trial activation error:', trialError);
-                setErrorMessage('Failed to activate free trial. Please try again.');
-              }
+              // Indian users: Use Razorpay with 7-day trial (payment method collected, charged after trial)
+              const razorpayService = (await import('../services/razorpayService.js')).default;
+              razorpayService.initiatePayment(
+                'PRO',
+                // Success callback
+                (result) => {
+                  console.log('Razorpay trial started:', result);
+                  if (result?.isTrialing) {
+                    dispatch(updateTrialStatus({
+                      packageType: result.planType || 'PRO',
+                      subscriptionStatus: 'trialing',
+                      isInTrialPeriod: true,
+                      trialEndsDate: result.trialEndsDate
+                    }));
+                  }
+                  navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
+                },
+                // Error callback
+                (error) => {
+                  console.error('Razorpay trial failed:', error);
+                  if (error.message !== 'Payment cancelled by user') {
+                    setErrorMessage(error.message || 'Failed to start free trial. Please try again.');
+                  }
+                  setGoogleLoading(false);
+                },
+                7 // 7-day trial period
+              );
             } else {
               // Non-Indian users: Go to Stripe checkout with 7-day trial
               // Payment method collected, charged after trial ends
@@ -325,9 +336,24 @@ const SignUp = () => {
           } else {
             // PRO/AGENCY (paid): Go to Stripe payment (for non-India) or Razorpay (for India)
             if (isIndianUser && packageType === 'PRO') {
-              // Indian users with PRO: Redirect to pricing for Razorpay
-              localStorage.setItem('intendedPackage', plans);
-              navigate('/pricing');
+              // Indian users with PRO: Use Razorpay (direct payment, no trial)
+              const razorpayService = (await import('../services/razorpayService.js')).default;
+              razorpayService.initiatePayment(
+                'PRO',
+                // Success callback
+                (result) => {
+                  console.log('Razorpay payment successful:', result);
+                  navigate(`/subscription-success?gateway=razorpay&isNewSignup=true`);
+                },
+                // Error callback
+                (error) => {
+                  console.error('Razorpay payment failed:', error);
+                  if (error.message !== 'Payment cancelled by user') {
+                    setErrorMessage(error.message || 'Failed to process payment. Please try again.');
+                  }
+                  setGoogleLoading(false);
+                }
+              );
             } else {
               // Non-Indian users or AGENCY: Go to Stripe payment
               localStorage.setItem('intendedPackage', plans);

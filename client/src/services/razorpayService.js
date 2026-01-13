@@ -45,12 +45,19 @@ class RazorpayService {
 
     /**
      * Create Razorpay subscription
+     * @param {string} planType - Plan type (PRO)
+     * @param {number} [trialPeriodDays] - Optional trial period in days
      */
-    async createSubscription(planType) {
+    async createSubscription(planType, trialPeriodDays = null) {
         try {
-            const response = await axiosInstance.post('/app/razorpay/create-order', {
-                planType: planType
-            });
+            const requestBody = { planType };
+            
+            // Add trial period for PRO plan only
+            if (trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO') {
+                requestBody.trialPeriodDays = trialPeriodDays;
+            }
+            
+            const response = await axiosInstance.post('/app/razorpay/create-order', requestBody);
             
             // Log the key being received from backend
             const keyId = response.data.data?.keyId;
@@ -58,6 +65,11 @@ class RazorpayService {
                 const keyType = keyId.startsWith('rzp_test_') ? 'TEST' : 
                                keyId.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
                 console.log(`Received Razorpay ${keyType} key from backend: ${keyId.substring(0, 15)}...`);
+            }
+            
+            // Log trial info if applicable
+            if (response.data.data?.hasTrial) {
+                console.log(`Razorpay subscription with ${response.data.data.trialDays}-day trial. Trial ends: ${response.data.data.trialEndsAt}`);
             }
             
             return response.data.data;
@@ -91,8 +103,9 @@ class RazorpayService {
      * @param {string} planType - The plan type (PRO)
      * @param {function} onSuccess - Callback on successful payment
      * @param {function} onError - Callback on payment failure
+     * @param {number} [trialPeriodDays] - Optional trial period in days
      */
-    async initiatePayment(planType, onSuccess, onError) {
+    async initiatePayment(planType, onSuccess, onError, trialPeriodDays = null) {
         try {
             // Load Razorpay script
             const scriptLoaded = await this.loadScript();
@@ -100,8 +113,8 @@ class RazorpayService {
                 throw new Error('Failed to load payment SDK');
             }
 
-            // Create subscription
-            const subscriptionData = await this.createSubscription(planType);
+            // Create subscription with optional trial period
+            const subscriptionData = await this.createSubscription(planType, trialPeriodDays);
 
             // Verify the key before using it
             const keyId = subscriptionData.keyId;

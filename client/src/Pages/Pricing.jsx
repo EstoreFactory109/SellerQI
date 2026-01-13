@@ -152,26 +152,40 @@ export default function PricingPage() {
     try {
       localStorage.removeItem('intendedAction');
       
-      // For Indian users, use the old manual trial system (no payment method required)
       if (country === 'IN') {
-        const response = await axiosInstance.post('/app/activate-free-trial');
-        
-        if (response.status === 200) {
-          // Update Redux state with new subscription info
-          if (response.data?.data) {
-            dispatch(updateTrialStatus({
-              packageType: response.data.data.packageType,
-              subscriptionStatus: response.data.data.subscriptionStatus,
-              isInTrialPeriod: response.data.data.isInTrialPeriod,
-              trialEndsDate: response.data.data.trialEndsDate
-            }));
-          }
-          
-          // Navigate to connect page after successful trial activation
-          setTimeout(() => {
-            navigate('/connect-to-amazon');
-          }, 500);
-        }
+        // For Indian users, use Razorpay with 7-day trial
+        // Payment method is collected upfront but not charged until trial ends
+        await razorpayService.initiatePayment(
+          'PRO',
+          // Success callback
+          (result) => {
+            console.log('Razorpay trial started:', result);
+            setLoading(prev => ({ ...prev, freeTrial: false }));
+            
+            // Update Redux state if trial info is returned
+            if (result?.isTrialing) {
+              dispatch(updateTrialStatus({
+                packageType: result.planType || 'PRO',
+                subscriptionStatus: 'trialing',
+                isInTrialPeriod: true,
+                trialEndsDate: result.trialEndsDate
+              }));
+            }
+            
+            // Navigate to success page or connect page
+            const isTrialing = result?.isTrialing ? 'true' : 'false';
+            navigate(`/subscription-success?gateway=razorpay&isTrialing=${isTrialing}&isNewSignup=true`);
+          },
+          // Error callback
+          (error) => {
+            console.error('Razorpay trial failed:', error);
+            setLoading(prev => ({ ...prev, freeTrial: false }));
+            if (error.message !== 'Payment cancelled by user') {
+              alert(error.message || 'Failed to start free trial. Please try again.');
+            }
+          },
+          7 // 7-day trial period
+        );
       } else {
         // For non-Indian users (US, etc.), use Stripe checkout with 7-day trial
         // Payment method is collected upfront but not charged until trial ends
@@ -180,10 +194,7 @@ export default function PricingPage() {
     } catch (error) {
       console.error('Error starting free trial:', error);
       alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');
-    } finally {
-      setTimeout(() => {
-        setLoading(prev => ({ ...prev, freeTrial: false }));
-      }, 500);
+      setLoading(prev => ({ ...prev, freeTrial: false }));
     }
   };
 

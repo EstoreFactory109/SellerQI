@@ -178,21 +178,37 @@ const OtpVerification = () => {
           localStorage.removeItem('intendedPackage');
           
           if (isIndianUser) {
-            // Indian users: Use old manual trial (no payment method required)
+            // Indian users: Use Razorpay with 7-day trial (payment method collected, charged after trial)
             try {
-              const trialResponse = await axiosInstance.post('/app/activate-free-trial');
-              if (trialResponse.status === 200 && trialResponse.data?.data) {
-                dispatch(updateTrialStatus({
-                  packageType: trialResponse.data.data.packageType,
-                  subscriptionStatus: trialResponse.data.data.subscriptionStatus,
-                  isInTrialPeriod: trialResponse.data.data.isInTrialPeriod,
-                  trialEndsDate: trialResponse.data.data.trialEndsDate
-                }));
-              }
-              navigate('/connect-to-amazon');
-            } catch (trialError) {
-              console.error('Trial activation error:', trialError);
-              setErrorMessage('Failed to activate free trial. Please try again.');
+              const razorpayService = (await import('../services/razorpayService.js')).default;
+              razorpayService.initiatePayment(
+                'PRO',
+                // Success callback
+                (result) => {
+                  console.log('Razorpay trial started:', result);
+                  if (result?.isTrialing) {
+                    dispatch(updateTrialStatus({
+                      packageType: result.planType || 'PRO',
+                      subscriptionStatus: 'trialing',
+                      isInTrialPeriod: true,
+                      trialEndsDate: result.trialEndsDate
+                    }));
+                  }
+                  navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
+                },
+                // Error callback
+                (error) => {
+                  console.error('Razorpay trial failed:', error);
+                  if (error.message !== 'Payment cancelled by user') {
+                    setErrorMessage(error.message || 'Failed to start free trial. Please try again.');
+                  }
+                  setLoading(false);
+                },
+                7 // 7-day trial period
+              );
+            } catch (razorpayError) {
+              console.error('Razorpay error:', razorpayError);
+              setErrorMessage('Failed to initiate free trial. Please try again.');
               setLoading(false);
               return;
             }
@@ -214,8 +230,31 @@ const OtpVerification = () => {
           localStorage.removeItem('intendedPackage');
           
           if (isIndianUser && packageToCheckout === 'PRO') {
-            // Indian users with PRO: Redirect to pricing for Razorpay
-            navigate('/pricing');
+            // Indian users with PRO: Use Razorpay (direct payment, no trial)
+            try {
+              const razorpayService = (await import('../services/razorpayService.js')).default;
+              razorpayService.initiatePayment(
+                'PRO',
+                // Success callback
+                (result) => {
+                  console.log('Razorpay payment successful:', result);
+                  navigate(`/subscription-success?gateway=razorpay&isNewSignup=true`);
+                },
+                // Error callback
+                (error) => {
+                  console.error('Razorpay payment failed:', error);
+                  if (error.message !== 'Payment cancelled by user') {
+                    setErrorMessage(error.message || 'Failed to process payment. Please try again.');
+                  }
+                  setLoading(false);
+                }
+              );
+            } catch (razorpayError) {
+              console.error('Razorpay error:', razorpayError);
+              setErrorMessage('Failed to initiate payment. Please try again.');
+              setLoading(false);
+              return;
+            }
           } else {
             // Non-Indian users or AGENCY: Go to Stripe checkout for immediate payment
             try {

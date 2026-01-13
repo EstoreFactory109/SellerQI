@@ -9,13 +9,23 @@ const logger = require('../../utils/Logger');
 const createOrder = asyncHandler(async (req, res) => {
     try {
         const userId = req.userId;
-        const { planType } = req.body;
+        const { planType, trialPeriodDays } = req.body;
 
         // Validate plan type - Only PRO is available for India via Razorpay
         if (!planType || planType !== 'PRO') {
             return res.status(400).json(
                 new ApiResponse(400, null, 'Invalid plan type. Only PRO plan is available for India.')
             );
+        }
+
+        // Validate trial period if provided (only allowed for PRO plan)
+        if (trialPeriodDays !== undefined && trialPeriodDays !== null) {
+            const trialDays = parseInt(trialPeriodDays);
+            if (isNaN(trialDays) || trialDays < 0 || trialDays > 365) {
+                return res.status(400).json(
+                    new ApiResponse(400, null, 'Trial period must be between 0 and 365 days.')
+                );
+            }
         }
 
         // Check if Razorpay is configured
@@ -25,10 +35,15 @@ const createOrder = asyncHandler(async (req, res) => {
             );
         }
 
-        // Create Razorpay order
-        const orderData = await razorpayService.createOrder(userId, planType);
+        // Create Razorpay order with optional trial period
+        const orderData = await razorpayService.createOrder(
+            userId, 
+            planType, 
+            trialPeriodDays ? parseInt(trialPeriodDays) : null
+        );
 
-        logger.info(`Razorpay order created for user: ${userId}, plan: ${planType}`);
+        const trialInfo = orderData.hasTrial ? `, trial: ${orderData.trialDays} days` : '';
+        logger.info(`Razorpay order created for user: ${userId}, plan: ${planType}${trialInfo}`);
 
         return res.status(200).json(
             new ApiResponse(200, orderData, 'Order created successfully')
@@ -39,7 +54,8 @@ const createOrder = asyncHandler(async (req, res) => {
             error: error.message,
             stack: error.stack,
             userId: req.userId,
-            planType: req.body?.planType
+            planType: req.body?.planType,
+            trialPeriodDays: req.body?.trialPeriodDays
         });
         return res.status(500).json(
             new ApiResponse(500, null, error.message || 'Failed to create order')

@@ -76,7 +76,7 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                   'Start Your 7-Day Free Trial'
                 )}
               </button>
-              <p className="text-sm text-gray-500 mt-3">No credit card required • Cancel anytime</p>
+              <p className="text-sm text-gray-500 mt-3">Payment method required • Charged after trial ends</p>
             </motion.div>
           </motion.div>
         </div>
@@ -301,7 +301,7 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
             transition={{ duration: 0.5, delay: 0.3 }}
             className="text-sm mt-4 opacity-80"
           >
-            No credit card required • Full access for 7 days • Cancel anytime
+            Payment method required • Full access for 7 days • Cancel anytime
           </motion.p>
         </div>
       </section>

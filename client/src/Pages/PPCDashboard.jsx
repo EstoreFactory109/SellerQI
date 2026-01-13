@@ -127,6 +127,9 @@ const PPCDashboard = () => {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
   const CalenderRef = useRef(null);
+  const tabsContainerRef = useRef(null);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(false);
   
   // Pagination states for each table
   const [highAcosPage, setHighAcosPage] = useState(1);
@@ -544,13 +547,42 @@ const PPCDashboard = () => {
     return 'N/A';
   };
 
-  // Filter search terms where clicks >= 10 and sales = 0
-  // Filter search terms with zero sales - using date-filtered data
+  // Aggregate daily search terms data by searchTerm+campaign+adGroup
+  // This prevents the same search term from appearing multiple times due to daily data
+  const aggregatedSearchTermsMap = new Map();
+  
+  filteredSearchTermsData.forEach(term => {
+    // Create unique key based on searchTerm + campaign + adGroup
+    const uniqueKey = `${term.searchTerm}|${term.campaignId}|${term.adGroupId || term.adGroupName || ''}`;
+    
+    if (aggregatedSearchTermsMap.has(uniqueKey)) {
+      const existing = aggregatedSearchTermsMap.get(uniqueKey);
+      existing.sales += parseFloat(term.sales) || 0;
+      existing.spend += parseFloat(term.spend) || 0;
+      existing.clicks += parseFloat(term.clicks) || 0;
+      existing.impressions += parseFloat(term.impressions) || 0;
+    } else {
+      aggregatedSearchTermsMap.set(uniqueKey, {
+        searchTerm: term.searchTerm,
+        keyword: term.keyword,
+        campaignName: term.campaignName,
+        campaignId: term.campaignId,
+        adGroupName: term.adGroupName,
+        adGroupId: term.adGroupId,
+        sales: parseFloat(term.sales) || 0,
+        spend: parseFloat(term.spend) || 0,
+        clicks: parseFloat(term.clicks) || 0,
+        impressions: parseFloat(term.impressions) || 0
+      });
+    }
+  });
+  
+  const aggregatedSearchTerms = Array.from(aggregatedSearchTermsMap.values());
+
+  // Filter search terms with zero sales - using aggregated data
   // Use < 0.01 instead of === 0 to handle floating point precision issues
-  const filteredSearchTerms = filteredSearchTermsData.filter(term => {
-    const clicks = parseFloat(term.clicks) || 0;
-    const sales = parseFloat(term.sales) || 0;
-    return clicks >= 10 && sales < 0.01;
+  const filteredSearchTerms = aggregatedSearchTerms.filter(term => {
+    return term.clicks >= 10 && term.sales < 0.01;
   });
   
   // Transform the data for the chart - prioritize PPCMetrics model data
@@ -707,6 +739,30 @@ const PPCDashboard = () => {
     setSelectedTab(tabId);
     setHasInteracted(true);
   };
+
+  // Check scroll position and show/hide arrows
+  const checkScrollButtons = () => {
+    if (tabsContainerRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsContainerRef.current;
+      setShowLeftArrow(scrollLeft > 0);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 1);
+    }
+  };
+
+  // Scroll tabs left
+  const scrollTabsLeft = () => {
+    if (tabsContainerRef.current) {
+      tabsContainerRef.current.scrollBy({ left: -200, behavior: 'smooth' });
+    }
+  };
+
+  // Scroll tabs right
+  const scrollTabsRight = () => {
+    if (tabsContainerRef.current) {
+      tabsContainerRef.current.scrollBy({ left: 200, behavior: 'smooth' });
+    }
+  };
+
   
   // Process data for different tabs
   // High ACOS Campaigns - Use date-filtered campaignWiseTotalSalesAndCost data
@@ -728,77 +784,58 @@ const PPCDashboard = () => {
     .filter(campaign => campaign.acos > 40 && campaign.totalSales > 0)
     .sort((a, b) => b.acos - a.acos);
   
-  // Wasted Spend Keywords - cost > 5 && attributedSales30d < 1
-  // Use date-filtered adsKeywordsPerformanceData structure
-  // console.log('=== Starting Wasted Keywords Processing ===');
-  // console.log('Processing', filteredAdsKeywordsPerformanceData.length, 'keywords for wasted spend analysis');
-
-  const wastedSpendKeywords = filteredAdsKeywordsPerformanceData
-    .filter((keyword, index) => {
-      // Apply filter: cost > 0 && attributedSales30d === 0 (with tolerance for floating point)
-      const cost = parseFloat(keyword.cost) || 0;
-      const attributedSales = parseFloat(keyword.attributedSales30d) || 0;
-      // Use < 0.01 instead of === 0 to handle floating point precision issues
-      const matchesCriteria = cost > 0 && attributedSales < 0.01;
-      
-      // Debug: Log every keyword for first 10, then log only matches
-      if (index < 10 || matchesCriteria) {
-        // console.log(`Keyword ${index + 1}:`, {
-        //   keyword: keyword.keyword,
-        //   rawCost: keyword.cost,
-        //   parsedCost: cost,
-        //   rawAttributedSales30d: keyword.attributedSales30d,
-        //   parsedAttributedSales30d: attributedSales,
-        //   costOver5: cost > 5,
-        //   attributedSales30dUnder1: attributedSales < 1,
-        //   matchesCriteria: matchesCriteria,
-        //   campaignName: keyword.campaignName,
-        //   matchType: keyword.matchType
-        // });
-      }
-      
-      return matchesCriteria;
-    })
-    .map((keyword, index) => {
-      // Process keyword data
-      const cost = parseFloat(keyword.cost) || 0;
-      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-      
-      const processedKeyword = {
+  // Aggregate daily keyword data by keyword+campaign+adGroup
+  // This prevents the same keyword from appearing in both wasted and top performing lists
+  // due to daily fluctuations in performance
+  const aggregatedKeywordsMap = new Map();
+  
+  filteredAdsKeywordsPerformanceData.forEach(keyword => {
+    // Create unique key based on keyword + campaign + adGroup
+    const uniqueKey = `${keyword.keyword}|${keyword.campaignId}|${keyword.adGroupId || keyword.adGroupName}`;
+    
+    if (aggregatedKeywordsMap.has(uniqueKey)) {
+      const existing = aggregatedKeywordsMap.get(uniqueKey);
+      existing.cost += parseFloat(keyword.cost) || 0;
+      existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
+      existing.impressions += parseFloat(keyword.impressions) || 0;
+      existing.clicks += parseFloat(keyword.clicks) || 0;
+    } else {
+      aggregatedKeywordsMap.set(uniqueKey, {
         keyword: keyword.keyword,
+        keywordId: keyword.keywordId,
         campaignName: keyword.campaignName,
         campaignId: keyword.campaignId,
-        sales: attributedSales30d,
-        spend: cost
-      };
-      
-      // console.log(`Processed Wasted Keyword ${index + 1}:`, processedKeyword);
-      return processedKeyword;
+        adGroupName: keyword.adGroupName,
+        adGroupId: keyword.adGroupId,
+        matchType: keyword.matchType,
+        cost: parseFloat(keyword.cost) || 0,
+        attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
+        impressions: parseFloat(keyword.impressions) || 0,
+        clicks: parseFloat(keyword.clicks) || 0
+      });
+    }
+  });
+  
+  const aggregatedKeywords = Array.from(aggregatedKeywordsMap.values());
+
+  // Wasted Spend Keywords - cost > 0 && attributedSales30d === 0 (aggregated over period)
+  const wastedSpendKeywords = aggregatedKeywords
+    .filter(keyword => {
+      // Apply filter: cost > 0 && attributedSales30d === 0 (with tolerance for floating point)
+      const matchesCriteria = keyword.cost > 0 && keyword.attributedSales30d < 0.01;
+      return matchesCriteria;
     })
+    .map(keyword => ({
+      keyword: keyword.keyword,
+      campaignName: keyword.campaignName,
+      campaignId: keyword.campaignId,
+      adGroupName: keyword.adGroupName,
+      sales: keyword.attributedSales30d,
+      spend: keyword.cost
+    }))
     .sort((a, b) => b.spend - a.spend);
 
-  // Debug: Final results
-  // console.log('=== Final Wasted Keywords Results ===');
-  // console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
-  // console.log('Filtered Wasted Keywords:', wastedSpendKeywords.length);
-  // console.log('Wasted Keywords Data:', wastedSpendKeywords);
-  
-  if (filteredAdsKeywordsPerformanceData.length > 0) {
-    // console.log('=== Data Analysis ===');
-    // console.log('Cost Distribution (all keywords):', filteredAdsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, cost: parseFloat(k.cost) || 0 })).slice(0, 10));
-    // console.log('AttributedSales30d Distribution (all keywords):', filteredAdsKeywordsPerformanceData.map(k => ({ keyword: k.keyword, attributedSales30d: parseFloat(k.attributedSales30d) || 0 })).slice(0, 10));
-    
-    const highCostKeywords = filteredAdsKeywordsPerformanceData.filter(k => parseFloat(k.cost) > 5);
-    const lowAttributedSalesKeywords = filteredAdsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) < 1);
-    
-    // console.log(`Keywords with cost > 5: ${highCostKeywords.length}`);
-    // console.log(`Keywords with attributedSales30d < 1: ${lowAttributedSalesKeywords.length}`);
-    // console.log('High cost keywords sample:', highCostKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
-    // console.log('Low attributedSales30d keywords sample:', lowAttributedSalesKeywords.slice(0, 5).map(k => ({ keyword: k.keyword, cost: k.cost, attributedSales30d: k.attributedSales30d })));
-  }
-  
-  // First, create a map of campaignId to campaign data for easier lookup (still needed for top performing keywords)
-  // Uses date-filtered product data
+  // First, create a map of campaignId to campaign data for easier lookup
   const campaignMap = new Map();
   filteredProductWiseSponsoredAds.forEach(product => {
     if (!campaignMap.has(product.campaignId)) {
@@ -810,101 +847,38 @@ const PPCDashboard = () => {
     campaignMap.get(product.campaignId).products.push(product);
   });
   
-  // Top Performing Keywords - Use date-filtered adsKeywordsPerformanceData
-  // Filter: ACOS < 20%, sales > 100, impressions > 1000
-  // console.log('=== Starting Top Performing Keywords Processing ===');
-  // console.log('Processing', filteredAdsKeywordsPerformanceData.length, 'keywords for top performance analysis');
-
-  const topPerformingKeywords = filteredAdsKeywordsPerformanceData
-    .filter((keyword, index) => {
-      // Calculate ACOS using attributedSales30d and cost
-      const cost = parseFloat(keyword.cost) || 0;
-      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-      const impressions = parseFloat(keyword.impressions) || 0;
-      const acos = attributedSales30d > 0 ? (cost / attributedSales30d) * 100 : 0;
-      
+  // Top Performing Keywords - ACOS < 20%, sales > 100, impressions > 1000 (aggregated over period)
+  const topPerformingKeywords = aggregatedKeywords
+    .filter(keyword => {
+      const acos = keyword.attributedSales30d > 0 ? (keyword.cost / keyword.attributedSales30d) * 100 : 0;
       // Apply filters: ACOS < 20%, sales > 100, impressions > 1000
-      const matchesCriteria = acos < 20 && attributedSales30d > 100 && impressions > 1000;
-      
-      // Debug: Log every keyword for first 10, then log only matches
-      if (index < 10 || matchesCriteria) {
-        // console.log(`Top Performance Keyword ${index + 1}:`, {
-        //   keyword: keyword.keyword,
-        //   rawCost: keyword.cost,
-        //   parsedCost: cost,
-        //   rawAttributedSales30d: keyword.attributedSales30d,
-        //   parsedAttributedSales30d: attributedSales30d,
-        //   rawImpressions: keyword.impressions,
-        //   parsedImpressions: impressions,
-        //   calculatedAcos: acos,
-        //   acosUnder20: acos < 20,
-        //   salesOver100: attributedSales30d > 100,
-        //   impressionsOver1000: impressions > 1000,
-        //   matchesCriteria: matchesCriteria,
-        //   campaignName: keyword.campaignName,
-        //   matchType: keyword.matchType
-        // });
-      }
-      
+      const matchesCriteria = acos < 20 && keyword.attributedSales30d > 100 && keyword.impressions > 1000;
       return matchesCriteria;
     })
-    .map((keyword, index) => {
-      // Process top performing keyword data
-      const cost = parseFloat(keyword.cost) || 0;
-      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-      const impressions = parseFloat(keyword.impressions) || 0;
-      const acos = attributedSales30d > 0 ? (cost / attributedSales30d) * 100 : 0;
-      
-      const processedKeyword = {
+    .map(keyword => {
+      const acos = keyword.attributedSales30d > 0 ? (keyword.cost / keyword.attributedSales30d) * 100 : 0;
+      return {
         keyword: keyword.keyword,
         campaignName: keyword.campaignName,
         campaignId: keyword.campaignId,
-        bid: 0, // Bid information not available in adsKeywordsPerformanceData
-        sales: attributedSales30d,
-        spend: cost,
+        bid: 0,
+        sales: keyword.attributedSales30d,
+        spend: keyword.cost,
         acos: acos,
-        impressions: impressions,
+        impressions: keyword.impressions,
         matchType: keyword.matchType,
-        state: 'enabled', // Default state
-        clicks: keyword.clicks || 0,
+        state: 'enabled',
+        clicks: keyword.clicks,
         adGroupName: keyword.adGroupName,
         keywordId: keyword.keywordId
       };
-      
-      // console.log(`Processed Top Performing Keyword ${index + 1}:`, processedKeyword);
-      return processedKeyword;
     })
     .sort((a, b) => b.sales - a.sales);
 
-  // Debug: Final results for top performing keywords
-  // console.log('=== Final Top Performing Keywords Results ===');
-  // console.log('Total Input Keywords:', adsKeywordsPerformanceData.length);
-  // console.log('Filtered Top Performing Keywords:', topPerformingKeywords.length);
-  // console.log('Top Performing Keywords Data:', topPerformingKeywords);
-  
-  if (filteredAdsKeywordsPerformanceData.length > 0) {
-    // console.log('=== Top Performance Analysis ===');
-    const highPerformanceKeywords = filteredAdsKeywordsPerformanceData.filter(k => {
-      const cost = parseFloat(k.cost) || 0;
-      const sales = parseFloat(k.attributedSales30d) || 0;
-      const impressions = parseFloat(k.impressions) || 0;
-      const acos = sales > 0 ? (cost / sales) * 100 : 0;
-      return acos < 20;
-    });
-    const highSalesKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.attributedSales30d) > 100);
-    const highImpressionsKeywords = adsKeywordsPerformanceData.filter(k => parseFloat(k.impressions) > 1000);
-    
-    // console.log(`Keywords with ACOS < 20%: ${highPerformanceKeywords.length}`);
-    // console.log(`Keywords with sales > $100: ${highSalesKeywords.length}`);
-    // console.log(`Keywords with impressions > 1000: ${highImpressionsKeywords.length}`);
-    // console.log('High performance keywords sample:', highPerformanceKeywords.slice(0, 5).map(k => ({ 
-    //   keyword: k.keyword, 
-    //   cost: k.cost, 
-    //   attributedSales30d: k.attributedSales30d,
-    //   impressions: k.impressions,
-    //   acos: parseFloat(k.attributedSales30d) > 0 ? (parseFloat(k.cost) / parseFloat(k.attributedSales30d)) * 100 : 0
-    // })));
-  }
+  // Debug logging (commented out)
+  // console.log('Aggregated Keywords:', aggregatedKeywords.length);
+  // console.log('Wasted Spend Keywords:', wastedSpendKeywords.length);
+  // console.log('Top Performing Keywords:', topPerformingKeywords.length);
   
   // Auto Campaign Insights Processing
   /*
@@ -932,53 +906,43 @@ const PPCDashboard = () => {
     .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
     .map(keyword => keyword.keywordText.toLowerCase());
   
-    // Process auto campaign insights using date-filtered search terms
-  const autoCampaignInsights = [];
-  
-  // Process search terms directly by matching campaign IDs
-  filteredSearchTermsData.forEach(searchTerm => {
-    // Check if sales > 30
-    if (searchTerm.sales > 30) {
-      // Check if this search term's campaignId belongs to an auto campaign
-      if (searchTerm.campaignId && autoCampaignIds.includes(searchTerm.campaignId)) {
-        
-        // Calculate ACOS for this search term
-        const acos = searchTerm.sales > 0 ? (searchTerm.spend / searchTerm.sales) * 100 : 0;
-        
-        // Find the campaign details
-        const campaign = autoCampaigns.find(c => c.campaignId === searchTerm.campaignId);
-        
-        // Check if this search term exists as a keyword in manual campaigns
-        const existsInManual = manualKeywords.includes(searchTerm.searchTerm.toLowerCase());
-        
-        // Determine action - only suggest migration if not in manual campaigns
-        const action = !existsInManual ? 'Migrate to Manual Campaign' : '';
-        
-        // Check if we already have this search term in our insights
-        const existingInsight = autoCampaignInsights.find(
-          insight => insight.searchTerm === searchTerm.searchTerm
-        );
-        
-        if (!existingInsight) {
-          autoCampaignInsights.push({
-            searchTerm: searchTerm.searchTerm,
-            keyword: searchTerm.keyword || '',
-            campaignName: searchTerm.campaignName || campaign?.name || 'Unknown Campaign',
-            campaignId: searchTerm.campaignId,
-            sales: searchTerm.sales,
-            spend: searchTerm.spend,
-            clicks: searchTerm.clicks,
-            impressions: searchTerm.impressions || 0,
-            acos: acos,
-            action: action
-          });
-        }
-      }
-    }
-  });
-  
-  // Sort by sales descending
-  autoCampaignInsights.sort((a, b) => b.sales - a.sales);
+  // Process auto campaign insights using aggregated search terms data
+  // Filter aggregated search terms for auto campaigns with sales > 30
+  const autoCampaignInsights = aggregatedSearchTerms
+    .filter(searchTerm => {
+      // Check if sales > 30 and belongs to an auto campaign
+      return searchTerm.sales > 30 && 
+             searchTerm.campaignId && 
+             autoCampaignIds.includes(searchTerm.campaignId);
+    })
+    .map(searchTerm => {
+      // Calculate ACOS for this search term
+      const acos = searchTerm.sales > 0 ? (searchTerm.spend / searchTerm.sales) * 100 : 0;
+      
+      // Find the campaign details
+      const campaign = autoCampaigns.find(c => c.campaignId === searchTerm.campaignId);
+      
+      // Check if this search term exists as a keyword in manual campaigns
+      const existsInManual = manualKeywords.includes(searchTerm.searchTerm.toLowerCase());
+      
+      // Determine action - only suggest migration if not in manual campaigns
+      const action = !existsInManual ? 'Migrate to Manual Campaign' : '';
+      
+      return {
+        searchTerm: searchTerm.searchTerm,
+        keyword: searchTerm.keyword || '',
+        campaignName: searchTerm.campaignName || campaign?.name || 'Unknown Campaign',
+        campaignId: searchTerm.campaignId,
+        adGroupName: searchTerm.adGroupName,
+        sales: searchTerm.sales,
+        spend: searchTerm.spend,
+        clicks: searchTerm.clicks,
+        impressions: searchTerm.impressions,
+        acos: acos,
+        action: action
+      };
+    })
+    .sort((a, b) => b.sales - a.sales);
   
   // Define all possible tabs with their data sources
   const allTabs = [
@@ -994,6 +958,26 @@ const PPCDashboard = () => {
   const tabs = useMemo(() => {
     return allTabs.filter(tab => tab.data && tab.data.length > 0);
   }, [highAcosCampaigns, wastedSpendKeywords, campaignsWithoutNegativeKeywords, topPerformingKeywords, filteredSearchTerms, autoCampaignInsights]);
+
+  // Check scroll buttons on mount and when tabs change
+  useEffect(() => {
+    // Use setTimeout to ensure DOM is updated
+    const timer = setTimeout(() => {
+      checkScrollButtons();
+    }, 0);
+    
+    const container = tabsContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', checkScrollButtons);
+      window.addEventListener('resize', checkScrollButtons);
+      return () => {
+        clearTimeout(timer);
+        container.removeEventListener('scroll', checkScrollButtons);
+        window.removeEventListener('resize', checkScrollButtons);
+      };
+    }
+    return () => clearTimeout(timer);
+  }, [tabs.length]); // Only depend on tabs length, not the tabs array itself
   
   // Create a mapping from original tab ID to filtered tab index
   const tabIdToIndexMap = useMemo(() => {
@@ -1362,7 +1346,7 @@ const PPCDashboard = () => {
           term.date || 'N/A',
           term.searchTerm,
           term.campaignName,
-          getAdGroupName(term),
+          term.adGroupName || 'N/A',
           `${currency}${term.sales.toFixed(2)}`,
           `${currency}${term.spend.toFixed(2)}`,
           term.clicks || 0,
@@ -1618,33 +1602,75 @@ const PPCDashboard = () => {
               
               {/* Tabs - Only show tabs with data */}
               {tabs.length > 0 ? (
-                <div className="flex gap-6 relative overflow-x-auto">
-                  {tabs.map((tab, index) => (
-                    <div
-                      key={tab.id}
-                      className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
-                      onClick={() => handleTabClick(tab.id)}
-                    >
-                      <p
-                        className={`text-sm font-medium transition-colors ${
-                          selectedTab === tab.id 
-                            ? 'text-blue-600 font-semibold' 
-                            : 'text-gray-500 hover:text-gray-700'
-                        }`}
+                <div>
+                  {/* Arrow Buttons Row - Above tabs */}
+                  <div className="flex justify-end gap-2 mb-2">
+                    {showLeftArrow && (
+                      <button
+                        onClick={scrollTabsLeft}
+                        className="bg-white hover:bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 flex items-center justify-center transition-all duration-200 shadow-sm"
+                        aria-label="Scroll tabs left"
                       >
-                        {tab.label}
-                      </p>
-                      
-                      {/* Animated underline */}
-                      {selectedTab === tab.id && (
-                        <motion.div
-                          layoutId="ppcUnderline"
-                          className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                        />
-                      )}
-                    </div>
-                  ))}
+                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                    )}
+                    {showRightArrow && (
+                      <button
+                        onClick={scrollTabsRight}
+                        className="bg-white hover:bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 flex items-center justify-center transition-all duration-200 shadow-sm"
+                        aria-label="Scroll tabs right"
+                      >
+                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Tabs Container */}
+                  <div 
+                    ref={tabsContainerRef}
+                    className="flex gap-6 overflow-x-auto scrollbar-hide"
+                    style={{ 
+                      scrollbarWidth: 'none', 
+                      msOverflowStyle: 'none'
+                    }}
+                    onScroll={checkScrollButtons}
+                  >
+                    <style>{`
+                      .scrollbar-hide::-webkit-scrollbar {
+                        display: none;
+                      }
+                    `}</style>
+                    {tabs.map((tab, index) => (
+                      <div
+                        key={tab.id}
+                        className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
+                        onClick={() => handleTabClick(tab.id)}
+                      >
+                        <p
+                          className={`text-sm font-medium transition-colors ${
+                            selectedTab === tab.id 
+                              ? 'text-blue-600 font-semibold' 
+                              : 'text-gray-500 hover:text-gray-700'
+                          }`}
+                        >
+                          {tab.label}
+                        </p>
+                        
+                        {/* Animated underline */}
+                        {selectedTab === tab.id && (
+                          <motion.div
+                            layoutId="ppcUnderline"
+                            className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="text-sm text-gray-500 py-2">
@@ -1681,10 +1707,10 @@ const PPCDashboard = () => {
                         <table className="w-full table-fixed min-w-[600px]">
                           <thead>
                             <tr className="border-b border-gray-200">
-                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Spend</th>
-                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">ACoS %</th>
+                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
+                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1700,10 +1726,12 @@ const PPCDashboard = () => {
                                 const endIndex = startIndex + itemsPerPage;
                                 return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
                                   <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-2/5 py-4 px-2 text-sm text-gray-900 truncate">{campaign.campaignName}</td>
-                                    <td className="w-1/5 py-4 px-2 text-sm text-center">{formatCurrencyWithLocale(campaign.totalSpend, currency)}</td>
-                                    <td className="w-1/5 py-4 px-2 text-sm text-center">{formatCurrencyWithLocale(campaign.totalSales, currency)}</td>
-                                    <td className="w-1/5 py-4 px-2 text-sm text-center font-medium text-red-600">
+                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-900 break-words">
+                                      {campaign.campaignName}
+                                    </td>
+                                    <td className="w-1/5 py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(campaign.totalSpend, currency)}</td>
+                                    <td className="w-1/5 py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(campaign.totalSales, currency)}</td>
+                                    <td className="w-1/5 py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
                                       {campaign.acos.toFixed(2)}%
                                     </td>
                                   </tr>
@@ -1735,58 +1763,66 @@ const PPCDashboard = () => {
                         Keywords with high spend but low returns
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[600px]">
+                        <table className="w-full table-fixed min-w-[700px]">
                           <thead>
                             <tr className="border-b border-gray-200">
-                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Keyword</th>
-                              <th className="w-1/3 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-1/6 text-center py-3 px-2 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-1/6 text-center py-3 px-2 text-sm font-medium text-gray-700">Spend</th>
+                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
+                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
+                              <th className="w-[15%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-[15%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
                             </tr>
                           </thead>
-                                                <tbody>
-                          {wastedSpendKeywords.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="text-center py-12 text-gray-400">
-                                {adsKeywordsPerformanceData.length === 0 ? (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No keyword performance data available</div>
-                                    <div className="text-xs">Check if keywords performance data has been synced</div>
-                                  </div>
-                                ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No keyword data for selected date range</div>
-                                    <div className="text-xs">Try selecting a different date range</div>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No wasted keywords found</div>
-                                    <div className="text-xs">
-                                       No keywords with cost &gt; $0 and sales = $0 
-                                       (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
+                          <tbody>
+                            {wastedSpendKeywords.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="text-center py-12 text-gray-400">
+                                  {adsKeywordsPerformanceData.length === 0 ? (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No keyword performance data available</div>
+                                      <div className="text-xs">Check if keywords performance data has been synced</div>
                                     </div>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (wastedSpendPage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                                  <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                                  <td className="py-4 text-sm text-center">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
-                                  <td className="py-4 text-sm text-center font-medium text-red-600">
-                                    {formatCurrencyWithLocale(keyword.spend, currency)}
-                                  </td>
-                                </tr>
-                              ));
-                            })()
-                          )}
-                        </tbody>
-                      </table>
+                                  ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No keyword data for selected date range</div>
+                                      <div className="text-xs">Try selecting a different date range</div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No wasted keywords found</div>
+                                      <div className="text-xs">
+                                         No keywords with cost &gt; $0 and sales = $0 
+                                         (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (wastedSpendPage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-900 break-words">
+                                      {keyword.keyword}
+                                    </td>
+                                    <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {keyword.campaignName}
+                                    </td>
+                                    <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {keyword.adGroupName || 'N/A'}
+                                    </td>
+                                    <td className="w-[15%] py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
+                                    <td className="w-[15%] py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
+                                      {formatCurrencyWithLocale(keyword.spend, currency)}
+                                    </td>
+                                  </tr>
+                                ));
+                              })()
+                            )}
+                          </tbody>
+                        </table>
                       <TablePagination
                         currentPage={wastedSpendPage}
                         totalPages={Math.ceil(wastedSpendKeywords.length / itemsPerPage)}
@@ -1813,36 +1849,40 @@ const PPCDashboard = () => {
                         <table className="w-full table-fixed min-w-[600px]">
                           <thead>
                             <tr className="border-b border-gray-200">
-                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-2/5 text-left py-3 px-2 text-sm font-medium text-gray-700">AdGroup</th>
-                              <th className="w-1/5 text-center py-3 px-2 text-sm font-medium text-gray-700">Negatives</th>
+                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">AdGroup</th>
+                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Negatives</th>
                             </tr>
                           </thead>
-                        <tbody>
-                          {campaignsWithoutNegativeKeywords.length === 0 ? (
-                            <tr>
-                              <td colSpan={3} className="text-center py-12 text-gray-400">
-                                All campaigns have negative keywords configured ✅
-                              </td>
-                            </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (campaignsWithoutNegativePage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return campaignsWithoutNegativeKeywords.slice(startIndex, endIndex).map((row, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{row.campaignName}</td>
-                                  <td className="py-4 text-sm text-gray-600">{row.adGroupName}</td>
-                                  <td className="py-4 text-sm text-center">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                      {row.negatives}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ));
-                            })()
-                          )}
-                        </tbody>
+                          <tbody>
+                            {campaignsWithoutNegativeKeywords.length === 0 ? (
+                              <tr>
+                                <td colSpan={3} className="text-center py-12 text-gray-400">
+                                  All campaigns have negative keywords configured ✅
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (campaignsWithoutNegativePage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return campaignsWithoutNegativeKeywords.slice(startIndex, endIndex).map((row, idx) => (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-900 break-words">
+                                      {row.campaignName}
+                                    </td>
+                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-600 break-words">
+                                      {row.adGroupName}
+                                    </td>
+                                    <td className="w-1/5 py-4 px-3 text-sm text-center">
+                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 whitespace-nowrap">
+                                        {row.negatives}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ));
+                              })()
+                            )}
+                          </tbody>
                         </table>
                       </div>
                       <TablePagination
@@ -1864,68 +1904,76 @@ const PPCDashboard = () => {
                         icon="📈"
                       />
                       <div className="overflow-x-auto">
-                      <table className="w-full min-w-[800px]">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Keyword</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS %</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Impressions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {topPerformingKeywords.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="text-center py-12 text-gray-400">
-                                {adsKeywordsPerformanceData.length === 0 ? (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No keyword performance data available</div>
-                                    <div className="text-xs">Check if keywords performance data has been synced</div>
-                                  </div>
-                                ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No keyword data for selected date range</div>
-                                    <div className="text-xs">Try selecting a different date range</div>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div>No top performing keywords found</div>
-                                    <div className="text-xs">
-                                      No keywords meeting criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
-                                      (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
-                                    </div>
-                                  </div>
-                                )}
-                              </td>
+                        <table className="w-full table-fixed min-w-[900px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-[18%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
+                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
+                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
+                              <th className="w-[9%] text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
+                              <th className="w-[9%] text-center py-3 px-3 text-sm font-medium text-gray-700">Impressions</th>
                             </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (topPerformingPage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                                  <td className="py-4 text-sm text-gray-600">{keyword.campaignName}</td>
-                                  <td className="py-4 text-sm text-center font-medium text-green-600">
-                                    {formatCurrencyWithLocale(keyword.sales, currency)}
-                                  </td>
-                                  <td className="py-4 text-sm text-center">
-                                    {formatCurrencyWithLocale(keyword.spend, currency)}
-                                  </td>
-                                  <td className="py-4 text-sm text-center font-medium text-green-600">
-                                    {keyword.acos.toFixed(2)}%
-                                  </td>
-                                  <td className="py-4 text-sm text-center">
-                                    {keyword.impressions.toLocaleString()}
-                                  </td>
-                                </tr>
-                              ));
-                            })()
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {topPerformingKeywords.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="text-center py-12 text-gray-400">
+                                  {adsKeywordsPerformanceData.length === 0 ? (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No keyword performance data available</div>
+                                      <div className="text-xs">Check if keywords performance data has been synced</div>
+                                    </div>
+                                  ) : filteredAdsKeywordsPerformanceData.length === 0 ? (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No keyword data for selected date range</div>
+                                      <div className="text-xs">Try selecting a different date range</div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center space-y-2">
+                                      <div>No top performing keywords found</div>
+                                      <div className="text-xs">
+                                        No keywords meeting criteria: ACOS &lt; 20%, Sales &gt; $100, Impressions &gt; 1000
+                                        (Keywords in range: {filteredAdsKeywordsPerformanceData.length})
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (topPerformingPage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="w-[18%] py-4 px-3 text-sm text-gray-900 break-words">
+                                      {keyword.keyword}
+                                    </td>
+                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {keyword.campaignName}
+                                    </td>
+                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {keyword.adGroupName || 'N/A'}
+                                    </td>
+                                    <td className="w-[12%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                      {formatCurrencyWithLocale(keyword.sales, currency)}
+                                    </td>
+                                    <td className="w-[12%] py-4 px-3 text-sm text-center whitespace-nowrap">
+                                      {formatCurrencyWithLocale(keyword.spend, currency)}
+                                    </td>
+                                    <td className="w-[9%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                      {keyword.acos.toFixed(2)}%
+                                    </td>
+                                    <td className="w-[9%] py-4 px-3 text-sm text-center whitespace-nowrap">
+                                      {keyword.impressions.toLocaleString()}
+                                    </td>
+                                  </tr>
+                                ));
+                              })()
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                       <TablePagination
                         currentPage={topPerformingPage}
@@ -1949,44 +1997,50 @@ const PPCDashboard = () => {
                         Search terms that generated clicks but no conversions
                       </div>
                       <div className="overflow-x-auto">
-                      <table className="w-full min-w-[800px]">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Matched Keyword</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Ad Group</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Clicks</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Spend</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredSearchTerms.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="text-center py-12 text-gray-400">
-                                No data available
-                              </td>
+                        <table className="w-full table-fixed min-w-[800px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Matched Keyword</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
+                              <th className="w-[11%] text-center py-3 px-3 text-sm font-medium text-gray-700">Clicks</th>
+                              <th className="w-[11%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
                             </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (searchTermsPage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
-                                <tr key={idx} className="border-b border-gray-200">
-                                  <td className="py-4 text-sm text-gray-900">{term.searchTerm}</td>
-                                  <td className="py-4 text-sm text-gray-600">{term.keyword}</td>
-                                  <td className="py-4 text-sm text-gray-600">{getAdGroupName(term)}</td>
-                                  <td className="py-4 text-sm text-center">{term.clicks}</td>
-                                  <td className="py-4 text-sm text-center">{formatCurrencyWithLocale(term.sales, currency)}</td>
-                                  <td className="py-4 text-sm text-center font-medium text-red-600">
-                                    {formatCurrencyWithLocale(term.spend, currency)}
-                                  </td>
-                                </tr>
-                              ));
-                            })()
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {filteredSearchTerms.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="text-center py-12 text-gray-400">
+                                  No data available
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (searchTermsPage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
+                                  <tr key={idx} className="border-b border-gray-200">
+                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-900 break-words">
+                                      {term.searchTerm}
+                                    </td>
+                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {term.keyword || 'N/A'}
+                                    </td>
+                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      {term.adGroupName || 'N/A'}
+                                    </td>
+                                    <td className="w-[11%] py-4 px-3 text-sm text-center whitespace-nowrap">{term.clicks}</td>
+                                    <td className="w-[11%] py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(term.sales, currency)}</td>
+                                    <td className="w-[12%] py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
+                                      {formatCurrencyWithLocale(term.spend, currency)}
+                                    </td>
+                                  </tr>
+                                ));
+                              })()
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                       <TablePagination
                         currentPage={searchTermsPage}
@@ -2010,48 +2064,52 @@ const PPCDashboard = () => {
                         Performance insights from automatic targeting campaigns
                       </div>
                       <div className="overflow-x-auto">
-                      <table className="w-full min-w-[700px]">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Search Term</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Campaign Name</th>
-                            <th className="text-left py-3 text-sm font-medium text-gray-700">Ad Group</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">Sales</th>
-                            <th className="text-center py-3 text-sm font-medium text-gray-700">ACoS %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {autoCampaignInsights.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} className="text-center py-12 text-gray-400">
-                                No data available
-                              </td>
+                        <table className="w-full table-fixed min-w-[700px]">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>
+                              <th className="w-[30%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign Name</th>
+                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
+                              <th className="w-[10%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
+                              <th className="w-[10%] text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
                             </tr>
-                          ) : (
-                            (() => {
-                              const startIndex = (autoCampaignPage - 1) * itemsPerPage;
-                              const endIndex = startIndex + itemsPerPage;
-                              return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => {
-                                // Find the original search term to get adGroup (using date-filtered data)
-                                const originalTerm = filteredSearchTermsData.find(st => st.searchTerm === insight.searchTerm && st.campaignId === insight.campaignId);
-                                return (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="py-4 text-sm text-gray-900">{insight.searchTerm}</td>
-                                    <td className="py-4 text-sm text-gray-600">{insight.campaignName}</td>
-                                    <td className="py-4 text-sm text-gray-600">{originalTerm ? getAdGroupName(originalTerm) : 'N/A'}</td>
-                                    <td className="py-4 text-sm text-center font-medium text-green-600">
-                                      {formatCurrencyWithLocale(insight.sales, currency)}
-                                    </td>
-                                    <td className="py-4 text-sm text-center font-medium">
-                                      {insight.acos.toFixed(2)}%
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            })()
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {autoCampaignInsights.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="text-center py-12 text-gray-400">
+                                  No data available
+                                </td>
+                              </tr>
+                            ) : (
+                              (() => {
+                                const startIndex = (autoCampaignPage - 1) * itemsPerPage;
+                                const endIndex = startIndex + itemsPerPage;
+                                return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => {
+                                  return (
+                                    <tr key={idx} className="border-b border-gray-200">
+                                      <td className="w-[25%] py-4 px-3 text-sm text-gray-900 break-words">
+                                        {insight.searchTerm}
+                                      </td>
+                                      <td className="w-[30%] py-4 px-3 text-sm text-gray-600 break-words">
+                                        {insight.campaignName}
+                                      </td>
+                                      <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                        {insight.adGroupName || 'N/A'}
+                                      </td>
+                                      <td className="w-[10%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                        {formatCurrencyWithLocale(insight.sales, currency)}
+                                      </td>
+                                      <td className="w-[10%] py-4 px-3 text-sm text-center font-medium whitespace-nowrap">
+                                        {insight.acos.toFixed(2)}%
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                       <TablePagination
                         currentPage={autoCampaignPage}

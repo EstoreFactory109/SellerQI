@@ -44,8 +44,11 @@ class RazorpayService {
 
     /**
      * Create Razorpay subscription using Plan ID
+     * @param {string} userId - User ID
+     * @param {string} planType - Plan type (PRO)
+     * @param {number} [trialPeriodDays] - Optional trial period in days
      */
-    async createOrder(userId, planType) {
+    async createOrder(userId, planType, trialPeriodDays = null) {
         try {
             if (!this.isConfigured()) {
                 throw new Error('Razorpay is not configured');
@@ -63,7 +66,8 @@ class RazorpayService {
                 throw new Error(`Plan ID not configured for: ${planType}. Please set RAZOR_PAY_PLAN_ID in environment variables.`);
             }
 
-            logger.info(`Creating Razorpay subscription for user ${userId} with plan ID: ${planId}`);
+            const hasTrial = trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO';
+            logger.info(`Creating Razorpay subscription for user ${userId} with plan ID: ${planId}${hasTrial ? `, trial: ${trialPeriodDays} days` : ''}`);
 
             // Create Razorpay subscription using the Plan ID
             const subscriptionOptions = {
@@ -73,9 +77,22 @@ class RazorpayService {
                 notes: {
                     userId: userId.toString(),
                     planType: planType,
-                    email: user.email
+                    email: user.email,
+                    hasTrial: hasTrial ? 'true' : 'false',
+                    trialDays: hasTrial ? trialPeriodDays.toString() : '0'
                 }
             };
+
+            // Add trial period using start_at parameter
+            // When start_at is set to a future date, Razorpay:
+            // 1. Collects payment method during authentication
+            // 2. Does not charge immediately
+            // 3. Automatically charges when start_at date arrives
+            if (hasTrial) {
+                const trialEndDate = Math.floor((Date.now() + (trialPeriodDays * 24 * 60 * 60 * 1000)) / 1000);
+                subscriptionOptions.start_at = trialEndDate;
+                logger.info(`Adding ${trialPeriodDays}-day trial period. Subscription will start charging on: ${new Date(trialEndDate * 1000).toISOString()}`);
+            }
 
             let razorpaySubscription;
             try {
@@ -90,7 +107,7 @@ class RazorpayService {
                 throw new Error(`Failed to create Razorpay subscription: ${razorpayError.error?.description || razorpayError.message}`);
             }
 
-            logger.info(`Razorpay subscription created: ${razorpaySubscription.id} for user: ${userId}, plan: ${planType}`);
+            logger.info(`Razorpay subscription created: ${razorpaySubscription.id} for user: ${userId}, plan: ${planType}${hasTrial ? ', with trial' : ''}`);
 
             // Save subscription info (pending state)
             await this.updateOrCreateSubscription(userId, {
@@ -112,12 +129,15 @@ class RazorpayService {
                 subscriptionId: razorpaySubscription.id,
                 keyId: keyId,
                 planName: 'Pro Plan',
-                description: 'SellerQI Pro Plan - Monthly Subscription',
+                description: hasTrial ? `SellerQI Pro Plan - ${trialPeriodDays}-Day Free Trial` : 'SellerQI Pro Plan - Monthly Subscription',
                 prefill: {
                     name: `${user.firstName} ${user.lastName}`,
                     email: user.email,
                     contact: user.phone || ''
-                }
+                },
+                hasTrial: hasTrial,
+                trialDays: hasTrial ? trialPeriodDays : null,
+                trialEndsAt: hasTrial ? new Date(Date.now() + (trialPeriodDays * 24 * 60 * 60 * 1000)).toISOString() : null
             };
 
         } catch (error) {
@@ -191,14 +211,23 @@ class RazorpayService {
             const isUpgrade = previousPackageType === 'LITE' || previousPackageType === 'PRO' || wasInTrial;
             const isNewSignup = !previousPackageType || previousPackageType === null || (!isUpgrade && planType === 'PRO');
 
-            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}`);
-
-            // Fetch subscription details from Razorpay to get billing cycle dates
+            // Fetch subscription details from Razorpay to check trial status and billing dates
             let currentPeriodStart = new Date();
             let currentPeriodEnd = new Date();
+            let isTrialing = false;
+            let trialEndsDate = null;
             
             try {
                 const razorpaySub = await this.razorpay.subscriptions.fetch(razorpaySubscriptionId);
+                
+                // Check if subscription is in trial (authenticated but start_at is in the future)
+                // When start_at is set to future, status is 'authenticated' until that date
+                if (razorpaySub.status === 'authenticated' && razorpaySub.start_at && razorpaySub.start_at * 1000 > Date.now()) {
+                    isTrialing = true;
+                    trialEndsDate = new Date(razorpaySub.start_at * 1000);
+                    logger.info(`Razorpay subscription is in trial period until: ${trialEndsDate.toISOString()}`);
+                }
+                
                 if (razorpaySub.current_start) {
                     currentPeriodStart = new Date(razorpaySub.current_start * 1000);
                 }
@@ -210,16 +239,18 @@ class RazorpayService {
                 currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
             }
 
+            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}, isTrialing=${isTrialing}`);
+
             // Update subscription with payment details
             const subscriptionData = {
                 razorpayPaymentId: paymentId,
                 razorpaySignature: signature,
-                status: 'active',
-                paymentStatus: 'paid',
+                status: isTrialing ? 'trialing' : 'active',
+                paymentStatus: isTrialing ? 'no_payment_required' : 'paid',
                 currentPeriodStart: currentPeriodStart,
-                currentPeriodEnd: currentPeriodEnd,
-                lastPaymentDate: new Date(),
-                nextBillingDate: currentPeriodEnd
+                currentPeriodEnd: isTrialing ? trialEndsDate : currentPeriodEnd,
+                lastPaymentDate: isTrialing ? null : new Date(),
+                nextBillingDate: isTrialing ? trialEndsDate : currentPeriodEnd
             };
 
             await Subscription.findOneAndUpdate(
@@ -230,9 +261,14 @@ class RazorpayService {
             // Update user's package type
             const updateData = {
                 packageType: planType,
-                subscriptionStatus: 'active',
-                isInTrialPeriod: false
+                subscriptionStatus: isTrialing ? 'trialing' : 'active',
+                isInTrialPeriod: isTrialing
             };
+
+            // Set trial end date if in trial
+            if (isTrialing && trialEndsDate) {
+                updateData.trialEndsDate = trialEndsDate;
+            }
 
             // If user purchased AGENCY plan, update accessType
             if (planType === 'AGENCY') {
@@ -241,63 +277,60 @@ class RazorpayService {
 
             await User.findByIdAndUpdate(userId, updateData);
 
-            // Try to get invoice URL and payment amount from Razorpay
-            let invoiceUrl = null;
-            let invoiceNumber = null;
-            let paymentAmount = subscription.amount || 0; // Fallback to subscription amount
+            // Only add payment history and fetch invoice if not in trial (no actual payment yet)
+            if (!isTrialing) {
+                // Try to get invoice URL and payment amount from Razorpay
+                let invoiceUrl = null;
+                let invoiceNumber = null;
+                let paymentAmount = subscription.amount || 0; // Fallback to subscription amount
 
-            try {
-                const razorpayPayment = await this.razorpay.payments.fetch(paymentId);
-                
-                // Razorpay returns amount in paise (smallest currency unit)
-                // For INR: ₹1,999.00 = 199900 paise
-                // Convert paise to rupees by dividing by 100
-                if (razorpayPayment.amount) {
-                    // Check if amount is already in rupees (if it's less than 10000, it's likely already in rupees)
-                    // For ₹1,999.00, if it's in paise it would be 199900, if in rupees it would be 1999
-                    // If amount > 1000, assume it's in paise and divide by 100
-                    // If amount <= 1000, it might already be in rupees, but for ₹1,999 it should be > 1000
-                    // So we'll always divide by 100 for safety
-                    const rawAmount = razorpayPayment.amount;
+                try {
+                    const razorpayPayment = await this.razorpay.payments.fetch(paymentId);
                     
-                    // If the amount is very large (like 199900), it's in paise - divide by 100
-                    // If the amount is reasonable (like 1999), it might already be in rupees
-                    // For subscription payments, Razorpay typically returns in paise
-                    // Let's check: if amount > 10000, it's definitely in paise
-                    if (rawAmount > 10000) {
-                        paymentAmount = rawAmount / 100; // Convert paise to rupees
-                        logger.info(`Razorpay payment amount: ${rawAmount} paise = ₹${paymentAmount}`);
-                    } else {
-                        // Amount is already in rupees (for test mode or certain cases)
-                        paymentAmount = rawAmount;
-                        logger.info(`Razorpay payment amount: ${rawAmount} (already in rupees) = ₹${paymentAmount}`);
+                    // Razorpay returns amount in paise (smallest currency unit)
+                    // For INR: ₹1,999.00 = 199900 paise
+                    // Convert paise to rupees by dividing by 100
+                    if (razorpayPayment.amount) {
+                        const rawAmount = razorpayPayment.amount;
+                        
+                        // If the amount is very large (like 199900), it's in paise - divide by 100
+                        if (rawAmount > 10000) {
+                            paymentAmount = rawAmount / 100; // Convert paise to rupees
+                            logger.info(`Razorpay payment amount: ${rawAmount} paise = ₹${paymentAmount}`);
+                        } else {
+                            // Amount is already in rupees (for test mode or certain cases)
+                            paymentAmount = rawAmount;
+                            logger.info(`Razorpay payment amount: ${rawAmount} (already in rupees) = ₹${paymentAmount}`);
+                        }
                     }
+                    
+                    if (razorpayPayment.invoice_id) {
+                        const invoice = await this.razorpay.invoices.fetch(razorpayPayment.invoice_id);
+                        invoiceUrl = invoice.short_url || null;
+                        invoiceNumber = invoice.id || null;
+                    }
+                } catch (invoiceError) {
+                    logger.warn(`Could not fetch Razorpay payment details: ${invoiceError.message}`);
                 }
-                
-                if (razorpayPayment.invoice_id) {
-                    const invoice = await this.razorpay.invoices.fetch(razorpayPayment.invoice_id);
-                    invoiceUrl = invoice.short_url || null;
-                    invoiceNumber = invoice.id || null;
-                }
-            } catch (invoiceError) {
-                logger.warn(`Could not fetch Razorpay payment details: ${invoiceError.message}`);
+
+                // Add to payment history with invoice URLs
+                await this.addPaymentHistory(userId, {
+                    orderId: paymentId,
+                    paymentId: paymentId,
+                    amount: paymentAmount,
+                    currency: subscription.currency || 'inr',
+                    status: 'paid',
+                    razorpayPaymentId: paymentId,
+                    invoiceUrl: invoiceUrl,
+                    invoiceNumber: invoiceNumber,
+                    paymentGateway: 'razorpay'
+                });
             }
 
-            // Add to payment history with invoice URLs
-            // Note: For subscriptions, we use paymentId as orderId since Razorpay subscriptions don't have separate orders
-            await this.addPaymentHistory(userId, {
-                orderId: paymentId, // Use paymentId as orderId for subscriptions
-                paymentId: paymentId,
-                amount: paymentAmount, // Use actual payment amount from Razorpay (in rupees)
-                currency: subscription.currency || 'inr',
-                status: 'paid',
-                razorpayPaymentId: paymentId,
-                invoiceUrl: invoiceUrl,
-                invoiceNumber: invoiceNumber,
-                paymentGateway: 'razorpay'
-            });
-
-            logger.info(`Razorpay payment successful for user: ${userId}, payment: ${paymentId}, plan: ${planType}`);
+            const statusMessage = isTrialing 
+                ? `Razorpay trial started for user: ${userId}, trial ends: ${trialEndsDate?.toISOString()}`
+                : `Razorpay payment successful for user: ${userId}, payment: ${paymentId}, plan: ${planType}`;
+            logger.info(statusMessage);
 
             return { 
                 success: true, 
@@ -305,8 +338,12 @@ class RazorpayService {
                 userId,
                 isTrialUpgrade: isTrialUpgrade,  // Flag to indicate if user upgraded from trial
                 isUpgrade: isUpgrade, // Flag to indicate if this is an upgrade (existing user)
-                isNewSignup: isNewSignup, // Flag to indicate if this is a new signup
-                message: 'Payment verified and subscription activated successfully'
+                isNewSignup: isNewSignup || isTrialing, // Trial users are treated as new signups
+                isTrialing: isTrialing, // Flag to indicate if user is in trial
+                trialEndsDate: trialEndsDate, // Trial end date if applicable
+                message: isTrialing 
+                    ? 'Trial started successfully. Payment will be charged when trial ends.'
+                    : 'Payment verified and subscription activated successfully'
             };
 
         } catch (error) {
@@ -433,6 +470,9 @@ class RazorpayService {
 
     /**
      * Handle subscription.activated webhook event
+     * This is triggered when:
+     * 1. A trial subscription's start_at date arrives (trial ends, subscription starts)
+     * 2. A subscription is created without trial and payment succeeds
      */
     async handleSubscriptionActivated(payload) {
         try {
@@ -445,24 +485,34 @@ class RazorpayService {
             const dbSubscription = await Subscription.findOne({ razorpaySubscriptionId: subscriptionId });
             
             if (dbSubscription) {
+                // Check if user was in trial before
+                const user = await User.findById(dbSubscription.userId);
+                const wasInTrial = user?.isInTrialPeriod === true;
+                
                 await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'active',
                         paymentStatus: 'paid',
                         currentPeriodStart: subscription.current_start ? new Date(subscription.current_start * 1000) : new Date(),
-                        currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null
+                        currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null,
+                        lastPaymentDate: new Date(),
+                        nextBillingDate: subscription.current_end ? new Date(subscription.current_end * 1000) : null
                     }
                 );
 
-                // Update user's package type
+                // Update user's package type - trial has ended, now on paid plan
                 await User.findByIdAndUpdate(dbSubscription.userId, {
                     packageType: dbSubscription.planType,
                     subscriptionStatus: 'active',
                     isInTrialPeriod: false
                 });
 
-                logger.info(`Subscription activated via webhook: ${subscriptionId}`);
+                if (wasInTrial) {
+                    logger.info(`Trial ended for user: ${dbSubscription.userId}. Subscription activated and payment charged. User now on paid ${dbSubscription.planType} plan.`);
+                } else {
+                    logger.info(`Subscription activated via webhook: ${subscriptionId}`);
+                }
             }
 
         } catch (error) {
