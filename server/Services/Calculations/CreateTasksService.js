@@ -341,21 +341,6 @@ class CreateTaskService {
                 });
             }
             
-            // Product review error - use actual error data
-            if (error.productReviewResultErrorData) {
-                const errorData = error.productReviewResultErrorData;
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin,
-                    errorCategory: 'conversion',
-                    errorType: 'insufficient_reviews',
-                    error: `Reviews | Insufficient: ${errorData.Message || 'Your product has fewer reviews than recommended, which can affect buyer confidence and conversion rates.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Implement a review acquisition strategy through follow-up emails using Amazon\'s Request a Review button. Focus on providing excellent customer service and product quality to encourage positive reviews.',
-                    status: TaskStatus.PENDING
-                });
-            }
-            
             // Star rating error - use actual error data
             if (error.productStarRatingResultErrorData) {
                 const errorData = error.productStarRatingResultErrorData;

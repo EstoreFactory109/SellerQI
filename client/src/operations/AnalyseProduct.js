@@ -1,6 +1,6 @@
 import axios from "axios";
 import { getRankings} from "../helpers/Rankingsj";
-import { checkNumberOfImages, checkIfVideoExists, checkNumberOfProductReviews, checkStarRating} from "../helpers/Conversion";
+import { checkNumberOfImages, checkIfVideoExists, checkStarRating} from "../helpers/Conversion";
 
 
 const AnalyseProduct = async (asin,country) => {
@@ -24,7 +24,7 @@ const AnalyseProduct = async (asin,country) => {
           
             const data=response.data.data;
             const rankingResult=getRankings(data);
-            const totalPossibleErrors=13
+            const totalPossibleErrors=12
             
             // Safe null checks for arrays
             const productPhotos = data["product_photos"] || [];
@@ -36,7 +36,6 @@ const AnalyseProduct = async (asin,country) => {
             
             const imageResult=checkNumberOfImages(productPhotos);
             const videoResult=checkIfVideoExists(productVideos);
-            const reviewResult=checkNumberOfProductReviews(productNumRatings);
             const starRatingResult=checkStarRating(productStarRating);
             
             console.log("Ranking Result: ",rankingResult)
@@ -50,10 +49,6 @@ const AnalyseProduct = async (asin,country) => {
                 conversionErrors++;
             }
             if(videoResult.status==="Error"){
-                TotalErrors++;
-                conversionErrors++;
-            }
-            if(reviewResult.status==="Error"){
                 TotalErrors++;
                 conversionErrors++;
             }
@@ -93,7 +88,6 @@ const AnalyseProduct = async (asin,country) => {
                 rankingResult,
                 imageResult,
                 videoResult,
-                reviewResult,
                 starRatingResult,
                 rankingErrors: rankingResult.TotalErrors || 0,
                 conversionErrors: conversionErrors,

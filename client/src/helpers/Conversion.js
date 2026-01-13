@@ -54,25 +54,6 @@ const checkIfVideoExists=(video)=>{
     }
 }
 
-const checkNumberOfProductReviews=(product_num_ratings)=>{
-    // Handle null, undefined, or non-numeric inputs
-    const numRatings = Number(product_num_ratings) || 0;
-    
-    if(numRatings<50){
-        return {
-            status:"Error",
-            Message:`Your product listing has ${numRatings} reviews. A low number of reviews may affect buyer confidence and product credibility, potentially impacting sales.`,
-            HowToSolve:"Encourage satisfied customers to leave reviews by following up after purchases with email reminders or using Amazon's 'Request a Review' feature. Ensure your product meets customer expectations to naturally increase positive feedback. Consider participating in Amazon's Vine program if eligible, to get more reviews quickly."
-        }
-    }else{
-        return {
-            status:"Success",
-            Message:"Excellent! Your product listing has 50 or more reviews, which helps build credibility and trust with potential buyers, positively influencing their purchasing decisions.",
-            HowToSolve:""
-        }
-    }
-}
-
 const checkStarRating=(product_star_ratings)=>{
     // Handle null, undefined, or non-numeric inputs
     const starRating = Number(product_star_ratings) || 0;
@@ -92,4 +73,4 @@ const checkStarRating=(product_star_ratings)=>{
     }
 }
 
-export {checkNumberOfImages,checkIfVideoExists,checkNumberOfProductReviews,checkStarRating}
+export {checkNumberOfImages,checkIfVideoExists,checkStarRating}

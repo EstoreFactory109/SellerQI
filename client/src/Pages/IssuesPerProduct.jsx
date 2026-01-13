@@ -239,7 +239,6 @@ const Dashboard = () => {
     const hasAnyConversionError = [
         updatedProduct.conversionErrors?.imageResultErrorData?.status,
         updatedProduct.conversionErrors?.videoResultErrorData?.status,
-        updatedProduct.conversionErrors?.productReviewResultErrorData?.status,
         updatedProduct.conversionErrors?.productStarRatingResultErrorData?.status,
         updatedProduct.conversionErrors?.productsWithOutBuyboxErrorData?.status,
         updatedProduct.conversionErrors?.aplusErrorData?.status
@@ -276,7 +275,6 @@ const Dashboard = () => {
     // Conversion issue states (independent toggles)
     const [imageSolution, setImageSolution] = useState("");
     const [videoSolution, setVideoSolution] = useState("");
-    const [productReviewSolution, setProductReviewSolution] = useState("");
     const [productStarRatingSolution, setProductStarRatingSolution] = useState("");
     const [productsWithOutBuyboxSolution, setProductsWithOutBuyboxSolution] = useState("");
     const [aplusSolution, setAplusSolution] = useState("");
@@ -495,15 +493,6 @@ const Dashboard = () => {
                 Issue: 'Video Issue',
                 Message: product.conversionErrors?.videoResultErrorData.Message,
                 Solution: product.conversionErrors?.videoResultErrorData.HowToSolve
-            });
-        }
-        if (product.conversionErrors?.productReviewResultErrorData?.status === "Error") {
-            exportData.push({
-                Category: 'Conversion Issues',
-                Type: 'Product Review',
-                Issue: 'Product Review Issue',
-                Message: product.conversionErrors?.productReviewResultErrorData.Message,
-                Solution: product.conversionErrors?.productReviewResultErrorData.HowToSolve
             });
         }
         if (product.conversionErrors?.productStarRatingResultErrorData?.status === "Error") {
@@ -1135,16 +1124,6 @@ const Dashboard = () => {
                                         solutionContent={product.conversionErrors?.videoResultErrorData.HowToSolve}
                                         stateValue={videoSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Video")}
-                                    />
-                                )}
-                                {product.conversionErrors?.productReviewResultErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Product Review Issue"
-                                        message={product.conversionErrors?.productReviewResultErrorData.Message}
-                                        solutionKey="ProductReview"
-                                        solutionContent={product.conversionErrors?.productReviewResultErrorData.HowToSolve}
-                                        stateValue={productReviewSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "ProductReview")}
                                     />
                                 )}
                                 {product.conversionErrors?.productStarRatingResultErrorData?.status === "Error" && (

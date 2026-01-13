@@ -8,17 +8,36 @@ const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 
 /**
  * Create checkout session for subscription
+ * Supports three options:
+ * 1. PRO with trial: 7-day free trial, payment collected upfront, charged after trial ends
+ * 2. PRO direct: Direct payment for PRO plan without trial
+ * 3. AGENCY: Direct payment for AGENCY plan (no trial available)
  */
 const createCheckoutSession = asyncHandler(async (req, res) => {
     try {
         const userId = req.userId;
-        const { planType, couponCode } = req.body;
+        const { planType, couponCode, trialPeriodDays } = req.body;
 
         // Validate plan type
         if (!planType || !['PRO', 'AGENCY'].includes(planType)) {
             return res.status(400).json(
                 new ApiResponse(400, null, 'Invalid plan type. Only PRO and AGENCY plans require payment.')
             );
+        }
+
+        // Validate trial period if provided (only allowed for PRO plan)
+        if (trialPeriodDays !== undefined && trialPeriodDays !== null) {
+            if (planType !== 'PRO') {
+                return res.status(400).json(
+                    new ApiResponse(400, null, 'Trial period is only available for PRO plan.')
+                );
+            }
+            const trialDays = parseInt(trialPeriodDays);
+            if (isNaN(trialDays) || trialDays < 0 || trialDays > 365) {
+                return res.status(400).json(
+                    new ApiResponse(400, null, 'Trial period must be between 0 and 365 days.')
+                );
+            }
         }
 
         // Check if user exists
@@ -41,21 +60,26 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
         const successUrl = `${baseUrl}/subscription-success?session_id={CHECKOUT_SESSION_ID}`;
         const cancelUrl = `${baseUrl}/payment-failed`;
 
-        // Create checkout session (with optional coupon code)
+        // Create checkout session (with optional coupon code and trial period)
+        // When trialPeriodDays is provided for PRO plan, Stripe will collect payment method but not charge until trial ends
         const checkoutSession = await stripeService.createCheckoutSession(
             userId,
             planType,
             successUrl,
             cancelUrl,
-            couponCode || null  // Pass coupon code if provided
+            couponCode || null,
+            trialPeriodDays ? parseInt(trialPeriodDays) : null
         );
 
-        logger.info(`Checkout session created for user: ${userId}, plan: ${planType}`);
+        const trialInfo = checkoutSession.hasTrial ? `, trial: ${checkoutSession.trialDays} days` : '';
+        logger.info(`Checkout session created for user: ${userId}, plan: ${planType}${trialInfo}`);
 
         return res.status(200).json(
             new ApiResponse(200, {
                 sessionId: checkoutSession.sessionId,
-                url: checkoutSession.url
+                url: checkoutSession.url,
+                hasTrial: checkoutSession.hasTrial || false,
+                trialDays: checkoutSession.trialDays || null
             }, 'Checkout session created successfully')
         );
 

@@ -30,7 +30,6 @@ const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Calculatio
 const {
     checkNumberOfImages,
     checkIfVideoExists,
-    checkNumberOfProductReviews,
     checkStarRating,
     checkAPlus,
     checkProductWithOutBuyBox
@@ -961,25 +960,23 @@ class AnalyseService {
         };
 
         const AmazonReadyProductsSet = new Set();
-        const imageResultArray = [], videoResultArray = [], productReviewResultArray = [], 
+        const imageResultArray = [], videoResultArray = [], 
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
         safeProductReviews.Products.forEach(product => {
             if (!DefaulterList.ProductReviews.includes(product.asin)) {
                 const imageResult = checkNumberOfImages(product.product_photos);
                 const videoResult = checkIfVideoExists(product.video_url);
-                const productReviewResult = checkNumberOfProductReviews(product.product_num_ratings);
                 const productStarRatingResult = checkStarRating(product.product_star_ratings);
                 const rankings = getRankings(product);
 
                 if (rankings.TotalErrors === 0 && 
-                    [imageResult, videoResult, productReviewResult, productStarRatingResult].every(r => r.status === "Success")) {
+                    [imageResult, videoResult, productStarRatingResult].every(r => r.status === "Success")) {
                     AmazonReadyProductsSet.add(product.asin);
                 }
 
                 imageResultArray.push({ asin: product.asin, data: imageResult });
                 videoResultArray.push({ asin: product.asin, data: videoResult });
-                productReviewResultArray.push({ asin: product.asin, data: productReviewResult });
                 productStarRatingResultArray.push({ asin: product.asin, data: productStarRatingResult });
                 RankingResultArray.push({ asin: product.asin, data: rankings.finalResult });
             }
@@ -1006,7 +1003,6 @@ class AnalyseService {
             conversionData: {
                 imageResult: imageResultArray,
                 videoResult: videoResultArray,
-                productReviewResult: productReviewResultArray,
                 productStarRatingResult: productStarRatingResultArray,
                 aPlusResult: aPlusArray,
                 ProductWithOutBuybox: checkProductWithOutBuyBox(buyBoxProducts).buyboxResult,
@@ -1171,7 +1167,6 @@ class AnalyseService {
         const conversionErrors = [
             ...conversionData.conversionData.imageResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.videoResult.filter(item => item && item.data && item.data.status === "Error"),
-            ...conversionData.conversionData.productReviewResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.productStarRatingResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.aPlusResult.filter(item => item && item.status === "Error")
         ];

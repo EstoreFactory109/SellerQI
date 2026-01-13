@@ -18,6 +18,9 @@ const CreateTaskService = require('../../Services/Calculations/CreateTasksServic
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
+const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
 
 /**
  * Get full dashboard data - calculates all data in backend
@@ -684,6 +687,184 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get Your Products data
+ * Returns all products with their details including status, ratings, A+ content status
+ */
+const getYourProductsData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        logger.info(`Getting Your Products data for user ${userId}, region ${Region}, country ${Country}`);
+
+        // Get seller data with products
+        const seller = await Seller.findOne({ User: userId });
+        
+        if (!seller) {
+            return res.status(404).json(
+                new ApiError(404, 'Seller account not found')
+            );
+        }
+
+        // Find the seller account for the current region
+        const sellerAccount = seller.sellerAccount.find(
+            acc => acc.region === Region
+        );
+
+        if (!sellerAccount) {
+            return res.status(404).json(
+                new ApiError(404, 'No seller account found for this region')
+            );
+        }
+
+        // Get products from seller account
+        const products = sellerAccount.products || [];
+
+        // Get product reviews data - try multiple query approaches
+        // First try with region and country, sorted by createdAt to get latest
+        let productReviews = await NumberOfProductReviews.findOne({
+            User: userId,
+            region: Region,
+            country: Country
+        }).sort({ createdAt: -1 });
+
+        // If not found, try just by user (some records might not have region/country)
+        if (!productReviews) {
+            productReviews = await NumberOfProductReviews.findOne({
+                User: userId
+            }).sort({ createdAt: -1 });
+            logger.info(`ProductReviews fallback query (user only): found=${!!productReviews}`);
+        }
+
+        // Get A+ content data from APlusContent model
+        // This data is populated by NumberOfProductReviews service from RapidAPI's has_aplus field
+        let aPlusContent = await APlusContent.findOne({
+            User: userId,
+            region: Region,
+            country: Country
+        }).sort({ createdAt: -1 });
+
+        // If not found, try just by user
+        if (!aPlusContent) {
+            aPlusContent = await APlusContent.findOne({
+                User: userId
+            }).sort({ createdAt: -1 });
+            logger.info(`APlusContent fallback query (user only): found=${!!aPlusContent}`);
+        }
+
+        logger.info(`Your Products data fetch results:`, {
+            userId,
+            region: Region,
+            country: Country,
+            productsCount: products.length,
+            productReviewsFound: !!productReviews,
+            productReviewsCount: productReviews?.Products?.length || 0,
+            aPlusContentFound: !!aPlusContent,
+            aPlusContentCount: aPlusContent?.ApiContentDetails?.length || 0
+        });
+
+        // Create a map for quick lookup of reviews by ASIN
+        const reviewsMap = new Map();
+        if (productReviews && productReviews.Products) {
+            productReviews.Products.forEach(product => {
+                // Use lowercase asin for case-insensitive matching
+                const asinKey = product.asin?.toUpperCase() || '';
+                reviewsMap.set(asinKey, {
+                    numRatings: product.product_num_ratings || '0',
+                    starRatings: product.product_star_ratings || '0',
+                    title: product.product_title || '',
+                    photos: product.product_photos || []
+                });
+            });
+            logger.info(`Reviews map created with ${reviewsMap.size} entries. Sample ASINs: ${Array.from(reviewsMap.keys()).slice(0, 5).join(', ')}`);
+        }
+
+        // Create a map for A+ content status by ASIN
+        // A+ data comes from APlusContent model, populated by NumberOfProductReviews service
+        // Status values: 'APPROVED' (has A+), 'NOT_AVAILABLE' (no A+)
+        const aPlusMap = new Map();
+        if (aPlusContent && aPlusContent.ApiContentDetails) {
+            let approvedCount = 0;
+            let notAvailableCount = 0;
+            
+            aPlusContent.ApiContentDetails.forEach(item => {
+                // Use uppercase asin for case-insensitive matching
+                const asinKey = item.Asins?.toUpperCase() || '';
+                aPlusMap.set(asinKey, item.status);
+                
+                if (item.status === 'APPROVED') approvedCount++;
+                else if (item.status === 'NOT_AVAILABLE') notAvailableCount++;
+            });
+            
+            logger.info(`A+ map created with ${aPlusMap.size} entries (${approvedCount} APPROVED, ${notAvailableCount} NOT_AVAILABLE). Sample ASINs: ${Array.from(aPlusMap.keys()).slice(0, 5).join(', ')}`);
+        }
+
+        // Log sample product ASINs for debugging
+        if (products.length > 0) {
+            logger.info(`Sample product ASINs from seller: ${products.slice(0, 5).map(p => p.asin).join(', ')}`);
+        }
+
+        // Combine all data
+        const enrichedProducts = products.map(product => {
+            // Use uppercase for matching
+            const asinKey = product.asin?.toUpperCase() || '';
+            const reviewData = reviewsMap.get(asinKey) || {};
+            const aPlusStatus = aPlusMap.get(asinKey);
+            
+            // Check for A+ content - handle both old format ('true'/'false') and new format ('APPROVED'/'NOT_AVAILABLE')
+            const hasAPlusContent = aPlusStatus === 'APPROVED' || 
+                                    aPlusStatus === 'PUBLISHED' || 
+                                    aPlusStatus === 'true' ||
+                                    aPlusStatus === true;
+            
+            return {
+                asin: product.asin,
+                sku: product.sku,
+                title: product.itemName || reviewData.title || '',
+                price: product.price || '0',
+                status: product.status || 'Unknown',
+                numRatings: reviewData.numRatings || '0',
+                starRatings: reviewData.starRatings || '0',
+                hasAPlus: hasAPlusContent,
+                aPlusStatus: aPlusStatus || 'Not Available',
+                image: reviewData.photos && reviewData.photos.length > 0 ? reviewData.photos[0] : null,
+                updatedAt: product.updatedAt || null
+            };
+        });
+
+        // Calculate summary metrics
+        const totalProducts = enrichedProducts.length;
+        const activeProducts = enrichedProducts.filter(p => p.status === 'Active').length;
+        const inactiveProducts = enrichedProducts.filter(p => p.status === 'Inactive').length;
+        const incompleteProducts = enrichedProducts.filter(p => p.status === 'Incomplete').length;
+        const productsWithAPlus = enrichedProducts.filter(p => p.hasAPlus).length;
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: enrichedProducts,
+                summary: {
+                    totalProducts,
+                    activeProducts,
+                    inactiveProducts,
+                    incompleteProducts,
+                    productsWithAPlus,
+                    productsWithoutAPlus: totalProducts - productsWithAPlus
+                },
+                country: Country,
+                region: Region
+            }, "Your Products data retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getYourProductsData:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Your Products data: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     getDashboardData,
     getProfitabilityData,
@@ -695,6 +876,7 @@ module.exports = {
     getTasksData,
     updateTaskStatus,
     getInventoryData,
-    getAsinWiseSalesData
+    getAsinWiseSalesData,
+    getYourProductsData
 };
 

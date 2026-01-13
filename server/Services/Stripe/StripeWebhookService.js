@@ -127,8 +127,9 @@ class StripeWebhookService {
         try {
             const userId = subscription.metadata.userId;
             const planType = subscription.metadata.planType;
+            const isTrialing = subscription.status === 'trialing';
 
-            logger.info(`Subscription created for user: ${userId}, plan: ${planType}, subscription: ${subscription.id}`);
+            logger.info(`Subscription created for user: ${userId}, plan: ${planType}, subscription: ${subscription.id}, status: ${subscription.status}, isTrialing: ${isTrialing}`);
 
             // Update subscription in our database
             const subscriptionData = {
@@ -137,19 +138,19 @@ class StripeWebhookService {
                 planType: planType,
                 stripePriceId: subscription.items.data[0].price.id,
                 status: subscription.status,
-                paymentStatus: subscription.status === 'active' ? 'paid' : 'pending',
+                paymentStatus: isTrialing ? 'no_payment_required' : (subscription.status === 'active' ? 'paid' : 'pending'),
                 amount: subscription.items.data[0].price.unit_amount,
                 currency: subscription.items.data[0].price.currency,
                 currentPeriodStart: this.safeDate(subscription.current_period_start),
                 currentPeriodEnd: this.safeDate(subscription.current_period_end),
-                nextBillingDate: this.safeDate(subscription.current_period_end),
+                nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
             };
 
             await this.updateSubscription(userId, subscriptionData);
 
             // Update user's package type and subscription status
-            await this.updateUserSubscription(userId, planType, subscription.status);
+            await this.updateUserSubscription(userId, planType, subscription.status, subscription);
 
             logger.info(`Successfully updated subscription for user: ${userId}`);
 
@@ -166,21 +167,24 @@ class StripeWebhookService {
         try {
             const userId = subscription.metadata.userId;
             const planType = subscription.metadata.planType;
+            const isTrialing = subscription.status === 'trialing';
 
-            logger.info(`Subscription updated for user: ${userId}, status: ${subscription.status}`);
+            logger.info(`Subscription updated for user: ${userId}, status: ${subscription.status}, isTrialing: ${isTrialing}`);
 
             // Update subscription in our database
             const subscriptionData = {
                 status: subscription.status,
                 currentPeriodStart: this.safeDate(subscription.current_period_start),
                 currentPeriodEnd: this.safeDate(subscription.current_period_end),
-                nextBillingDate: this.safeDate(subscription.current_period_end),
+                nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
             };
 
             // Update payment status based on subscription status
             if (subscription.status === 'active') {
                 subscriptionData.paymentStatus = 'paid';
+            } else if (subscription.status === 'trialing') {
+                subscriptionData.paymentStatus = 'no_payment_required';
             } else if (subscription.status === 'past_due') {
                 subscriptionData.paymentStatus = 'unpaid';
             }
@@ -188,7 +192,7 @@ class StripeWebhookService {
             await this.updateSubscription(userId, subscriptionData);
 
             // Update user subscription status
-            await this.updateUserSubscription(userId, planType, subscription.status);
+            await this.updateUserSubscription(userId, planType, subscription.status, subscription);
 
             // If subscription is cancelled, downgrade user to LITE
             if (subscription.status === 'canceled') {
@@ -231,6 +235,7 @@ class StripeWebhookService {
 
     /**
      * Handle successful invoice payment
+     * This is triggered when trial ends and payment is charged, or for regular renewals
      */
     async handleInvoicePaymentSucceeded(invoice) {
         try {
@@ -243,8 +248,12 @@ class StripeWebhookService {
             // Get subscription from Stripe to get metadata
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
             const userId = subscription.metadata.userId;
+            const planType = subscription.metadata.planType;
+            
+            // Check if this is a trial ending payment (billing_reason will be 'subscription_cycle' after trial)
+            const isTrialEndPayment = invoice.billing_reason === 'subscription_cycle' || invoice.billing_reason === 'subscription_create';
 
-            logger.info(`Invoice payment succeeded for user: ${userId}, amount: ${invoice.amount_paid}`);
+            logger.info(`Invoice payment succeeded for user: ${userId}, amount: ${invoice.amount_paid}, billing_reason: ${invoice.billing_reason}, isTrialEndPayment: ${isTrialEndPayment}`);
 
             // Add payment to history with invoice URLs
             await this.addPaymentToHistory(userId, {
@@ -263,8 +272,19 @@ class StripeWebhookService {
             // Update subscription payment status
             await this.updateSubscription(userId, {
                 paymentStatus: 'paid',
-                lastPaymentDate: this.safeDate(invoice.status_transitions.paid_at)
+                lastPaymentDate: this.safeDate(invoice.status_transitions.paid_at),
+                status: subscription.status
             });
+
+            // Update user - if this was a trial that just ended, update trial status
+            const user = await User.findById(userId);
+            if (user && user.isInTrialPeriod) {
+                await User.findByIdAndUpdate(userId, {
+                    isInTrialPeriod: false,
+                    subscriptionStatus: 'active'
+                });
+                logger.info(`Trial ended for user: ${userId}. Payment successfully charged. User now on paid ${planType} plan.`);
+            }
 
             logger.info(`Successfully recorded payment for user: ${userId}`);
 
@@ -308,16 +328,18 @@ class StripeWebhookService {
     }
 
     /**
-     * Handle trial will end
+     * Handle trial will end (sent 3 days before trial ends by Stripe)
      */
     async handleTrialWillEnd(subscription) {
         try {
             const userId = subscription.metadata.userId;
+            const planType = subscription.metadata.planType;
+            const trialEndDate = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
 
-            logger.info(`Trial will end for user: ${userId}`);
+            logger.info(`Trial will end for user: ${userId}, plan: ${planType}, trial ends on: ${trialEndDate}. Stripe will automatically charge the payment method on file.`);
 
             // TODO: Send email notification about trial ending
-            // TODO: Implement any trial-specific logic
+            // Example: await emailService.sendTrialEndingEmail(userId, trialEndDate, planType);
 
         } catch (error) {
             logger.error('Error handling trial will end:', error);
@@ -344,13 +366,22 @@ class StripeWebhookService {
     /**
      * Update user subscription details
      */
-    async updateUserSubscription(userId, planType, subscriptionStatus) {
+    async updateUserSubscription(userId, planType, subscriptionStatus, subscription = null) {
         try {
             const updateData = {
                 packageType: planType,
                 subscriptionStatus: subscriptionStatus,
-                isInTrialPeriod: false // User has now paid, no longer in trial
             };
+
+            // Handle trial status
+            if (subscriptionStatus === 'trialing') {
+                updateData.isInTrialPeriod = true;
+                if (subscription && subscription.trial_end) {
+                    updateData.trialEndsDate = this.safeDate(subscription.trial_end);
+                }
+            } else {
+                updateData.isInTrialPeriod = false;
+            }
             
             // If user purchased AGENCY plan, update accessType to enterpriseAdmin
             if (planType === 'AGENCY') {
@@ -358,7 +389,7 @@ class StripeWebhookService {
             }
             
             await User.findByIdAndUpdate(userId, updateData);
-            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${subscriptionStatus}, isInTrialPeriod=false`);
+            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${subscriptionStatus}, isInTrialPeriod=${updateData.isInTrialPeriod}`);
         } catch (error) {
             logger.error('Error updating user subscription:', error);
             throw error;

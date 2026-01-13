@@ -70,8 +70,9 @@ class StripeService {
      * @param {string} successUrl - Success redirect URL
      * @param {string} cancelUrl - Cancel redirect URL
      * @param {string} [couponCode] - Optional coupon/promo code to apply
+     * @param {number} [trialPeriodDays] - Optional trial period in days (only for PRO plan)
      */
-    async createCheckoutSession(userId, planType, successUrl, cancelUrl, couponCode = null) {
+    async createCheckoutSession(userId, planType, successUrl, cancelUrl, couponCode = null, trialPeriodDays = null) {
         try {
             // Check if Stripe is configured
             if (!process.env.STRIPE_SECRET_KEY) {
@@ -125,14 +126,26 @@ class StripeService {
                 metadata: {
                     userId: userId.toString(),
                     planType: planType,
+                    hasTrial: trialPeriodDays && trialPeriodDays > 0 ? 'true' : 'false',
                 },
                 subscription_data: {
                     metadata: {
                         userId: userId.toString(),
                         planType: planType,
+                        hasTrial: trialPeriodDays && trialPeriodDays > 0 ? 'true' : 'false',
                     },
                 },
             };
+
+            // Add trial period if specified (only for PRO plan)
+            // When trial_period_days is set, Stripe will:
+            // 1. Collect payment method during checkout
+            // 2. Not charge immediately
+            // 3. Automatically charge when trial ends
+            if (trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO') {
+                sessionOptions.subscription_data.trial_period_days = trialPeriodDays;
+                logger.info(`Adding ${trialPeriodDays}-day trial period to checkout session for user: ${userId}. Payment will be collected but not charged until trial ends.`);
+            }
 
             // If a coupon code is provided, apply it automatically
             if (couponCode) {
@@ -164,11 +177,14 @@ class StripeService {
                 paymentStatus: 'pending'
             });
 
-            logger.info(`Created checkout session: ${session.id} for user: ${userId}, plan: ${planType}`);
+            const trialInfo = trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO' ? `, trial: ${trialPeriodDays} days` : '';
+            logger.info(`Created checkout session: ${session.id} for user: ${userId}, plan: ${planType}${trialInfo}`);
             
             return {
                 sessionId: session.id,
-                url: session.url
+                url: session.url,
+                hasTrial: trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO',
+                trialDays: trialPeriodDays && planType === 'PRO' ? trialPeriodDays : null
             };
 
         } catch (error) {
@@ -272,7 +288,9 @@ class StripeService {
                 throw new Error('No price information found in subscription');
             }
 
-            logger.info(`Subscription details: status=${stripeSubscription.status}, period_start=${stripeSubscription.current_period_start}, period_end=${stripeSubscription.current_period_end}`);
+            // Check if subscription is in trial period (Stripe native trial)
+            const isTrialing = stripeSubscription.status === 'trialing';
+            logger.info(`Subscription details: status=${stripeSubscription.status}, isTrialing=${isTrialing}, period_start=${stripeSubscription.current_period_start}, period_end=${stripeSubscription.current_period_end}, trial_end=${stripeSubscription.trial_end || 'N/A'}`);
             
             // Update subscription in our database
             const subscriptionData = {
@@ -281,14 +299,14 @@ class StripeService {
                 stripeSessionId: sessionId,
                 planType: planType,
                 stripePriceId: priceItem.price.id,
-                status: stripeSubscription.status,
-                paymentStatus: 'paid',
+                status: stripeSubscription.status, // Will be 'trialing' if in trial
+                paymentStatus: isTrialing ? 'no_payment_required' : 'paid',
                 amount: priceItem.price.unit_amount,
                 currency: priceItem.price.currency,
                 currentPeriodStart: this.safeDate(stripeSubscription.current_period_start),
                 currentPeriodEnd: this.safeDate(stripeSubscription.current_period_end),
-                lastPaymentDate: new Date(),
-                nextBillingDate: this.safeDate(stripeSubscription.current_period_end),
+                lastPaymentDate: isTrialing ? null : new Date(), // No payment date during trial
+                nextBillingDate: this.safeDate(stripeSubscription.trial_end || stripeSubscription.current_period_end),
             };
 
             // Validate subscription data before saving
@@ -307,8 +325,16 @@ class StripeService {
             const updateData = {
                 packageType: planType,
                 subscriptionStatus: stripeSubscription.status,
-                isInTrialPeriod: false // User has now paid, no longer in trial
+                isInTrialPeriod: isTrialing, // Set based on Stripe subscription status
             };
+            
+            // If subscription is in trial, set trial end date
+            if (isTrialing && stripeSubscription.trial_end) {
+                updateData.trialEndsDate = this.safeDate(stripeSubscription.trial_end);
+                logger.info(`User ${userId} is in trial period. Trial ends on ${updateData.trialEndsDate}`);
+            } else {
+                updateData.isInTrialPeriod = false;
+            }
             
             // If user purchased AGENCY plan, update accessType to enterpriseAdmin
             if (planType === 'AGENCY') {
@@ -317,7 +343,7 @@ class StripeService {
             
             await User.findByIdAndUpdate(userId, updateData);
             
-            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${stripeSubscription.status}, isInTrialPeriod=false`);
+            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${stripeSubscription.status}, isInTrialPeriod=${updateData.isInTrialPeriod}`);
 
             // Create admin token for AGENCY users
             let adminToken = null;
@@ -331,44 +357,46 @@ class StripeService {
                 }
             }
 
-            // Get invoice URL if available
+            // Get invoice URL if available (won't be available during trial)
             let invoiceUrl = null;
             let invoicePdf = null;
             let invoiceId = null;
             let invoiceNumber = null;
 
-            try {
-                // Try to get invoice from subscription
-                const invoices = await this.stripe.invoices.list({
-                    subscription: stripeSubscription.id,
-                    limit: 1
-                });
-                if (invoices.data.length > 0) {
-                    const invoice = invoices.data[0];
-                    invoiceUrl = invoice.hosted_invoice_url || null;
-                    invoicePdf = invoice.invoice_pdf || null;
-                    invoiceId = invoice.id;
-                    invoiceNumber = invoice.number || null;
+            if (!isTrialing) {
+                try {
+                    // Try to get invoice from subscription
+                    const invoices = await this.stripe.invoices.list({
+                        subscription: stripeSubscription.id,
+                        limit: 1
+                    });
+                    if (invoices.data.length > 0) {
+                        const invoice = invoices.data[0];
+                        invoiceUrl = invoice.hosted_invoice_url || null;
+                        invoicePdf = invoice.invoice_pdf || null;
+                        invoiceId = invoice.id;
+                        invoiceNumber = invoice.number || null;
+                    }
+                } catch (invoiceError) {
+                    logger.warn(`Could not fetch invoice for subscription: ${stripeSubscription.id}`);
                 }
-            } catch (invoiceError) {
-                logger.warn(`Could not fetch invoice for subscription: ${stripeSubscription.id}`);
+
+                // Add to payment history with invoice URLs (only if not in trial)
+                await this.addPaymentHistory(userId, {
+                    sessionId: sessionId,
+                    amount: priceItem.price.unit_amount,
+                    currency: priceItem.price.currency,
+                    status: 'paid',
+                    stripePaymentIntentId: session.payment_intent,
+                    stripeInvoiceId: invoiceId,
+                    invoiceUrl: invoiceUrl,
+                    invoicePdf: invoicePdf,
+                    invoiceNumber: invoiceNumber,
+                    paymentGateway: 'stripe'
+                });
             }
 
-            // Add to payment history with invoice URLs
-            await this.addPaymentHistory(userId, {
-                sessionId: sessionId,
-                amount: priceItem.price.unit_amount,
-                currency: priceItem.price.currency,
-                status: 'paid',
-                stripePaymentIntentId: session.payment_intent,
-                stripeInvoiceId: invoiceId,
-                invoiceUrl: invoiceUrl,
-                invoicePdf: invoicePdf,
-                invoiceNumber: invoiceNumber,
-                paymentGateway: 'stripe'
-            });
-
-            logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}`);
+            logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}, isTrialing: ${isTrialing}`);
             
             return { 
                 success: true, 
@@ -377,7 +405,9 @@ class StripeService {
                 adminToken,
                 isTrialUpgrade: isTrialUpgrade,  // Flag to indicate if user upgraded from trial
                 isUpgrade: isUpgrade, // Flag to indicate if this is an upgrade (existing user)
-                isNewSignup: isNewSignup // Flag to indicate if this is a new signup
+                isNewSignup: isNewSignup, // Flag to indicate if this is a new signup
+                isTrialing: isTrialing, // Flag to indicate if subscription is in trial
+                trialEndsDate: isTrialing && stripeSubscription.trial_end ? this.safeDate(stripeSubscription.trial_end) : null
             };
 
         } catch (error) {

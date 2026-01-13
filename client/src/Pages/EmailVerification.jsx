@@ -6,6 +6,10 @@ import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import stripeService from '../services/stripeService.js';
+import { detectCountry } from '../utils/countryDetection.js';
+import axiosInstance from '../config/axios.config.js';
+import { useDispatch } from 'react-redux';
+import { updateTrialStatus } from '../redux/slices/authSlice.js';
 
 
 const OtpVerification = () => {
@@ -19,6 +23,7 @@ const OtpVerification = () => {
   const [resendCooldown, setResendCooldown] = useState(40); // 40 seconds cooldown
   const [canResend, setCanResend] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
+  const [detectedCountry, setDetectedCountry] = useState(null); // For trial flow
   const one = useRef(null);
   const two = useRef(null);
   const three = useRef(null);
@@ -26,6 +31,7 @@ const OtpVerification = () => {
   const five = useRef(null);
   
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   
   // Get intended package from state or localStorage
   // If null/undefined, user will choose plan on pricing page
@@ -35,6 +41,18 @@ const OtpVerification = () => {
 
   useEffect(() => {
     one.current.focus();
+    
+    // Detect country for trial flow
+    const detectUserCountry = async () => {
+      try {
+        const country = await detectCountry();
+        setDetectedCountry(country);
+      } catch (error) {
+        console.error('Error detecting country:', error);
+        setDetectedCountry(null);
+      }
+    };
+    detectUserCountry();
   }, []);
 
   // Timer effect for OTP expiration
@@ -145,33 +163,75 @@ const OtpVerification = () => {
         clearAuthCache();
         localStorage.setItem("isAuth", true);
         
+        const isIndianUser = detectedCountry === 'IN';
+        
         // Redirect based on intended package
         // If no intended package: Redirect to pricing page to choose plan
-        // PRO-Trial: Go directly to connect-to-amazon (free trial)
-        // PRO: Go to Stripe payment page (requires payment)
-        // AGENCY: Go to Stripe payment page (requires payment)
+        // PRO-Trial: For India use manual trial, for others use Stripe trial
+        // PRO: Go to Stripe payment page (requires immediate payment)
+        // AGENCY: Go to Stripe payment page (requires immediate payment)
         if (!intendedPackage || intendedPackage === 'null' || intendedPackage === 'undefined') {
           // No plan selected - redirect to pricing page
           localStorage.removeItem('intendedPackage');
           navigate("/pricing");
+        } else if (intendedPackage === 'PRO-Trial') {
+          localStorage.removeItem('intendedPackage');
+          
+          if (isIndianUser) {
+            // Indian users: Use old manual trial (no payment method required)
+            try {
+              const trialResponse = await axiosInstance.post('/app/activate-free-trial');
+              if (trialResponse.status === 200 && trialResponse.data?.data) {
+                dispatch(updateTrialStatus({
+                  packageType: trialResponse.data.data.packageType,
+                  subscriptionStatus: trialResponse.data.data.subscriptionStatus,
+                  isInTrialPeriod: trialResponse.data.data.isInTrialPeriod,
+                  trialEndsDate: trialResponse.data.data.trialEndsDate
+                }));
+              }
+              navigate('/connect-to-amazon');
+            } catch (trialError) {
+              console.error('Trial activation error:', trialError);
+              setErrorMessage('Failed to activate free trial. Please try again.');
+              setLoading(false);
+              return;
+            }
+          } else {
+            // Non-Indian users: Go to Stripe checkout with 7-day trial
+            // Payment method collected, charged after trial ends
+            try {
+              await stripeService.createCheckoutSession('PRO', null, 7);
+              // stripeService will handle the redirect to Stripe
+            } catch (stripeError) {
+              console.error('Stripe checkout error:', stripeError);
+              setErrorMessage('Failed to initiate free trial. Please try again.');
+              setLoading(false);
+              return;
+            }
+          }
         } else if (intendedPackage === 'PRO' || intendedPackage === 'AGENCY') {
-          // Clear intended package from localStorage after storing for post-payment
           const packageToCheckout = intendedPackage;
           localStorage.removeItem('intendedPackage');
-          // Redirect to Stripe checkout for payment
-          try {
-            await stripeService.createCheckoutSession(packageToCheckout);
-            // stripeService will handle the redirect to Stripe
-          } catch (stripeError) {
-            console.error('Stripe checkout error:', stripeError);
-            setErrorMessage('Failed to initiate payment. Please try again.');
-            setLoading(false);
-            return;
+          
+          if (isIndianUser && packageToCheckout === 'PRO') {
+            // Indian users with PRO: Redirect to pricing for Razorpay
+            navigate('/pricing');
+          } else {
+            // Non-Indian users or AGENCY: Go to Stripe checkout for immediate payment
+            try {
+              await stripeService.createCheckoutSession(packageToCheckout);
+              // stripeService will handle the redirect to Stripe
+            } catch (stripeError) {
+              console.error('Stripe checkout error:', stripeError);
+              setErrorMessage('Failed to initiate payment. Please try again.');
+              setLoading(false);
+              return;
+            }
           }
         } else {
-          // PRO-Trial: Go directly to connect-to-amazon
+          // Unknown package - redirect to pricing page
           localStorage.removeItem('intendedPackage');
-        navigate("/connect-to-amazon");
+          navigate("/pricing");
         }
       }
     } catch (error) {

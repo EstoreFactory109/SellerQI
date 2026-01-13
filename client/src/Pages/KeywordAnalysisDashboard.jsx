@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, Info } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import {
   setAsinsList,
@@ -17,13 +17,13 @@ const KeywordAnalysisDashboard = () => {
   const [activeTab, setActiveTab] = useState('all');
   const [selectedKeywords, setSelectedKeywords] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'keyword', direction: 'desc' });
-  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsToShow, setItemsToShow] = useState(10);
   const [selectedAsin, setSelectedAsin] = useState('');
   const [isSwitchingAsin, setIsSwitchingAsin] = useState(false);
   const [isAsinDropdownOpen, setIsAsinDropdownOpen] = useState(false);
   const [asinSearchQuery, setAsinSearchQuery] = useState('');
   const asinDropdownRef = useRef(null);
-  const itemsPerPage = 10;
+  const itemsPerLoad = 10;
 
   // Get data from Redux
   const asinsList = useSelector((state) => state.keywordRecommendations?.asinsList || []);
@@ -272,10 +272,8 @@ const KeywordAnalysisDashboard = () => {
     let filtered = keywords.filter(k => k.matchType === 'BROAD');
 
     // Tab filtering
-    if (activeTab === 'selected') {
-      filtered = filtered.filter(k => k.userSelectedKeyword === true);
-    } else if (activeTab === 'highRank') {
-      filtered = filtered.filter(k => k.rank !== null && k.rank <= 5);
+    if (activeTab === 'highRank') {
+      filtered = filtered.filter(k => k.rank !== null && k.rank <= 10);
     } else if (activeTab === 'highImpression') {
       filtered = filtered.filter(k => k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50);
     }
@@ -297,19 +295,22 @@ const KeywordAnalysisDashboard = () => {
     return filtered;
   }, [keywords, activeTab, sortConfig]);
 
-  // Pagination calculations
-  const totalPages = useMemo(() => Math.ceil(filteredKeywords.length / itemsPerPage), [filteredKeywords.length]);
-  
-  const paginatedKeywords = useMemo(() => {
-    const indexOfLastItem = currentPage * itemsPerPage;
-    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-    return filteredKeywords.slice(indexOfFirstItem, indexOfLastItem);
-  }, [filteredKeywords, currentPage]);
+  // Load more items logic
+  const displayedKeywords = useMemo(() => {
+    return filteredKeywords.slice(0, itemsToShow);
+  }, [filteredKeywords, itemsToShow]);
 
-  // Reset to page 1 when tabs or sorting changes
+  const hasMoreItems = filteredKeywords.length > itemsToShow;
+
+  // Reset items to show when tabs or sorting changes
   useEffect(() => {
-    setCurrentPage(1);
+    setItemsToShow(itemsPerLoad);
   }, [activeTab, sortConfig.key, selectedAsin]);
+
+  // Load more function
+  const handleLoadMore = () => {
+    setItemsToShow(prev => prev + itemsPerLoad);
+  };
 
   // Metrics calculation - only for BROAD match type keywords
   const metrics = useMemo(() => {
@@ -345,23 +346,10 @@ const KeywordAnalysisDashboard = () => {
   // Select all keywords
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedKeywords(paginatedKeywords.map(k => k.id));
+      setSelectedKeywords(displayedKeywords.map(k => k.id));
     } else {
       setSelectedKeywords([]);
     }
-  };
-
-  // Pagination navigation functions
-  const goToPage = (page) => {
-    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
-  };
-
-  const goToPreviousPage = () => {
-    setCurrentPage(prev => Math.max(prev - 1, 1));
-  };
-
-  const goToNextPage = () => {
-    setCurrentPage(prev => Math.min(prev + 1, totalPages));
   };
 
   // Toggle keyword selection
@@ -381,14 +369,12 @@ const KeywordAnalysisDashboard = () => {
     // Define CSV headers
     const headers = [
       'Keyword',
-      'Bid',
-      'Rank',
-      'Impression Share',
+      'Relevance Rank',
+      'High Impression Share',
       'Impression Rank',
       'Suggested Bid Range Start',
       'Suggested Bid Range End',
-      'Suggested Bid Median',
-      'User Selected'
+      'Suggested Bid Median'
     ];
 
     // Convert data to CSV rows
@@ -401,14 +387,12 @@ const KeywordAnalysisDashboard = () => {
         
         return [
           `"${(keyword.keyword || '').replace(/"/g, '""')}"`, // Escape quotes in keyword
-          (keyword.bid / 100).toFixed(2),
           keyword.rank !== null ? keyword.rank : '',
           keyword.searchTermImpressionShare !== null ? keyword.searchTermImpressionShare.toFixed(2) : '',
           keyword.searchTermImpressionRank !== null ? keyword.searchTermImpressionRank : '',
           suggestedBidStart,
           suggestedBidEnd,
-          suggestedBidMedian,
-          keyword.userSelectedKeyword ? 'Yes' : 'No'
+          suggestedBidMedian
         ].join(',');
       })
     ];
@@ -716,7 +700,8 @@ const KeywordAnalysisDashboard = () => {
         .table-container {
           background: white;
           border-radius: 0 0 12px 12px;
-          overflow: hidden;
+          overflow-x: auto;
+          overflow-y: visible;
           box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
         
@@ -727,11 +712,12 @@ const KeywordAnalysisDashboard = () => {
         
         thead {
           background: #f8fafc;
+          position: relative;
         }
         
         th {
           padding: 12px 16px;
-          text-align: left;
+          text-align: center;
           font-size: 12px;
           font-weight: 600;
           color: #64748b;
@@ -749,6 +735,7 @@ const KeywordAnalysisDashboard = () => {
           padding: 12px 16px;
           border-top: 1px solid #e2e8f0;
           font-size: 14px;
+          text-align: center;
         }
         
         tbody tr:hover {
@@ -811,6 +798,7 @@ const KeywordAnalysisDashboard = () => {
         
         .table-container-wrapper {
           position: relative;
+          overflow: visible;
         }
         
         .loading-spinner {
@@ -838,6 +826,89 @@ const KeywordAnalysisDashboard = () => {
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
+        }
+        
+        .tooltip-container {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          margin-left: 6px;
+        }
+        
+        .tooltip-icon {
+          width: 14px;
+          height: 14px;
+          color: #94a3b8;
+          cursor: help;
+          transition: color 0.2s;
+        }
+        
+        .tooltip-icon:hover {
+          color: #3b82f6;
+        }
+        
+        .tooltip-content {
+          position: absolute;
+          top: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          margin-top: 8px;
+          padding: 12px 16px;
+          background: #1e293b;
+          color: white;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 400;
+          line-height: 1.5;
+          white-space: normal;
+          width: 280px;
+          max-width: calc(100vw - 40px);
+          z-index: 10000;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.2s, transform 0.2s;
+          transform: translateX(-50%) translateY(4px);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        .tooltip-container:hover .tooltip-content {
+          opacity: 1;
+          pointer-events: auto;
+          transform: translateX(-50%) translateY(0);
+        }
+        
+        /* Adjust tooltip position for right edge (last column) */
+        .tooltip-container.tooltip-last .tooltip-content {
+          left: auto;
+          right: 0;
+          transform: translateX(0) translateY(4px);
+        }
+        
+        .tooltip-container.tooltip-last:hover .tooltip-content {
+          transform: translateX(0) translateY(0);
+        }
+        
+        .tooltip-content::before {
+          content: '';
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          border: 6px solid transparent;
+          border-bottom-color: #1e293b;
+        }
+        
+        .tooltip-container.tooltip-last .tooltip-content::before {
+          left: auto;
+          right: 20px;
+          transform: translateX(0);
+        }
+        
+        .th-with-tooltip {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
         }
       `}</style>
 
@@ -1094,19 +1165,6 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">Unique Keywords</div>
-              <div className="metric-value">{metrics.uniqueKeywords}</div>
-              <div className="metric-trend">
-                {metrics.totalKeywords > 0 ? ((metrics.uniqueKeywords / metrics.totalKeywords) * 100).toFixed(1) : 0}% unique
-              </div>
-            </div>
-            <div className="metric-icon icon-green">
-              <CheckCircle size={24} />
-            </div>
-          </div>
-          
-          <div className="metric-card">
-            <div className="metric-content">
               <div className="metric-label">Avg. Bid</div>
               <div className="metric-value">${metrics.avgBid}</div>
               <div className="metric-trend">
@@ -1121,10 +1179,10 @@ const KeywordAnalysisDashboard = () => {
           
           <div className="metric-card">
             <div className="metric-content">
-              <div className="metric-label">High Rank Keywords</div>
+              <div className="metric-label">High Relevance Keywords</div>
               <div className="metric-value">{metrics.highRankKeywords}</div>
               <div className="metric-trend">
-                Rank ≤ 10
+                Relevance Rank ≤ 10
               </div>
             </div>
             <div className="metric-icon icon-purple">
@@ -1142,16 +1200,10 @@ const KeywordAnalysisDashboard = () => {
             All Keywords ({keywords.filter(k => k.matchType === 'BROAD').length})
           </div>
           <div 
-            className={`tab ${activeTab === 'selected' ? 'active' : ''}`}
-            onClick={() => setActiveTab('selected')}
-          >
-            User Selected ({keywords.filter(k => k.matchType === 'BROAD' && k.userSelectedKeyword === true).length})
-          </div>
-          <div 
             className={`tab ${activeTab === 'highRank' ? 'active' : ''}`}
             onClick={() => setActiveTab('highRank')}
           >
-            High Rank ({keywords.filter(k => k.matchType === 'BROAD' && k.rank !== null && k.rank <= 5).length})
+            High Relevance ({keywords.filter(k => k.matchType === 'BROAD' && k.rank !== null && k.rank <= 10).length})
           </div>
           <div 
             className={`tab ${activeTab === 'highImpression' ? 'active' : ''}`}
@@ -1176,48 +1228,67 @@ const KeywordAnalysisDashboard = () => {
           <table>
             <thead>
               <tr>
-                <th style={{ width: 40 }}>
-                  <input 
-                    type="checkbox"
-                    checked={paginatedKeywords.length > 0 && paginatedKeywords.every(k => selectedKeywords.includes(k.id))}
-                    onChange={handleSelectAll}
-                  />
-                </th>
                 <th onClick={() => handleSort('keyword')}>
                   Keyword {sortConfig.key === 'keyword' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th onClick={() => handleSort('bid')}>
-                  Bid {sortConfig.key === 'bid' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                </th>
                 <th onClick={() => handleSort('rank')}>
-                  Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  <div className="th-with-tooltip">
+                    <span>Relevance Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
+                    <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                      <Info className="tooltip-icon" />
+                      <div className="tooltip-content">
+                        <strong>Relevance Rank (Lower the better)</strong><br />
+                        Estimate of how well this keyword matches your product - Rank 1 is their top pick, but always check search volume and competition before committing.
+                      </div>
+                    </div>
+                  </div>
                 </th>
                 <th onClick={() => handleSort('searchTermImpressionShare')}>
-                  Impression Share {sortConfig.key === 'searchTermImpressionShare' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  <div className="th-with-tooltip">
+                    <span>High Impression Share {sortConfig.key === 'searchTermImpressionShare' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
+                    <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                      <Info className="tooltip-icon" />
+                      <div className="tooltip-content">
+                        <strong>Impression Share</strong><br />
+                        The percentage of times your ad showed when it could have - if it's low, you're either getting outbid or hitting your budget cap before the day ends.
+                      </div>
+                    </div>
+                  </div>
                 </th>
                 <th onClick={() => handleSort('searchTermImpressionRank')}>
-                  Impression Rank {sortConfig.key === 'searchTermImpressionRank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  <div className="th-with-tooltip">
+                    <span>Impression Rank {sortConfig.key === 'searchTermImpressionRank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
+                    <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                      <Info className="tooltip-icon" />
+                      <div className="tooltip-content">
+                        <strong>Impression Rank</strong><br />
+                        Where your ad typically shows on the page - top positions get more clicks but cost more, while lower placements are cheaper but less visible.
+                      </div>
+                    </div>
+                  </div>
                 </th>
-                <th>Suggested Bid Range</th>
-                <th>User Selected</th>
+                <th>
+                  <div className="th-with-tooltip">
+                    <span>Suggested Bid Range</span>
+                    <div className="tooltip-container tooltip-last">
+                      <Info className="tooltip-icon" />
+                      <div className="tooltip-content">
+                        <strong>Suggested Bid Range</strong><br />
+                        Recommended bid to stay competitive, start on the lower end and adjust based on actual performance.
+                      </div>
+                    </div>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {paginatedKeywords.length > 0 ? (
-                paginatedKeywords.map(keyword => {
+              {displayedKeywords.length > 0 ? (
+                displayedKeywords.map(keyword => {
                   return (
                     <tr key={keyword.id}>
                       <td>
-                        <input 
-                          type="checkbox"
-                          checked={selectedKeywords.includes(keyword.id)}
-                          onChange={() => toggleKeywordSelection(keyword.id)}
-                        />
-                      </td>
-                      <td>
                         <span className="keyword-cell">{keyword.keyword || 'N/A'}</span>
                       </td>
-                      <td>${(keyword.bid / 100).toFixed(2)}</td>
                       <td>
                         {keyword.rank !== null ? (
                           <span style={{ fontWeight: 600, color: keyword.rank <= 5 ? '#10b981' : keyword.rank <= 10 ? '#f59e0b' : '#ef4444' }}>
@@ -1242,24 +1313,12 @@ const KeywordAnalysisDashboard = () => {
                           </span>
                         ) : '—'}
                       </td>
-                      <td>
-                        <span style={{
-                          padding: '4px 10px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          background: keyword.userSelectedKeyword ? '#d1fae5' : '#f1f5f9',
-                          color: keyword.userSelectedKeyword ? '#065f46' : '#475569'
-                        }}>
-                          {keyword.userSelectedKeyword ? 'Yes' : 'No'}
-                        </span>
-                      </td>
                     </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan={8} className="empty-state">
+                  <td colSpan={5} className="empty-state">
                     {keywords.length === 0 
                       ? `No keyword recommendations available for ASIN: ${selectedAsin}. Please ensure data is loaded.`
                       : 'No keywords found matching your filters'}
@@ -1269,96 +1328,54 @@ const KeywordAnalysisDashboard = () => {
             </tbody>
           </table>
           
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
+          {/* Load More Controls */}
+          {hasMoreItems && (
             <div style={{
               padding: '16px 24px',
               borderTop: '1px solid #e2e8f0',
               display: 'flex',
-              justifyContent: 'space-between',
+              justifyContent: 'center',
+              alignItems: 'center',
+              background: '#f8fafc'
+            }}>
+              <div style={{ fontSize: '14px', color: '#64748b', marginRight: '16px' }}>
+                Showing {displayedKeywords.length} of {filteredKeywords.length} keywords
+              </div>
+              <button
+                onClick={handleLoadMore}
+                style={{
+                  padding: '10px 24px',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '6px',
+                  background: '#3b82f6',
+                  color: 'white',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
+              >
+                Load More
+                <ChevronDown size={16} />
+              </button>
+            </div>
+          )}
+          {!hasMoreItems && displayedKeywords.length > itemsPerLoad && (
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'center',
               alignItems: 'center',
               background: '#f8fafc'
             }}>
               <div style={{ fontSize: '14px', color: '#64748b' }}>
-                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredKeywords.length)} of {filteredKeywords.length} keywords
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  onClick={goToPreviousPage}
-                  disabled={currentPage === 1}
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    background: currentPage === 1 ? '#f1f5f9' : 'white',
-                    color: currentPage === 1 ? '#94a3b8' : '#475569',
-                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
-                >
-                  <ChevronLeft size={16} />
-                  Previous
-                </button>
-                
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) {
-                      pageNum = i + 1;
-                    } else if (currentPage <= 3) {
-                      pageNum = i + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i;
-                    } else {
-                      pageNum = currentPage - 2 + i;
-                    }
-                    
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => goToPage(pageNum)}
-                        style={{
-                          minWidth: '36px',
-                          height: '36px',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          background: currentPage === pageNum ? '#3b82f6' : 'white',
-                          color: currentPage === pageNum ? 'white' : '#475569',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: currentPage === pageNum ? '600' : '500'
-                        }}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                </div>
-                
-                <button
-                  onClick={goToNextPage}
-                  disabled={currentPage === totalPages}
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    background: currentPage === totalPages ? '#f1f5f9' : 'white',
-                    color: currentPage === totalPages ? '#94a3b8' : '#475569',
-                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
-                >
-                  Next
-                  <ChevronRight size={16} />
-                </button>
+                Showing all {filteredKeywords.length} keywords
               </div>
             </div>
           )}

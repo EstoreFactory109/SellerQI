@@ -22,7 +22,8 @@ const {
     getTasksData,
     updateTaskStatus,
     getInventoryData,
-    getAsinWiseSalesData
+    getAsinWiseSalesData,
+    getYourProductsData
 } = require('../controllers/analytics/PageWiseDataController.js');
 
 const {
@@ -75,6 +76,10 @@ router.get('/reimbursement', auth, getLocation, analyseDataCache(3600, 'reimburs
 // ===== INVENTORY PAGE =====
 // Returns inventory data
 router.get('/inventory', auth, getLocation, analyseDataCache(3600, 'inventory'), getInventoryData);
+
+// ===== YOUR PRODUCTS PAGE =====
+// Returns all products with status, ratings, A+ content info
+router.get('/your-products', auth, getLocation, analyseDataCache(3600, 'your-products'), getYourProductsData);
 
 // ===== TASKS PAGE =====
 // Returns tasks data

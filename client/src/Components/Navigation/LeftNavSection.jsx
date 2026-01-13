@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign, Search, Lock} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign, Search, Lock, Package} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -197,6 +197,28 @@ const LeftNavSection = () => {
                                             <LayoutDashboard className={`${iconClass} ${isActive ? 'text-white' : 'text-blue-600'}`}/>
                                         </div>
                                         <span className="font-medium flex-1">Dashboard</span>
+                                        {isPremiumLocked && (
+                                            <Lock className="w-3.5 h-3.5 text-amber-500" />
+                                        )}
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
+
+                        {/* Your Products - For PRO/AGENCY users and expired trial users */}
+                        {(!isLiteUser || isPremiumLocked) && (
+                            <NavLink
+                                to="/seller-central-checker/your-products"
+                                className={({ isActive }) =>
+                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-cyan-50 group-hover:bg-cyan-100'}`}>
+                                            <Package className={`${iconClass} ${isActive ? 'text-white' : 'text-cyan-600'}`}/>
+                                        </div>
+                                        <span className="font-medium flex-1">Your Products</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
                                         )}

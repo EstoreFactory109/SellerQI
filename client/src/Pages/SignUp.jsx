@@ -16,10 +16,12 @@ import {
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
-import { loginSuccess } from '../redux/slices/authSlice';
+import { loginSuccess, updateTrialStatus } from '../redux/slices/authSlice';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
 import { countryCodesData } from '../utils/countryCodesData.js';
+import { detectCountry } from '../utils/countryDetection.js';
+import axiosInstance from '../config/axios.config.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
@@ -55,11 +57,24 @@ const SignUp = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [detectedCountry, setDetectedCountry] = useState(null); // For trial flow
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Detect country for trial flow
+    const detectUserCountry = async () => {
+      try {
+        const country = await detectCountry();
+        setDetectedCountry(country);
+      } catch (error) {
+        console.error('Error detecting country:', error);
+        setDetectedCountry(null);
+      }
+    };
+    detectUserCountry();
   }, []);
 
   // Auto-dismiss error messages after 5 seconds
@@ -191,7 +206,7 @@ const SignUp = () => {
     try {
       // Determine package settings based on selected plan
       // If no plan selected (plans is null), user will choose on pricing page after signup
-      // PRO-Trial: Free 7-day trial with PRO features
+      // PRO-Trial: 7-day Stripe trial (payment method collected, charged after trial ends)
       // PRO: Requires payment after email verification
       // AGENCY: Requires payment after email verification
       const isPROTrial = plans === "PRO-Trial";
@@ -201,21 +216,23 @@ const SignUp = () => {
       
       // Determine packageType based on plan
       // If no plan selected, default to LITE (user will choose on pricing page)
+      // For PRO-Trial, start as LITE until Stripe trial is activated
       let packageType = "LITE";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (isPRO || isPROTrial) {
+      } else if (isPRO) {
         packageType = "PRO";
       }
+      // PRO-Trial starts as LITE, will be upgraded when Stripe checkout completes
       
       const formDataWithTerms = {
         ...formData,
         phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
-        packageType: packageType, // LITE if no plan, PRO for PRO-Trial/PRO, AGENCY for AGENCY
-        isInTrialPeriod: isPROTrial, // Only true for PRO-Trial
-        subscriptionStatus: noPlanSelected ? "active" : (isPROTrial ? "active" : "inactive"), // LITE is active, PRO/AGENCY needs payment first
-        trialEndsDate: isPROTrial ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null, // 7 days for trial
+        packageType: packageType, // LITE for no plan or PRO-Trial, PRO for PRO, AGENCY for AGENCY
+        isInTrialPeriod: false, // Trial is now managed by Stripe, not manually
+        subscriptionStatus: noPlanSelected || isPROTrial ? "active" : "inactive", // LITE is active, PRO/AGENCY needs payment first
+        trialEndsDate: null, // Trial dates managed by Stripe
         intendedPackage: plans, // Store the intended package for post-verification flow (null if no plan)
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
@@ -251,19 +268,22 @@ const SignUp = () => {
       const isPROTrial = plans === "PRO-Trial";
       const isAGENCY = plans === "AGENCY";
       const noPlanSelected = plans === null || plans === undefined;
+      const isIndianUser = detectedCountry === 'IN';
       
       // Determine packageType based on plan
       // If no plan selected, default to LITE (user will choose on pricing page)
+      // For PRO-Trial, start as LITE until trial is activated (Stripe for non-India, manual for India)
       let packageType = "LITE";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (isPROTrial || plans === "PRO") {
+      } else if (plans === "PRO") {
         packageType = "PRO";
       }
       
-      const isInTrialPeriod = isPROTrial;
-      const subscriptionStatus = noPlanSelected ? "active" : (isPROTrial ? "active" : "inactive");
-      const trialEndsDate = isPROTrial ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null;
+      // For Indian users with PRO-Trial, we'll activate manual trial after signup
+      const isInTrialPeriod = false;
+      const subscriptionStatus = noPlanSelected || isPROTrial ? "active" : "inactive";
+      const trialEndsDate = null;
       
       const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
         
@@ -276,17 +296,44 @@ const SignUp = () => {
           
           // If no plan selected, redirect to pricing page
           if (noPlanSelected) {
-          navigate('/pricing');
+            navigate('/pricing');
           } else if (isPROTrial) {
-            // PRO-Trial: Go directly to connect-to-amazon
-            navigate('/connect-to-amazon');
+            // PRO-Trial: Different flow for India vs non-India
+            if (isIndianUser) {
+              // Indian users: Use old manual trial (no payment method required)
+              try {
+                const trialResponse = await axiosInstance.post('/app/activate-free-trial');
+                if (trialResponse.status === 200 && trialResponse.data?.data) {
+                  dispatch(updateTrialStatus({
+                    packageType: trialResponse.data.data.packageType,
+                    subscriptionStatus: trialResponse.data.data.subscriptionStatus,
+                    isInTrialPeriod: trialResponse.data.data.isInTrialPeriod,
+                    trialEndsDate: trialResponse.data.data.trialEndsDate
+                  }));
+                }
+                navigate('/connect-to-amazon');
+              } catch (trialError) {
+                console.error('Trial activation error:', trialError);
+                setErrorMessage('Failed to activate free trial. Please try again.');
+              }
+            } else {
+              // Non-Indian users: Go to Stripe checkout with 7-day trial
+              // Payment method collected, charged after trial ends
+              const stripeService = (await import('../services/stripeService.js')).default;
+              await stripeService.createCheckoutSession('PRO', null, 7);
+            }
           } else {
-            // PRO/AGENCY (paid): Go to Stripe payment
-            // Store intended package and redirect to payment
-            localStorage.setItem('intendedPackage', plans);
-            // Import stripeService and redirect to payment
-            const stripeService = (await import('../services/stripeService.js')).default;
-            await stripeService.createCheckoutSession(packageType);
+            // PRO/AGENCY (paid): Go to Stripe payment (for non-India) or Razorpay (for India)
+            if (isIndianUser && packageType === 'PRO') {
+              // Indian users with PRO: Redirect to pricing for Razorpay
+              localStorage.setItem('intendedPackage', plans);
+              navigate('/pricing');
+            } else {
+              // Non-Indian users or AGENCY: Go to Stripe payment
+              localStorage.setItem('intendedPackage', plans);
+              const stripeService = (await import('../services/stripeService.js')).default;
+              await stripeService.createCheckoutSession(packageType);
+            }
           }
           
         } else {

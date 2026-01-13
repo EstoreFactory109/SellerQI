@@ -33,22 +33,6 @@ const checkIfVideoExists = (video) => {
     }
 }
 
-const checkNumberOfProductReviews = (product_num_ratings) => {
-    if (Number(product_num_ratings) < 50) {
-        return {
-            status: "Error",
-            Message: "Your product listing has fewer than 50 reviews. A low number of reviews may affect buyer confidence and product credibility, potentially impacting sales.",
-            HowToSolve: "Encourage satisfied customers to leave reviews by following up after purchases with email reminders or using Amazon’s ‘Request a Review’ feature. Ensure your product meets customer expectations to naturally increase positive feedback. Consider participating in Amazon’s Vine program if eligible, to get more reviews quickly."
-        }
-    } else {
-        return {
-            status: "Success",
-            Message: "Excellent! Your product listing has 50 or more reviews, which helps build credibility and trust with potential buyers, positively influencing their purchasing decisions.",
-            HowToSolve: ""
-        }
-    }
-}
-
 const checkStarRating = (product_star_ratings) => {
     if (Number(product_star_ratings) < 4.3) {
         return {
@@ -127,4 +111,4 @@ const checkProductWithOutBuyBox = (asinList) => {
 
 
 
-module.exports = { checkNumberOfImages, checkIfVideoExists, checkNumberOfProductReviews, checkStarRating, checkAPlus, checkProductWithOutBuyBox }
+module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox }

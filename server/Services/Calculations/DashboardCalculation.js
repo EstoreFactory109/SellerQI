@@ -618,8 +618,6 @@ const analyseData = async (data, userId = null) => {
         data.ConversionData.imageResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
     const videoResultError = Array.isArray(data.ConversionData?.videoResult) ? 
         data.ConversionData.videoResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
-    const productReviewResultError = Array.isArray(data.ConversionData?.productReviewResult) ? 
-        data.ConversionData.productReviewResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
     const productStarRatingResultError = Array.isArray(data.ConversionData?.productStarRatingResult) ? 
         data.ConversionData.productStarRatingResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
 
@@ -627,7 +625,6 @@ const analyseData = async (data, userId = null) => {
     const aplusErrorMap = new Map(aplusError.map(p => [p.asin, p]));
     const imageResultErrorMap = new Map(imageResultError.map(p => [p.asin, p]));
     const videoResultErrorMap = new Map(videoResultError.map(p => [p.asin, p]));
-    const productReviewResultErrorMap = new Map(productReviewResultError.map(p => [p.asin, p]));
     const productStarRatingResultErrorMap = new Map(productStarRatingResultError.map(p => [p.asin, p]));
 
     // PERFORMANCE OPTIMIZATION: Create Maps for inventory error lookups
@@ -751,12 +748,6 @@ const analyseData = async (data, userId = null) => {
         const videoFound = videoResultErrorMap.get(asin);
         if (videoFound) {
             convData.videoResultErrorData = videoFound.data;
-            errorCount++;
-        }
-
-        const reviewFound = productReviewResultErrorMap.get(asin);
-        if (reviewFound) {
-            convData.productReviewResultErrorData = reviewFound.data;
             errorCount++;
         }
 

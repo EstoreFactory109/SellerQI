@@ -193,7 +193,6 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
             const issueMap = [
                 ['Images', conversionErrors.imageResultErrorData],
                 ['Video', conversionErrors.videoResultErrorData],
-                ['Product Review', conversionErrors.productReviewResultErrorData],
                 ['Star Rating', conversionErrors.productStarRatingResultErrorData],
                 ['A+ Content', conversionErrors.aplusErrorData]
             ];
@@ -504,7 +503,6 @@ const IssuesByProduct = () => {
         return (
             conversionErrors.imageResultErrorData?.status === "Error" ||
             conversionErrors.videoResultErrorData?.status === "Error" ||
-            conversionErrors.productReviewResultErrorData?.status === "Error" ||
             conversionErrors.productStarRatingResultErrorData?.status === "Error" ||
             conversionErrors.productsWithOutBuyboxErrorData?.status === "Error" ||
             conversionErrors.aplusErrorData?.status === "Error"
@@ -807,7 +805,6 @@ const IssuesByProduct = () => {
             const checks = [
                 conversionErrors.imageResultErrorData,
                 conversionErrors.videoResultErrorData,
-                conversionErrors.productReviewResultErrorData,
                 conversionErrors.productStarRatingResultErrorData,
                 conversionErrors.productsWithOutBuyboxErrorData,
                 conversionErrors.aplusErrorData

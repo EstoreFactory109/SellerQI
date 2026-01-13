@@ -36,7 +36,6 @@ function ResultsPage() {
   const rankingResult = analysisResult?.rankingResult || {};
   const imageResult = analysisResult?.imageResult || {};
   const videoResult = analysisResult?.videoResult || {};
-  const reviewResult = analysisResult?.reviewResult || {};
   const starRatingResult = analysisResult?.starRatingResult || {};
 
   // Calculate health score (inverse of error score)
@@ -49,7 +48,6 @@ function ResultsPage() {
     (rankingResult.TotalErrors || 0) +
     (imageResult.status === "Error" ? 1 : 0) +
     (videoResult.status === "Error" ? 1 : 0) +
-    (reviewResult.status === "Error" ? 1 : 0) +
     (starRatingResult.status === "Error" ? 1 : 0)
   ) : 0;
 
@@ -414,13 +412,6 @@ function ResultsPage() {
         id: 'video',
         label: 'Product Video',
         message: analysisResult.videoResult.Message
-      });
-    }
-    if (analysisResult.reviewResult?.status === 'Error') {
-      conversionIssues.push({
-        id: 'reviews',
-        label: 'Product Reviews',
-        message: analysisResult.reviewResult.Message
       });
     }
     if (analysisResult.starRatingResult?.status === 'Error') {

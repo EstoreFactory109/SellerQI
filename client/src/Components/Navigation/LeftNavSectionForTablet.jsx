@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -197,6 +197,36 @@ const LeftNavSection = () => {
                                                 }`}/>
                                             </div>
                                             <span className="font-medium flex-1">Dashboard</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
+
+                            {/* Your Products - For PRO/AGENCY users and expired trial users */}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavLink
+                                    to="/seller-central-checker/your-products"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-cyan-50 group-hover:bg-cyan-100'
+                                            }`}>
+                                                <Package className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-cyan-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium flex-1">Your Products</span>
                                             {isPremiumLocked && (
                                                 <Lock className="w-3 h-3 text-amber-500" />
                                             )}

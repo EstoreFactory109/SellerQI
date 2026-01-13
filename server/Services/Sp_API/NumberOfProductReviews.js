@@ -87,13 +87,16 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
           return {
             asin: asin,
             product_title: data.data.product_title || "",
-            about_product: data.data.about_product || "",
-            product_description: data.data.product_description || "",
+            about_product: data.data.about_product || [],
+            product_description: Array.isArray(data.data.product_description) 
+              ? data.data.product_description 
+              : (data.data.product_description ? [data.data.product_description] : []),
             product_photos: data.data.product_photos || [],
             video_url: data.data.product_videos?.map(video => video.video_url) || [],
-            product_num_ratings: data.data.product_num_ratings || "",
-            product_star_ratings: data.data.product_star_rating || "",
-            aplus:data.data.has_aplus || false
+            // Convert number to string for consistency with model
+            product_num_ratings: String(data.data.product_num_ratings || 0),
+            product_star_ratings: String(data.data.product_star_rating || "0"),
+            aplus: data.data.has_aplus || false
           };
         })()
       );
@@ -107,7 +110,8 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
       .filter(product => product !== null)
       .map(product => ({
         Asins: product.asin,
-        status: product.aplus ? 'true' : 'false'
+        // Use 'APPROVED' for true, 'NOT_AVAILABLE' for false to match expected status values
+        status: product.aplus ? 'APPROVED' : 'NOT_AVAILABLE'
       }));
     const filteredProducts = products.filter(product => product !== null);
 

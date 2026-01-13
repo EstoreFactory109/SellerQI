@@ -150,28 +150,36 @@ export default function PricingPage() {
     setLoading(prev => ({ ...prev, freeTrial: true }));
 
     try {
-      const response = await axiosInstance.post('/app/activate-free-trial');
+      localStorage.removeItem('intendedAction');
       
-      if (response.status === 200) {
-        localStorage.removeItem('intendedAction');
+      // For Indian users, use the old manual trial system (no payment method required)
+      if (country === 'IN') {
+        const response = await axiosInstance.post('/app/activate-free-trial');
         
-        // Update Redux state with new subscription info
-        if (response.data?.data) {
-          dispatch(updateTrialStatus({
-            packageType: response.data.data.packageType,
-            subscriptionStatus: response.data.data.subscriptionStatus,
-            isInTrialPeriod: response.data.data.isInTrialPeriod,
-            trialEndsDate: response.data.data.trialEndsDate
-          }));
+        if (response.status === 200) {
+          // Update Redux state with new subscription info
+          if (response.data?.data) {
+            dispatch(updateTrialStatus({
+              packageType: response.data.data.packageType,
+              subscriptionStatus: response.data.data.subscriptionStatus,
+              isInTrialPeriod: response.data.data.isInTrialPeriod,
+              trialEndsDate: response.data.data.trialEndsDate
+            }));
+          }
+          
+          // Navigate to connect page after successful trial activation
+          setTimeout(() => {
+            navigate('/connect-to-amazon');
+          }, 500);
         }
-        
-        setTimeout(() => {
-          navigate('/connect-to-amazon');
-        }, 500);
+      } else {
+        // For non-Indian users (US, etc.), use Stripe checkout with 7-day trial
+        // Payment method is collected upfront but not charged until trial ends
+        await stripeService.createCheckoutSession('PRO', null, 7);
       }
     } catch (error) {
-      console.error('Error activating free trial:', error);
-      alert(error.response?.data?.message || 'Failed to activate free trial. Please try again.');
+      console.error('Error starting free trial:', error);
+      alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');
     } finally {
       setTimeout(() => {
         setLoading(prev => ({ ...prev, freeTrial: false }));
@@ -294,7 +302,7 @@ export default function PricingPage() {
                 <span className="text-3xl font-bold text-gray-900">$0</span>
                 <span className="text-gray-500 text-sm ml-1">for 7 days</span>
               </div>
-              <p className="text-gray-600 text-sm mb-5">Try all Pro features free for 7 days. No credit card required.</p>
+              <p className="text-gray-600 text-sm mb-5">Try all Pro features free for 7 days. Card required, charged after trial ends.</p>
               
               <ul className="space-y-2.5 mb-6 flex-1">
                 {[
