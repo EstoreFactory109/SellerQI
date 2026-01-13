@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { 
   Package, 
   Search, 
@@ -13,13 +13,10 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
-import axiosInstance from '../config/axios.config.js';
+import { fetchYourProductsData } from '../redux/slices/PageDataSlice.js';
 
 const YourProducts = () => {
-  const [products, setProducts] = useState([]);
-  const [summary, setSummary] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'title', direction: 'asc' });
@@ -30,27 +27,19 @@ const YourProducts = () => {
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
 
-  // Fetch products data
-  useEffect(() => {
-    const fetchProducts = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await axiosInstance.get('/api/pagewise/your-products');
-        if (response.data && response.data.data) {
-          setProducts(response.data.data.products || []);
-          setSummary(response.data.data.summary || {});
-        }
-      } catch (err) {
-        console.error('Error fetching products:', err);
-        setError(err.response?.data?.message || 'Failed to fetch products');
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Get products data from Redux
+  const yourProductsData = useSelector((state) => state.pageData?.yourProducts?.data);
+  const loading = useSelector((state) => state.pageData?.yourProducts?.loading) ?? true;
+  const error = useSelector((state) => state.pageData?.yourProducts?.error);
 
-    fetchProducts();
-  }, [currentCountry, currentRegion]);
+  // Extract products and summary from Redux data
+  const products = useMemo(() => yourProductsData?.products || [], [yourProductsData]);
+  const summary = useMemo(() => yourProductsData?.summary || {}, [yourProductsData]);
+
+  // Fetch products data from Redux (only if empty)
+  useEffect(() => {
+    dispatch(fetchYourProductsData());
+  }, [dispatch, currentCountry, currentRegion]);
 
   // Filter products based on search and tab
   const filteredProducts = useMemo(() => {

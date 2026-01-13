@@ -74,6 +74,13 @@ const initialState = {
         loading: false,
         error: null,
         lastFetched: null
+    },
+    // Your Products Data
+    yourProducts: {
+        data: null,
+        loading: false,
+        error: null,
+        lastFetched: null
     }
 };
 
@@ -268,6 +275,24 @@ export const fetchInventoryData = createAsyncThunk(
     }
 );
 
+export const fetchYourProductsData = createAsyncThunk(
+    'pageData/fetchYourProducts',
+    async (_, { getState, rejectWithValue }) => {
+        try {
+            const state = getState();
+            // Check if data exists in Redux - only fetch if empty
+            if (state.pageData?.yourProducts?.data) {
+                return state.pageData.yourProducts.data;
+            }
+            
+            const response = await axiosInstance.get('/api/pagewise/your-products');
+            return response.data.data;
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch your products data');
+        }
+    }
+);
+
 // Create the slice
 const pageDataSlice = createSlice({
     name: 'pageData',
@@ -444,6 +469,21 @@ const pageDataSlice = createSlice({
             .addCase(fetchInventoryData.rejected, (state, action) => {
                 state.inventory.loading = false;
                 state.inventory.error = action.payload;
+            })
+        
+        // Your Products
+            .addCase(fetchYourProductsData.pending, (state) => {
+                state.yourProducts.loading = true;
+                state.yourProducts.error = null;
+            })
+            .addCase(fetchYourProductsData.fulfilled, (state, action) => {
+                state.yourProducts.loading = false;
+                state.yourProducts.data = action.payload;
+                state.yourProducts.lastFetched = Date.now();
+            })
+            .addCase(fetchYourProductsData.rejected, (state, action) => {
+                state.yourProducts.loading = false;
+                state.yourProducts.error = action.payload;
             });
     }
 });
