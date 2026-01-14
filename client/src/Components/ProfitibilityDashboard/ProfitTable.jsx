@@ -434,7 +434,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
             const cogsPerUnit = cogsValues[item.asin] || 0;
             const unitsSold = item.quantity || 0;
             const sales = item.sales || 0;
-            const totalFees = (item.amzFee || 0) * unitsSold;
+            // For EconomicsMetrics data, amzFee is already total, don't multiply
+            // For legacy data, amzFee might be per-unit, so multiply
+            const totalFees = item.source === 'economicsMetrics' 
+              ? (item.amzFee || 0) 
+              : ((item.amzFee || 0) * unitsSold);
             const adSpend = item.ads || 0;
             const grossProfit = sales - adSpend - totalFees;
             const totalCogs = cogsPerUnit * unitsSold;

@@ -20,8 +20,8 @@ const YourProducts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'title', direction: 'asc' });
-  const [itemsToShow, setItemsToShow] = useState(10);
-  const itemsPerLoad = 10;
+  const [loadingMore, setLoadingMore] = useState(false);
+  const itemsPerPage = 20; // Items fetched from backend per page
 
   // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
@@ -32,16 +32,45 @@ const YourProducts = () => {
   const loading = useSelector((state) => state.pageData?.yourProducts?.loading) ?? true;
   const error = useSelector((state) => state.pageData?.yourProducts?.error);
 
-  // Extract products and summary from Redux data
+  // Extract products, summary, and pagination from Redux data
   const products = useMemo(() => yourProductsData?.products || [], [yourProductsData]);
   const summary = useMemo(() => yourProductsData?.summary || {}, [yourProductsData]);
+  const pagination = useMemo(() => yourProductsData?.pagination || {}, [yourProductsData]);
 
   // Fetch products data from Redux (only if empty)
   useEffect(() => {
-    dispatch(fetchYourProductsData());
-  }, [dispatch, currentCountry, currentRegion]);
+    // Only fetch if data doesn't exist in Redux
+    if (!yourProductsData && !loading) {
+      dispatch(fetchYourProductsData({ page: 1, limit: itemsPerPage }));
+    }
+  }, [dispatch, yourProductsData, loading]);
+  
+  // Handle loading more products from backend
+  const handleLoadMoreFromBackend = async () => {
+    // Guard against loading if already loading or no more data
+    if (loadingMore) return;
+    
+    // Check if we already have all data
+    const totalItems = summary.totalProducts || pagination.totalItems || 0;
+    if (products.length >= totalItems) return;
+    if (!pagination.hasMore) return;
+    
+    setLoadingMore(true);
+    try {
+      const nextPage = (pagination.page || 1) + 1;
+      await dispatch(fetchYourProductsData({ 
+        page: nextPage, 
+        limit: itemsPerPage, 
+        append: true 
+      })).unwrap();
+    } catch (err) {
+      console.error('Error loading more products:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
-  // Filter products based on search and tab
+  // Filter products based on search and tab (client-side filtering of loaded products)
   const filteredProducts = useMemo(() => {
     let filtered = [...products];
 
@@ -94,21 +123,13 @@ const YourProducts = () => {
     return filtered;
   }, [products, searchQuery, activeTab, sortConfig]);
 
-  // Displayed products (load more logic)
-  const displayedProducts = useMemo(() => {
-    return filteredProducts.slice(0, itemsToShow);
-  }, [filteredProducts, itemsToShow]);
-
-  const hasMoreItems = filteredProducts.length > itemsToShow;
-
-  // Reset items to show when filters change
-  useEffect(() => {
-    setItemsToShow(itemsPerLoad);
-  }, [activeTab, searchQuery, sortConfig.key]);
-
-  const handleLoadMore = () => {
-    setItemsToShow(prev => prev + itemsPerLoad);
-  };
+  // For display, we use all filtered products (no client-side pagination needed since we paginate from backend)
+  const displayedProducts = filteredProducts;
+  
+  // Check if there's more data to load from backend
+  // Use both pagination.hasMore and compare loaded count vs total
+  const totalItems = summary.totalProducts || pagination.totalItems || 0;
+  const hasMoreFromBackend = pagination.hasMore === true && products.length < totalItems;
 
   // Handle sort
   const handleSort = (key) => {
@@ -550,24 +571,34 @@ const YourProducts = () => {
           </div>
 
           {/* Load More */}
-          {hasMoreItems && (
+          {hasMoreFromBackend && (
             <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center gap-4">
               <span className="text-sm text-gray-500">
-                Showing {displayedProducts.length} of {filteredProducts.length} products
+                Showing {products.length} of {summary.totalProducts || pagination.totalItems || products.length} products
               </span>
               <button
-                onClick={handleLoadMore}
-                className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                onClick={handleLoadMoreFromBackend}
+                disabled={loadingMore}
+                className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Load More
-                <ChevronDown size={16} />
+                {loadingMore ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    Load More
+                    <ChevronDown size={16} />
+                  </>
+                )}
               </button>
             </div>
           )}
-          {!hasMoreItems && displayedProducts.length > itemsPerLoad && (
+          {!hasMoreFromBackend && products.length > 0 && (
             <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center">
               <span className="text-sm text-gray-500">
-                Showing all {filteredProducts.length} products
+                Showing all {summary.totalProducts || products.length} products
               </span>
             </div>
           )}

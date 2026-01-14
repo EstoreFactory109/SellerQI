@@ -126,7 +126,7 @@ const KeywordAnalysisDashboard = () => {
     keywordsByAsinRef.current = keywordsByAsin;
   }, [keywordsByAsin]);
 
-  // Fetch keyword recommendations data for selected ASIN (only if not in Redux)
+  // Fetch keyword recommendations data for selected ASIN (only if not in Redux or stale)
   useEffect(() => {
     // Track if the component is still mounted
     let isMounted = true;
@@ -140,9 +140,16 @@ const KeywordAnalysisDashboard = () => {
       // Check if data already exists in Redux (using ref to avoid dependency loop)
       const existingData = keywordsByAsinRef.current[selectedAsin];
       if (existingData && existingData.data) {
-        // Data already exists, no need to fetch or show loader
-        setIsSwitchingAsin(false);
-        return;
+        // Check if data is still fresh (less than 5 minutes old)
+        const fetchedAt = existingData.fetchedAt ? new Date(existingData.fetchedAt).getTime() : 0;
+        const isStale = (Date.now() - fetchedAt) > 5 * 60 * 1000; // 5 minutes
+        
+        if (!isStale) {
+          // Data is fresh, no need to fetch or show loader
+          setIsSwitchingAsin(false);
+          return;
+        }
+        // Data is stale, will refetch but don't show loader (silent refresh)
       }
 
       // Show loader only when we need to fetch

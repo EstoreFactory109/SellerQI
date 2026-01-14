@@ -569,13 +569,23 @@ const getKeywordRecommendationsAsins = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get keyword recommendations for a specific ASIN
+ * Get keyword recommendations for a specific ASIN with pagination support
+ * 
+ * Query params:
+ * - asin: ASIN to get recommendations for (required)
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 50, max: 200)
+ * - summaryOnly: If true, return only counts (default: false)
  */
 const getKeywordRecommendationsByAsin = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const country = req.country;
     const region = req.region;
-    const { asin } = req.query;
+    const { asin, summaryOnly } = req.query;
+    
+    // Pagination parameters
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
 
     if (!userId) {
         logger.error("User ID is missing from request");
@@ -602,19 +612,62 @@ const getKeywordRecommendationsByAsin = asyncHandler(async (req, res) => {
                 },
                 totalKeywords: 0,
                 asin: asin,
+                pagination: {
+                    page,
+                    limit,
+                    totalItems: 0,
+                    totalPages: 0,
+                    hasMore: false
+                },
                 message: `No keyword recommendations found for ASIN: ${asin}`
             }, "Keyword recommendations data fetched successfully"));
         }
 
+        const allKeywords = asinKeywordData.keywordTargetList || [];
+        const totalKeywords = allKeywords.length;
+        
+        // If only summary is requested, return counts only
+        if (summaryOnly === 'true') {
+            return res.status(200).json(new ApiResponse(200, {
+                keywordRecommendationData: {
+                    keywordTargetList: []
+                },
+                totalKeywords: totalKeywords,
+                asin: asinKeywordData.asin,
+                pagination: {
+                    page,
+                    limit,
+                    totalItems: totalKeywords,
+                    totalPages: Math.ceil(totalKeywords / limit),
+                    hasMore: false
+                },
+                fetchedAt: asinKeywordData.fetchedAt
+            }, "Keyword recommendations summary fetched successfully"));
+        }
+
+        // Apply pagination
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedKeywords = allKeywords.slice(startIndex, endIndex);
+        const totalPages = Math.ceil(totalKeywords / limit);
+        const hasMore = page < totalPages;
+
         return res.status(200).json(new ApiResponse(200, {
             keywordRecommendationData: {
-                keywordTargetList: asinKeywordData.keywordTargetList || []
+                keywordTargetList: paginatedKeywords
             },
-            totalKeywords: asinKeywordData.totalKeywords || 0,
+            totalKeywords: totalKeywords,
             asin: asinKeywordData.asin,
             userId: asinKeywordData.userId,
             country: asinKeywordData.country,
             region: asinKeywordData.region,
+            pagination: {
+                page,
+                limit,
+                totalItems: totalKeywords,
+                totalPages,
+                hasMore
+            },
             fetchedAt: asinKeywordData.fetchedAt,
             createdAt: asinKeywordData.createdAt,
             updatedAt: asinKeywordData.updatedAt

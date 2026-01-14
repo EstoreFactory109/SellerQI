@@ -30,8 +30,9 @@ router.get('/logging/emails', auth, getUserEmailLogs)
 router.post('/logging/create-sample', auth, createSampleLoggingData)
 
 // ===== KEYWORD RECOMMENDATIONS ROUTES =====
-router.get('/keywordRecommendations', auth, getLocation, getKeywordRecommendations)
-router.get('/keywordRecommendations/asins', auth, getLocation, getKeywordRecommendationsAsins)
-router.get('/keywordRecommendations/byAsin', auth, getLocation, getKeywordRecommendationsByAsin)
+// Cache TTL: 1 hour for keyword data (data doesn't change frequently)
+router.get('/keywordRecommendations', auth, getLocation, analyseDataCache(3600, 'keyword-recs'), getKeywordRecommendations)
+router.get('/keywordRecommendations/asins', auth, getLocation, analyseDataCache(3600, 'keyword-asins'), getKeywordRecommendationsAsins)
+router.get('/keywordRecommendations/byAsin', auth, getLocation, getKeywordRecommendationsByAsin) // Not cached as ASIN is dynamic
 
 module.exports=router;

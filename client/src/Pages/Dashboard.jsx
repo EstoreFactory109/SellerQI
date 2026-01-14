@@ -8,7 +8,7 @@ import Calender from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
 import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
 import { useSelector, useDispatch } from 'react-redux'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../redux/slices/PPCMetricsSlice.js'
@@ -20,8 +20,30 @@ const Dashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
   const ExportRef = useRef(null)
+  const contentRef = useRef(null)
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const location = useLocation()
+  
+  // Reset scroll position when navigating to Dashboard
+  useEffect(() => {
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      // Reset scroll position of the main content area (Dashboard's own scroll container)
+      if (contentRef.current) {
+        contentRef.current.scrollTop = 0
+      }
+      // Also reset the parent scroll container (MainPagesLayout's scrollable div)
+      const parentScrollContainer = document.querySelector('section.flex-1.overflow-y-auto')
+      if (parentScrollContainer) {
+        parentScrollContainer.scrollTop = 0
+      }
+      // Reset window scroll (in case of any window-level scrolling)
+      window.scrollTo(0, 0)
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [location.pathname]) // Reset when route changes
   
   // Get reimbursement data from Redux (cached)
   const reimbursementData = useSelector(state => state.reimbursement)
@@ -559,7 +581,11 @@ const Dashboard = () => {
       </div>
 
       {/* Main Content - Scrollable */}
-      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
+      <div 
+        ref={contentRef}
+        className='overflow-y-auto' 
+        style={{ height: 'calc(100vh - 120px)' }}
+      >
         <div className='px-4 lg:px-6 py-6 pb-20'>
           {/* Show partial data notice if some data is missing */}
           {hasAnyData && !hasAllData && (

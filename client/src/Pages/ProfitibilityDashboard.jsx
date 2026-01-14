@@ -541,8 +541,18 @@ const ProfitabilityDashboard = () => {
          const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
          const totalCogs = cogsPerUnit * (product.quantity || 0);
          // Use totalFees from EconomicsMetrics if available
-         const totalFees = product.totalFees !== undefined ? product.totalFees : 
-                          ((product.amzFee || 0) * (product.quantity || 0));
+         // Handle both object format {amount: number} and number format
+         // Note: For EconomicsMetrics, fees are already totals (not per-unit)
+         let totalFees = 0;
+         if (product.totalFees !== undefined && product.totalFees !== null) {
+           totalFees = typeof product.totalFees === 'object' ? (product.totalFees.amount || 0) : product.totalFees;
+         } else if (product.source === 'economicsMetrics') {
+           // For EconomicsMetrics data, amzFee is already total, don't multiply
+           totalFees = product.amzFee || 0;
+         } else {
+           // Legacy data: amzFee might be per-unit, multiply by quantity
+           totalFees = (product.amzFee || 0) * (product.quantity || 0);
+         }
          const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
                             ((product.sales || 0) - (product.ads || 0) - totalFees);
          const netProfit = grossProfit - totalCogs;
@@ -555,8 +565,18 @@ const ProfitabilityDashboard = () => {
          const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
          const totalCogs = cogsPerUnit * (product.quantity || 0);
          // Use totalFees from EconomicsMetrics if available
-         const totalFees = product.totalFees !== undefined ? product.totalFees : 
-                          ((product.amzFee || 0) * (product.quantity || 0));
+         // Handle both object format {amount: number} and number format
+         // Note: For EconomicsMetrics, fees are already totals (not per-unit)
+         let totalFees = 0;
+         if (product.totalFees !== undefined && product.totalFees !== null) {
+           totalFees = typeof product.totalFees === 'object' ? (product.totalFees.amount || 0) : product.totalFees;
+         } else if (product.source === 'economicsMetrics') {
+           // For EconomicsMetrics data, amzFee is already total, don't multiply
+           totalFees = product.amzFee || 0;
+         } else {
+           // Legacy data: amzFee might be per-unit, multiply by quantity
+           totalFees = (product.amzFee || 0) * (product.quantity || 0);
+         }
          const grossProfit = product.grossProfit !== undefined ? product.grossProfit :
                             ((product.sales || 0) - (product.ads || 0) - totalFees);
          const netProfit = grossProfit - totalCogs;
@@ -731,9 +751,20 @@ const ProfitabilityDashboard = () => {
         const totalCogs = cogsPerUnit * (product.quantity || 0);
         
         // Use amazonFees from EconomicsMetrics if available
-        const amazonFees = product.amazonFees !== undefined ? product.amazonFees : 
-                          (product.totalFees !== undefined ? product.totalFees : 
-                          ((product.amzFee || 0) * (product.quantity || 0)));
+        // Note: amazonFees from EconomicsMetrics is already a TOTAL (not per-unit)
+        // Handle both object format {amount: number} and number format
+        let amazonFees = 0;
+        if (product.amazonFees !== undefined && product.amazonFees !== null) {
+          amazonFees = typeof product.amazonFees === 'object' ? (product.amazonFees.amount || 0) : product.amazonFees;
+        } else if (product.totalFees !== undefined && product.totalFees !== null) {
+          amazonFees = typeof product.totalFees === 'object' ? (product.totalFees.amount || 0) : product.totalFees;
+        } else if (product.source === 'economicsMetrics') {
+          // For EconomicsMetrics data, amzFee is already total, don't multiply
+          amazonFees = product.amzFee || 0;
+        } else {
+          // Legacy data: amzFee might be per-unit, multiply by quantity
+          amazonFees = (product.amzFee || 0) * (product.quantity || 0);
+        }
         const totalFees = amazonFees;
         
         // Use grossProfit from EconomicsMetrics if available, otherwise calculate

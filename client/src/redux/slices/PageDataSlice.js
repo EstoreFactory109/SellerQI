@@ -277,16 +277,42 @@ export const fetchInventoryData = createAsyncThunk(
 
 export const fetchYourProductsData = createAsyncThunk(
     'pageData/fetchYourProducts',
-    async (_, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, summaryOnly = false, append = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
-            // Check if data exists in Redux - only fetch if empty
-            if (state.pageData?.yourProducts?.data) {
-                return state.pageData.yourProducts.data;
+            const existingData = state.pageData?.yourProducts?.data;
+            const lastFetched = state.pageData?.yourProducts?.lastFetched;
+            
+            // Check if data exists and is less than 5 minutes old (only for first page, non-append)
+            if (!append && page === 1 && lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000 && existingData) {
+                return { ...existingData, fromCache: true };
             }
             
-            const response = await axiosInstance.get('/api/pagewise/your-products');
-            return response.data.data;
+            const response = await axiosInstance.get('/api/pagewise/your-products', {
+                params: { page, limit, summaryOnly }
+            });
+            
+            const newData = response.data.data;
+            
+            // If appending, merge products with existing ones
+            if (append && existingData && existingData.products) {
+                const mergedProducts = [...existingData.products, ...newData.products];
+                const totalItems = newData.pagination?.totalItems || newData.summary?.totalProducts || 0;
+                
+                return {
+                    ...newData,
+                    products: mergedProducts,
+                    pagination: {
+                        ...newData.pagination,
+                        page: page, // Current page we just fetched
+                        // Recalculate hasMore based on merged products count vs total
+                        hasMore: mergedProducts.length < totalItems
+                    },
+                    fromCache: false
+                };
+            }
+            
+            return { ...newData, fromCache: false };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch your products data');
         }

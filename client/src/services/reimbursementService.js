@@ -8,16 +8,50 @@ const BASE_URL = import.meta.env.VITE_BASE_URI;
  */
 
 /**
- * Get reimbursement summary for dashboard
+ * Get reimbursement summary for dashboard with pagination support
+ * @param {Object} options - Pagination options
+ * @param {number} options.page - Page number (default: 1)
+ * @param {number} options.limit - Items per page (default: 20)
+ * @param {boolean} options.summaryOnly - If true, return only summary without data (default: false)
+ * @param {string} options.category - If specified, only return data for that category (shipment, lost, damaged, disposed)
  */
-export const getReimbursementSummary = async () => {
+export const getReimbursementSummary = async ({ page = 1, limit = 20, summaryOnly = false, category = null } = {}) => {
     try {
-        const response = await axios.get(`${BASE_URL}/app/reimbursements/summary`, {
+        const params = new URLSearchParams();
+        params.append('page', page);
+        params.append('limit', limit);
+        if (summaryOnly) params.append('summaryOnly', 'true');
+        if (category) params.append('category', category);
+        
+        const response = await axios.get(`${BASE_URL}/app/reimbursements/summary?${params.toString()}`, {
             withCredentials: true
         });
         return response.data;
     } catch (error) {
         console.error('Error fetching reimbursement summary:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get reimbursement data for a specific category with pagination
+ * @param {string} category - Category type (shipment, lost, damaged, disposed)
+ * @param {number} page - Page number
+ * @param {number} limit - Items per page
+ */
+export const getReimbursementByCategory = async (category, page = 1, limit = 20) => {
+    try {
+        const params = new URLSearchParams();
+        params.append('page', page);
+        params.append('limit', limit);
+        params.append('category', category);
+        
+        const response = await axios.get(`${BASE_URL}/app/reimbursements/summary?${params.toString()}`, {
+            withCredentials: true
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching reimbursement category data:', error);
         throw error;
     }
 };
@@ -134,6 +168,7 @@ export const updateReimbursementCosts = async (cogsValues) => {
 
 export default {
     getReimbursementSummary,
+    getReimbursementByCategory,
     getAllReimbursements,
     getPotentialClaims,
     getUrgentClaims,

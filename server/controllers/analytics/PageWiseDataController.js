@@ -688,16 +688,26 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get Your Products data
- * Returns all products with their details including status, ratings, A+ content status
+ * Get Your Products data with pagination support
+ * Returns products with their details including status, ratings, A+ content status
+ * 
+ * Query params:
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 20, max: 100)
+ * - summaryOnly: If true, return only summary data (default: false)
  */
 const getYourProductsData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
+    
+    // Pagination parameters
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const summaryOnly = req.query.summaryOnly === 'true';
 
     try {
-        logger.info(`Getting Your Products data for user ${userId}, region ${Region}, country ${Country}`);
+        logger.info(`Getting Your Products data for user ${userId}, region ${Region}, country ${Country}, page ${page}, limit ${limit}`);
 
         // Get seller data with products
         const seller = await Seller.findOne({ User: userId });
@@ -720,7 +730,78 @@ const getYourProductsData = asyncHandler(async (req, res) => {
         }
 
         // Get products from seller account
-        const products = sellerAccount.products || [];
+        const allProducts = sellerAccount.products || [];
+        const totalProducts = allProducts.length;
+
+        // Calculate summary metrics first (always needed)
+        // We need to calculate this from all products, not just paginated
+        let activeProducts = 0;
+        let inactiveProducts = 0;
+        let incompleteProducts = 0;
+        
+        allProducts.forEach(p => {
+            if (p.status === 'Active') activeProducts++;
+            else if (p.status === 'Inactive') inactiveProducts++;
+            else if (p.status === 'Incomplete') incompleteProducts++;
+        });
+
+        // If only summary is requested, return early without processing all product details
+        if (summaryOnly) {
+            // Get A+ content count (quick aggregation)
+            let productsWithAPlus = 0;
+            let aPlusContent = await APlusContent.findOne({
+                User: userId,
+                region: Region,
+                country: Country
+            }).sort({ createdAt: -1 }).select('ApiContentDetails');
+
+            if (!aPlusContent) {
+                aPlusContent = await APlusContent.findOne({
+                    User: userId
+                }).sort({ createdAt: -1 }).select('ApiContentDetails');
+            }
+
+            if (aPlusContent && aPlusContent.ApiContentDetails) {
+                // Create a set of product ASINs for quick lookup
+                const productAsinSet = new Set(allProducts.map(p => p.asin?.toUpperCase()));
+                
+                aPlusContent.ApiContentDetails.forEach(item => {
+                    const asinKey = item.Asins?.toUpperCase() || '';
+                    if (productAsinSet.has(asinKey) && 
+                        (item.status === 'APPROVED' || item.status === 'PUBLISHED')) {
+                        productsWithAPlus++;
+                    }
+                });
+            }
+
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    products: [], // Empty array for summary only
+                    summary: {
+                        totalProducts,
+                        activeProducts,
+                        inactiveProducts,
+                        incompleteProducts,
+                        productsWithAPlus,
+                        productsWithoutAPlus: totalProducts - productsWithAPlus
+                    },
+                    pagination: {
+                        page,
+                        limit,
+                        totalItems: totalProducts,
+                        totalPages: Math.ceil(totalProducts / limit),
+                        hasMore: false
+                    },
+                    country: Country,
+                    region: Region
+                }, "Your Products summary retrieved successfully")
+            );
+        }
+
+        // Apply pagination to products
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedProducts = allProducts.slice(startIndex, endIndex);
 
         // Get product reviews data - try multiple query approaches
         // First try with region and country, sorted by createdAt to get latest
@@ -735,11 +816,9 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             productReviews = await NumberOfProductReviews.findOne({
                 User: userId
             }).sort({ createdAt: -1 });
-            logger.info(`ProductReviews fallback query (user only): found=${!!productReviews}`);
         }
 
         // Get A+ content data from APlusContent model
-        // This data is populated by NumberOfProductReviews service from RapidAPI's has_aplus field
         let aPlusContent = await APlusContent.findOne({
             User: userId,
             region: Region,
@@ -751,25 +830,12 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             aPlusContent = await APlusContent.findOne({
                 User: userId
             }).sort({ createdAt: -1 });
-            logger.info(`APlusContent fallback query (user only): found=${!!aPlusContent}`);
         }
-
-        logger.info(`Your Products data fetch results:`, {
-            userId,
-            region: Region,
-            country: Country,
-            productsCount: products.length,
-            productReviewsFound: !!productReviews,
-            productReviewsCount: productReviews?.Products?.length || 0,
-            aPlusContentFound: !!aPlusContent,
-            aPlusContentCount: aPlusContent?.ApiContentDetails?.length || 0
-        });
 
         // Create a map for quick lookup of reviews by ASIN
         const reviewsMap = new Map();
         if (productReviews && productReviews.Products) {
             productReviews.Products.forEach(product => {
-                // Use lowercase asin for case-insensitive matching
                 const asinKey = product.asin?.toUpperCase() || '';
                 reviewsMap.set(asinKey, {
                     numRatings: product.product_num_ratings || '0',
@@ -778,42 +844,34 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     photos: product.product_photos || []
                 });
             });
-            logger.info(`Reviews map created with ${reviewsMap.size} entries. Sample ASINs: ${Array.from(reviewsMap.keys()).slice(0, 5).join(', ')}`);
         }
 
         // Create a map for A+ content status by ASIN
-        // A+ data comes from APlusContent model, populated by NumberOfProductReviews service
-        // Status values: 'APPROVED' (has A+), 'NOT_AVAILABLE' (no A+)
         const aPlusMap = new Map();
+        let productsWithAPlus = 0;
         if (aPlusContent && aPlusContent.ApiContentDetails) {
-            let approvedCount = 0;
-            let notAvailableCount = 0;
+            // Create a set of all product ASINs for quick lookup
+            const productAsinSet = new Set(allProducts.map(p => p.asin?.toUpperCase()));
             
             aPlusContent.ApiContentDetails.forEach(item => {
-                // Use uppercase asin for case-insensitive matching
                 const asinKey = item.Asins?.toUpperCase() || '';
                 aPlusMap.set(asinKey, item.status);
                 
-                if (item.status === 'APPROVED') approvedCount++;
-                else if (item.status === 'NOT_AVAILABLE') notAvailableCount++;
+                // Count products with A+ (only count if ASIN is in our products)
+                if (productAsinSet.has(asinKey) && 
+                    (item.status === 'APPROVED' || item.status === 'PUBLISHED' || 
+                     item.status === 'true' || item.status === true)) {
+                    productsWithAPlus++;
+                }
             });
-            
-            logger.info(`A+ map created with ${aPlusMap.size} entries (${approvedCount} APPROVED, ${notAvailableCount} NOT_AVAILABLE). Sample ASINs: ${Array.from(aPlusMap.keys()).slice(0, 5).join(', ')}`);
         }
 
-        // Log sample product ASINs for debugging
-        if (products.length > 0) {
-            logger.info(`Sample product ASINs from seller: ${products.slice(0, 5).map(p => p.asin).join(', ')}`);
-        }
-
-        // Combine all data
-        const enrichedProducts = products.map(product => {
-            // Use uppercase for matching
+        // Enrich only paginated products
+        const enrichedProducts = paginatedProducts.map(product => {
             const asinKey = product.asin?.toUpperCase() || '';
             const reviewData = reviewsMap.get(asinKey) || {};
             const aPlusStatus = aPlusMap.get(asinKey);
             
-            // Check for A+ content - handle both old format ('true'/'false') and new format ('APPROVED'/'NOT_AVAILABLE')
             const hasAPlusContent = aPlusStatus === 'APPROVED' || 
                                     aPlusStatus === 'PUBLISHED' || 
                                     aPlusStatus === 'true' ||
@@ -834,12 +892,8 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             };
         });
 
-        // Calculate summary metrics
-        const totalProducts = enrichedProducts.length;
-        const activeProducts = enrichedProducts.filter(p => p.status === 'Active').length;
-        const inactiveProducts = enrichedProducts.filter(p => p.status === 'Inactive').length;
-        const incompleteProducts = enrichedProducts.filter(p => p.status === 'Incomplete').length;
-        const productsWithAPlus = enrichedProducts.filter(p => p.hasAPlus).length;
+        const totalPages = Math.ceil(totalProducts / limit);
+        const hasMore = page < totalPages;
 
         return res.status(200).json(
             new ApiResponse(200, {
@@ -851,6 +905,13 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     incompleteProducts,
                     productsWithAPlus,
                     productsWithoutAPlus: totalProducts - productsWithAPlus
+                },
+                pagination: {
+                    page,
+                    limit,
+                    totalItems: totalProducts,
+                    totalPages,
+                    hasMore
                 },
                 country: Country,
                 region: Region
