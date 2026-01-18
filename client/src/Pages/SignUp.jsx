@@ -294,9 +294,9 @@ const SignUp = () => {
           localStorage.setItem("isAuth", true);
           dispatch(loginSuccess(response.data.data || response.data));
           
-          // If no plan selected, redirect to pricing page
+          // If no plan selected, redirect to connect-to-amazon page (skip pricing)
           if (noPlanSelected) {
-            navigate('/pricing');
+            navigate('/connect-to-amazon');
           } else if (isPROTrial) {
             // PRO-Trial: Different flow for India vs non-India
             if (isIndianUser) {

@@ -620,12 +620,15 @@ const analyseData = async (data, userId = null) => {
         data.ConversionData.videoResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
     const productStarRatingResultError = Array.isArray(data.ConversionData?.productStarRatingResult) ? 
         data.ConversionData.productStarRatingResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
+    const brandStoryError = Array.isArray(data.ConversionData?.brandStoryResult) ? 
+        data.ConversionData.brandStoryResult.filter((p) => p && p.data && p.data.status === "Error" && p.asin && activeProductSet.has(p.asin)) : [];
 
     // PERFORMANCE OPTIMIZATION: Create Maps for conversion error lookups (O(1) instead of O(n))
     const aplusErrorMap = new Map(aplusError.map(p => [p.asin, p]));
     const imageResultErrorMap = new Map(imageResultError.map(p => [p.asin, p]));
     const videoResultErrorMap = new Map(videoResultError.map(p => [p.asin, p]));
     const productStarRatingResultErrorMap = new Map(productStarRatingResultError.map(p => [p.asin, p]));
+    const brandStoryErrorMap = new Map(brandStoryError.map(p => [p.asin, p]));
 
     // PERFORMANCE OPTIMIZATION: Create Maps for inventory error lookups
     const inventoryPlanningMap = new Map();
@@ -760,6 +763,12 @@ const analyseData = async (data, userId = null) => {
         const buyboxFound = buyboxErrorMap.get(asin);
         if (buyboxFound) {
             convData.productsWithOutBuyboxErrorData = buyboxFound.data;
+            errorCount++;
+        }
+
+        const brandStoryFound = brandStoryErrorMap.get(asin);
+        if (brandStoryFound) {
+            convData.brandStoryErrorData = brandStoryFound.data;
             errorCount++;
         }
 

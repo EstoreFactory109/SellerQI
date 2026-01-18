@@ -194,7 +194,8 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
                 ['Images', conversionErrors.imageResultErrorData],
                 ['Video', conversionErrors.videoResultErrorData],
                 ['Star Rating', conversionErrors.productStarRatingResultErrorData],
-                ['A+ Content', conversionErrors.aplusErrorData]
+                ['A+ Content', conversionErrors.aplusErrorData],
+                ['Brand Story', conversionErrors.brandStoryErrorData]
             ];
             
             issueMap.forEach(([label, errorData]) => {
@@ -807,7 +808,8 @@ const IssuesByProduct = () => {
                 conversionErrors.videoResultErrorData,
                 conversionErrors.productStarRatingResultErrorData,
                 conversionErrors.productsWithOutBuyboxErrorData,
-                conversionErrors.aplusErrorData
+                conversionErrors.aplusErrorData,
+                conversionErrors.brandStoryErrorData
             ];
             
             checks.forEach(check => {

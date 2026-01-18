@@ -283,35 +283,68 @@ export const fetchYourProductsData = createAsyncThunk(
             const existingData = state.pageData?.yourProducts?.data;
             const lastFetched = state.pageData?.yourProducts?.lastFetched;
             
-            // Check if data exists and is less than 5 minutes old (only for first page, non-append)
-            if (!append && page === 1 && lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000 && existingData) {
-                return { ...existingData, fromCache: true };
+            // IMPORTANT: When append is true (Load More), ALWAYS fetch from backend - NEVER use cache
+            if (append) {
+                // Fetch the requested page from backend
+                const response = await axiosInstance.get('/api/pagewise/your-products', {
+                    params: { page, limit, summaryOnly }
+                });
+                
+                const newData = response.data.data;
+                
+                // Merge with existing products (deduplicated)
+                if (existingData && existingData.products) {
+                    const existingKeys = new Set(
+                        existingData.products.map(p => `${p.asin}-${p.sku}`)
+                    );
+                    
+                    const uniqueNewProducts = newData.products.filter(
+                        p => !existingKeys.has(`${p.asin}-${p.sku}`)
+                    );
+                    
+                    const mergedProducts = [...existingData.products, ...uniqueNewProducts];
+                    const totalItems = newData.pagination?.totalItems || newData.summary?.totalProducts || 0;
+                    
+                    return {
+                        ...newData,
+                        products: mergedProducts,
+                        pagination: {
+                            ...newData.pagination,
+                            page: page,
+                            hasMore: mergedProducts.length < totalItems
+                        },
+                        issuesData: existingData.issuesData || newData.issuesData,
+                        fromCache: false
+                    };
+                }
+                
+                return { ...newData, fromCache: false };
             }
             
+            // Cache logic for non-append requests (initial page load):
+            // Only use cache if ALL products are already loaded
+            if (page === 1 && lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000 && existingData && existingData.issuesData !== undefined) {
+                const totalProducts = existingData.summary?.totalProducts || 0;
+                const loadedProducts = existingData.products?.length || 0;
+                
+                // Only return full cache if ALL products are loaded
+                if (loadedProducts >= totalProducts && totalProducts > 0) {
+                    return { ...existingData, fromCache: true };
+                }
+                // If partial data exists, still return it (will show Load More button)
+                if (loadedProducts > 0) {
+                    return { ...existingData, fromCache: true };
+                }
+            }
+            
+            // Fetch from backend for initial load
             const response = await axiosInstance.get('/api/pagewise/your-products', {
                 params: { page, limit, summaryOnly }
             });
             
             const newData = response.data.data;
             
-            // If appending, merge products with existing ones
-            if (append && existingData && existingData.products) {
-                const mergedProducts = [...existingData.products, ...newData.products];
-                const totalItems = newData.pagination?.totalItems || newData.summary?.totalProducts || 0;
-                
-                return {
-                    ...newData,
-                    products: mergedProducts,
-                    pagination: {
-                        ...newData.pagination,
-                        page: page, // Current page we just fetched
-                        // Recalculate hasMore based on merged products count vs total
-                        hasMore: mergedProducts.length < totalItems
-                    },
-                    fromCache: false
-                };
-            }
-            
+            // Return fresh data for initial load (append is handled at the top)
             return { ...newData, fromCache: false };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch your products data');

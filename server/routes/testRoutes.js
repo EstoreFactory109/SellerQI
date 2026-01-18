@@ -4,7 +4,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews}=require('../controllers/test/TestController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
@@ -37,5 +37,8 @@ router.post('/testPPCMetrics',testPPCMetrics)  // Fetch aggregated PPC metrics f
 // PPC Units Sold - Date-wise units sold data with attribution windows
 router.post('/testPPCUnitsSold', testGetPPCUnitsSold)  // Fetch units sold data date-wise from SP, SB, SD campaigns
 router.get('/ppc-units-sold/info', getUnitsMetricsInfo)  // Get info about available units sold metrics
+
+// NumberOfProductReviews - Fetches product review data from RapidAPI
+router.post('/testNumberOfProductReviews', testNumberOfProductReviews)  // Fetch ASINs from DB and fetch product reviews data
 
 module.exports=router

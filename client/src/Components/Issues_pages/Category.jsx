@@ -241,7 +241,8 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
       ['Videos', item.videoResultErrorData],
       ['Rating', item.productStarRatingResultErrorData],
       ['Buy Box', item.productsWithOutBuyboxErrorData],
-      ['A Plus', item.aplusErrorData]
+      ['A Plus', item.aplusErrorData],
+      ['Brand Story', item.brandStoryErrorData]
     ];
 
     return sections

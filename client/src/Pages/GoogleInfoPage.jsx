@@ -223,9 +223,9 @@ const GoogleInfoPage = () => {
             console.log('Google: sellerCentral data not available - redirecting to dashboard for full check');
             window.location.href = "/seller-central-checker/dashboard";
           } else if (!hasPremium) {
-            // SP-API not connected AND no subscription → redirect to pricing
-            console.log('Google: No SP-API and no subscription - redirecting to pricing');
-            window.location.href = "/pricing";
+            // SP-API not connected AND no subscription → redirect to connect-to-amazon (skip pricing)
+            console.log('Google: No SP-API and no subscription - redirecting to connect-to-amazon');
+            window.location.href = "/connect-to-amazon";
           } else {
             // SP-API not connected BUT has subscription → redirect to connect-to-amazon
             console.log('Google: Has subscription but no SP-API - redirecting to connect-to-amazon');
@@ -240,9 +240,9 @@ const GoogleInfoPage = () => {
         dispatch(loginSuccess(response.data));
         localStorage.setItem("isAuth", true);
         
-        setStatus('Registration successful! Redirecting to pricing...');
+        setStatus('Registration successful! Redirecting to connect Amazon...');
         setTimeout(() => {
-          navigate("/pricing");
+          navigate("/connect-to-amazon");
         }, 1000);
       }
       

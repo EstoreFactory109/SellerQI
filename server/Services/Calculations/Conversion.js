@@ -88,7 +88,7 @@ const checkProductWithOutBuyBox = (asinList) => {
             let obj = {
                 asin: elm.asin,
                 status: "Success",
-                Message: "Excellent! You currently hold the Buy Box for your product. This not only boosts your sales potential but also allows you to run sponsored ads, significantly enhancing your product’s visibility and market reach on Amazon.",
+                Message: "Excellent! You currently hold the Buy Box for your product. This not only boosts your sales potential but also allows you to run sponsored ads, significantly enhancing your product's visibility and market reach on Amazon.",
                 HowToSolve: ""
             };
             result.push(obj);
@@ -109,6 +109,38 @@ const checkProductWithOutBuyBox = (asinList) => {
     };
 };
 
+/**
+ * Check if product has Brand Story
+ * @param {Array} productsList - Array of products with has_brandstory field from NumberOfProductReviews
+ * @returns {Array} Array of results with status and messages
+ */
+const checkBrandStory = (productsList) => {
+    let result = [];
+    
+    productsList.forEach(product => {
+        if (product.has_brandstory === false || product.has_brandstory === undefined) {
+            result.push({
+                asin: product.asin,
+                data: {
+                    status: "Error",
+                    Message: "The product lacks a brand story, making it difficult for customers to connect emotionally, leading to reduced trust, engagement, and sales in a competitive marketplace.",
+                    HowToSolve: "Develop a compelling brand story that highlights the product's unique values, mission, and benefits, using engaging content to build trust and differentiate it from competitors."
+                }
+            });
+        } else {
+            result.push({
+                asin: product.asin,
+                data: {
+                    status: "Success",
+                    Message: "Great job! Your product listing includes a Brand Story, enhancing customer connection and trust in your brand.",
+                    HowToSolve: ""
+                }
+            });
+        }
+    });
+
+    return result;
+};
 
 
-module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox }
+module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory }

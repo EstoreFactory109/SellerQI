@@ -1,8 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Globe, ChevronLeft, ChevronRight, User, Check } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import axiosInstance from '../config/axios.config.js';
+import { detectCountry } from '../utils/countryDetection.js';
+import stripeService from '../services/stripeService.js';
+import razorpayService from '../services/razorpayService.js';
 
 
 const ProfileIDSelection = () => {
@@ -15,9 +19,13 @@ const ProfileIDSelection = () => {
   const [profileData, setProfileData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true); // Loading state for initial data fetch
+  const [analysisStarted, setAnalysisStarted] = useState(false); // Track if analysis has started
+  const [waitingForAnalysis, setWaitingForAnalysis] = useState(false); // Track if waiting for analysis to start
   
   const navigate = useNavigate();
   const location = useLocation();
+  const pollingRef = useRef(null); // Ref for polling interval
+  const timeoutRef = useRef(null); // Ref for timeout
   
   // Check if profile data was passed via navigation state (pre-fetched)
   const prefetchedProfileData = location.state?.profileData;
@@ -130,6 +138,153 @@ const ProfileIDSelection = () => {
     };
   }, [prefetchedProfileData]);
 
+  // Wait for integration job to start (status becomes 'active')
+  const waitForJobToStart = async (jobId) => {
+    return new Promise((resolve) => {
+      const maxWaitTime = 30000; // 30 seconds max
+      const pollInterval = 2000; // Check every 2 seconds
+      const startTime = Date.now();
+      
+      const checkStatus = async () => {
+        try {
+          const statusResponse = await axiosInstance.get(`/api/integration/status/${jobId}`);
+          const status = statusResponse.data.data.status?.toLowerCase();
+          
+          console.log(`[ProfileIDSelection] Job status check: ${status}`);
+          
+          if (status === 'active' || status === 'running') {
+            // Job started - clear polling and resolve
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.log('[ProfileIDSelection] Job has started processing');
+            resolve(true);
+            return;
+          }
+          
+          if (status === 'completed') {
+            // Job done - clear and resolve
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.log('[ProfileIDSelection] Job already completed');
+            resolve(true);
+            return;
+          }
+          
+          if (status === 'failed') {
+            // Job failed - clear and resolve (proceed anyway)
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.error('[ProfileIDSelection] Job failed');
+            resolve(true); // Proceed anyway
+            return;
+          }
+          
+          // Check timeout
+          if (Date.now() - startTime >= maxWaitTime) {
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.warn('[ProfileIDSelection] Timeout waiting for job to start, proceeding anyway');
+            resolve(true); // Proceed anyway
+            return;
+          }
+        } catch (error) {
+          console.error('[ProfileIDSelection] Error checking job status:', error);
+          // On error, proceed anyway (don't block user)
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          resolve(true);
+        }
+      };
+      
+      // Start polling
+      pollingRef.current = setInterval(checkStatus, pollInterval);
+      
+      // Check immediately
+      checkStatus();
+      
+      // Set timeout as backup
+      timeoutRef.current = setTimeout(() => {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        resolve(true);
+      }, maxWaitTime);
+    });
+  };
+
+  // Navigate to payment based on country
+  const navigateToPayment = async () => {
+    try {
+      // Detect user's country
+      const country = await detectCountry();
+      const isIndianUser = country === 'IN';
+      
+      console.log(`[ProfileIDSelection] Detected country: ${country}, navigating to payment...`);
+      
+      if (isIndianUser) {
+        // India: Use Razorpay with 7-day trial
+        setWaitingForAnalysis(false);
+        await razorpayService.initiatePayment(
+          'PRO',
+          // Success callback
+          (result) => {
+            console.log('Razorpay trial started:', result);
+            navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
+          },
+          // Error callback
+          (error) => {
+            console.error('Razorpay trial failed:', error);
+            if (error.message !== 'Payment cancelled by user') {
+              alert(error.message || 'Failed to start free trial. Please try again.');
+            }
+            setWaitingForAnalysis(false);
+          },
+          7 // 7-day trial period
+        );
+      } else {
+        // US/Other: Use Stripe checkout with 7-day trial
+        setWaitingForAnalysis(false);
+        await stripeService.createCheckoutSession('PRO', null, 7);
+        // stripeService will handle the redirect to Stripe
+      }
+    } catch (error) {
+      console.error('[ProfileIDSelection] Error navigating to payment:', error);
+      setWaitingForAnalysis(false);
+      // Don't block user - they can proceed manually
+    }
+  };
+
   const saveProfileId = async (profileId,currencyCode) => {
     setLoading(true);
     try {
@@ -144,10 +299,56 @@ const ProfileIDSelection = () => {
         setProfileId('');
         setCurrencyCode('');
         
-        // Redirect to analyse-account page after successful save
-        setTimeout(() => {
-          navigate('/analyse-account');
-        }, 1500); // Small delay to show success message
+        // Trigger integration job and wait for it to start, then navigate to payment
+        try {
+          console.log('[ProfileIDSelection] Triggering integration job...');
+          setWaitingForAnalysis(true);
+          
+          let jobId = null;
+          
+          // First check if there's an active job
+          const activeResponse = await axiosInstance.get('/api/integration/active');
+          
+          if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
+            // Job already exists
+            jobId = activeResponse.data.data.jobId;
+            const existingStatus = activeResponse.data.data.status?.toLowerCase();
+            console.log('[ProfileIDSelection] Active job already exists:', existingStatus);
+            
+            // If already active or completed, proceed immediately
+            if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'completed') {
+              setAnalysisStarted(true);
+              await navigateToPayment();
+              return;
+            }
+          } else {
+            // No active job, trigger new one
+            const triggerResponse = await axiosInstance.post('/api/integration/trigger');
+            
+            if (triggerResponse.status === 202 || triggerResponse.status === 200) {
+              jobId = triggerResponse.data.data.jobId;
+              console.log('[ProfileIDSelection] Integration job triggered successfully, jobId:', jobId);
+            } else {
+              throw new Error('Failed to trigger integration job');
+            }
+          }
+          
+          // Wait for job to start (status becomes 'active')
+          if (jobId) {
+            console.log('[ProfileIDSelection] Waiting for job to start...');
+            await waitForJobToStart(jobId);
+            setAnalysisStarted(true);
+            console.log('[ProfileIDSelection] Job started, navigating to payment...');
+            await navigateToPayment();
+          } else {
+            throw new Error('No job ID received');
+          }
+        } catch (error) {
+          console.error('[ProfileIDSelection] Error in integration job flow:', error);
+          setWaitingForAnalysis(false);
+          // Don't block user - they can proceed manually
+          alert('Analysis started but payment setup failed. You can continue and set up payment later.');
+        }
       }
     } catch (error) {
       console.error('Error saving profile ID:', error);
@@ -195,6 +396,20 @@ const ProfileIDSelection = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
+
+  // Cleanup polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const getPaginationGroup = () => {
     const group = [];
@@ -284,6 +499,62 @@ const ProfileIDSelection = () => {
                 </div>
               </div>
             </motion.div>
+
+            {/* Waiting for Analysis Banner - Show when waiting for analysis to start */}
+            {waitingForAnalysis && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-xl p-4 shadow-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <motion.div
+                      className="w-5 h-5 border-2 border-yellow-600 border-t-transparent rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-yellow-900 mb-1">
+                      Starting Analysis...
+                    </h3>
+                    <p className="text-xs text-yellow-700">
+                      Please wait while we start your account analysis. You will be redirected to payment setup shortly.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Analysis Started Banner - Show when analysis has started */}
+            {analysisStarted && !waitingForAnalysis && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-4 shadow-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <motion.div
+                      className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-indigo-900 mb-1">
+                      Analysis Started
+                    </h3>
+                    <p className="text-xs text-indigo-700">
+                      Your account analysis is running in the background. Redirecting to payment setup...
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
             {/* Search and Stats Section */}
             <motion.div 

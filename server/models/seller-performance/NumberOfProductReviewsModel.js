@@ -29,9 +29,13 @@ const productSchema=new mongoose.Schema({
       product_num_ratings:{
        type:String,
        require:true
-      },product_star_ratings:{
+      },      product_star_ratings:{
        type:String,
        require:true
+      },
+      has_brandstory:{
+       type:Boolean,
+       default:false
       }
 })
 // Define the schema

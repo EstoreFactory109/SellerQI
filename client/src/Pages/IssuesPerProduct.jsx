@@ -275,9 +275,11 @@ const Dashboard = () => {
     // Conversion issue states (independent toggles)
     const [imageSolution, setImageSolution] = useState("");
     const [videoSolution, setVideoSolution] = useState("");
+    const [productReviewSolution, setProductReviewSolution] = useState("");
     const [productStarRatingSolution, setProductStarRatingSolution] = useState("");
     const [productsWithOutBuyboxSolution, setProductsWithOutBuyboxSolution] = useState("");
     const [aplusSolution, setAplusSolution] = useState("");
+    const [brandStorySolution, setBrandStorySolution] = useState("");
 
     // Inventory issue states (independent toggles)
     const [inventoryPlanningSolution, setInventoryPlanningSolution] = useState("");
@@ -303,6 +305,9 @@ const Dashboard = () => {
         }
         if (component === "Aplus") {
             setAplusSolution(prev => prev === val ? "" : val);
+        }
+        if (component === "BrandStory") {
+            setBrandStorySolution(prev => prev === val ? "" : val);
         }
     };
 
@@ -1154,6 +1159,16 @@ const Dashboard = () => {
                                         solutionContent={product.conversionErrors?.aplusErrorData.HowToSolve}
                                         stateValue={aplusSolution}
                                         toggleFunc={(val) => openCloseSolutionConversion(val, "Aplus")}
+                                    />
+                                )}
+                                {product.conversionErrors?.brandStoryErrorData?.status === "Error" && (
+                                    <IssueItem
+                                        label="Brand Story Issue"
+                                        message={product.conversionErrors?.brandStoryErrorData.Message}
+                                        solutionKey="BrandStory"
+                                        solutionContent={product.conversionErrors?.brandStoryErrorData.HowToSolve}
+                                        stateValue={brandStorySolution}
+                                        toggleFunc={(val) => openCloseSolutionConversion(val, "BrandStory")}
                                     />
                                 )}
                             </ul>

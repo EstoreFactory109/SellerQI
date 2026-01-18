@@ -171,9 +171,9 @@ const OtpVerification = () => {
         // PRO: Go to Stripe payment page (requires immediate payment)
         // AGENCY: Go to Stripe payment page (requires immediate payment)
         if (!intendedPackage || intendedPackage === 'null' || intendedPackage === 'undefined') {
-          // No plan selected - redirect to pricing page
+          // No plan selected - redirect to connect-to-amazon page (skip pricing)
           localStorage.removeItem('intendedPackage');
-          navigate("/pricing");
+          navigate("/connect-to-amazon");
         } else if (intendedPackage === 'PRO-Trial') {
           localStorage.removeItem('intendedPackage');
           
@@ -268,9 +268,9 @@ const OtpVerification = () => {
             }
           }
         } else {
-          // Unknown package - redirect to pricing page
+          // Unknown package - redirect to connect-to-amazon page (skip pricing)
           localStorage.removeItem('intendedPackage');
-          navigate("/pricing");
+          navigate("/connect-to-amazon");
         }
       }
     } catch (error) {

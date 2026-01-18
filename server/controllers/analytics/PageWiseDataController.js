@@ -729,8 +729,9 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             );
         }
 
-        // Get products from seller account
-        const allProducts = sellerAccount.products || [];
+        // Get products from seller account - convert Mongoose subdocuments to plain objects
+        // This ensures all fields including 'issues' array are properly accessible
+        const allProducts = (sellerAccount.products || []).map(p => p.toObject ? p.toObject() : p);
         const totalProducts = allProducts.length;
 
         // Calculate summary metrics first (always needed)
@@ -841,7 +842,8 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     numRatings: product.product_num_ratings || '0',
                     starRatings: product.product_star_ratings || '0',
                     title: product.product_title || '',
-                    photos: product.product_photos || []
+                    photos: product.product_photos || [],
+                    hasBrandstory: product.has_brandstory || false
                 });
             });
         }
@@ -887,13 +889,45 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 starRatings: reviewData.starRatings || '0',
                 hasAPlus: hasAPlusContent,
                 aPlusStatus: aPlusStatus || 'Not Available',
+                hasBrandstory: reviewData.hasBrandstory || false,
                 image: reviewData.photos && reviewData.photos.length > 0 ? reviewData.photos[0] : null,
-                updatedAt: product.updatedAt || null
+                updatedAt: product.updatedAt || null,
+                issues: product.issues || [] // Include issues from seller model for inactive/incomplete products
             };
         });
 
         const totalPages = Math.ceil(totalProducts / limit);
         const hasMore = page < totalPages;
+
+        // Get issues data for frontend calculation (same as IssuesByProduct page)
+        let issuesData = null;
+        try {
+            logger.info('[getYourProductsData] Fetching issues data...');
+            const analyseResult = await AnalyseService.Analyse(userId, Country, Region, null);
+            logger.info('[getYourProductsData] AnalyseService result status:', analyseResult?.status);
+            
+            if (analyseResult && analyseResult.status === 200 && analyseResult.message) {
+                const calculatedData = await analyseData(analyseResult.message, userId);
+                logger.info('[getYourProductsData] calculatedData exists:', !!calculatedData);
+                logger.info('[getYourProductsData] dashboardData exists:', !!calculatedData?.dashboardData);
+                
+                if (calculatedData && calculatedData.dashboardData) {
+                    const dashboardData = calculatedData.dashboardData;
+                    issuesData = {
+                        rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
+                        TotalProduct: dashboardData.TotalProduct || [],
+                        buyBoxData: dashboardData.buyBoxData || {}
+                    };
+                    logger.info('[getYourProductsData] issuesData populated:', {
+                        rankingCount: issuesData.rankingProductWiseErrors.length,
+                        totalProductCount: issuesData.TotalProduct.length,
+                        hasBuyBoxData: !!issuesData.buyBoxData?.asinBuyBoxData
+                    });
+                }
+            }
+        } catch (issueError) {
+            logger.warn('Could not fetch issues data for YourProducts:', issueError.message);
+        }
 
         return res.status(200).json(
             new ApiResponse(200, {
@@ -914,7 +948,8 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     hasMore
                 },
                 country: Country,
-                region: Region
+                region: Region,
+                issuesData: issuesData
             }, "Your Products data retrieved successfully")
         );
 

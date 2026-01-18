@@ -38,12 +38,12 @@ export default function SubscriptionSuccess() {
                             // User upgraded (from trial or LITE) → redirect to dashboard
                             navigate('/seller-central-checker/dashboard');
                         } else if (isNewSignup) {
-                            // New signup payment → redirect to connect-to-amazon
-                            navigate('/connect-to-amazon');
+                            // New signup payment → redirect to analyse-account page
+                            navigate('/analyse-account');
                         } else {
                             // Default: if unsure, check if user already exists (upgrade) or new signup
-                            // For now, default to connect-to-amazon for safety
-                            navigate('/connect-to-amazon');
+                            // For now, default to analyse-account for safety
+                            navigate('/analyse-account');
                         }
                     }, 3000);
                 } else if (sessionId) {
@@ -69,8 +69,8 @@ export default function SubscriptionSuccess() {
                                 // User upgraded (from trial or LITE) → redirect to dashboard
                                 navigate('/seller-central-checker/dashboard');
                             } else if (result.data.isNewSignup) {
-                                // New signup payment → redirect to connect-to-amazon
-                                navigate('/connect-to-amazon');
+                                // New signup payment → redirect to analyse-account page
+                                navigate('/analyse-account');
                             } else {
                                 // Default: if unsure, redirect to dashboard (safer for existing users)
                                 navigate('/seller-central-checker/dashboard');
@@ -90,9 +90,9 @@ export default function SubscriptionSuccess() {
                     localStorage.removeItem('intendedPlan');
                     localStorage.removeItem('intendedPackage');
                     
-                    // Redirect to connect-to-amazon
+                    // Redirect to analyse-account page
                     setTimeout(() => {
-                            navigate('/connect-to-amazon');
+                            navigate('/analyse-account');
                     }, 3000);
                 }
                 

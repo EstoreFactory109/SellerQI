@@ -58,9 +58,9 @@ const AmazonConnect = () => {
   const userData = useSelector(state => state.Auth?.user);
   const isAuthenticated = useSelector(state => state.Auth?.isAuthenticated) || localStorage.getItem('isAuth') === 'true';
 
-  // Check subscription status on mount - redirect LITE users to pricing
+  // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
-    const checkSubscription = async () => {
+    const checkAuth = async () => {
       // If not authenticated, redirect to login
       if (!isAuthenticated) {
         console.log('ConnectToAmazon: Not authenticated - redirecting to login');
@@ -68,58 +68,14 @@ const AmazonConnect = () => {
         return;
       }
 
-      // Wait a bit for Redux state to propagate if coming from pricing page
-      // This handles the race condition when user just activated free trial
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Check if user has premium access (PRO, PRO trial, or AGENCY)
-      const hasPremium = hasPremiumAccess(userData);
-      
-      console.log('ConnectToAmazon: Subscription check', {
-        userData,
-        hasPremium,
-        packageType: userData?.packageType
-      });
-
-      // If userData shows premium access, allow through
-      if (hasPremium) {
-        setCheckingSubscription(false);
-        return;
-      }
-
-      // If userData doesn't show premium but user just came from pricing,
-      // they may have just activated trial - fetch fresh user data
-      try {
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URI}/app/profile`, { 
-          withCredentials: true 
-        });
-        
-        if (response.data?.data) {
-          const freshUserData = response.data.data;
-          const freshHasPremium = hasPremiumAccess(freshUserData);
-          
-          console.log('ConnectToAmazon: Fresh user data check', {
-            freshUserData,
-            freshHasPremium,
-            packageType: freshUserData?.packageType
-          });
-
-          if (freshHasPremium) {
-            setCheckingSubscription(false);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('ConnectToAmazon: Error fetching fresh user data', error);
-      }
-
-      // LITE users or users without valid subscription should go to pricing
-      console.log('ConnectToAmazon: No premium access - redirecting to pricing');
-      navigate('/pricing', { replace: true });
+      // Allow all authenticated users to proceed (skip pricing check)
+      // New signups with LITE package can connect Amazon first, then pay later
+      console.log('ConnectToAmazon: User authenticated - allowing access');
+      setCheckingSubscription(false);
     };
 
-    checkSubscription();
-  }, [isAuthenticated, navigate]); // Removed userData from deps to prevent re-running on update
+    checkAuth();
+  }, [isAuthenticated, navigate]);
   
   // Get selected country data
   const selectedCountry = useMemo(() => {

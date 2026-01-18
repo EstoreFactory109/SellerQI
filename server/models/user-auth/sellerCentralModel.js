@@ -28,6 +28,11 @@ const Products=new mongoose.Schema({
   status:{
     type:String,
     required:true
+  },
+  issues:{
+    type: [String],
+    required: false,
+    default: undefined
   }
 },{timestamps:true})
 

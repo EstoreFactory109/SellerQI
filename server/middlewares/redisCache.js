@@ -23,8 +23,15 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
             }
 
             // Create a unique cache key based on userId, country, region, adminId, and page type
-            // This allows caching different pages separately
-            const cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}`;
+            // For paginated endpoints (like your-products), include page and limit in cache key
+            let cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}`;
+            
+            // For your-products endpoint, include pagination params to cache each page separately
+            if (pageType === 'your-products') {
+                const page = req.query.page || 1;
+                const limit = req.query.limit || 20;
+                cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}`;
+            }
             
             const redisClient = getRedisClient();
             
@@ -96,6 +103,19 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
                 logger.info(`Cache cleared for key: ${cacheKey}`);
             });
         });
+        
+        // Clear your-products paginated cache using pattern matching
+        const yourProductsPattern = `analyse_data:your-products:${userId}:${country}:${region}:${adminId || 'null'}:*`;
+        try {
+            const keys = await redisClient.keys(yourProductsPattern);
+            if (keys && keys.length > 0) {
+                const deletePromises = keys.map(key => redisClient.del(key));
+                await Promise.all(deletePromises);
+                logger.info(`Cleared ${keys.length} your-products cache entries for user: ${userId}`);
+            }
+        } catch (patternError) {
+            logger.warn('Could not clear your-products pattern cache:', patternError.message);
+        }
         
         // Also clear the legacy cache key format for backward compatibility
         const legacyCacheKey = `analyse_data:${userId}:${country}:${region}:${adminId || 'null'}`;

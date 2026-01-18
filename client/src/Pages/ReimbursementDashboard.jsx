@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   DollarSign, AlertCircle, Package, 
@@ -32,6 +32,22 @@ const ReimbursementDashboard = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  // Scroll to top when component mounts to prevent content going under nav bar
+  useEffect(() => {
+    // Find the scrollable container (MainPagesLayout's overflow-y-auto div)
+    const scrollContainer = document.querySelector('section.flex-1.overflow-y-auto');
+    if (scrollContainer) {
+      scrollContainer.scrollTop = 0;
+    }
+    // Also try the scrollbar-hide class as fallback
+    const altContainer = document.querySelector('.scrollbar-hide');
+    if (altContainer) {
+      altContainer.scrollTop = 0;
+    }
+    // Fallback: scroll window to top
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
 
   // Format currency
   const formatCurrency = (value) => {
@@ -459,8 +475,8 @@ const ReimbursementDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
-      <div className="h-[90vh] overflow-y-auto">
-        <div className="p-6 lg:p-8">
+      <div className="w-full">
+        <div className="p-6 lg:p-8 pt-6 lg:pt-8">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}

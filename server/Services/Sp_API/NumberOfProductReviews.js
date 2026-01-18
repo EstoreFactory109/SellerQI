@@ -96,7 +96,8 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
             // Convert number to string for consistency with model
             product_num_ratings: String(data.data.product_num_ratings || 0),
             product_star_ratings: String(data.data.product_star_rating || "0"),
-            aplus: data.data.has_aplus || false
+            aplus: data.data.has_aplus || false,
+            has_brandstory: data.data.has_brandstory || false
           };
         })()
       );
@@ -106,14 +107,22 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
     }
 
     const products = allProducts;
-    const aplusProducts = products
-      .filter(product => product !== null)
+    
+    // Filter out null products and products with missing required fields
+    const validProducts = products.filter(product => 
+      product !== null && 
+      product.asin && 
+      product.product_title && 
+      product.product_title.trim() !== ''
+    );
+    
+    const aplusProducts = validProducts
       .map(product => ({
         Asins: product.asin,
         // Use 'APPROVED' for true, 'NOT_AVAILABLE' for false to match expected status values
         status: product.aplus ? 'APPROVED' : 'NOT_AVAILABLE'
       }));
-    const filteredProducts = products.filter(product => product !== null);
+    const filteredProducts = validProducts;
 
     if (filteredProducts.length === 0) {
       return false;

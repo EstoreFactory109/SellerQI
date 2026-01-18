@@ -615,12 +615,174 @@ const testAmazonAds = async (req, res) => {
     })
   }
 
+  /**
+   * Test NumberOfProductReviews - Fetches product review data from RapidAPI
+   * Accepts userId, country, and region - fetches ASINs automatically from Seller model
+   * NOTE: This function was updated to fetch ASINs from the database instead of requiring them in the request
+   */
   const testNumberOfProductReviews = async (req, res) => {
-    const { asin, country, accessToken } = req.body;
-    const result = await getNumberOfProductReviews(asin, country, accessToken);
-    return res.status(200).json({
-        data: result
-    })
+    try {
+      const { userId, country, region } = req.body;
+      
+      // Import required modules
+      const mongoose = require('mongoose');
+      const Seller = require('../../models/user-auth/sellerCentralModel.js');
+      const { addReviewDataTODatabase } = require('../../Services/Sp_API/NumberOfProductReviews.js');
+      
+      // Validate required parameters
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId is required'
+        });
+      }
+      
+      if (!country) {
+        return res.status(400).json({
+          success: false,
+          error: 'country is required (e.g., US, UK, DE, CA)'
+        });
+      }
+      
+      if (!region) {
+        return res.status(400).json({
+          success: false,
+          error: 'region is required (NA, EU, or FE)'
+        });
+      }
+      
+      // Validate region
+      const validRegions = ['NA', 'EU', 'FE'];
+      if (!validRegions.includes(region)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
+        });
+      }
+      
+      console.log('🔍 [testNumberOfProductReviews] Fetching seller account and ASINs from database...');
+      
+      // Convert userId to ObjectId if needed
+      let userIdQuery = userId;
+      if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+        userIdQuery = new mongoose.Types.ObjectId(userId);
+      }
+      
+      // Find the Seller document
+      const sellerCentral = await Seller.findOne({ User: userIdQuery });
+      
+      if (!sellerCentral) {
+        return res.status(404).json({
+          success: false,
+          error: 'Seller account not found for the provided userId',
+          suggestion: 'Please ensure the user has connected their Amazon Seller Central account.'
+        });
+      }
+      
+      // Find the specific seller account for this country/region
+      const sellerAccount = sellerCentral.sellerAccount?.find(
+        acc => acc.country === country && acc.region === region
+      );
+      
+      if (!sellerAccount) {
+        return res.status(404).json({
+          success: false,
+          error: `No seller account found for country: ${country}, region: ${region}`,
+          availableAccounts: sellerCentral.sellerAccount?.map(acc => ({
+            country: acc.country,
+            region: acc.region
+          })) || []
+        });
+      }
+      
+      // Extract ASINs from the seller account products
+      const products = sellerAccount.products || [];
+      const asins = products
+        .map(p => p.asin)
+        .filter(asin => asin && typeof asin === 'string' && asin.trim().length > 0);
+      
+      if (asins.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No ASINs found in the seller account products',
+          suggestion: 'Please ensure the seller account has products with ASINs'
+        });
+      }
+      
+      console.log(`✅ [testNumberOfProductReviews] Found ${asins.length} ASINs for processing`);
+      console.log('🧪 [testNumberOfProductReviews] Starting product reviews fetch:', {
+        userId,
+        country,
+        region,
+        asinCount: asins.length,
+        sampleAsins: asins.slice(0, 5)
+      });
+      
+      // Call the addReviewDataTODatabase service
+      const result = await addReviewDataTODatabase(asins, country, userId, region);
+      
+      if (!result) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to fetch and save product reviews data',
+          message: 'The service returned false. Check logs for details.'
+        });
+      }
+      
+      // Return success response with summary
+      return res.status(200).json({
+        success: true,
+        message: 'Product reviews data fetched and saved successfully',
+        data: {
+          recordId: result._id,
+          userId: result.User,
+          country: result.country,
+          region: result.region,
+          productsCount: result.Products?.length || 0,
+          createdAt: result.createdAt
+        },
+        summary: {
+          totalAsins: asins.length,
+          productsProcessed: result.Products?.length || 0,
+          sampleProducts: result.Products?.slice(0, 3).map(p => ({
+            asin: p.asin,
+            product_title: p.product_title,
+            product_num_ratings: p.product_num_ratings,
+            product_star_ratings: p.product_star_ratings,
+            has_brandstory: p.has_brandstory
+          })) || []
+        },
+        metadata: {
+          userId,
+          country,
+          region,
+          processedAt: new Date().toISOString()
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error in testNumberOfProductReviews:', error);
+      
+      // Handle specific error cases
+      if (error.response) {
+        const status = error.response.status || 500;
+        const errorData = error.response.data || {};
+        
+        return res.status(status).json({
+          success: false,
+          error: 'RapidAPI Error',
+          status: status,
+          message: error.message,
+          details: errorData
+        });
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Internal Server Error',
+        message: error.message || 'An unexpected error occurred while fetching product reviews'
+      });
+    }
   }
 
 const testLedgerSummaryReport = async (req, res) => {
@@ -2120,5 +2282,6 @@ module.exports = { testReport, getTotalSales,
    testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
    testKeywordRecommendationsFromDB,
    getStoredKeywordRecommendations,
-   testPPCMetrics
+   testPPCMetrics,
+   testNumberOfProductReviews
    }

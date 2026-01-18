@@ -32,7 +32,8 @@ const {
     checkIfVideoExists,
     checkStarRating,
     checkAPlus,
-    checkProductWithOutBuyBox
+    checkProductWithOutBuyBox,
+    checkBrandStory
 } = require('../Calculations/Conversion.js');
 const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const NegetiveKeywords = require('../../models/amazon-ads/NegetiveKeywords.js');
@@ -994,6 +995,9 @@ class AnalyseService {
 
         const aplusProducts = safeAplusResponse.ApiContentDetails;
         const aPlusArray = checkAPlus(aplusProducts);
+        
+        // Check Brand Story status from NumberOfProductReviews data
+        const brandStoryArray = checkBrandStory(safeProductReviews.Products);
 
         return {
             rankingsData: {
@@ -1005,6 +1009,7 @@ class AnalyseService {
                 videoResult: videoResultArray,
                 productStarRatingResult: productStarRatingResultArray,
                 aPlusResult: aPlusArray,
+                brandStoryResult: brandStoryArray,
                 ProductWithOutBuybox: checkProductWithOutBuyBox(buyBoxProducts).buyboxResult,
                 AmazonReadyproducts: Array.from(AmazonReadyProductsSet)
             },

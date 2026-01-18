@@ -1,14 +1,5 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
-import { useDispatch } from "react-redux";
-import { setDashboardInfo } from '../redux/slices/DashboardSlice.js'
-import { setHistoryInfo } from '../redux/slices/HistorySlice.js'
-import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js'
-import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js'
-import { addBrand } from '../redux/slices/authSlice.js'
-import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js'
-import axiosInstance from '../config/axios.config.js'
 
 // Animated DNA Helix Loader
 const HelixLoader = () => {
@@ -105,258 +96,17 @@ const FloatingParticles = () => {
 
 const AnalysingAccount = () => {
     const [timeElapsed, setTimeElapsed] = useState(0);
-    const [jobStatus, setJobStatus] = useState('initializing'); // initializing, queued, processing, completed, failed
-    const [jobId, setJobId] = useState(null);
-    const [progress, setProgress] = useState(0);
-    const [errorMessage, setErrorMessage] = useState(null);
-    const pollingRef = useRef(null);
-    const navigate = useNavigate();
-    const dispatch = useDispatch();
+    const [jobStatus] = useState('processing'); // Static status - always 'processing'
+    const [progress] = useState(50); // Static progress - always 50%
 
-    // Fetch dashboard data and navigate
-    const fetchDashboardAndNavigate = useCallback(async () => {
-        let dashboardData = null;
-            let hasAnyData = false;
 
-        try {
-            console.log("=== AnalysingAccount: Fetching dashboard data ===");
-                    const response = await axiosInstance.get('/api/pagewise/dashboard');
-                    
-                    if (response && response.status === 200) {
-                        dashboardData = response.data?.data?.dashboardData;
-                        console.log("Pre-calculated dashboard data received:", dashboardData);
-                            
-                        if (!dashboardData || isEmptyDashboardData(dashboardData)) {
-                                console.log("⚠️ Account has no data available - will show zero data instead of error");
-                            dashboardData = dashboardData || createDefaultDashboardData();
-                                hasAnyData = false;
-                            } else {
-                                console.log("✅ Account has data available");
-                                hasAnyData = true;
-                            }
-                            
-                            dispatch(setDashboardInfo(dashboardData));
-                        
-                        if (dashboardData.Brand) {
-                            dispatch(addBrand(dashboardData.Brand));
-                        }
-                        
-                        if (dashboardData.AllSellerAccounts && dashboardData.AllSellerAccounts.length > 0) {
-                            dispatch(setAllAccounts(dashboardData.AllSellerAccounts));
-                        }
-                            
-                            if (dashboardData.totalProfitabilityErrors !== undefined) {
-                                dispatch(setProfitabilityErrorDetails({
-                                    totalErrors: dashboardData.totalProfitabilityErrors || 0,
-                                    errorDetails: dashboardData.profitabilityErrorDetails || []
-                                }));
-                            }
-                            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-                                dispatch(setSponsoredAdsErrorDetails({
-                                    totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-                                    errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-                                }));
-                        }
-                    } else {
-                    dashboardData = createDefaultDashboardData();
-                    dispatch(setDashboardInfo(dashboardData));
-                }
-
-            // Fetch history if we have data
-                if (dashboardData && hasAnyData) {
-                    try {
-                        const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
-                        if (historyResponse && historyResponse.status === 200) {
-                            dispatch(setHistoryInfo(historyResponse.data.data));
-                        }
-                    } catch (historyError) {
-                        console.error("❌ History fetch failed:", historyError);
-                    }
-                }
-
-                console.log("✅ Navigating to dashboard...");
-                navigate("/seller-central-checker/dashboard");
-
-            } catch (error) {
-            console.error("❌ Error fetching dashboard data:", error);
-                
-                if (!dashboardData) {
-                    dashboardData = createDefaultDashboardData();
-                    dispatch(setDashboardInfo(dashboardData));
-                }
-                
-                if (error.response?.status === 401) {
-                    navigate("/");
-                } else {
-                    navigate("/seller-central-checker/dashboard");
-                }
-            }
-    }, [dispatch, navigate]);
-
-    // Poll job status
-    const pollJobStatus = useCallback(async (jobIdToPoll) => {
-        try {
-            const response = await axiosInstance.get(`/api/integration/status/${jobIdToPoll}`);
-            
-            if (response.status === 200) {
-                const { status, progress: jobProgress } = response.data.data;
-                
-                console.log(`[AnalysingAccount] Job status: ${status}, progress: ${jobProgress}`);
-                
-                setProgress(jobProgress || 0);
-                
-                // Handle various status values (BullMQ states + DB states)
-                const normalizedStatus = status?.toLowerCase();
-                
-                switch (normalizedStatus) {
-                    case 'waiting':
-                    case 'delayed':
-                    case 'pending':
-                        setJobStatus('queued');
-                        break;
-                    case 'active':
-                    case 'running':
-                        setJobStatus('processing');
-                        break;
-                    case 'completed':
-                        console.log('[AnalysingAccount] Job completed! Fetching dashboard...');
-                        setJobStatus('completed');
-                        setProgress(100);
-                        // Stop polling
-                        if (pollingRef.current) {
-                            clearInterval(pollingRef.current);
-                            pollingRef.current = null;
-                        }
-                        // Fetch dashboard data and navigate
-                        await fetchDashboardAndNavigate();
-                        break;
-                    case 'failed':
-                        console.log('[AnalysingAccount] Job failed:', response.data.data.error);
-                        setJobStatus('failed');
-                        setErrorMessage(response.data.data.error || 'Integration failed');
-                        // Stop polling
-                        if (pollingRef.current) {
-                            clearInterval(pollingRef.current);
-                            pollingRef.current = null;
-                        }
-                        break;
-                    case 'not_found':
-                        // Job might have been removed from queue after completion
-                        // Check if this is a recently completed job
-                        console.log('[AnalysingAccount] Job not found in queue, might be completed');
-                        // Try to fetch dashboard anyway if we were at high progress
-                        if (progress >= 90) {
-                            console.log('[AnalysingAccount] High progress detected, assuming completed');
-                            setJobStatus('completed');
-                            setProgress(100);
-                            if (pollingRef.current) {
-                                clearInterval(pollingRef.current);
-                                pollingRef.current = null;
-                            }
-                            await fetchDashboardAndNavigate();
-                        }
-                        break;
-                    default:
-                        console.log(`[AnalysingAccount] Unknown status: ${status}`);
-                        setJobStatus('processing');
-                }
-            }
-        } catch (error) {
-            console.error("Error polling job status:", error);
-            // Don't stop polling on error, just log it
-        }
-    }, [fetchDashboardAndNavigate, progress]);
-
-    // Start polling
-    const startPolling = useCallback((jobIdToPoll) => {
-        // Clear any existing polling
-        if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-        }
-        
-        // Poll immediately
-        pollJobStatus(jobIdToPoll);
-        
-        // Then poll every 3 seconds
-        pollingRef.current = setInterval(() => {
-            pollJobStatus(jobIdToPoll);
-        }, 3000);
-    }, [pollJobStatus]);
-
-    // Trigger integration job
-    const triggerIntegrationJob = useCallback(async () => {
-        try {
-            setJobStatus('initializing');
-            
-            // First check if there's an active job
-            const activeResponse = await axiosInstance.get('/api/integration/active');
-            
-            if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
-                // Job already exists, start polling
-                const existingJobId = activeResponse.data.data.jobId;
-                const existingStatus = activeResponse.data.data.status?.toLowerCase();
-                setJobId(existingJobId);
-                
-                // If job is already completed, redirect immediately
-                if (existingStatus === 'completed') {
-                    console.log('[AnalysingAccount] Active job already completed, redirecting...');
-                    setJobStatus('completed');
-                    setProgress(100);
-                    await fetchDashboardAndNavigate();
-                    return;
-                }
-                
-                setJobStatus(existingStatus === 'waiting' ? 'queued' : 'processing');
-                startPolling(existingJobId);
-                return;
-            }
-
-            // No active job, trigger new one
-            const response = await axiosInstance.post('/api/integration/trigger');
-            
-            if (response.status === 202 || response.status === 200) {
-                const { jobId: newJobId, status, isExisting } = response.data.data;
-                const normalizedStatus = status?.toLowerCase();
-                setJobId(newJobId);
-                
-                // If trigger returns a completed job, redirect immediately
-                if (normalizedStatus === 'completed') {
-                    console.log('[AnalysingAccount] Trigger returned completed job, redirecting...');
-                    setJobStatus('completed');
-                    setProgress(100);
-                    await fetchDashboardAndNavigate();
-                    return;
-                }
-                
-                setJobStatus(isExisting ? 'processing' : 'queued');
-                startPolling(newJobId);
-            }
-        } catch (error) {
-            console.error("Error triggering integration job:", error);
-            setJobStatus('failed');
-            setErrorMessage(error.response?.data?.message || 'Failed to start integration');
-        }
-    }, [startPolling, fetchDashboardAndNavigate]);
-
+    // Update elapsed time every minute (client-side only)
     useEffect(() => {
-        // Update elapsed time every minute
         const timeInterval = setInterval(() => {
             setTimeElapsed((prev) => prev + 1);
         }, 60000); // 1 minute
         return () => clearInterval(timeInterval);
     }, []);
-
-    // Trigger job on mount
-    useEffect(() => {
-        triggerIntegrationJob();
-        
-        // Cleanup polling on unmount
-        return () => {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-            }
-        };
-    }, [triggerIntegrationJob]);
 
     // Format elapsed time
     const formatElapsedTime = (minutes) => {
@@ -368,22 +118,9 @@ const AnalysingAccount = () => {
         return `${hours} hour${hours !== 1 ? 's' : ''} ${remainingMinutes > 0 ? `${remainingMinutes} minute${remainingMinutes !== 1 ? 's' : ''}` : ''}`;
     };
 
-    // Get status message
+    // Get status message (static)
     const getStatusMessage = () => {
-        switch (jobStatus) {
-            case 'initializing':
-                return 'Starting analysis...';
-            case 'queued':
-                return 'Analysis queued and will start shortly...';
-            case 'processing':
-                return 'Deep analysis in progress...';
-            case 'completed':
-                return 'Analysis complete! Redirecting...';
-            case 'failed':
-                return `Analysis failed: ${errorMessage}`;
-            default:
-                return 'Processing...';
-        }
+        return 'Deep analysis in progress...';
     };
 
     return (
@@ -433,17 +170,9 @@ const AnalysingAccount = () => {
                         transition={{ duration: 0.5, delay: 0.4 }}
                         className="mb-2"
                     >
-                        <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium ${
-                            jobStatus === 'completed' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
-                            jobStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
-                            'bg-indigo-100 text-indigo-700 border border-indigo-200'
-                        }`}>
+                        <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
                             <motion.span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                    jobStatus === 'completed' ? 'bg-emerald-500' :
-                                    jobStatus === 'failed' ? 'bg-red-500' :
-                                    'bg-indigo-500'
-                                }`}
+                                className="w-1.5 h-1.5 rounded-full bg-indigo-500"
                                 animate={{ opacity: [1, 0.4, 1] }}
                                 transition={{ duration: 1.5, repeat: Infinity }}
                             />

@@ -17,6 +17,8 @@ const tokenManager = require('../../utils/TokenManager.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const { getFunctionsForDay } = require('./ScheduleConfig.js');
 const ListingItemsModel = require('../../models/products/GetListingItemsModel.js');
+const { GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
+const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
 const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
 
@@ -196,8 +198,11 @@ class ScheduledIntegration {
                 RefreshToken, AdsRefreshToken, loggingHelper
             );
 
-            // Extract product data
+            // Extract product data (active products)
             const productData = this.extractProductData(merchantListingsData, Country, Region);
+
+            // Extract inactive product data for issues fetching
+            const inactiveProductData = this.extractInactiveProductData(merchantListingsData, Country, Region);
 
             // Prepare dataToSend object
             const dataToSend = this.prepareDataToSend(
@@ -234,6 +239,26 @@ class ScheduledIntegration {
                 merchantListingsData,
                 loggingHelper
             });
+
+            // Process inactive SKUs to fetch and store their issues
+            if (inactiveProductData.inactiveSkuArray.length > 0) {
+                logger.info("Processing inactive SKUs for issues (scheduled)", { 
+                    inactiveCount: inactiveProductData.inactiveSkuArray.length 
+                });
+                await this.processInactiveListingItems(
+                    AccessToken,
+                    inactiveProductData.inactiveSkuArray,
+                    inactiveProductData.inactiveAsinArray,
+                    dataToSend,
+                    userId,
+                    Base_URI,
+                    Country,
+                    Region,
+                    RefreshToken,
+                    AdsRefreshToken,
+                    loggingHelper
+                );
+            }
 
             // Create final result
             const result = this.createFinalResult(apiData, merchantListingsData, productData);
@@ -764,6 +789,49 @@ class ScheduledIntegration {
 
         logger.info("extractProductData ended");
         return { asinArray, skuArray, ProductDetails };
+    }
+
+    /**
+     * Extract inactive product data from merchant listings (same as Integration)
+     * Returns arrays of ASINs and SKUs for inactive products only
+     */
+    static extractInactiveProductData(merchantListingsData, Country, Region) {
+        logger.info("extractInactiveProductData starting");
+        
+        const inactiveAsinArray = [];
+        const inactiveSkuArray = [];
+
+        if (!merchantListingsData || !Array.isArray(merchantListingsData.sellerAccount)) {
+            logger.info("extractInactiveProductData ended - no merchant data");
+            return { inactiveAsinArray, inactiveSkuArray };
+        }
+
+        const merchantSellerAccounts = merchantListingsData.sellerAccount;
+        const SellerAccount = merchantSellerAccounts.find(item => item && item.country === Country && item.region === Region);
+
+        if (!SellerAccount || !Array.isArray(SellerAccount.products)) {
+            logger.info("extractInactiveProductData ended - no seller account");
+            return { inactiveAsinArray, inactiveSkuArray };
+        }
+
+        // Filter products with status "Inactive" or "Incomplete"
+        const inactiveProducts = SellerAccount.products.filter(product => {
+            if (!product || typeof product !== 'object') return false;
+            if (product.status !== "Inactive" && product.status !== "Incomplete") return false;
+            if (!product.asin || typeof product.asin !== 'string' || product.asin.trim() === '') return false;
+            if (!product.sku || typeof product.sku !== 'string' || product.sku.trim() === '') return false;
+            return true;
+        });
+
+        inactiveProducts.forEach(product => {
+            inactiveAsinArray.push(product.asin.trim());
+            inactiveSkuArray.push(product.sku.trim());
+        });
+
+        logger.info("extractInactiveProductData ended", { 
+            inactiveCount: inactiveAsinArray.length 
+        });
+        return { inactiveAsinArray, inactiveSkuArray };
     }
 
     /**
@@ -1368,6 +1436,163 @@ class ScheduledIntegration {
         }
 
         return { campaignIdArray, adGroupIdArray };
+    }
+
+    /**
+     * Process inactive listing items and fetch their issues from Amazon SP-API (same as Integration)
+     * Updates the Seller model with issues for each inactive SKU
+     */
+    static async processInactiveListingItems(AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend, userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper) {
+        logger.info("processInactiveListingItems starting", { 
+            inactiveSkuCount: inactiveSkuArray?.length || 0 
+        });
+        
+        const issuesDataArray = [];
+
+        if (!AccessToken || !Array.isArray(inactiveSkuArray) || !Array.isArray(inactiveAsinArray) || inactiveSkuArray.length === 0) {
+            logger.info("processInactiveListingItems ended - no inactive SKUs to process");
+            return issuesDataArray;
+        }
+
+        if (loggingHelper) {
+            loggingHelper.logFunctionStart('inactiveListingItems_processing', {
+                totalInactiveSkus: inactiveSkuArray.length
+            });
+        }
+
+        try {
+            const MAX_CONCURRENT_ITEMS = 50;
+            const BATCH_SIZE = Math.min(MAX_CONCURRENT_ITEMS, inactiveSkuArray.length);
+
+            for (let batchStart = 0; batchStart < inactiveSkuArray.length; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, inactiveSkuArray.length);
+                const batchSKUs = inactiveSkuArray.slice(batchStart, batchEnd);
+                const batchASINs = inactiveAsinArray.slice(batchStart, batchEnd);
+
+                const batchTasks = batchSKUs.map((sku, index) => {
+                    return limit(async () => {
+                        const delay = (index % 5) * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                        const asin = batchASINs[index];
+                        if (!asin) return null;
+
+                        try {
+                            const issuesResult = await tokenManager.wrapDataToSendFunction(
+                                GetListingItemIssuesForInactive, userId, RefreshToken, AdsRefreshToken
+                            )(dataToSend, sku, asin, userId, Base_URI, Country, Region);
+
+                            return issuesResult || null;
+                        } catch (listingError) {
+                            logger.error("Error processing inactive listing item issues", {
+                                error: listingError.message,
+                                sku,
+                                asin
+                            });
+                            return null;
+                        }
+                    });
+                });
+
+                const batchResults = await Promise.all(batchTasks);
+                const validResults = batchResults.filter(result => result !== null);
+                if (validResults.length > 0) {
+                    issuesDataArray.push(...validResults);
+                }
+
+                if (batchEnd < inactiveSkuArray.length) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+
+            // Update Seller model with issues for each inactive SKU
+            if (issuesDataArray.length > 0) {
+                await this.updateSellerProductIssues(userId, Country, Region, issuesDataArray);
+            }
+
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('inactiveListingItems_processing', issuesDataArray, {
+                    recordsProcessed: inactiveSkuArray.length,
+                    recordsSuccessful: issuesDataArray.length
+                });
+            }
+            
+            logger.info("processInactiveListingItems ended", {
+                processedCount: issuesDataArray.length
+            });
+        } catch (listingError) {
+            logger.error("Error during inactive listing items processing", {
+                error: listingError.message
+            });
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('inactiveListingItems_processing', listingError);
+            }
+        }
+
+        return issuesDataArray;
+    }
+
+    /**
+     * Update Seller model with issues for inactive products (same as Integration)
+     */
+    static async updateSellerProductIssues(userId, Country, Region, issuesDataArray) {
+        logger.info("updateSellerProductIssues starting", {
+            issuesCount: issuesDataArray.length
+        });
+
+        try {
+            const sellerDetails = await Seller.findOne({ User: userId });
+            
+            if (!sellerDetails) {
+                logger.error("Seller not found for updating product issues", { userId });
+                return false;
+            }
+
+            // Find the matching seller account
+            const accountIndex = sellerDetails.sellerAccount.findIndex(
+                account => account.country === Country && account.region === Region
+            );
+
+            if (accountIndex === -1) {
+                logger.error("Seller account not found for country/region", { userId, Country, Region });
+                return false;
+            }
+
+            // Create a map of SKU to issues for quick lookup
+            const issuesMap = new Map();
+            issuesDataArray.forEach(item => {
+                if (item && item.sku && Array.isArray(item.issues)) {
+                    issuesMap.set(item.sku, item.issues);
+                }
+            });
+
+            // Update the products array with issues
+            const products = sellerDetails.sellerAccount[accountIndex].products;
+            let updatedCount = 0;
+
+            products.forEach(product => {
+                // Update issues for both Inactive and Incomplete products
+                if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
+                    product.issues = issuesMap.get(product.sku);
+                    updatedCount++;
+                }
+            });
+
+            await sellerDetails.save();
+
+            logger.info("updateSellerProductIssues ended", {
+                updatedCount,
+                totalProducts: products.length
+            });
+
+            return true;
+        } catch (error) {
+            logger.error("Error updating seller product issues", {
+                error: error.message,
+                userId
+            });
+            return false;
+        }
     }
 
     /**

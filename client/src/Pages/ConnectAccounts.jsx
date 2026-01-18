@@ -165,9 +165,9 @@ const ConnectAccounts = () => {
   const countryCode = searchParams.get('country') || searchParams.get('countryCode');
   const region = searchParams.get('region');
 
-  // Check subscription status on mount - redirect LITE users to pricing
+  // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
-    const checkSubscription = async () => {
+    const checkAuth = async () => {
       // If not authenticated, redirect to login
       if (!isAuthenticated) {
         console.log('ConnectAccounts: Not authenticated - redirecting to login');
@@ -175,55 +175,14 @@ const ConnectAccounts = () => {
         return;
       }
 
-      // Wait a bit for Redux state to propagate if coming from pricing page
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Check if user has premium access (PRO, PRO trial, or AGENCY)
-      const hasPremium = hasPremiumAccess(userData);
-      
-      console.log('ConnectAccounts: Subscription check', {
-        userData,
-        hasPremium,
-        packageType: userData?.packageType
-      });
-
-      // If userData shows premium access, allow through
-      if (hasPremium) {
-        setCheckingSubscription(false);
-        return;
-      }
-
-      // If userData doesn't show premium but user just came from pricing,
-      // they may have just activated trial - fetch fresh user data
-      try {
-        const response = await axiosInstance.get('/app/profile');
-        
-        if (response.data?.data) {
-          const freshUserData = response.data.data;
-          const freshHasPremium = hasPremiumAccess(freshUserData);
-          
-          console.log('ConnectAccounts: Fresh user data check', {
-            freshUserData,
-            freshHasPremium,
-            packageType: freshUserData?.packageType
-          });
-
-          if (freshHasPremium) {
-            setCheckingSubscription(false);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('ConnectAccounts: Error fetching fresh user data', error);
-      }
-
-      // LITE users or users without valid subscription should go to pricing
-      console.log('ConnectAccounts: No premium access - redirecting to pricing');
-      navigate('/pricing', { replace: true });
+      // Allow all authenticated users to proceed (skip pricing check)
+      // New signups with LITE package can connect accounts first, then pay later
+      console.log('ConnectAccounts: User authenticated - allowing access');
+      setCheckingSubscription(false);
     };
 
-    checkSubscription();
-  }, [isAuthenticated, navigate]); // Removed userData from deps to prevent re-running on update
+    checkAuth();
+  }, [isAuthenticated, navigate]);
 
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
