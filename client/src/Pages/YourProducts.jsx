@@ -18,6 +18,7 @@ import {
   X
 } from 'lucide-react';
 import { fetchYourProductsData } from '../redux/slices/PageDataSlice.js';
+import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 
 const YourProducts = () => {
   const dispatch = useDispatch();
@@ -28,9 +29,10 @@ const YourProducts = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const itemsPerPage = 20; // Items fetched from backend per page
 
-  // Get current marketplace from Redux
+  // Get current marketplace and currency from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
+  const currency = useSelector((state) => state.currency?.currency) || '$';
 
   // Get products data from Redux
   const yourProductsData = useSelector((state) => state.pageData?.yourProducts?.data);
@@ -875,7 +877,7 @@ const YourProducts = () => {
                         </td>
                         <td className="px-2 py-3 text-center align-top">
                           <span className="text-xs font-medium text-gray-900 whitespace-nowrap">
-                            {product.price ? `$${parseFloat(product.price).toFixed(2)}` : '—'}
+                            {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
                           </span>
                         </td>
                         <td className="px-2 py-3 text-center align-top">
