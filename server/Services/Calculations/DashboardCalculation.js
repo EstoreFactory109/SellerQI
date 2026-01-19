@@ -340,81 +340,196 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
  * @param {Array} negativeKeywordsMetrics - Array of negative keywords metrics
  * @returns {Object} Total errors and error details
  */
-const calculateSponsoredAdsErrors = (productWiseSponsoredAds, negativeKeywordsMetrics, totalProducts = []) => {
+/**
+ * Calculate sponsored ads errors based on campaign/keyword-level analysis
+ * This matches the PPC Dashboard Campaign Analysis logic
+ * @param {Array} campaignWiseTotalSalesAndCost - Campaign-level spend and sales data
+ * @param {Array} adsKeywordsPerformanceData - Keyword performance data
+ * @param {Array} searchTerms - Search terms data
+ * @param {Array} campaignData - Campaign metadata
+ * @param {Array} keywords - Keywords data for manual campaign lookup
+ * @returns {Object} { totalErrors, errorDetails }
+ */
+const calculateSponsoredAdsErrors = (
+    campaignWiseTotalSalesAndCost = [],
+    adsKeywordsPerformanceData = [],
+    searchTerms = [],
+    campaignData = [],
+    keywords = []
+) => {
     let totalErrors = 0;
     const errorDetails = [];
     
-    // Create a map of ASIN to product name for quick lookup
-    const productNameMap = new Map();
-    if (Array.isArray(totalProducts)) {
-        totalProducts.forEach(product => {
-            if (product.asin) {
-                productNameMap.set(product.asin, product.itemName || product.title || product.productName || null);
-            }
-        });
-    }
-    
-    // Count products with high ACOS or no sales but high spend
-    if (Array.isArray(productWiseSponsoredAds)) {
-        productWiseSponsoredAds.forEach((product) => {
-            const spend = parseFloat(String(product.spend)) || 0;
-            const sales = parseFloat(String(product.salesIn30Days)) || 0;
+    // 1. High ACOS Campaigns (ACOS > 40% and sales > 0)
+    if (Array.isArray(campaignWiseTotalSalesAndCost)) {
+        campaignWiseTotalSalesAndCost.forEach((campaign) => {
+            const spend = parseFloat(String(campaign.totalSpend)) || 0;
+            const sales = parseFloat(String(campaign.totalSales)) || 0;
             const acos = sales > 0 ? (spend / sales) * 100 : 0;
             
-            let errorType = null;
-            // Count as error if:
-            // 1. ACOS > 50% (unprofitable)
-            // 2. Spend > $5 with no sales
-            // 3. Spend > $10 with ACOS > 30% (marginally profitable)
-            if (acos > 50 && sales > 0) {
-                errorType = 'high_acos';
-            } else if (spend > 5 && sales === 0) {
-                errorType = 'no_sales_high_spend';
-            } else if (spend > 10 && acos > 30) {
-                errorType = 'marginal_profit';
-            }
-            
-            if (errorType) {
+            // Count as error if ACOS > 40% and has sales
+            if (acos > 40 && sales > 0) {
                 totalErrors++;
                 errorDetails.push({
-                    asin: product.asin,
-                    productName: productNameMap.get(product.asin) || null,
-                    campaignName: product.campaignName || 'Unknown Campaign',
+                    campaignId: campaign.campaignId,
+                    campaignName: campaign.campaignName || 'Unknown Campaign',
                     spend: spend,
                     sales: sales,
                     acos: acos,
-                    errorType: errorType,
-                    source: 'product'
+                    errorType: 'high_acos_campaign',
+                    source: 'campaign'
                 });
             }
         });
     }
     
-    // Also count negative keywords with issues
-    if (Array.isArray(negativeKeywordsMetrics)) {
-        negativeKeywordsMetrics.forEach((keyword) => {
-            let errorType = null;
-            // Count keywords with extremely high ACOS or no sales but spend
-            if (keyword.acos > 100 && keyword.sales > 0) {
-                errorType = 'extreme_high_acos';
-            } else if (keyword.spend > 5 && keyword.sales === 0) {
-                errorType = 'keyword_no_sales';
-            }
+    // 2. Wasted Spend Keywords (cost > 0 and sales < 0.01)
+    // Aggregate keywords by keyword+campaign+adGroup to avoid duplicates
+    const aggregatedKeywordsMap = new Map();
+    
+    if (Array.isArray(adsKeywordsPerformanceData)) {
+        adsKeywordsPerformanceData.forEach((keyword) => {
+            const uniqueKey = `${keyword.keyword || ''}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`;
             
-            if (errorType) {
-                totalErrors++;
-                errorDetails.push({
+            if (aggregatedKeywordsMap.has(uniqueKey)) {
+                const existing = aggregatedKeywordsMap.get(uniqueKey);
+                existing.cost += parseFloat(keyword.cost) || 0;
+                existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
+            } else {
+                aggregatedKeywordsMap.set(uniqueKey, {
                     keyword: keyword.keyword,
+                    keywordId: keyword.keywordId,
                     campaignName: keyword.campaignName,
-                    spend: keyword.spend,
-                    sales: keyword.sales,
-                    acos: keyword.acos,
-                    errorType: errorType,
-                    source: 'keyword'
+                    campaignId: keyword.campaignId,
+                    adGroupName: keyword.adGroupName,
+                    adGroupId: keyword.adGroupId,
+                    cost: parseFloat(keyword.cost) || 0,
+                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0
                 });
             }
         });
     }
+    
+    const aggregatedKeywords = Array.from(aggregatedKeywordsMap.values());
+    
+    aggregatedKeywords.forEach((keyword) => {
+        // Count as error if cost > 0 and sales < 0.01 (wasted spend)
+        if (keyword.cost > 0 && keyword.attributedSales30d < 0.01) {
+            totalErrors++;
+            errorDetails.push({
+                keyword: keyword.keyword,
+                keywordId: keyword.keywordId,
+                campaignName: keyword.campaignName || 'Unknown Campaign',
+                campaignId: keyword.campaignId,
+                adGroupName: keyword.adGroupName,
+                spend: keyword.cost,
+                sales: keyword.attributedSales30d,
+                errorType: 'wasted_spend_keyword',
+                source: 'keyword'
+            });
+        }
+    });
+    
+    // 3. Search Terms with Zero Sales (clicks >= 10 and sales < 0.01)
+    // Aggregate search terms by searchTerm+campaign+adGroup to avoid duplicates
+    const aggregatedSearchTermsMap = new Map();
+    
+    if (Array.isArray(searchTerms)) {
+        searchTerms.forEach((term) => {
+            const uniqueKey = `${term.searchTerm || ''}|${term.campaignId || ''}|${term.adGroupId || term.adGroupName || ''}`;
+            
+            if (aggregatedSearchTermsMap.has(uniqueKey)) {
+                const existing = aggregatedSearchTermsMap.get(uniqueKey);
+                existing.sales += parseFloat(term.sales) || 0;
+                existing.spend += parseFloat(term.spend) || 0;
+                existing.clicks += parseFloat(term.clicks) || 0;
+            } else {
+                aggregatedSearchTermsMap.set(uniqueKey, {
+                    searchTerm: term.searchTerm,
+                    keyword: term.keyword,
+                    campaignName: term.campaignName,
+                    campaignId: term.campaignId,
+                    adGroupName: term.adGroupName,
+                    adGroupId: term.adGroupId,
+                    sales: parseFloat(term.sales) || 0,
+                    spend: parseFloat(term.spend) || 0,
+                    clicks: parseFloat(term.clicks) || 0
+                });
+            }
+        });
+    }
+    
+    const aggregatedSearchTerms = Array.from(aggregatedSearchTermsMap.values());
+    
+    aggregatedSearchTerms.forEach((term) => {
+        // Count as error if clicks >= 10 and sales < 0.01
+        if (term.clicks >= 10 && term.sales < 0.01) {
+            totalErrors++;
+            errorDetails.push({
+                searchTerm: term.searchTerm,
+                keyword: term.keyword,
+                campaignName: term.campaignName || 'Unknown Campaign',
+                campaignId: term.campaignId,
+                adGroupName: term.adGroupName,
+                clicks: term.clicks,
+                spend: term.spend,
+                sales: term.sales,
+                errorType: 'search_term_zero_sales',
+                source: 'search_term'
+            });
+        }
+    });
+    
+    // 4. Auto Campaign Insights - Only count those that need migration
+    // Get auto campaigns
+    const autoCampaigns = Array.isArray(campaignData) 
+        ? campaignData.filter(campaign => campaign.targetingType === 'auto')
+        : [];
+    const autoCampaignIds = autoCampaigns.map(campaign => campaign.campaignId);
+    
+    // Get manual campaigns for checking if keywords exist there
+    const manualCampaigns = Array.isArray(campaignData)
+        ? campaignData.filter(campaign => campaign.targetingType === 'manual')
+        : [];
+    const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
+    
+    // Get keywords from manual campaigns
+    const manualKeywords = Array.isArray(keywords)
+        ? keywords
+            .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
+            .map(keyword => keyword.keywordText?.toLowerCase() || '')
+        : [];
+    
+    // Filter aggregated search terms for auto campaigns with sales > 30
+    aggregatedSearchTerms.forEach((term) => {
+        // Check if sales > 30 and belongs to an auto campaign
+        if (term.sales > 30 && 
+            term.campaignId && 
+            autoCampaignIds.includes(term.campaignId)) {
+            
+            // Check if this search term exists as a keyword in manual campaigns
+            const existsInManual = manualKeywords.includes((term.searchTerm || '').toLowerCase());
+            
+            // Only count as error if it needs migration (doesn't exist in manual campaigns)
+            if (!existsInManual) {
+                totalErrors++;
+                const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
+                errorDetails.push({
+                    searchTerm: term.searchTerm,
+                    keyword: term.keyword || '',
+                    campaignName: term.campaignName || 'Unknown Campaign',
+                    campaignId: term.campaignId,
+                    adGroupName: term.adGroupName,
+                    sales: term.sales,
+                    spend: term.spend,
+                    clicks: term.clicks,
+                    acos: acos,
+                    errorType: 'auto_campaign_migration_needed',
+                    source: 'auto_campaign_insight'
+                });
+            }
+        }
+    });
     
     return { totalErrors, errorDetails };
 };
@@ -1138,7 +1253,15 @@ const analyseData = async (data, userId = null) => {
     }
     
     try {
-        sponsoredAdsErrorsData = calculateSponsoredAdsErrors(activeProductWiseSponsoredAds, negativeKeywordsMetrics, TotalProducts);
+        // Calculate sponsored ads errors using campaign/keyword-level analysis
+        // This matches the PPC Dashboard Campaign Analysis logic
+        sponsoredAdsErrorsData = calculateSponsoredAdsErrors(
+            campaignWiseTotalSalesAndCost,
+            data.adsKeywordsPerformanceData || [],
+            data.searchTerms || [],
+            data.campaignData || [],
+            data.keywords || []
+        );
     } catch (error) {
         logger.error("Error calculating sponsored ads errors:", error);
     }

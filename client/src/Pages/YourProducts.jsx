@@ -20,6 +20,107 @@ import {
 import { fetchYourProductsData } from '../redux/slices/PageDataSlice.js';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 
+// Helper function to format text with numbered points on separate lines
+// Handles both formats: "1) " and "(1) "
+const formatNumberedPoints = (text) => {
+  if (!text) return [];
+  
+  // Check if text contains numbered points pattern (e.g., "1) ", "2) ", "(1) ", "(2) ", etc.)
+  // Pattern matches: number followed by ") " or "(number) " with optional space before
+  if (!text.match(/(\s+|^)(\d+\)\s+|\(\d+\)\s+)/)) {
+    // No numbered points, return as single item
+    return [text];
+  }
+  
+  // First, handle "(1) " format by replacing it with a temporary marker
+  // This prevents it from being split incorrectly
+  let processedText = text;
+  const parenMatches = [];
+  let parenIndex = 0;
+  
+  // Replace "(1) ", "(2) ", etc. with temporary markers
+  processedText = processedText.replace(/\(\d+\)\s+/g, (match) => {
+    const marker = `__PAREN_MARKER_${parenIndex}__`;
+    parenMatches[parenIndex] = match;
+    parenIndex++;
+    return marker;
+  });
+  
+  // Now split on "1) " format (with space before)
+  const parts = processedText.split(/(?=\s+\d+\)\s+)/);
+  
+  // Restore the "(1) " format
+  const formatted = [];
+  for (const part of parts) {
+    let restored = part;
+    // Restore parenthesized markers
+    for (let i = 0; i < parenMatches.length; i++) {
+      restored = restored.replace(`__PAREN_MARKER_${i}__`, parenMatches[i]);
+    }
+    const trimmed = restored.trim();
+    if (trimmed) {
+      formatted.push(trimmed);
+    }
+  }
+  
+  return formatted.length > 0 ? formatted : [text];
+};
+
+// Component to render text with numbered points on separate lines
+const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
+  if (hasHTML) {
+    // For HTML content, we need to format it differently
+    // First check if it contains numbered points
+    const formattedPoints = formatNumberedPoints(processedHTML);
+    
+    if (formattedPoints.length > 1) {
+      // Multiple points - render each on separate line
+      return (
+        <div className="space-y-1 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium">
+          {formattedPoints.map((point, index) => (
+            <div 
+              key={index}
+              className="text-sm text-gray-800 leading-relaxed break-words whitespace-normal"
+              dangerouslySetInnerHTML={{ __html: point }}
+            />
+          ))}
+        </div>
+      );
+    }
+    
+    // Single item or no numbered points - render as before
+    return (
+      <div 
+        className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium"
+        dangerouslySetInnerHTML={{ __html: processedHTML }}
+      />
+    );
+  }
+  
+  // For plain text, format numbered points
+  const formattedPoints = formatNumberedPoints(processedHTML);
+  
+  if (formattedPoints.length > 1) {
+    // Multiple points - render each on separate line
+    return (
+      <div className="space-y-1">
+        {formattedPoints.map((point, index) => (
+          <p key={index} className="text-sm text-gray-800 leading-relaxed break-words whitespace-normal">
+            {point}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  
+  // Single item or no numbered points - render as before
+  return (
+    <p className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content">
+      {processedHTML}
+    </p>
+  );
+};
+
 const YourProducts = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -621,7 +722,7 @@ const YourProducts = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans overflow-x-hidden">
       <style>{`
         .tooltip-container {
           position: relative;
@@ -645,8 +746,8 @@ const YourProducts = () => {
         .tooltip-content {
           position: absolute;
           top: 100%;
-          left: 50%;
-          transform: translateX(-50%);
+          left: 0;
+          transform: translateY(4px);
           margin-top: 8px;
           padding: 12px 16px;
           background: #1e293b;
@@ -662,22 +763,22 @@ const YourProducts = () => {
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.2s, transform 0.2s;
-          transform: translateX(-50%) translateY(4px);
+          text-align: left;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         
         .tooltip-container:hover .tooltip-content {
           opacity: 1;
           pointer-events: auto;
-          transform: translateX(-50%) translateY(0);
+          transform: translateY(0);
         }
         
         .tooltip-content::before {
           content: '';
           position: absolute;
           bottom: 100%;
-          left: 50%;
-          transform: translateX(-50%);
+          left: 20px;
+          transform: translateX(0);
           border: 6px solid transparent;
           border-bottom-color: #1e293b;
         }
@@ -685,7 +786,7 @@ const YourProducts = () => {
         .th-with-tooltip {
           display: flex;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 4px;
         }
         
@@ -694,19 +795,21 @@ const YourProducts = () => {
         }
         
         .tooltip-container.tooltip-last .tooltip-content {
-          left: auto;
-          right: 0;
-          transform: translateX(0);
+          left: 50%;
+          right: auto;
+          transform: translateX(-50%) translateY(4px);
+          text-align: left;
+          max-width: min(250px, calc(100vw - 40px));
         }
         
         .tooltip-container.tooltip-last:hover .tooltip-content {
-          transform: translateX(0) translateY(0);
+          transform: translateX(-50%) translateY(0);
         }
         
         .tooltip-container.tooltip-last .tooltip-content::before {
-          left: auto;
-          right: 20px;
-          transform: translateX(0);
+          left: 50%;
+          right: auto;
+          transform: translateX(-50%);
         }
         
         /* Fix overflow for issues column */
@@ -725,9 +828,37 @@ const YourProducts = () => {
           word-break: break-all;
           overflow-wrap: anywhere;
         }
+        
+        /* Prevent horizontal scrolling */
+        table {
+          max-width: 100%;
+        }
+        
+        table th,
+        table td {
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          overflow: visible;
+        }
+        
+        /* Allow tooltips to overflow their containers */
+        .tooltip-container {
+          overflow: visible !important;
+        }
+        
+        table th .tooltip-container,
+        table td .tooltip-container {
+          overflow: visible !important;
+        }
+        
+        /* Ensure table container doesn't exceed viewport */
+        .max-w-7xl {
+          max-width: 100%;
+          overflow-x: hidden;
+        }
       `}</style>
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-7xl mx-auto" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -842,7 +973,7 @@ const YourProducts = () => {
         </div>
 
         {/* Products Table */}
-        <div className="bg-white rounded-b-xl shadow-sm overflow-hidden relative">
+        <div className="bg-white rounded-b-xl shadow-sm relative" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
           {/* Table loader overlay - shown when loading but not initial load (tab switch) */}
           {/* Don't show overlay when loadingMore (Load More has its own loader row) */}
           {loading && !isInitialLoad && !loadingMore && (
@@ -853,8 +984,8 @@ const YourProducts = () => {
               </div>
             </div>
           )}
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{ tableLayout: 'fixed', width: '100%' }}>
+          <div className="w-full" style={{ overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
+            <table className="w-full" style={{ tableLayout: 'fixed', width: '100%', maxWidth: '100%' }}>
               <thead className="bg-gray-50">
                 <tr>
                   {/* Show different columns based on tab */}
@@ -862,7 +993,7 @@ const YourProducts = () => {
                     <>
                       {/* Simplified columns for inactive/incomplete tabs: ASIN/SKU, Title, B2B Pricing, Issues */}
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
+                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
                         style={{ width: '14%' }}
                         onClick={() => handleSort('asin')}
                       >
@@ -878,7 +1009,7 @@ const YourProducts = () => {
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '8%' }}>
                         <div className="th-with-tooltip">
                           <span>B2B Pricing</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
                               <strong>B2B Pricing</strong><br />
@@ -904,14 +1035,14 @@ const YourProducts = () => {
                     <>
                       {/* Full columns for other tabs */}
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                         style={{ width: activeTab === 'active' ? '10%' : '9%' }}
                         onClick={() => handleSort('asin')}
                       >
                         ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                         style={{ width: activeTab === 'active' ? '8%' : '7%' }}
                         onClick={() => handleSort('sku')}
                       >
@@ -968,7 +1099,7 @@ const YourProducts = () => {
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
                         <div className="th-with-tooltip">
                           <span>B2B Pricing</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
                               <strong>B2B Pricing</strong><br />
@@ -1041,8 +1172,8 @@ const YourProducts = () => {
                       const issueCount = product.issues?.length || 0;
                       return (
                         <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50/50 transition-colors border-b border-gray-100">
-                          <td className="px-2 py-4 text-center align-top">
-                            <div className="flex flex-col gap-1 items-center">
+                          <td className="px-2 py-4 text-left align-top">
+                            <div className="flex flex-col gap-1 items-start">
                             <code className="text-xs font-mono text-gray-900 bg-gray-50 px-1.5 py-0.5 rounded break-all">
                                 {product.asin || '—'}
                             </code>
@@ -1078,37 +1209,40 @@ const YourProducts = () => {
                                     </div>
                                     {(() => {
                                       const { hasHTML, processedHTML } = processIssueHTML(issue);
-                                      return hasHTML ? (
+                                      const handleLinkClick = (e) => {
+                                        // Prevent React Router from intercepting link clicks
+                                        const target = e.target;
+                                        // Check if clicked element is a link or inside a link
+                                        const link = target.closest('a');
+                                        if (link && link.href) {
+                                          // Check if it has the data-external-link attribute or is an external URL
+                                          const isExternalLink = link.getAttribute('data-external-link') === 'true';
+                                          const href = link.getAttribute('href');
+                                          const isExternalUrl = href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//'));
+                                          
+                                          // If it's marked as external or is an external URL, prevent React Router
+                                          if (isExternalLink || isExternalUrl) {
+                                            // Stop event propagation to prevent React Router from handling it
+                                            e.stopPropagation();
+                                            // Prevent default to handle manually if needed
+                                            e.preventDefault();
+                                            // Open the link in a new tab
+                                            window.open(href || link.href, '_blank', 'noopener,noreferrer');
+                                          }
+                                        }
+                                      };
+                                      
+                                      return (
                                         <div 
-                                          className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium"
-                                          dangerouslySetInnerHTML={{ __html: processedHTML }}
-                                          onClick={(e) => {
-                                            // Prevent React Router from intercepting link clicks
-                                            const target = e.target;
-                                            // Check if clicked element is a link or inside a link
-                                            const link = target.closest('a');
-                                            if (link && link.href) {
-                                              // Check if it has the data-external-link attribute or is an external URL
-                                              const isExternalLink = link.getAttribute('data-external-link') === 'true';
-                                              const href = link.getAttribute('href');
-                                              const isExternalUrl = href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//'));
-                                              
-                                              // If it's marked as external or is an external URL, prevent React Router
-                                              if (isExternalLink || isExternalUrl) {
-                                                // Stop event propagation to prevent React Router from handling it
-                                                e.stopPropagation();
-                                                // Prevent default to handle manually if needed
-                                                e.preventDefault();
-                                                // Open the link in a new tab
-                                                window.open(href || link.href, '_blank', 'noopener,noreferrer');
-                                              }
-                                            }
-                                          }}
-                                        />
-                                      ) : (
-                                        <p className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content">
-                                          {processedHTML}
-                                        </p>
+                                          className="flex-1 min-w-0"
+                                          onClick={handleLinkClick}
+                                        >
+                                          <FormattedIssueText 
+                                            text={issue} 
+                                            hasHTML={hasHTML} 
+                                            processedHTML={processedHTML} 
+                                          />
+                                        </div>
                                       );
                                     })()}
                                   </div>
@@ -1128,10 +1262,10 @@ const YourProducts = () => {
                     // Default row layout for other tabs
                     return (
                       <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-3 text-left align-top">
                           <code className="text-xs font-mono text-gray-900 break-all">{product.asin}</code>
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-3 text-left align-top">
                           <span className="text-xs text-gray-600 break-words">{product.sku || '—'}</span>
                         </td>
                         <td className="px-2 py-3 text-left align-top">

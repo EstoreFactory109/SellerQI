@@ -253,10 +253,19 @@ class RazorpayService {
                 nextBillingDate: isTrialing ? trialEndsDate : currentPeriodEnd
             };
 
-            await Subscription.findOneAndUpdate(
+            // Update subscription with explicit $set and verify the update succeeded
+            const updatedSubscription = await Subscription.findOneAndUpdate(
                 { userId, razorpaySubscriptionId: razorpaySubscriptionId },
-                subscriptionData
+                { $set: subscriptionData },
+                { new: true, runValidators: true }
             );
+
+            if (!updatedSubscription) {
+                logger.error(`Failed to update subscription for user: ${userId}, razorpaySubscriptionId: ${razorpaySubscriptionId}`);
+                throw new Error('Failed to update subscription - subscription not found');
+            }
+
+            logger.info(`Subscription payment status updated to: ${updatedSubscription.paymentStatus} for user: ${userId}, subscription: ${razorpaySubscriptionId}`);
 
             // Update user's package type
             const updateData = {
@@ -508,17 +517,27 @@ class RazorpayService {
                 const user = await User.findById(dbSubscription.userId);
                 const wasInTrial = user?.isInTrialPeriod === true;
                 
-                await Subscription.findOneAndUpdate(
+                // Update subscription with explicit $set and verify the update succeeded
+                const activatedSubscription = await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: subscriptionId },
                     {
-                        status: 'active',
-                        paymentStatus: 'paid',
-                        currentPeriodStart: subscription.current_start ? new Date(subscription.current_start * 1000) : new Date(),
-                        currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null,
-                        lastPaymentDate: new Date(),
-                        nextBillingDate: subscription.current_end ? new Date(subscription.current_end * 1000) : null
-                    }
+                        $set: {
+                            status: 'active',
+                            paymentStatus: 'paid',
+                            currentPeriodStart: subscription.current_start ? new Date(subscription.current_start * 1000) : new Date(),
+                            currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null,
+                            lastPaymentDate: new Date(),
+                            nextBillingDate: subscription.current_end ? new Date(subscription.current_end * 1000) : null
+                        }
+                    },
+                    { new: true, runValidators: true }
                 );
+
+                if (!activatedSubscription) {
+                    logger.error(`Failed to update subscription via webhook for subscriptionId: ${subscriptionId}`);
+                }
+
+                logger.info(`Subscription activated via webhook, payment status updated to: ${activatedSubscription?.paymentStatus} for subscriptionId: ${subscriptionId}`);
 
                 // Update user's package type - trial has ended, now on paid plan
                 await User.findByIdAndUpdate(dbSubscription.userId, {
@@ -556,19 +575,28 @@ class RazorpayService {
             const dbSubscription = await Subscription.findOne({ razorpaySubscriptionId: subscriptionId });
             
             if (dbSubscription) {
-                // Update subscription dates
-                await Subscription.findOneAndUpdate(
+                // Update subscription dates with explicit $set and verify the update succeeded
+                const chargedSubscription = await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: subscriptionId },
                     {
-                        razorpayPaymentId: paymentId,
-                        status: 'active',
-                        paymentStatus: 'paid',
-                        currentPeriodStart: subscription.current_start ? new Date(subscription.current_start * 1000) : new Date(),
-                        currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null,
-                        lastPaymentDate: new Date(),
-                        nextBillingDate: subscription.current_end ? new Date(subscription.current_end * 1000) : null
-                    }
+                        $set: {
+                            razorpayPaymentId: paymentId,
+                            status: 'active',
+                            paymentStatus: 'paid',
+                            currentPeriodStart: subscription.current_start ? new Date(subscription.current_start * 1000) : new Date(),
+                            currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null,
+                            lastPaymentDate: new Date(),
+                            nextBillingDate: subscription.current_end ? new Date(subscription.current_end * 1000) : null
+                        }
+                    },
+                    { new: true, runValidators: true }
                 );
+
+                if (!chargedSubscription) {
+                    logger.error(`Failed to update subscription for recurring payment, subscriptionId: ${subscriptionId}, paymentId: ${paymentId}`);
+                }
+
+                logger.info(`Recurring payment processed, payment status updated to: ${chargedSubscription?.paymentStatus} for subscriptionId: ${subscriptionId}, paymentId: ${paymentId}`);
 
                 // Add to payment history
                 // Razorpay returns amount in paise (smallest currency unit)

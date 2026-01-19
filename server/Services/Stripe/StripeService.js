@@ -201,9 +201,10 @@ class StripeService {
             logger.info(`Updating subscription for user: ${userId}`);
             logger.debug(`Update data:`, JSON.stringify(updateData, null, 2));
             
+            // Use $set explicitly to ensure payment status is updated correctly
             const subscription = await Subscription.findOneAndUpdate(
                 { userId },
-                updateData,
+                { $set: updateData },
                 { 
                     new: true, 
                     upsert: true,
@@ -211,7 +212,12 @@ class StripeService {
                 }
             );
 
-            logger.info(`Successfully updated subscription for user: ${userId}, subscription ID: ${subscription._id}`);
+            if (!subscription) {
+                logger.error(`Failed to update subscription for user: ${userId}`);
+                throw new Error('Failed to update subscription');
+            }
+
+            logger.info(`Successfully updated subscription for user: ${userId}, subscription ID: ${subscription._id}, paymentStatus: ${subscription.paymentStatus}`);
             return subscription;
 
         } catch (error) {

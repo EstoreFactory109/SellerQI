@@ -586,6 +586,14 @@ class CreateTaskService {
             else if (error.keyword) {
                 productName = `Keyword: ${error.keyword.substring(0, 50)}`;
             }
+            // For search term errors, use search term
+            else if (error.searchTerm) {
+                productName = `Search Term: ${error.searchTerm.substring(0, 50)}`;
+            }
+            // For campaign errors, use campaign name
+            else if (error.campaignName) {
+                productName = `Campaign: ${error.campaignName.substring(0, 50)}`;
+            }
             // If we have ASIN but no name, just use the ASIN
             else if (error.asin) {
                 productName = error.asin;
@@ -604,9 +612,11 @@ class CreateTaskService {
             
             switch (error.errorType) {
                 case 'high_acos':
+                case 'high_acos_campaign':
                     errorType = 'high_acos';
-                    errorMessage = `PPC | High ACOS: This target has an ACOS of ${acos}% (Spend: $${spend}, Sales: $${sales}). Your advertising cost is eating into your profit margins significantly.`;
-                    solution = `Reduce ACOS by: 1) Lowering bids on underperforming keywords. 2) Adding negative keywords to filter irrelevant traffic. 3) Improving product listing conversion rate. 4) Focusing budget on proven, profitable keywords. 5) Consider pausing this target if ACOS remains high after optimization.`;
+                    const campaignContext = error.campaignName ? `Campaign "${error.campaignName}"` : 'This target';
+                    errorMessage = `PPC | High ACOS: ${campaignContext} has an ACOS of ${acos}% (Spend: $${spend}, Sales: $${sales}). Your advertising cost is eating into your profit margins significantly.`;
+                    solution = `Reduce ACOS by: 1) Lowering bids on underperforming keywords. 2) Adding negative keywords to filter irrelevant traffic. 3) Improving product listing conversion rate. 4) Focusing budget on proven, profitable keywords. 5) Consider pausing this campaign if ACOS remains high after optimization.`;
                     break;
                     
                 case 'extreme_high_acos':
@@ -622,9 +632,25 @@ class CreateTaskService {
                     break;
                     
                 case 'keyword_no_sales':
-                    errorType = 'keyword_no_sales';
-                    errorMessage = `PPC | Keyword Without Sales: The keyword "${error.keyword || 'Unknown'}" has spent $${spend} with ${clicks} clicks but no sales. This suggests either poor keyword-product match or listing conversion issues.`;
+                case 'wasted_spend_keyword':
+                    errorType = 'wasted_spend_keyword';
+                    const keywordName = error.keyword || 'Unknown';
+                    errorMessage = `PPC | Wasted Spend Keyword: The keyword "${keywordName}" has spent $${spend} with ${clicks} clicks but no sales (Sales: $${sales}). This suggests either poor keyword-product match or listing conversion issues.`;
                     solution = `Optimize or remove: 1) Add as negative keyword if not relevant to your product. 2) If relevant, lower bid and continue monitoring. 3) Review search term report to understand what queries are triggering this keyword. 4) Improve product listing if the keyword is relevant but not converting.`;
+                    break;
+                    
+                case 'search_term_zero_sales':
+                    errorType = 'search_term_zero_sales';
+                    const searchTermName = error.searchTerm || 'Unknown';
+                    errorMessage = `PPC | Search Term with Zero Sales: The search term "${searchTermName}" has generated ${clicks} clicks and spent $${spend} but no sales. Consider adding this as a negative keyword.`;
+                    solution = `Address zero-sale search term: 1) Add "${searchTermName}" as a negative keyword to prevent future wasted spend. 2) Review if the search term is relevant to your product - if not, definitely add as negative. 3) If relevant, check your product listing for conversion issues. 4) Analyze competitor listings for this search term.`;
+                    break;
+                    
+                case 'auto_campaign_migration_needed':
+                    errorType = 'auto_campaign_migration_needed';
+                    const autoSearchTerm = error.searchTerm || 'Unknown';
+                    errorMessage = `PPC | Auto Campaign Migration: The search term "${autoSearchTerm}" in auto campaign "${error.campaignName || 'Unknown'}" has generated $${sales} in sales. Consider migrating this to a manual campaign for better control.`;
+                    solution = `Migrate to manual campaign: 1) Create a new manual campaign or add to existing manual campaign. 2) Add "${autoSearchTerm}" as an exact match keyword. 3) Set an appropriate bid based on current performance. 4) Monitor performance in the manual campaign. 5) Consider pausing the auto campaign if manual campaign performs better.`;
                     break;
                     
                 case 'marginal_profit':
@@ -649,7 +675,7 @@ class CreateTaskService {
             tasks.push({
                 taskId: generateTaskId(),
                 productName,
-                asin: error.asin || 'N/A',
+                asin: error.asin || error.campaignId || error.keywordId || 'N/A',
                 errorCategory: 'sponsoredAds',
                 errorType,
                 error: errorMessage,

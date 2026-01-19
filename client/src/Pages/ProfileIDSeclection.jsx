@@ -2,9 +2,11 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Globe, ChevronLeft, ChevronRight, User, Check } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import axios from 'axios';
 import axiosInstance from '../config/axios.config.js';
 import { detectCountry } from '../utils/countryDetection.js';
+import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 import stripeService from '../services/stripeService.js';
 import razorpayService from '../services/razorpayService.js';
 
@@ -26,6 +28,7 @@ const ProfileIDSelection = () => {
   const location = useLocation();
   const pollingRef = useRef(null); // Ref for polling interval
   const timeoutRef = useRef(null); // Ref for timeout
+  const userData = useSelector(state => state.Auth?.user); // Get user data for premium access check
   
   // Check if profile data was passed via navigation state (pre-fetched)
   const prefetchedProfileData = location.state?.profileData;
@@ -246,6 +249,15 @@ const ProfileIDSelection = () => {
   // Navigate to payment based on country
   const navigateToPayment = async () => {
     try {
+      // Check if user already has premium access (PRO subscription or active trial)
+      // If so, skip payment and go directly to analyzing page
+      if (hasPremiumAccess(userData)) {
+        console.log('[ProfileIDSelection] User already has premium access, skipping payment...');
+        setWaitingForAnalysis(false);
+        navigate('/analysing-account');
+        return;
+      }
+      
       // Detect user's country
       const country = await detectCountry();
       const isIndianUser = country === 'IN';

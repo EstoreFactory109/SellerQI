@@ -613,6 +613,15 @@ const ConnectAccounts = () => {
   // Navigate to payment based on country
   const navigateToPayment = async () => {
     try {
+      // Check if user already has premium access (PRO subscription or active trial)
+      // If so, skip payment and go directly to analyzing page
+      if (hasPremiumAccess(userData)) {
+        console.log('[ConnectAccounts] User already has premium access, skipping payment...');
+        setWaitingForAnalysis(false);
+        navigate('/analysing-account');
+        return;
+      }
+      
       // Detect user's country
       const country = await detectCountry();
       const isIndianUser = country === 'IN';

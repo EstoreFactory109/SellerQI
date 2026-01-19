@@ -814,43 +814,6 @@ export default function IndiaBilling() {
             </motion.h2>
             
             <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-            <div className="flex items-center justify-end mb-8">
-              <button
-                className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-medium transition-all duration-300 hover:shadow-lg"
-                onClick={async () => {
-                  try {
-                    // Download all available invoices
-                    const downloadPromises = paymentHistory
-                      .filter(p => p.invoiceUrl || p.invoicePdf || p.razorpayPaymentId)
-                      .map(async (payment) => {
-                        try {
-                          if (payment.invoicePdf || payment.invoiceUrl) {
-                            window.open(payment.invoicePdf || payment.invoiceUrl, '_blank');
-                          } else if (payment.razorpayPaymentId) {
-                            await razorpayService.downloadInvoice(payment.razorpayPaymentId);
-                          }
-                        } catch (error) {
-                          console.error(`Error downloading invoice for payment ${payment.paymentId}:`, error);
-                        }
-                      });
-                    
-                    // Open invoices with slight delay to avoid popup blockers
-                    for (let i = 0; i < downloadPromises.length; i++) {
-                      await downloadPromises[i];
-                      if (i < downloadPromises.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between downloads
-                      }
-                    }
-                  } catch (error) {
-                    console.error('Error downloading payment history:', error);
-                    alert('Some invoices could not be downloaded. Please try downloading them individually.');
-                  }
-                }}
-              >
-                <Download className="w-4 h-4" />
-                <span>Download All</span>
-              </button>
-            </div>
 
             {loadingHistory ? (
               <div className="flex items-center justify-center py-12">
@@ -889,11 +852,6 @@ export default function IndiaBilling() {
                           <p className="text-sm text-gray-600">
                             {formatDate(payment.paymentDate)}
                           </p>
-                          {payment.razorpayPaymentId && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              ID: {payment.razorpayPaymentId.slice(-8)}
-                            </p>
-                          )}
                         </div>
                       </div>
                       

@@ -352,11 +352,18 @@ class StripeWebhookService {
      */
     async updateSubscription(userId, updateData) {
         try {
-            await Subscription.findOneAndUpdate(
+            // Use $set explicitly to ensure payment status is updated correctly
+            const subscription = await Subscription.findOneAndUpdate(
                 { userId },
-                updateData,
-                { new: true, upsert: true }
+                { $set: updateData },
+                { new: true, upsert: true, runValidators: true }
             );
+
+            if (!subscription) {
+                logger.error(`Failed to update subscription via webhook for user: ${userId}`);
+            }
+
+            logger.info(`Subscription updated via webhook for user: ${userId}, paymentStatus: ${subscription?.paymentStatus}`);
         } catch (error) {
             logger.error('Error updating subscription in database:', error);
             throw error;

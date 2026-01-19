@@ -52,9 +52,13 @@ const formatMessageWithHighlight = (message) => {
     /^(.*?)(Revenue:\s*\$[\d,.]+.*)$/i,
     /^(.*?)(Net Profit:\s*-?\$[\d,.]+.*)$/i,
     
-    // PPC/Sponsored Ads patterns
-    /^(.*?)(Spend:\s*\$[\d,.]+.*)$/i,
-    /^(.*?)(ACOS:\s*[\d.]+%.*)$/i,
+    // PPC/Sponsored Ads patterns - match complete parenthetical expressions first (most specific)
+    /^(.*?)(\([^)]*Spend:\s*\$[\d,.]+[^)]*\))/i,  // Match complete (Spend: ...) with brackets
+    /^(.*?)(\([^)]*Sales:\s*\$[\d,.]+[^)]*\))/i,  // Match complete (Sales: ...) with brackets
+    /^(.*?)(\([^)]*ACOS:\s*[\d.]+%[^)]*\))/i,  // Match complete (ACOS: ...) with brackets
+    /^(.*?)(\([^)]*Spend:\s*\$[\d,.]+[^)]*Sales:\s*\$[\d,.]+[^)]*\))/i,  // Match (Spend: ... Sales: ...) together
+    /^(.*?)(Spend:\s*\$[\d,.]+(?:\s*,\s*Sales:\s*\$[\d,.]+)?[^.)]*)/i,  // Fallback for Spend without brackets (stop at period or closing paren)
+    /^(.*?)(ACOS:\s*[\d.]+%[^.(]*)/i,  // Fallback for ACOS without brackets (stop before opening paren or period)
     /^(.*?)(\d+ clicks from \d+ impressions.*)$/i,
   ];
   
@@ -72,8 +76,13 @@ const formatMessageWithHighlight = (message) => {
 };
 
 // Component to render message with highlighted part
-const FormattedMessage = ({ message }) => {
+const FormattedMessage = ({ message, errorCategory }) => {
   const { mainText, highlightedText } = formatMessageWithHighlight(message);
+  
+  // Don't make bold for profitability and sponsored ads errors
+  const shouldBold = errorCategory?.toLowerCase() !== 'profitability' && 
+                     errorCategory?.toLowerCase() !== 'sponsoredads' &&
+                     errorCategory?.toLowerCase() !== 'sponsored ads';
   
   return (
     <>
@@ -81,10 +90,55 @@ const FormattedMessage = ({ message }) => {
       {highlightedText && (
         <>
           <br />
-          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+          {shouldBold ? (
+            <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+          ) : (
+            <span className="text-gray-900 mt-1 block">{highlightedText}</span>
+          )}
         </>
       )}
     </>
+  );
+};
+
+// Helper function to format "How to Solve" text with numbered points on separate lines
+const formatHowToSolve = (text) => {
+  if (!text) return [];
+  
+  // Check if text contains numbered points pattern (e.g., "1) ", "2) ", etc.)
+  if (!text.match(/\d+\)\s+/)) {
+    // No numbered points, return as single item
+    return [text];
+  }
+  
+  // Split on pattern: number followed by ") " (with optional space before)
+  // Use positive lookahead to keep the delimiter
+  const parts = text.split(/(?=\d+\)\s+)/);
+  
+  const formatted = [];
+  
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed) {
+      formatted.push(trimmed);
+    }
+  }
+  
+  return formatted.length > 0 ? formatted : [text];
+};
+
+// Component to render "How to Solve" with numbered points on separate lines
+const FormattedHowToSolve = ({ text }) => {
+  const formattedPoints = formatHowToSolve(text);
+  
+  return (
+    <div className="space-y-1">
+      {formattedPoints.map((point, index) => (
+        <div key={index} className="whitespace-normal">
+          {point}
+        </div>
+      ))}
+    </div>
   );
 };
 
@@ -626,13 +680,13 @@ export default function Tasks() {
                       <td className='px-4 py-4 text-sm text-gray-900'>
                         <div>
                           <p className='whitespace-normal'>
-                            <FormattedMessage message={item.error} />
+                            <FormattedMessage message={item.error} errorCategory={item.errorCategory} />
                           </p>
                         </div>
                       </td>
                       <td className='px-4 py-4 text-sm text-gray-900'>
                         <div>
-                          <p className='whitespace-normal'>{item.howToSolve}</p>
+                          <FormattedHowToSolve text={item.howToSolve} />
                         </div>
                       </td>
                                              <td className='px-4 py-4 whitespace-nowrap w-[100px]'>

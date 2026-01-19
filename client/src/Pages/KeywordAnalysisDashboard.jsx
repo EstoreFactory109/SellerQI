@@ -725,7 +725,7 @@ const KeywordAnalysisDashboard = () => {
         
         th {
           padding: 12px 16px;
-          text-align: center;
+          text-align: left;
           font-size: 12px;
           font-weight: 600;
           color: #64748b;
@@ -746,7 +746,7 @@ const KeywordAnalysisDashboard = () => {
           padding: 12px 16px;
           border-top: 1px solid #e2e8f0;
           font-size: 14px;
-          text-align: center;
+          text-align: left;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
@@ -867,8 +867,8 @@ const KeywordAnalysisDashboard = () => {
         .tooltip-content {
           position: absolute;
           top: 100%;
-          left: 50%;
-          transform: translateX(-50%);
+          left: 0;
+          transform: translateY(4px);
           margin-top: 8px;
           padding: 12px 16px;
           background: #1e293b;
@@ -884,14 +884,14 @@ const KeywordAnalysisDashboard = () => {
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.2s, transform 0.2s;
-          transform: translateX(-50%) translateY(4px);
+          text-align: left;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
         
         .tooltip-container:hover .tooltip-content {
           opacity: 1;
           pointer-events: auto;
-          transform: translateX(-50%) translateY(0);
+          transform: translateY(0);
         }
         
         /* Adjust tooltip position for right edge (last column) */
@@ -899,6 +899,7 @@ const KeywordAnalysisDashboard = () => {
           left: auto;
           right: 0;
           transform: translateX(0) translateY(4px);
+          text-align: left;
         }
         
         .tooltip-container.tooltip-last:hover .tooltip-content {
@@ -909,8 +910,8 @@ const KeywordAnalysisDashboard = () => {
           content: '';
           position: absolute;
           bottom: 100%;
-          left: 50%;
-          transform: translateX(-50%);
+          left: 20px;
+          transform: translateX(0);
           border: 6px solid transparent;
           border-bottom-color: #1e293b;
         }
@@ -924,7 +925,7 @@ const KeywordAnalysisDashboard = () => {
         .th-with-tooltip {
           display: flex;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 4px;
         }
       `}</style>
