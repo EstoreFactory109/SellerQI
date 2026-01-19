@@ -103,18 +103,42 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
 
+    // Check for B2B pricing in purchasable_offer array (always check, even if generic_keyword is missing)
+    let hasB2BPricing = false;
+    const purchasableOffer = response.data?.attributes?.purchasable_offer;
+    if (Array.isArray(purchasableOffer)) {
+      hasB2BPricing = purchasableOffer.some(offer => 
+        offer && offer.audience === "B2B"
+      );
+    }
+
+    // If generic_keyword is missing, still return B2B pricing info
     if (!keywordData) {
-      logger.error(`No generic_keyword found for SKU: ${sku}`);
-      return false;
+      logger.warn(`No generic_keyword found for SKU: ${sku}, but returning B2B pricing info`, {
+        sku,
+        asin,
+        has_b2b_pricing: hasB2BPricing
+      });
+      
+      // Return object with B2B pricing even without generic_keyword
+      return {
+        asin: asin,
+        value: null,
+        marketplace_id: null,
+        has_b2b_pricing: hasB2BPricing,
+        sku: sku
+      };
     }
 
     const generic_Keyword = {
       asin: asin,
       value: keywordData.value,
-      marketplace_id: keywordData.marketplace_id
+      marketplace_id: keywordData.marketplace_id,
+      has_b2b_pricing: hasB2BPricing,
+      sku: sku
     };
 
-    logger.info("GetListingItemsIssues ended");
+    logger.info("GetListingItemsIssues ended", { has_b2b_pricing: hasB2BPricing });
     return generic_Keyword;
 
   } catch (error) {
@@ -191,11 +215,27 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
     awsRegion = 'us-west-2';
   }
 
-  // Build query parameters - only need issues for inactive SKUs
+  // Build query parameters
+  // For includedData, Amazon expects multiple query params OR comma-separated values
+  // Using URLSearchParams and appending each includedData value separately
   const queryParamsObj = new URLSearchParams();
   queryParamsObj.append('marketplaceIds', dataToReceive.marketplaceId);
   queryParamsObj.append('issueLocale', dataToReceive.issueLocale);
-  queryParamsObj.append('includedData', 'issues');
+  
+  // Handle includedData - can be comma-separated string or array
+  // For inactive SKUs, we need at least issues and offers
+  const includedDataValues = typeof dataToReceive.includedData === 'string' 
+    ? dataToReceive.includedData.split(',').map(v => v.trim())
+    : (dataToReceive.includedData || ['issues', 'offers']);
+  
+  // Ensure issues and offers are included
+  const requiredData = ['issues', 'offers'];
+  const finalIncludedData = [...new Set([...requiredData, ...includedDataValues])];
+  
+  // Append each includedData value as a separate parameter
+  finalIncludedData.forEach(value => {
+    queryParamsObj.append('includedData', value);
+  });
   
   const queryParams = queryParamsObj.toString();
 
@@ -210,7 +250,8 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
     awsRegion,
     sellerId: dataToReceive.SellerId,
     marketplaceId: dataToReceive.marketplaceId,
-    issueLocale: dataToReceive.issueLocale
+    issueLocale: dataToReceive.issueLocale,
+    includedData: finalIncludedData
   });
 
   let request = {
@@ -251,15 +292,26 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
       issuesMessages = issuesArray.map(issue => issue.message || JSON.stringify(issue));
     }
 
+    // Check for B2B pricing in purchasable_offer array
+    let hasB2BPricing = false;
+    const purchasableOffer = response.data?.attributes?.purchasable_offer;
+    if (Array.isArray(purchasableOffer)) {
+      hasB2BPricing = purchasableOffer.some(offer => 
+        offer && offer.audience === "B2B"
+      );
+    }
+
     logger.info("GetListingItemIssuesForInactive ended", { 
       sku, 
-      issuesCount: issuesMessages.length 
+      issuesCount: issuesMessages.length,
+      has_b2b_pricing: hasB2BPricing
     });
 
     return {
       sku: sku,
       asin: asin,
-      issues: issuesMessages
+      issues: issuesMessages,
+      has_b2b_pricing: hasB2BPricing
     };
 
   } catch (error) {

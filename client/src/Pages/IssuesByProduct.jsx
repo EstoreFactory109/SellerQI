@@ -1089,8 +1089,8 @@ const IssuesByProduct = () => {
                                                             <span className="text-white text-xs font-bold">{totalIssues}</span>
                                                         </div>
                                                     </div>
-                                                    <div className="flex-1">
-                                                        <h3 className="font-bold text-xl mb-2 text-gray-900 max-w-md truncate">
+                                                    <div className="flex-1 min-w-0">
+                                                        <h3 className="font-bold text-xl mb-2 text-gray-900 break-words">
                                                             {product.name}
                                                         </h3>
                                                         <div className="flex flex-wrap gap-4 text-sm text-gray-600">

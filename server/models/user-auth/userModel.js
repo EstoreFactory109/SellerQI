@@ -73,7 +73,7 @@ const userSchema = new mongoose.Schema(
       },
       subscriptionStatus: {
         type: String,
-        enum: ["active", "inactive", "cancelled", "past_due"],
+        enum: ["active", "inactive", "cancelled", "past_due", "trialing"],
         default: "active"
       },
       isInTrialPeriod: {

@@ -1703,8 +1703,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Campaigns with high advertising cost of sales
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[600px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
@@ -1762,8 +1762,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Keywords with high spend but low returns
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[700px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
@@ -1845,8 +1845,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[600px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
@@ -1903,8 +1903,8 @@ const PPCDashboard = () => {
                         tip="This keyword performs well — consider raising bid by 15–20%."
                         icon="📈"
                       />
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[900px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-[18%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
@@ -1996,8 +1996,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Search terms that generated clicks but no conversions
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[800px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>
@@ -2063,8 +2063,8 @@ const PPCDashboard = () => {
                       <div className="mb-4 mt-4 text-sm text-gray-600">
                         Performance insights from automatic targeting campaigns
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full table-fixed min-w-[700px]">
+                      <div className="w-full overflow-hidden">
+                        <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-gray-200">
                               <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>

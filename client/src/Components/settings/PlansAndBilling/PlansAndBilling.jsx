@@ -252,8 +252,17 @@ export default function PlansAndBilling() {
     setLoadingHistory(true);
     try {
       const history = await stripeService.getPaymentHistory();
+      
+      // Deduplicate by sessionId or stripePaymentIntentId (safety measure)
+      const uniqueHistory = history.filter((payment, index, self) => 
+        index === self.findIndex(p => 
+          (payment.sessionId && p.sessionId === payment.sessionId) ||
+          (payment.stripePaymentIntentId && p.stripePaymentIntentId === payment.stripePaymentIntentId)
+        )
+      );
+      
       // Sort by most recent first
-      const sortedHistory = history.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+      const sortedHistory = uniqueHistory.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
       setPaymentHistory(sortedHistory);
     } catch (error) {
       console.error('Error fetching payment history:', error);
@@ -806,7 +815,7 @@ export default function PlansAndBilling() {
               <div className="space-y-4">
                 {paymentHistory.slice(0, visiblePayments).map((payment, index) => (
                   <motion.div
-                    key={payment.sessionId || index}
+                    key={payment.stripePaymentIntentId || payment.sessionId || payment.paymentId || `payment-${index}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: index * 0.1 }}

@@ -26,11 +26,21 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
             // For paginated endpoints (like your-products), include page and limit in cache key
             let cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}`;
             
-            // For your-products endpoint, include pagination params to cache each page separately
+            // For your-products endpoint, include status filter and pagination params
+            // IMPORTANT: Only cache page 1 - Load More requests (page > 1) bypass cache for data consistency
             if (pageType === 'your-products') {
-                const page = req.query.page || 1;
-                const limit = req.query.limit || 20;
-                cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}`;
+                const page = parseInt(req.query.page) || 1;
+                const limit = parseInt(req.query.limit) || 20;
+                const status = req.query.status || 'all'; // Include status filter in cache key (differentiates tabs)
+                
+                // Only cache page 1 - bypass cache for Load More (page > 1)
+                if (page === 1) {
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:status${status}:page${page}:limit${limit}`;
+                } else {
+                    // Skip caching for page > 1 (Load More requests) - always fetch fresh data
+                    logger.info(`Skipping cache for your-products page ${page}, status: ${status} (Load More request)`);
+                    return next();
+                }
             }
             
             const redisClient = getRedisClient();
@@ -94,7 +104,7 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['dashboard', 'profitability', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory'];
+        const pageTypes = ['dashboard', 'profitability', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {

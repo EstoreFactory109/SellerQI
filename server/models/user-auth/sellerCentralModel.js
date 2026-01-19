@@ -33,6 +33,11 @@ const Products=new mongoose.Schema({
     type: [String],
     required: false,
     default: undefined
+  },
+  has_b2b_pricing:{
+    type: Boolean,
+    required: false,
+    default: false
   }
 },{timestamps:true})
 

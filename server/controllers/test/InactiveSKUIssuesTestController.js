@@ -269,14 +269,32 @@ const testProcessAllInactiveSKUs = asyncHandler(async (req, res) => {
         let AccessToken;
         try {
             // generateAccessToken requires userId and refreshToken as parameters
+            logger.info('[InactiveSKUIssuesTest] Calling generateAccessToken', {
+                userId,
+                hasRefreshToken: !!sellerAccount.spiRefreshToken,
+                refreshTokenPrefix: sellerAccount.spiRefreshToken?.substring(0, 20) + '...',
+                country,
+                region
+            });
+            
             AccessToken = await generateAccessToken(userId, sellerAccount.spiRefreshToken);
             if (!AccessToken) {
                 logger.error('[InactiveSKUIssuesTest] generateAccessToken returned null/undefined', {
-                    userId
+                    userId,
+                    country,
+                    region,
+                    hasRefreshToken: !!sellerAccount.spiRefreshToken,
+                    refreshTokenLength: sellerAccount.spiRefreshToken?.length,
+                    refreshTokenPrefix: sellerAccount.spiRefreshToken?.substring(0, 30) + '...'
                 });
-                return res.status(401).json(
-                    new ApiError(401, 'Failed to generate access token - token generation returned null. Check if refresh token is valid.')
-                );
+                
+                // Return proper error format
+                const error = new ApiError(401, 'Failed to generate access token. The refresh token may be invalid, expired, or not authorized for this region/country combination. Please reconnect your seller account.');
+                return res.status(401).json({
+                    statusCode: error.statusCode,
+                    message: error.message,
+                    errors: error.errors
+                });
             }
             logger.info('[InactiveSKUIssuesTest] Access token generated successfully', {
                 userId,

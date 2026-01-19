@@ -699,8 +699,8 @@ const ReimbursementDashboard = () => {
                           {summary.feeProtector.backendShipmentItems.count || summary.feeProtector.backendShipmentItems.data.length} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
                         </p>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
+                    <div className="w-full overflow-hidden">
+                      <table className="w-full table-fixed">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -718,8 +718,8 @@ const ReimbursementDashboard = () => {
                           {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
                             <tr key={index} className="hover:bg-gray-50 transition-colors">
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.shipmentId || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900">{item.shipmentName || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words">{item.shipmentId || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 break-words">{item.shipmentName || 'N/A'}</td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.quantityShipped || 0}</td>
@@ -765,8 +765,8 @@ const ReimbursementDashboard = () => {
                           {showUnderpaidOnly ? 'Show All' : 'Show Underpaid Only'}
                         </button>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
+                    <div className="w-full overflow-hidden">
+                      <table className="w-full table-fixed">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
@@ -837,8 +837,8 @@ const ReimbursementDashboard = () => {
                           {filteredDamagedInventoryData.length} items (last 30 days) • {formatCurrency(damagedInventoryTotal)} total
                         </p>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
+                    <div className="w-full overflow-hidden">
+                      <table className="w-full table-fixed">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -888,8 +888,8 @@ const ReimbursementDashboard = () => {
                           {filteredDisposedInventoryData.length} items (last 30 days) • {formatCurrency(disposedInventoryTotal)} total
                         </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="w-full overflow-hidden">
+              <table className="w-full table-fixed">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>

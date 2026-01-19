@@ -638,8 +638,8 @@ const ProfitTable = ({ setSuggestionsData }) => {
         )}
 
         {/* Table */}
-        <div className="w-full overflow-x-auto">
-          <table className="w-full table-fixed min-w-[900px]">
+        <div className="w-full overflow-hidden">
+          <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200">
                 <th className="w-8 px-2 py-4 text-center text-xs font-semibold text-gray-500">#</th>

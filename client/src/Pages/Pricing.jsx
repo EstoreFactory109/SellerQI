@@ -318,8 +318,14 @@ export default function PricingPage() {
 
               <h3 className="text-xl font-bold text-white mb-1">7-Day Free Trial</h3>
               <div className="mb-4">
+                <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-white">$0</span>
-                <span className="text-white/70 text-sm ml-1">for 7 days</span>
+                  <span className="text-white/70 text-sm">for 7 days</span>
+                </div>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-xl font-bold text-white">$99</span>
+                  <span className="text-white/70 text-sm">/month after trial</span>
+                </div>
               </div>
               <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business. Card required, charged after trial ends.</p>
               

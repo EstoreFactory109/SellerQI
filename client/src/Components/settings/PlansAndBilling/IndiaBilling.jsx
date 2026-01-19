@@ -298,7 +298,17 @@ export default function IndiaBilling() {
     setLoadingHistory(true);
     try {
       const history = await razorpayService.getPaymentHistory();
-      const sortedHistory = history.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+      
+      // Deduplicate by paymentId or razorpayPaymentId (safety measure)
+      const uniqueHistory = history.filter((payment, index, self) => 
+        index === self.findIndex(p => 
+          (payment.paymentId && p.paymentId === payment.paymentId) ||
+          (payment.razorpayPaymentId && p.razorpayPaymentId === payment.razorpayPaymentId) ||
+          (payment.orderId && p.orderId === payment.orderId)
+        )
+      );
+      
+      const sortedHistory = uniqueHistory.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
       setPaymentHistory(sortedHistory);
     } catch (error) {
       console.error('Error fetching payment history:', error);
@@ -861,7 +871,7 @@ export default function IndiaBilling() {
               <div className="space-y-4">
                 {paymentHistory.slice(0, visiblePayments).map((payment, index) => (
                   <motion.div
-                    key={payment.paymentId || index}
+                    key={payment.razorpayPaymentId || payment.paymentId || payment.orderId || `payment-${index}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: index * 0.1 }}

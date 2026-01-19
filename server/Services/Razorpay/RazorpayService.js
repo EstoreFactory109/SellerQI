@@ -390,6 +390,23 @@ class RazorpayService {
      */
     async addPaymentHistory(userId, paymentData) {
         try {
+            // Check if payment already exists to prevent duplicates
+            const subscription = await Subscription.findOne({ userId });
+            
+            if (subscription && subscription.paymentHistory) {
+                // Check for duplicate by paymentId or razorpayPaymentId
+                const existingPayment = subscription.paymentHistory.find(payment => 
+                    (paymentData.paymentId && payment.paymentId === paymentData.paymentId) ||
+                    (paymentData.razorpayPaymentId && payment.razorpayPaymentId === paymentData.razorpayPaymentId) ||
+                    (paymentData.orderId && payment.orderId === paymentData.orderId)
+                );
+                
+                if (existingPayment) {
+                    logger.info(`Payment already exists in history for user ${userId}, paymentId: ${paymentData.paymentId || paymentData.razorpayPaymentId || paymentData.orderId}, skipping duplicate`);
+                    return;
+                }
+            }
+            
             await Subscription.findOneAndUpdate(
                 { userId },
                 { 
@@ -401,6 +418,8 @@ class RazorpayService {
                     } 
                 }
             );
+            
+            logger.info(`Payment added to history for user ${userId}, paymentId: ${paymentData.paymentId || paymentData.razorpayPaymentId || paymentData.orderId}`);
         } catch (error) {
             logger.error('Error adding payment history:', error);
         }

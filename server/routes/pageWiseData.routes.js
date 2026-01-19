@@ -79,7 +79,9 @@ router.get('/inventory', auth, getLocation, analyseDataCache(3600, 'inventory'),
 
 // ===== YOUR PRODUCTS PAGE =====
 // Returns all products with status, ratings, A+ content info
-router.get('/your-products', auth, getLocation, analyseDataCache(3600, 'your-products'), getYourProductsData);
+// Cache TTL: 15 minutes (shorter than other pages due to frequent product updates)
+// Only page 1 is cached - Load More requests (page > 1) bypass cache for data consistency
+router.get('/your-products', auth, getLocation, analyseDataCache(900, 'your-products'), getYourProductsData);
 
 // ===== TASKS PAGE =====
 // Returns tasks data

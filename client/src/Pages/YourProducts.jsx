@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -27,108 +27,289 @@ const YourProducts = () => {
   const [activeTab, setActiveTab] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'title', direction: 'asc' });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if this is the first load
   const itemsPerPage = 20; // Items fetched from backend per page
+  const fetchingRef = useRef(false); // Prevent duplicate fetches
 
   // Get current marketplace and currency from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
   const currency = useSelector((state) => state.currency?.currency) || '$';
 
+  // Helper function to detect and process HTML content in issues
+  const processIssueHTML = useMemo(() => (issueText) => {
+    if (!issueText || typeof issueText !== 'string') {
+      return { hasHTML: false, processedHTML: issueText || '' };
+    }
+
+    // Check if the text contains HTML tags (more comprehensive check)
+    const htmlTagPattern = /<[a-z][\s\S]*?>/i;
+    const hasHTMLTags = htmlTagPattern.test(issueText);
+    
+    // URL pattern to detect plain URLs (http, https, or www)
+    // Matches URLs with query parameters, fragments, and special characters
+    const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+    const hasURLs = urlPattern.test(issueText);
+    
+    // If no HTML tags and no URLs, return as plain text
+    if (!hasHTMLTags && !hasURLs) {
+      return { 
+        hasHTML: false, 
+        processedHTML: issueText
+      };
+    }
+
+    // Process HTML content
+    let processedHTML = issueText;
+    
+    // First, process existing anchor tags - check if they're complete URLs
+    processedHTML = processedHTML.replace(
+      /<a\s+([^>]*?)>(.*?)<\/a>/gi,
+      (match, attributes, linkText) => {
+        // Extract href value
+        const hrefMatch = attributes.match(/href=["']([^"']+)["']/i);
+        const href = hrefMatch ? hrefMatch[1] : '#';
+        
+        // Check if it's a complete URL (starts with http://, https://, or //)
+        const isCompleteUrl = href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//'));
+        
+        // If not a complete URL, convert to bold text showing the actual href instead of link text
+        if (!isCompleteUrl && href !== '#') {
+          return `<strong>${href}</strong>`;
+        }
+        
+        // For complete URLs, process as normal link
+        // Check if target exists, if not add it
+        const hasTarget = /target\s*=/i.test(attributes);
+        const hasRel = /rel\s*=/i.test(attributes);
+        const hasClass = /class\s*=/i.test(attributes);
+        
+        // Build new attributes
+        let newAttributes = attributes.trim();
+        
+        // Ensure target="_blank" for all links
+        if (!hasTarget) {
+          newAttributes += ' target="_blank"';
+        }
+        
+        // Ensure rel="noopener noreferrer" for security
+        if (!hasRel) {
+          newAttributes += ' rel="noopener noreferrer"';
+        }
+        
+        // Add data attribute to prevent React Router interception
+        newAttributes += ' data-external-link="true"';
+        
+        // Add styling class if not present
+        if (!hasClass) {
+          newAttributes += ' class="text-blue-600 hover:text-blue-800 underline font-medium"';
+        } else {
+          // Append to existing class
+          newAttributes = newAttributes.replace(
+            /class=["']([^"']+)["']/i,
+            'class="$1 text-blue-600 hover:text-blue-800 underline font-medium"'
+          );
+        }
+        
+        return `<a ${newAttributes}>${linkText}</a>`;
+      }
+    );
+
+    // Process other common HTML tags
+    // Ensure proper closing of self-closing tags
+    processedHTML = processedHTML.replace(/<br\s*\/?>/gi, '<br />');
+    processedHTML = processedHTML.replace(/<hr\s*\/?>/gi, '<hr />');
+    
+    // Ensure proper spacing around block-level tags for readability
+    processedHTML = processedHTML.replace(/(<p[^>]*>)/gi, '<br />$1');
+    processedHTML = processedHTML.replace(/(<\/p>)/gi, '$1<br />');
+
+    // Convert plain URLs to clickable links (but not URLs already inside anchor tags or bold tags)
+    // Strategy: First, temporarily replace existing anchor tags and bold tags with placeholders
+    const tagPlaceholders = [];
+    let placeholderIndex = 0;
+    
+    // Store existing anchor tags and bold tags with placeholders
+    processedHTML = processedHTML.replace(
+      /<(a|strong)[^>]*>.*?<\/(a|strong)>/gi,
+      (match) => {
+        const placeholder = `__TAG_PLACEHOLDER_${placeholderIndex}__`;
+        tagPlaceholders[placeholderIndex] = match;
+        placeholderIndex++;
+        return placeholder;
+      }
+    );
+    
+    // Now convert plain URLs to links (only complete URLs)
+    processedHTML = processedHTML.replace(
+      /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi,
+      (match) => {
+        // Ensure URL has protocol
+        let fullUrl = match;
+        if (match.startsWith('www.')) {
+          fullUrl = 'https://' + match;
+        }
+        
+        // Create anchor tag with proper styling and data attribute
+        return `<a href="${fullUrl}" target="_blank" rel="noopener noreferrer" data-external-link="true" class="text-blue-600 hover:text-blue-800 underline font-medium">${match}</a>`;
+      }
+    );
+    
+    // Restore original tags
+    tagPlaceholders.forEach((originalTag, index) => {
+      processedHTML = processedHTML.replace(
+        `__TAG_PLACEHOLDER_${index}__`,
+        originalTag
+      );
+    });
+
+    return { hasHTML: true, processedHTML };
+  }, [currentRegion]);
+
   // Get products data from Redux
   const yourProductsData = useSelector((state) => state.pageData?.yourProducts?.data);
   const loading = useSelector((state) => state.pageData?.yourProducts?.loading) ?? true;
   const error = useSelector((state) => state.pageData?.yourProducts?.error);
+  const lastFetched = useSelector((state) => state.pageData?.yourProducts?.lastFetched);
 
   // Extract products, summary, and pagination from Redux data
   const products = useMemo(() => yourProductsData?.products || [], [yourProductsData]);
   const summary = useMemo(() => yourProductsData?.summary || {}, [yourProductsData]);
   const pagination = useMemo(() => yourProductsData?.pagination || {}, [yourProductsData]);
-
-  // Fetch products data from Redux (only if empty)
-  useEffect(() => {
-    // Only fetch if data doesn't exist in Redux
-    if (!yourProductsData && !loading) {
-      dispatch(fetchYourProductsData({ page: 1, limit: itemsPerPage }));
-    }
-  }, [dispatch, yourProductsData, loading]);
-
-  // Track if we've loaded all products for inactive/incomplete tabs
-  const [allProductsLoaded, setAllProductsLoaded] = useState(false);
   
-  // Reset allProductsLoaded when tab changes away from inactive/incomplete
+  // Debug: Log when products change
   useEffect(() => {
-    if (activeTab !== 'inactive' && activeTab !== 'incomplete') {
-      setAllProductsLoaded(false);
-    }
-  }, [activeTab]);
+    console.log('[YourProducts] Products updated:', {
+      productsCount: products.length,
+      totalItems: pagination.totalItems,
+      hasMore: pagination.hasMore,
+      currentPage: pagination.page
+    });
+  }, [products.length, pagination.totalItems, pagination.hasMore, pagination.page]);
 
-  // Auto-load ALL products when switching to inactive/incomplete tabs (one-time load)
+  // Map tab key to status filter for backend
+  const getStatusForTab = (tab) => {
+    switch (tab) {
+      case 'active':
+        return 'Active';
+      case 'inactive':
+        return 'Inactive';
+      case 'incomplete':
+        return 'Incomplete';
+      case 'withAPlus':
+        return undefined; // Keep client-side filtering for A+ tab
+      case 'all':
+      default:
+        return undefined; // No filter for 'all' tab
+    }
+  };
+
+  // Track when data is first loaded to distinguish initial load from tab switches
   useEffect(() => {
-    const loadAllProducts = async () => {
-      // Only proceed if on inactive/incomplete tab and haven't loaded all yet
-      if ((activeTab === 'inactive' || activeTab === 'incomplete') && 
-          !allProductsLoaded && !loading && !loadingMore) {
-        
-        const totalItems = summary.totalProducts || pagination.totalItems || 0;
-        
-        // If all products are already loaded, mark as complete
-        if (products.length >= totalItems || !pagination.hasMore) {
-          setAllProductsLoaded(true);
-          return;
-        }
-        
-        // Load all remaining products in sequence
-        setLoadingMore(true);
-        try {
-          let currentPage = pagination.page || 1;
-          let currentProductCount = products.length;
-          
-          while (currentProductCount < totalItems && currentPage < Math.ceil(totalItems / itemsPerPage)) {
-            currentPage++;
-            const result = await dispatch(fetchYourProductsData({ 
-              page: currentPage, 
-              limit: itemsPerPage, 
-              append: true 
-            })).unwrap();
-            
-            currentProductCount = result.products?.length || currentProductCount;
-            
-            // Safety check to prevent infinite loop
-            if (!result.pagination?.hasMore) break;
-          }
-          
-          setAllProductsLoaded(true);
-        } catch (err) {
-          console.error('Error auto-loading products for inactive tab:', err);
-        } finally {
-          setLoadingMore(false);
-        }
-      }
-    };
+    // Once we have data (even if loading), we're past initial load
+    // This ensures tab switches don't show full page loader
+    if (yourProductsData && yourProductsData.products && yourProductsData.products.length > 0) {
+      setIsInitialLoad(false);
+    }
+  }, [yourProductsData]);
+
+  // Fetch products data when component mounts or when tab changes
+  useEffect(() => {
+    const status = getStatusForTab(activeTab);
+    const currentStatus = yourProductsData?.currentStatus;
     
-    loadAllProducts();
-  }, [activeTab, allProductsLoaded]); // Only depend on tab and our tracking flag
+    // Check if we already have data for this status in Redux
+    // Only fetch if:
+    // 1. No data exists at all
+    // 2. Status changed AND we don't have data for this status
+    // 3. Data is stale (older than 5 minutes)
+    const hasDataForStatus = yourProductsData && 
+                            yourProductsData.products && 
+                            yourProductsData.products.length > 0 &&
+                            currentStatus === status;
+    
+    const isDataStale = lastFetched && (Date.now() - lastFetched) > 5 * 60 * 1000;
+    
+    const needsFetch = !hasDataForStatus || isDataStale;
+    
+    // Prevent duplicate fetches
+    if (needsFetch && !loading && !fetchingRef.current) {
+      fetchingRef.current = true;
+      
+      console.log('[YourProducts] Fetching data:', {
+        hasDataForStatus,
+        currentStatus,
+        requestedStatus: status,
+        isDataStale,
+        needsFetch,
+        lastFetched: lastFetched ? new Date(lastFetched).toISOString() : null
+      });
+      
+      dispatch(fetchYourProductsData({ 
+        page: 1, 
+        limit: itemsPerPage, 
+        status: status,
+        reset: false // Don't reset - let Redux check cache first
+      })).finally(() => {
+        fetchingRef.current = false;
+      });
+    } else {
+      console.log('[YourProducts] Using cached data from Redux (no database call):', {
+        hasDataForStatus,
+        currentStatus,
+        requestedStatus: status,
+        lastFetched: lastFetched ? new Date(lastFetched).toISOString() : null
+      });
+    }
+  }, [dispatch, activeTab, loading, yourProductsData?.currentStatus, lastFetched]); // Include lastFetched to detect stale data
   
   // Handle loading more products from backend
   const handleLoadMoreFromBackend = async () => {
     // Guard against loading if already loading
     if (loadingMore || loading) return;
     
-    // Check if we already have all data
-    const totalItems = summary.totalProducts || pagination.totalItems || 0;
+    // Get current status filter
+    const status = getStatusForTab(activeTab);
+    
+    // Check if we already have all data for current filter
+    const totalItems = pagination.totalItems || 0; // Use filtered total from pagination
     if (products.length >= totalItems) return;
     
     setLoadingMore(true);
     try {
       // Calculate next page based on current products loaded
-      const currentPage = Math.ceil(products.length / itemsPerPage);
+      // IMPORTANT: Calculate based on how many pages we've already loaded, not just pagination.page
+      // This ensures we always request the correct next page even if pagination state is stale
+      const currentPage = pagination.page || 1;
       const nextPage = currentPage + 1;
       
-      await dispatch(fetchYourProductsData({ 
+      console.log('[YourProducts] Load More - Before fetch:', {
+        currentPage,
+        nextPage,
+        currentProductsCount: products.length,
+        totalItems,
+        status,
+        lastAsin: products[products.length - 1]?.asin
+      });
+      
+      const result = await dispatch(fetchYourProductsData({ 
         page: nextPage, 
         limit: itemsPerPage, 
-        append: true 
+        append: true,
+        status: status
       })).unwrap();
+      
+      console.log('[YourProducts] Load More result:', {
+        requestedPage: nextPage,
+        status,
+        previousProductsCount: products.length,
+        newProductsCount: result.products?.length || 0,
+        totalItems: result.pagination?.totalItems || 0,
+        hasMore: result.pagination?.hasMore,
+        newPage: result.pagination?.page,
+        lastAsin: result.products?.[result.products.length - 1]?.asin,
+        firstNewAsin: result.products?.[products.length]?.asin
+      });
     } catch (err) {
       console.error('Error loading more products:', err);
     } finally {
@@ -136,9 +317,16 @@ const YourProducts = () => {
     }
   };
 
-  // Filter products based on search and tab (client-side filtering of loaded products)
+  // Filter products based on search and sort (client-side filtering)
+  // Note: Status filtering is now done on backend, but we keep client-side for 'withAPlus' tab
   const filteredProducts = useMemo(() => {
     let filtered = [...products];
+
+    // Only apply client-side status filter for 'withAPlus' tab (backend doesn't filter by hasAPlus)
+    if (activeTab === 'withAPlus') {
+      filtered = filtered.filter(p => p.hasAPlus);
+    }
+    // For other tabs (all, active, inactive, incomplete), backend already filters by status
 
     // Search filter
     if (searchQuery.trim()) {
@@ -148,17 +336,6 @@ const YourProducts = () => {
         product.sku?.toLowerCase().includes(query) ||
         product.title?.toLowerCase().includes(query)
       );
-    }
-
-    // Tab filter
-    if (activeTab === 'active') {
-      filtered = filtered.filter(p => p.status === 'Active');
-    } else if (activeTab === 'inactive') {
-      filtered = filtered.filter(p => p.status === 'Inactive');
-    } else if (activeTab === 'incomplete') {
-      filtered = filtered.filter(p => p.status === 'Incomplete');
-    } else if (activeTab === 'withAPlus') {
-      filtered = filtered.filter(p => p.hasAPlus);
     }
 
     // Sort
@@ -191,10 +368,9 @@ const YourProducts = () => {
   const displayedProducts = filteredProducts;
   
   // Check if there's more data to load from backend
-  // Use both pagination.hasMore and compare loaded count vs total
-  const totalItems = summary.totalProducts || pagination.totalItems || 0;
-  // More robust check: show Load More if we have fewer products than total
-  const hasMoreFromBackend = products.length > 0 && products.length < totalItems;
+  // Use filtered total from pagination (not summary.totalProducts which is for all products)
+  const totalItems = pagination.totalItems || 0; // This is the filtered total (e.g., 70 for inactive)
+  const hasMoreFromBackend = pagination.hasMore && products.length < totalItems;
 
   // Handle sort
   const handleSort = (key) => {
@@ -373,6 +549,7 @@ const YourProducts = () => {
       'Ratings',
       'Has A+ Content',
       'A+ Status',
+      'Has Videos',
       'Ranking Issues',
       'Conversion Issues',
       'Inventory Issues',
@@ -396,6 +573,7 @@ const YourProducts = () => {
           product.starRatings,
           product.hasAPlus ? 'Yes' : 'No',
           product.aPlusStatus,
+          product.hasVideo ? 'Yes' : 'No',
           rankingIssues,
           conversionIssues,
           inventoryIssues,
@@ -418,7 +596,9 @@ const YourProducts = () => {
     document.body.removeChild(link);
   };
 
-  if (loading) {
+  // Show full page loader only on initial load (when no data exists yet)
+  // Once we have any data, tab switches will show table loader instead
+  if (loading && isInitialLoad && !yourProductsData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -528,6 +708,23 @@ const YourProducts = () => {
           right: 20px;
           transform: translateX(0);
         }
+        
+        /* Fix overflow for issues column */
+        .issues-cell {
+          max-width: 0;
+          overflow: hidden;
+        }
+        
+        .issues-content {
+          min-width: 0;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+        
+        .issues-content a {
+          word-break: break-all;
+          overflow-wrap: anywhere;
+        }
       `}</style>
 
       <div className="max-w-7xl mx-auto">
@@ -577,6 +774,31 @@ const YourProducts = () => {
             <div className="text-sm text-gray-500 mb-1">With A+</div>
             <div className="text-2xl font-bold text-purple-600">{summary.productsWithAPlus || 0}</div>
           </div>
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <div className="text-sm text-gray-500 mb-1">Brand Story</div>
+            <div className="flex items-center">
+              {summary.hasBrandStory ? (
+                <Check size={28} className="text-green-600" strokeWidth={3} />
+              ) : (
+                <X size={28} className="text-red-600" strokeWidth={3} />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* General Info Message about Inactive/Incomplete Products */}
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6 rounded-r-lg">
+          <div className="flex items-start gap-3">
+            <Info className="text-blue-600 flex-shrink-0 mt-0.5" size={20} />
+            <div>
+              <h3 className="text-sm font-semibold text-blue-800 mb-1">
+                Check Product Issues
+              </h3>
+              <p className="text-sm text-blue-700">
+                To view and resolve issues for inactive or incomplete products, navigate to the <strong>Inactive</strong> or <strong>Incomplete</strong> tabs above. Each product in these tabs displays the specific issues that need to be addressed.
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Search and Filters */}
@@ -599,7 +821,7 @@ const YourProducts = () => {
         {/* Tabs */}
         <div className="bg-white rounded-t-xl shadow-sm px-4 flex gap-2 overflow-x-auto border-b border-gray-200">
           {[
-            { key: 'all', label: 'All', count: products.length },
+            { key: 'all', label: 'All', count: summary.totalProducts || 0 },
             { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
             { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
             { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 },
@@ -620,37 +842,52 @@ const YourProducts = () => {
         </div>
 
         {/* Products Table */}
-        <div className="bg-white rounded-b-xl shadow-sm overflow-hidden">
-          <div className="overflow-hidden">
-            <table className="w-full" style={{ tableLayout: 'fixed' }}>
+        <div className="bg-white rounded-b-xl shadow-sm overflow-hidden relative">
+          {/* Table loader overlay - shown when loading but not initial load (tab switch) */}
+          {/* Don't show overlay when loadingMore (Load More has its own loader row) */}
+          {loading && !isInitialLoad && !loadingMore && (
+            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+              <div className="text-center">
+                <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
+                <p className="text-sm text-gray-600">Loading products...</p>
+              </div>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ tableLayout: 'fixed', width: '100%' }}>
               <thead className="bg-gray-50">
                 <tr>
                   {/* Show different columns based on tab */}
                   {(activeTab === 'inactive' || activeTab === 'incomplete') ? (
                     <>
-                      {/* Simplified columns for inactive/incomplete tabs: SKU, ASIN, Title, Issues */}
+                      {/* Simplified columns for inactive/incomplete tabs: ASIN/SKU, Title, B2B Pricing, Issues */}
                       <th 
                         className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
-                        style={{ width: '6%' }}
-                        onClick={() => handleSort('sku')}
-                      >
-                        SKU {sortConfig.key === 'sku' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
-                        style={{ width: '10%' }}
+                        style={{ width: '14%' }}
                         onClick={() => handleSort('asin')}
                       >
-                        ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
                         className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
-                        style={{ width: '28%' }}
+                        style={{ width: '25%' }}
                         onClick={() => handleSort('title')}
                       >
                         Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '56%' }}>
+                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '8%' }}>
+                        <div className="th-with-tooltip">
+                          <span>B2B Pricing</span>
+                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                            <Info className="tooltip-icon" />
+                            <div className="tooltip-content">
+                              <strong>B2B Pricing</strong><br />
+                              Indicates whether the product has Business-to-Business (B2B) pricing enabled.
+                            </div>
+                          </div>
+                        </div>
+                      </th>
+                      <th className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '53%' }}>
                         <div className="th-with-tooltip">
                           <span>Issues</span>
                           <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
@@ -668,30 +905,37 @@ const YourProducts = () => {
                       {/* Full columns for other tabs */}
                       <th 
                         className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '11%' : '10%' }}
+                        style={{ width: activeTab === 'active' ? '10%' : '9%' }}
                         onClick={() => handleSort('asin')}
                       >
                         ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
                         className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '9%' : '8%' }}
+                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
                         onClick={() => handleSort('sku')}
                       >
                         SKU {sortConfig.key === 'sku' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
                         className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '22%' : '20%' }}
+                        style={{ width: activeTab === 'active' ? '20%' : '18%' }}
                         onClick={() => handleSort('title')}
                       >
                         Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th 
+                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                        onClick={() => handleSort('price')}
+                      >
+                        Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       {/* Status column - hidden in 'active' tab */}
                       {activeTab !== 'active' && (
                         <th 
                           className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                          style={{ width: '8%' }}
+                          style={{ width: '7%' }}
                           onClick={() => handleSort('status')}
                         >
                           Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
@@ -709,33 +953,38 @@ const YourProducts = () => {
                           </div>
                         </div>
                       </th>
-                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '9%' : '8%' }}>
+                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
                         <div className="th-with-tooltip">
-                          <span>Brand Story</span>
+                          <span>Has Videos</span>
                           <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
-                              <strong>Brand Story</strong><br />
-                              A compelling brand narrative that helps customers connect emotionally with your product and brand.
+                              <strong>Has Videos</strong><br />
+                              Indicates whether the product listing has video content available.
+                            </div>
+                          </div>
+                        </div>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
+                        <div className="th-with-tooltip">
+                          <span>B2B Pricing</span>
+                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                            <Info className="tooltip-icon" />
+                            <div className="tooltip-content">
+                              <strong>B2B Pricing</strong><br />
+                              Indicates whether the product has Business-to-Business (B2B) pricing enabled.
                             </div>
                           </div>
                         </div>
                       </th>
                       <th 
                         className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '9%' : '8%' }}
-                        onClick={() => handleSort('price')}
-                      >
-                        Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '9%' : '8%' }}
+                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
                         onClick={() => handleSort('numRatings')}
                       >
                         <div className="th-with-tooltip">
                           <span>Reviews {sortConfig.key === 'numRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
                               <strong>Reviews</strong><br />
@@ -746,12 +995,12 @@ const YourProducts = () => {
                       </th>
                       <th 
                         className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '9%' : '8%' }}
+                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
                         onClick={() => handleSort('starRatings')}
                       >
                         <div className="th-with-tooltip">
                           <span>Ratings {sortConfig.key === 'starRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
+                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
                               <strong>Ratings</strong><br />
@@ -793,34 +1042,75 @@ const YourProducts = () => {
                       return (
                         <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50/50 transition-colors border-b border-gray-100">
                           <td className="px-2 py-4 text-center align-top">
-                            <span className="text-xs font-medium text-gray-700 break-words">{product.sku || '—'}</span>
-                          </td>
-                          <td className="px-2 py-4 text-center align-top">
+                            <div className="flex flex-col gap-1 items-center">
                             <code className="text-xs font-mono text-gray-900 bg-gray-50 px-1.5 py-0.5 rounded break-all">
-                              {product.asin}
+                                {product.asin || '—'}
                             </code>
+                              <span className="text-xs font-medium text-gray-600 break-words">
+                                {product.sku || '—'}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-2 py-4 text-left align-top">
                             <span className="text-sm text-gray-900 font-medium leading-relaxed block break-words">
                               {product.title || '—'}
                             </span>
                           </td>
-                          <td className="px-2 py-4 text-left align-top">
+                          <td className="px-2 py-4 text-center align-top">
+                            {product.has_b2b_pricing ? (
+                              <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                            ) : (
+                              <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                            )}
+                          </td>
+                          <td className="px-2 py-4 text-left align-top issues-cell">
                             {issueCount > 0 ? (
-                              <div className="space-y-2">
+                              <div className="space-y-2 issues-content">
                                 {product.issues.map((issue, issueIndex) => (
                                   <div 
                                     key={issueIndex} 
-                                    className="flex items-start gap-2 p-2.5 bg-amber-50 border-l-3 border-amber-400 rounded-r-md hover:bg-amber-100/70 transition-colors"
+                                    className="flex items-start gap-2 p-2.5 bg-amber-50 border-l-3 border-amber-400 rounded-r-md hover:bg-amber-100/70 transition-colors min-w-0"
                                   >
                                     <div className="flex-shrink-0 mt-0.5">
                                       <div className="w-4 h-4 rounded-full bg-amber-200 flex items-center justify-center">
                                         <AlertTriangle size={10} className="text-amber-700" />
                                       </div>
                                     </div>
-                                    <p className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal">
-                                      {issue}
-                                    </p>
+                                    {(() => {
+                                      const { hasHTML, processedHTML } = processIssueHTML(issue);
+                                      return hasHTML ? (
+                                        <div 
+                                          className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium"
+                                          dangerouslySetInnerHTML={{ __html: processedHTML }}
+                                          onClick={(e) => {
+                                            // Prevent React Router from intercepting link clicks
+                                            const target = e.target;
+                                            // Check if clicked element is a link or inside a link
+                                            const link = target.closest('a');
+                                            if (link && link.href) {
+                                              // Check if it has the data-external-link attribute or is an external URL
+                                              const isExternalLink = link.getAttribute('data-external-link') === 'true';
+                                              const href = link.getAttribute('href');
+                                              const isExternalUrl = href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//'));
+                                              
+                                              // If it's marked as external or is an external URL, prevent React Router
+                                              if (isExternalLink || isExternalUrl) {
+                                                // Stop event propagation to prevent React Router from handling it
+                                                e.stopPropagation();
+                                                // Prevent default to handle manually if needed
+                                                e.preventDefault();
+                                                // Open the link in a new tab
+                                                window.open(href || link.href, '_blank', 'noopener,noreferrer');
+                                              }
+                                            }
+                                          }}
+                                        />
+                                      ) : (
+                                        <p className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content">
+                                          {processedHTML}
+                                        </p>
+                                      );
+                                    })()}
                                   </div>
                                 ))}
                               </div>
@@ -849,6 +1139,11 @@ const YourProducts = () => {
                             {product.title || '—'}
                           </span>
                         </td>
+                        <td className="px-2 py-3 text-center align-top">
+                          <span className="text-xs font-medium text-gray-900 whitespace-nowrap">
+                            {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
+                          </span>
+                        </td>
                         {/* Status column - hidden in 'active' tab */}
                         {activeTab !== 'active' && (
                           <td className="px-2 py-3 text-center align-top">
@@ -869,16 +1164,18 @@ const YourProducts = () => {
                           )}
                         </td>
                         <td className="px-2 py-3 text-center align-top">
-                          {product.hasBrandstory ? (
+                          {product.hasVideo ? (
                             <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
                           ) : (
                             <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
                           )}
                         </td>
                         <td className="px-2 py-3 text-center align-top">
-                          <span className="text-xs font-medium text-gray-900 whitespace-nowrap">
-                            {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
-                          </span>
+                          {product.has_b2b_pricing ? (
+                            <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                          ) : (
+                            <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                          )}
                         </td>
                         <td className="px-2 py-3 text-center align-top">
                           <span className="text-xs text-gray-600 whitespace-nowrap">
@@ -925,12 +1222,28 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      activeTab === 'all' ? 9 : 
-                      activeTab === 'active' ? 8 : 10
+                      activeTab === 'all' ? 10 : 
+                      activeTab === 'active' ? 9 : 10
                     } className="px-4 py-12 text-center text-gray-500">
                       {products.length === 0 
                         ? 'No products found. Please ensure your account is connected and data is synced.'
                         : 'No products match your current filters.'}
+                    </td>
+                  </tr>
+                )}
+                
+                {/* Loading row - shown when loading more products */}
+                {loadingMore && displayedProducts.length > 0 && (
+                  <tr>
+                    <td colSpan={
+                      (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
+                      activeTab === 'all' ? 9 : 
+                      activeTab === 'active' ? 8 : 9
+                    } className="px-4 py-8 text-center bg-gray-50">
+                      <div className="flex items-center justify-center gap-3">
+                        <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-sm text-gray-600">Loading more products...</span>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -939,34 +1252,25 @@ const YourProducts = () => {
           </div>
 
           {/* Load More */}
-          {hasMoreFromBackend && (
+          {hasMoreFromBackend && !loadingMore && (
             <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center gap-4">
               <span className="text-sm text-gray-500">
-                Showing {products.length} of {summary.totalProducts || pagination.totalItems || products.length} products
+                Showing {products.length} of {pagination.totalItems || products.length} products
               </span>
               <button
                 onClick={handleLoadMoreFromBackend}
                 disabled={loadingMore}
                 className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loadingMore ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Loading...
-                  </>
-                ) : (
-                  <>
-                    Load More
-                    <ChevronDown size={16} />
-                  </>
-                )}
+                Load More
+                <ChevronDown size={16} />
               </button>
             </div>
           )}
           {!hasMoreFromBackend && products.length > 0 && (
             <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center">
               <span className="text-sm text-gray-500">
-                Showing all {summary.totalProducts || products.length} products
+                Showing all {pagination.totalItems || products.length} products
               </span>
             </div>
           )}

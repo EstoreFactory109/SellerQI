@@ -277,75 +277,151 @@ export const fetchInventoryData = createAsyncThunk(
 
 export const fetchYourProductsData = createAsyncThunk(
     'pageData/fetchYourProducts',
-    async ({ page = 1, limit = 20, summaryOnly = false, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, summaryOnly = false, append = false, status = undefined, reset = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existingData = state.pageData?.yourProducts?.data;
             const lastFetched = state.pageData?.yourProducts?.lastFetched;
             
+            // If reset is true, always fetch fresh data (bypass cache)
+            // Otherwise, check cache first before fetching
+            if (reset) {
+                console.log('[Redux] Reset flag set - fetching fresh data from database');
+                const response = await axiosInstance.get('/api/pagewise/your-products', {
+                    params: { page, limit, summaryOnly, status }
+                });
+                return { ...response.data.data, currentStatus: status, fromCache: false };
+            }
+            
+            // Check cache BEFORE fetching - only fetch if data doesn't exist or is stale
+            // For page 1 requests (initial load or tab switch), check if we have cached data for this status
+            if (page === 1 && !append) {
+                const hasCachedData = existingData && 
+                                    existingData.products && 
+                                    Array.isArray(existingData.products) && 
+                                    existingData.products.length > 0;
+                
+                const statusMatches = existingData?.currentStatus === status;
+                const isRecent = lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000;
+                
+                // If we have cached data for this exact status and it's recent, return it
+                if (hasCachedData && statusMatches && isRecent && existingData.issuesData !== undefined) {
+                    console.log('[Redux] Using cached data from Redux (no database call):', {
+                        status,
+                        productsCount: existingData.products.length,
+                        lastFetched: new Date(lastFetched).toISOString(),
+                        ageMinutes: ((Date.now() - lastFetched) / 1000 / 60).toFixed(2)
+                    });
+                    return { ...existingData, fromCache: true };
+                }
+                
+                // If we don't have data or status doesn't match or data is stale, fetch from database
+                console.log('[Redux] Cache miss - fetching from database:', {
+                    hasCachedData,
+                    statusMatches,
+                    isRecent,
+                    requestedStatus: status,
+                    cachedStatus: existingData?.currentStatus
+                });
+            }
+            
             // IMPORTANT: When append is true (Load More), ALWAYS fetch from backend - NEVER use cache
             if (append) {
-                // Fetch the requested page from backend
+                // Fetch the requested page from backend with status filter
+                // IMPORTANT: Ensure we're passing the correct page number to the backend
+                console.log('[Redux] Load More - Fetching page:', {
+                    requestedPage: page,
+                    limit,
+                    status,
+                    existingProductsCount: existingData?.products?.length || 0,
+                    existingPage: existingData?.pagination?.page || 1
+                });
+                
                 const response = await axiosInstance.get('/api/pagewise/your-products', {
-                    params: { page, limit, summaryOnly }
+                    params: { page, limit, summaryOnly, status }
                 });
                 
                 const newData = response.data.data;
                 
-                // Merge with existing products (deduplicated)
-                if (existingData && existingData.products) {
+                // Always merge when append is true - we're loading the next page
+                // The backend returns only the requested page (e.g., page 2 = products 21-40)
+                // We need to append these to existing products (e.g., products 1-20)
+                // existingData should always exist when append is true (we're loading more of existing data)
+                if (existingData && existingData.products && Array.isArray(existingData.products) && existingData.products.length > 0) {
                     const existingKeys = new Set(
                         existingData.products.map(p => `${p.asin}-${p.sku}`)
                     );
                     
-                    const uniqueNewProducts = newData.products.filter(
+                    // Filter out duplicates (in case backend returns some overlap)
+                    const uniqueNewProducts = (newData.products || []).filter(
                         p => !existingKeys.has(`${p.asin}-${p.sku}`)
                     );
                     
+                    // Merge: existing products + new unique products
                     const mergedProducts = [...existingData.products, ...uniqueNewProducts];
-                    const totalItems = newData.pagination?.totalItems || newData.summary?.totalProducts || 0;
+                    const totalItems = newData.pagination?.totalItems || 0;
+                    
+                    // Verify we got new products
+                    if (uniqueNewProducts.length === 0 && newData.products && newData.products.length > 0) {
+                        console.warn('[Redux] Load More - All new products were duplicates!', {
+                            requestedPage: page,
+                            backendReturnedCount: newData.products.length,
+                            existingCount: existingData.products.length,
+                            lastExistingAsin: existingData.products[existingData.products.length - 1]?.asin,
+                            firstNewAsin: newData.products[0]?.asin
+                        });
+                    }
+                    
+                console.log('[Redux] Load More - Merging products:', {
+                    hasExistingData: !!existingData,
+                    existingCount: existingData.products.length,
+                    newCount: newData.products?.length || 0,
+                    uniqueNewCount: uniqueNewProducts.length,
+                    mergedCount: mergedProducts.length,
+                    totalItems,
+                    requestedPage: page,
+                    backendReturnedPage: newData.pagination?.page,
+                    status,
+                    lastExistingAsin: existingData.products[existingData.products.length - 1]?.asin,
+                    firstNewAsin: uniqueNewProducts[0]?.asin,
+                    lastNewAsin: uniqueNewProducts[uniqueNewProducts.length - 1]?.asin
+                });
                     
                     return {
                         ...newData,
-                        products: mergedProducts,
+                        products: mergedProducts, // Merged products list
+                        currentStatus: status || existingData.currentStatus, // Preserve or set status
                         pagination: {
                             ...newData.pagination,
-                            page: page,
+                            page: page, // Use the requested page number (should match backend response)
+                            totalItems: totalItems, // Keep the filtered total
                             hasMore: mergedProducts.length < totalItems
                         },
+                        summary: newData.summary || existingData.summary, // Preserve summary
                         issuesData: existingData.issuesData || newData.issuesData,
                         fromCache: false
                     };
                 }
                 
-                return { ...newData, fromCache: false };
+                // If no existing data, just return new data (shouldn't happen in normal flow)
+                console.warn('[Redux] Load More - No existing data to merge with', {
+                    hasExistingData: !!existingData,
+                    hasProducts: !!existingData?.products,
+                    isArray: Array.isArray(existingData?.products),
+                    productsLength: existingData?.products?.length || 0
+                });
+                return { ...newData, currentStatus: status, fromCache: false };
             }
             
-            // Cache logic for non-append requests (initial page load):
-            // Only use cache if ALL products are already loaded
-            if (page === 1 && lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000 && existingData && existingData.issuesData !== undefined) {
-                const totalProducts = existingData.summary?.totalProducts || 0;
-                const loadedProducts = existingData.products?.length || 0;
-                
-                // Only return full cache if ALL products are loaded
-                if (loadedProducts >= totalProducts && totalProducts > 0) {
-                    return { ...existingData, fromCache: true };
-                }
-                // If partial data exists, still return it (will show Load More button)
-                if (loadedProducts > 0) {
-                    return { ...existingData, fromCache: true };
-                }
-            }
-            
-            // Fetch from backend for initial load
+            // Fetch from backend for initial load (cache check already done above for page 1)
             const response = await axiosInstance.get('/api/pagewise/your-products', {
-                params: { page, limit, summaryOnly }
+                params: { page, limit, summaryOnly, status }
             });
             
             const newData = response.data.data;
             
             // Return fresh data for initial load (append is handled at the top)
-            return { ...newData, fromCache: false };
+            return { ...newData, currentStatus: status, fromCache: false };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch your products data');
         }

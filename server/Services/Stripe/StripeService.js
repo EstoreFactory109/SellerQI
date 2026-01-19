@@ -421,6 +421,22 @@ class StripeService {
      */
     async addPaymentHistory(userId, paymentData) {
         try {
+            // Check if payment already exists to prevent duplicates
+            const subscription = await Subscription.findOne({ userId });
+            
+            if (subscription && subscription.paymentHistory) {
+                // Check for duplicate by sessionId or stripePaymentIntentId
+                const existingPayment = subscription.paymentHistory.find(payment => 
+                    (paymentData.sessionId && payment.sessionId === paymentData.sessionId) ||
+                    (paymentData.stripePaymentIntentId && payment.stripePaymentIntentId === paymentData.stripePaymentIntentId)
+                );
+                
+                if (existingPayment) {
+                    logger.info(`Payment already exists in history for user ${userId}, sessionId: ${paymentData.sessionId || 'N/A'}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}, skipping duplicate`);
+                    return;
+                }
+            }
+            
             await Subscription.findOneAndUpdate(
                 { userId },
                 { 
@@ -429,6 +445,8 @@ class StripeService {
                     } 
                 }
             );
+            
+            logger.info(`Payment added to history for user ${userId}, sessionId: ${paymentData.sessionId || 'N/A'}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}`);
         } catch (error) {
             logger.error('Error adding payment history:', error);
         }

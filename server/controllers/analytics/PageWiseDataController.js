@@ -705,9 +705,12 @@ const getYourProductsData = asyncHandler(async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const summaryOnly = req.query.summaryOnly === 'true';
+    
+    // Status filter parameter (optional): 'Active', 'Inactive', 'Incomplete', or undefined (all)
+    const statusFilter = req.query.status || undefined;
 
     try {
-        logger.info(`Getting Your Products data for user ${userId}, region ${Region}, country ${Country}, page ${page}, limit ${limit}`);
+        logger.info(`Getting Your Products data for user ${userId}, region ${Region}, country ${Country}, page ${page}, limit ${limit}, status: ${statusFilter || 'all'}`);
 
         // Get seller data with products
         const seller = await Seller.findOne({ User: userId });
@@ -745,6 +748,23 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             else if (p.status === 'Inactive') inactiveProducts++;
             else if (p.status === 'Incomplete') incompleteProducts++;
         });
+        
+        // Filter products by status BEFORE pagination (if status filter is provided)
+        let filteredProducts = allProducts;
+        if (statusFilter && ['Active', 'Inactive', 'Incomplete'].includes(statusFilter)) {
+            filteredProducts = allProducts.filter(p => p.status === statusFilter);
+        }
+        
+        // IMPORTANT: Sort products consistently before pagination to ensure stable pagination
+        // Sort by ASIN (ascending) to ensure the same products appear on the same page
+        // This prevents pagination issues where the same page returns different products
+        filteredProducts.sort((a, b) => {
+            const asinA = (a.asin || '').toUpperCase();
+            const asinB = (b.asin || '').toUpperCase();
+            return asinA.localeCompare(asinB);
+        });
+        
+        const filteredTotal = filteredProducts.length;
 
         // If only summary is requested, return early without processing all product details
         if (summaryOnly) {
@@ -774,6 +794,38 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     }
                 });
             }
+            
+            // Check if any active product has brand story
+            let hasBrandStory = false;
+            const [productReviewsWithRegion, productReviewsWithoutRegion] = await Promise.all([
+                NumberOfProductReviews.findOne({
+                    User: userId,
+                    region: Region,
+                    country: Country
+                }).sort({ createdAt: -1 }).lean(),
+                NumberOfProductReviews.findOne({
+                    User: userId
+                }).sort({ createdAt: -1 }).lean()
+            ]);
+            
+            const productReviews = productReviewsWithRegion || productReviewsWithoutRegion;
+            if (productReviews && productReviews.Products) {
+                // Create a set of active product ASINs for quick lookup
+                const activeProductAsinSet = new Set(
+                    allProducts
+                        .filter(p => p.status === 'Active')
+                        .map(p => (p.asin || '').toUpperCase())
+                );
+                
+                // Check if any active product has brand story
+                for (const product of productReviews.Products) {
+                    const asinKey = (product.asin || '').toUpperCase();
+                    if (activeProductAsinSet.has(asinKey) && product.has_brandstory === true) {
+                        hasBrandStory = true;
+                        break; // Found one, no need to check further
+                    }
+                }
+            }
 
             return res.status(200).json(
                 new ApiResponse(200, {
@@ -784,7 +836,8 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                         inactiveProducts,
                         incompleteProducts,
                         productsWithAPlus,
-                        productsWithoutAPlus: totalProducts - productsWithAPlus
+                        productsWithoutAPlus: totalProducts - productsWithAPlus,
+                        hasBrandStory: hasBrandStory
                     },
                     pagination: {
                         page,
@@ -799,53 +852,82 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             );
         }
 
-        // Apply pagination to products
+        // Apply pagination to FILTERED products (not all products)
         const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
-        const paginatedProducts = allProducts.slice(startIndex, endIndex);
+        const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+        
+        // Debug logging for pagination
+        logger.info(`[getYourProductsData] Pagination details:`, {
+            page,
+            limit,
+            filteredTotal,
+            startIndex,
+            endIndex,
+            paginatedCount: paginatedProducts.length,
+            firstAsin: paginatedProducts[0]?.asin,
+            lastAsin: paginatedProducts[paginatedProducts.length - 1]?.asin,
+            statusFilter: statusFilter || 'all'
+        });
 
-        // Get product reviews data - try multiple query approaches
-        // First try with region and country, sorted by createdAt to get latest
-        let productReviews = await NumberOfProductReviews.findOne({
-            User: userId,
-            region: Region,
-            country: Country
-        }).sort({ createdAt: -1 });
-
-        // If not found, try just by user (some records might not have region/country)
-        if (!productReviews) {
-            productReviews = await NumberOfProductReviews.findOne({
+        // Get product reviews data - OPTIMIZATION: Run both queries in parallel with fallback
+        const [productReviewsWithRegion, productReviewsWithoutRegion, aPlusContentWithRegion, aPlusContentWithoutRegion] = await Promise.all([
+            NumberOfProductReviews.findOne({
+                User: userId,
+                region: Region,
+                country: Country
+            }).sort({ createdAt: -1 }).lean(),
+            NumberOfProductReviews.findOne({
                 User: userId
-            }).sort({ createdAt: -1 });
-        }
-
-        // Get A+ content data from APlusContent model
-        let aPlusContent = await APlusContent.findOne({
-            User: userId,
-            region: Region,
-            country: Country
-        }).sort({ createdAt: -1 });
-
-        // If not found, try just by user
-        if (!aPlusContent) {
-            aPlusContent = await APlusContent.findOne({
+            }).sort({ createdAt: -1 }).lean(),
+            APlusContent.findOne({
+                User: userId,
+                region: Region,
+                country: Country
+            }).sort({ createdAt: -1 }).lean(),
+            APlusContent.findOne({
                 User: userId
-            }).sort({ createdAt: -1 });
-        }
+            }).sort({ createdAt: -1 }).lean()
+        ]);
+
+        // Use the one with region/country if available, otherwise fallback
+        const productReviews = productReviewsWithRegion || productReviewsWithoutRegion;
+        const aPlusContent = aPlusContentWithRegion || aPlusContentWithoutRegion;
 
         // Create a map for quick lookup of reviews by ASIN
         const reviewsMap = new Map();
         if (productReviews && productReviews.Products) {
             productReviews.Products.forEach(product => {
                 const asinKey = product.asin?.toUpperCase() || '';
+                const videoUrls = product.video_url || [];
                 reviewsMap.set(asinKey, {
                     numRatings: product.product_num_ratings || '0',
                     starRatings: product.product_star_ratings || '0',
                     title: product.product_title || '',
                     photos: product.product_photos || [],
-                    hasBrandstory: product.has_brandstory || false
+                    hasVideo: Array.isArray(videoUrls) && videoUrls.length > 0
                 });
             });
+        }
+        
+        // Check if any active product has brand story
+        let hasBrandStory = false;
+        if (productReviews && productReviews.Products) {
+            // Create a set of active product ASINs for quick lookup
+            const activeProductAsinSet = new Set(
+                allProducts
+                    .filter(p => p.status === 'Active')
+                    .map(p => (p.asin || '').toUpperCase())
+            );
+            
+            // Check if any active product has brand story
+            for (const product of productReviews.Products) {
+                const asinKey = (product.asin || '').toUpperCase();
+                if (activeProductAsinSet.has(asinKey) && product.has_brandstory === true) {
+                    hasBrandStory = true;
+                    break; // Found one, no need to check further
+                }
+            }
         }
 
         // Create a map for A+ content status by ASIN
@@ -889,44 +971,54 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 starRatings: reviewData.starRatings || '0',
                 hasAPlus: hasAPlusContent,
                 aPlusStatus: aPlusStatus || 'Not Available',
-                hasBrandstory: reviewData.hasBrandstory || false,
+                hasVideo: reviewData.hasVideo || false,
                 image: reviewData.photos && reviewData.photos.length > 0 ? reviewData.photos[0] : null,
                 updatedAt: product.updatedAt || null,
-                issues: product.issues || [] // Include issues from seller model for inactive/incomplete products
+                issues: product.issues || [], // Include issues from seller model for inactive/incomplete products
+                has_b2b_pricing: product.has_b2b_pricing || false // Include B2B pricing status
             };
         });
 
-        const totalPages = Math.ceil(totalProducts / limit);
+        // Calculate pagination based on FILTERED products, not all products
+        const totalPages = Math.ceil(filteredTotal / limit);
         const hasMore = page < totalPages;
 
         // Get issues data for frontend calculation (same as IssuesByProduct page)
+        // OPTIMIZATION: Only load issues data for Active products (not needed for inactive/incomplete)
+        // Also make it optional via query parameter to allow skipping for faster loads
         let issuesData = null;
-        try {
-            logger.info('[getYourProductsData] Fetching issues data...');
-            const analyseResult = await AnalyseService.Analyse(userId, Country, Region, null);
-            logger.info('[getYourProductsData] AnalyseService result status:', analyseResult?.status);
-            
-            if (analyseResult && analyseResult.status === 200 && analyseResult.message) {
-                const calculatedData = await analyseData(analyseResult.message, userId);
-                logger.info('[getYourProductsData] calculatedData exists:', !!calculatedData);
-                logger.info('[getYourProductsData] dashboardData exists:', !!calculatedData?.dashboardData);
+        const includeIssues = req.query.includeIssues !== 'false' && statusFilter === 'Active';
+        
+        if (includeIssues) {
+            try {
+                logger.info('[getYourProductsData] Fetching issues data for Active products...');
+                const analyseResult = await AnalyseService.Analyse(userId, Country, Region, null);
+                logger.info('[getYourProductsData] AnalyseService result status:', analyseResult?.status);
                 
-                if (calculatedData && calculatedData.dashboardData) {
-                    const dashboardData = calculatedData.dashboardData;
-                    issuesData = {
-                        rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
-                        TotalProduct: dashboardData.TotalProduct || [],
-                        buyBoxData: dashboardData.buyBoxData || {}
-                    };
-                    logger.info('[getYourProductsData] issuesData populated:', {
-                        rankingCount: issuesData.rankingProductWiseErrors.length,
-                        totalProductCount: issuesData.TotalProduct.length,
-                        hasBuyBoxData: !!issuesData.buyBoxData?.asinBuyBoxData
-                    });
+                if (analyseResult && analyseResult.status === 200 && analyseResult.message) {
+                    const calculatedData = await analyseData(analyseResult.message, userId);
+                    logger.info('[getYourProductsData] calculatedData exists:', !!calculatedData);
+                    logger.info('[getYourProductsData] dashboardData exists:', !!calculatedData?.dashboardData);
+                    
+                    if (calculatedData && calculatedData.dashboardData) {
+                        const dashboardData = calculatedData.dashboardData;
+                        issuesData = {
+                            rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
+                            TotalProduct: dashboardData.TotalProduct || [],
+                            buyBoxData: dashboardData.buyBoxData || {}
+                        };
+                        logger.info('[getYourProductsData] issuesData populated:', {
+                            rankingCount: issuesData.rankingProductWiseErrors.length,
+                            totalProductCount: issuesData.TotalProduct.length,
+                            hasBuyBoxData: !!issuesData.buyBoxData?.asinBuyBoxData
+                        });
+                    }
                 }
+            } catch (issueError) {
+                logger.warn('Could not fetch issues data for YourProducts:', issueError.message);
             }
-        } catch (issueError) {
-            logger.warn('Could not fetch issues data for YourProducts:', issueError.message);
+        } else {
+            logger.info('[getYourProductsData] Skipping issues data (not needed for inactive/incomplete products or explicitly disabled)');
         }
 
         return res.status(200).json(
@@ -938,12 +1030,13 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                     inactiveProducts,
                     incompleteProducts,
                     productsWithAPlus,
-                    productsWithoutAPlus: totalProducts - productsWithAPlus
+                    productsWithoutAPlus: totalProducts - productsWithAPlus,
+                    hasBrandStory: hasBrandStory
                 },
                 pagination: {
                     page,
                     limit,
-                    totalItems: totalProducts,
+                    totalItems: filteredTotal, // Use filtered total for pagination
                     totalPages,
                     hasMore
                 },

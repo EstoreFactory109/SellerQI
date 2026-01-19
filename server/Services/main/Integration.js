@@ -1395,6 +1395,19 @@ class Integration {
                 });
             }
             
+            // Update B2B pricing for active products
+            const b2bPricingData = genericKeyWordArray
+                .filter(item => item && item.has_b2b_pricing !== undefined)
+                .map(item => ({
+                    sku: item.sku,
+                    asin: item.asin,
+                    has_b2b_pricing: item.has_b2b_pricing
+                }));
+            
+            if (b2bPricingData.length > 0) {
+                await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
+            }
+            
             logger.info("processListingItems ended");
         } catch (listingError) {
             logger.error("Error during listing items processing", {
@@ -1500,9 +1513,22 @@ class Integration {
                 }
             }
 
-            // Update Seller model with issues for each inactive SKU
+            // Update Seller model with issues and B2B pricing for each inactive SKU
             if (issuesDataArray.length > 0) {
                 await this.updateSellerProductIssues(userId, Country, Region, issuesDataArray);
+                
+                // Update B2B pricing for inactive products
+                const b2bPricingData = issuesDataArray
+                    .filter(item => item && item.has_b2b_pricing !== undefined)
+                    .map(item => ({
+                        sku: item.sku,
+                        asin: item.asin,
+                        has_b2b_pricing: item.has_b2b_pricing
+                    }));
+                
+                if (b2bPricingData.length > 0) {
+                    await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
+                }
             }
 
             if (loggingHelper) {
@@ -1525,6 +1551,68 @@ class Integration {
         }
 
         return issuesDataArray;
+    }
+
+    /**
+     * Update Seller model with B2B pricing for products
+     */
+    static async updateSellerProductB2BPricing(userId, Country, Region, b2bPricingDataArray) {
+        logger.info("updateSellerProductB2BPricing starting", {
+            b2bPricingCount: b2bPricingDataArray.length
+        });
+
+        try {
+            const sellerDetails = await Seller.findOne({ User: userId });
+            
+            if (!sellerDetails) {
+                logger.error("Seller not found for updating B2B pricing", { userId });
+                return false;
+            }
+
+            // Find the matching seller account
+            const accountIndex = sellerDetails.sellerAccount.findIndex(
+                account => account.country === Country && account.region === Region
+            );
+
+            if (accountIndex === -1) {
+                logger.error("Seller account not found for country/region", { userId, Country, Region });
+                return false;
+            }
+
+            // Create a map of SKU to B2B pricing for quick lookup
+            const b2bPricingMap = new Map();
+            b2bPricingDataArray.forEach(item => {
+                if (item && item.sku && item.has_b2b_pricing !== undefined) {
+                    b2bPricingMap.set(item.sku, item.has_b2b_pricing);
+                }
+            });
+
+            // Update the products array with B2B pricing
+            const products = sellerDetails.sellerAccount[accountIndex].products;
+            let updatedCount = 0;
+
+            products.forEach(product => {
+                if (b2bPricingMap.has(product.sku)) {
+                    product.has_b2b_pricing = b2bPricingMap.get(product.sku);
+                    updatedCount++;
+                }
+            });
+
+            await sellerDetails.save();
+
+            logger.info("updateSellerProductB2BPricing ended", {
+                updatedCount,
+                totalProducts: products.length
+            });
+
+            return true;
+        } catch (error) {
+            logger.error("Error updating seller product B2B pricing", {
+                error: error.message,
+                userId
+            });
+            return false;
+        }
     }
 
     /**

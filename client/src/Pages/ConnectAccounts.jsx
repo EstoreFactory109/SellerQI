@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Store, 
@@ -14,6 +14,9 @@ import axiosInstance from '../config/axios.config.js';
 import { isSpApiConnected, isSpApiConnectedFromAccounts } from '../utils/spApiConnectionCheck.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
+import { detectCountry } from '../utils/countryDetection.js';
+import stripeService from '../services/stripeService.js';
+import razorpayService from '../services/razorpayService.js';
 
 // Marketplace configuration mapping
 const MARKETPLACE_CONFIG = {
@@ -154,6 +157,9 @@ const ConnectAccounts = () => {
   const [isSpApiConnectedState, setIsSpApiConnectedState] = useState(false);
   const [checkingSpApi, setCheckingSpApi] = useState(true);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
+  const [waitingForAnalysis, setWaitingForAnalysis] = useState(false);
+  const pollingRef = useRef(null);
+  const timeoutRef = useRef(null);
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -499,6 +505,222 @@ const ConnectAccounts = () => {
     navigate('/seller-central-checker/dashboard');
   };
 
+  // Wait for integration job to start (status becomes 'active')
+  const waitForJobToStart = async (jobId) => {
+    return new Promise((resolve) => {
+      const maxWaitTime = 30000; // 30 seconds max
+      const pollInterval = 2000; // Check every 2 seconds
+      const startTime = Date.now();
+      
+      const checkStatus = async () => {
+        try {
+          const statusResponse = await axiosInstance.get(`/api/integration/status/${jobId}`);
+          const status = statusResponse.data.data.status?.toLowerCase();
+          
+          console.log(`[ConnectAccounts] Job status check: ${status}`);
+          
+          if (status === 'active' || status === 'running') {
+            // Job started - clear polling and resolve
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.log('[ConnectAccounts] Job has started processing');
+            resolve(true);
+            return;
+          }
+          
+          if (status === 'completed') {
+            // Job done - clear and resolve
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.log('[ConnectAccounts] Job already completed');
+            resolve(true);
+            return;
+          }
+          
+          if (status === 'failed') {
+            // Job failed - clear and resolve (proceed anyway)
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.error('[ConnectAccounts] Job failed');
+            resolve(true); // Proceed anyway
+            return;
+          }
+          
+          // Check timeout
+          if (Date.now() - startTime >= maxWaitTime) {
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            console.warn('[ConnectAccounts] Timeout waiting for job to start, proceeding anyway');
+            resolve(true); // Proceed anyway
+            return;
+          }
+        } catch (error) {
+          console.error('[ConnectAccounts] Error checking job status:', error);
+          // On error, proceed anyway (don't block user)
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          resolve(true);
+        }
+      };
+      
+      // Start polling
+      pollingRef.current = setInterval(checkStatus, pollInterval);
+      
+      // Check immediately
+      checkStatus();
+      
+      // Set timeout as backup
+      timeoutRef.current = setTimeout(() => {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        resolve(true);
+      }, maxWaitTime);
+    });
+  };
+
+  // Navigate to payment based on country
+  const navigateToPayment = async () => {
+    try {
+      // Detect user's country
+      const country = await detectCountry();
+      const isIndianUser = country === 'IN';
+      
+      console.log(`[ConnectAccounts] Detected country: ${country}, navigating to payment...`);
+      
+      if (isIndianUser) {
+        // India: Use Razorpay with 7-day trial
+        setWaitingForAnalysis(false);
+        await razorpayService.initiatePayment(
+          'PRO',
+          // Success callback
+          (result) => {
+            console.log('Razorpay trial started:', result);
+            navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
+          },
+          // Error callback
+          (error) => {
+            console.error('Razorpay trial failed:', error);
+            if (error.message !== 'Payment cancelled by user') {
+              alert(error.message || 'Failed to start free trial. Please try again.');
+            }
+            setWaitingForAnalysis(false);
+          },
+          7 // 7-day trial period
+        );
+      } else {
+        // US/Other: Use Stripe checkout with 7-day trial
+        setWaitingForAnalysis(false);
+        await stripeService.createCheckoutSession('PRO', null, 7);
+        // stripeService will handle the redirect to Stripe
+      }
+    } catch (error) {
+      console.error('[ConnectAccounts] Error navigating to payment:', error);
+      setWaitingForAnalysis(false);
+      // Don't block user - they can proceed manually
+    }
+  };
+
+  // Handle skip button click
+  const handleSkip = async () => {
+    if (!isSpApiConnectedState || checkingSpApi) {
+      return; // Should not happen due to disabled state, but safety check
+    }
+
+    try {
+      console.log('[ConnectAccounts] Skip clicked - triggering integration job...');
+      setWaitingForAnalysis(true);
+      
+      let jobId = null;
+      
+      // First check if there's an active job
+      const activeResponse = await axiosInstance.get('/api/integration/active');
+      
+      if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
+        // Job already exists
+        jobId = activeResponse.data.data.jobId;
+        const existingStatus = activeResponse.data.data.status?.toLowerCase();
+        console.log('[ConnectAccounts] Active job already exists:', existingStatus);
+        
+        // If already active or completed, proceed immediately
+        if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'completed') {
+          await navigateToPayment();
+          return;
+        }
+      } else {
+        // No active job, trigger new one
+        const triggerResponse = await axiosInstance.post('/api/integration/trigger');
+        
+        if (triggerResponse.status === 202 || triggerResponse.status === 200) {
+          jobId = triggerResponse.data.data.jobId;
+          console.log('[ConnectAccounts] Integration job triggered successfully, jobId:', jobId);
+        } else {
+          throw new Error('Failed to trigger integration job');
+        }
+      }
+      
+      // Wait for job to start (status becomes 'active')
+      if (jobId) {
+        console.log('[ConnectAccounts] Waiting for job to start...');
+        await waitForJobToStart(jobId);
+        console.log('[ConnectAccounts] Job started, navigating to payment...');
+        await navigateToPayment();
+      } else {
+        throw new Error('No job ID received');
+      }
+    } catch (error) {
+      console.error('[ConnectAccounts] Error in skip flow:', error);
+      setWaitingForAnalysis(false);
+      // Don't block user - they can proceed manually
+      alert('Analysis started but payment setup failed. You can continue and set up payment later.');
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
+
   // Show loading state while checking subscription
   if (checkingSubscription) {
     return (
@@ -662,10 +884,26 @@ const ConnectAccounts = () => {
                 <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div className="text-sm text-blue-800">
                   <p className="font-medium mb-1">Secure Connection</p>
-                  <p className="text-blue-700">Your data is encrypted and securely stored. We use Amazon's official APIs and never store your login credentials.</p>
+                  <p className="text-blue-700">Your data is encrypted and securely stored. We connect directly to Amazon's secure systems and never store your login credentials.</p>
                 </div>
               </div>
             </motion.div>
+
+            {/* Waiting for Analysis Banner */}
+            {waitingForAnalysis && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center mt-4"
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                  <p className="text-blue-600 text-sm font-medium">
+                    Starting analysis... Please wait
+                  </p>
+                </div>
+              </motion.div>
+            )}
 
             {/* Navigation Links */}
             <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
@@ -678,16 +916,30 @@ const ConnectAccounts = () => {
               </button>
               <button
                 type="button"
-                onClick={()=>navigate('/analyse-account')}
-                disabled={!isSpApiConnectedState || checkingSpApi}
-                className={`text-sm font-semibold transition-colors flex items-center gap-1 ${
-                  !isSpApiConnectedState || checkingSpApi
-                    ? 'text-gray-400 cursor-not-allowed'
-                    : 'text-[#3B4A6B] hover:text-[#2d3a52] hover:underline'
+                onClick={handleSkip}
+                disabled={!isSpApiConnectedState || checkingSpApi || waitingForAnalysis}
+                className={`px-4 py-2.5 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center gap-2 ${
+                  !isSpApiConnectedState || checkingSpApi || waitingForAnalysis
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-[#3B4A6B] to-[#2d3a52] text-white hover:from-[#2d3a52] hover:to-[#1f2937] shadow-md hover:shadow-lg transform hover:scale-[1.02] active:scale-[0.98]'
                 }`}
               >
-                {checkingSpApi ? 'Checking...' : 'Skip for Now'}
-                <ArrowRight className="w-4 h-4" />
+                {waitingForAnalysis ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Starting analysis...</span>
+                  </>
+                ) : checkingSpApi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Checking...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Don't have Ads Profile, continue</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
 

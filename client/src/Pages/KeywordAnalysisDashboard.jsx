@@ -707,7 +707,7 @@ const KeywordAnalysisDashboard = () => {
         .table-container {
           background: white;
           border-radius: 0 0 12px 12px;
-          overflow-x: auto;
+          overflow-x: hidden;
           overflow-y: visible;
           box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
@@ -715,6 +715,7 @@ const KeywordAnalysisDashboard = () => {
         table {
           width: 100%;
           border-collapse: collapse;
+          table-layout: fixed;
         }
         
         thead {
@@ -732,6 +733,9 @@ const KeywordAnalysisDashboard = () => {
           letter-spacing: 0.5px;
           cursor: pointer;
           user-select: none;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
         
         th:hover {
@@ -743,6 +747,9 @@ const KeywordAnalysisDashboard = () => {
           border-top: 1px solid #e2e8f0;
           font-size: 14px;
           text-align: center;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
         
         tbody tr:hover {
@@ -752,6 +759,9 @@ const KeywordAnalysisDashboard = () => {
         .keyword-cell {
           font-weight: 500;
           color: #1e293b;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
         
         .badge {
@@ -1235,10 +1245,10 @@ const KeywordAnalysisDashboard = () => {
           <table>
             <thead>
               <tr>
-                <th onClick={() => handleSort('keyword')}>
+                <th style={{ width: '30%' }} onClick={() => handleSort('keyword')}>
                   Keyword {sortConfig.key === 'keyword' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                 </th>
-                <th onClick={() => handleSort('rank')}>
+                <th style={{ width: '15%' }} onClick={() => handleSort('rank')}>
                   <div className="th-with-tooltip">
                     <span>Relevance Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
                     <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
@@ -1250,7 +1260,7 @@ const KeywordAnalysisDashboard = () => {
                     </div>
                   </div>
                 </th>
-                <th onClick={() => handleSort('searchTermImpressionShare')}>
+                <th style={{ width: '18%' }} onClick={() => handleSort('searchTermImpressionShare')}>
                   <div className="th-with-tooltip">
                     <span>High Impression Share {sortConfig.key === 'searchTermImpressionShare' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
                     <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
@@ -1262,7 +1272,7 @@ const KeywordAnalysisDashboard = () => {
                     </div>
                   </div>
                 </th>
-                <th onClick={() => handleSort('searchTermImpressionRank')}>
+                <th style={{ width: '15%' }} onClick={() => handleSort('searchTermImpressionRank')}>
                   <div className="th-with-tooltip">
                     <span>Impression Rank {sortConfig.key === 'searchTermImpressionRank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
                     <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
@@ -1274,7 +1284,7 @@ const KeywordAnalysisDashboard = () => {
                     </div>
                   </div>
                 </th>
-                <th>
+                <th style={{ width: '22%' }}>
                   <div className="th-with-tooltip">
                     <span>Suggested Bid Range</span>
                     <div className="tooltip-container tooltip-last">

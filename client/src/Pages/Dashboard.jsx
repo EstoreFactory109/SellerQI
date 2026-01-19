@@ -27,22 +27,54 @@ const Dashboard = () => {
   
   // Reset scroll position when navigating to Dashboard
   useEffect(() => {
-    // Small delay to ensure DOM is ready
-    const timer = setTimeout(() => {
-      // Reset scroll position of the main content area (Dashboard's own scroll container)
-      if (contentRef.current) {
-        contentRef.current.scrollTop = 0
+    // Only reset scroll when navigating to Dashboard
+    if (location.pathname.includes('/dashboard') || location.pathname === '/seller-central-checker/dashboard') {
+      // Use requestAnimationFrame to ensure DOM is ready
+      const resetScroll = () => {
+        // Reset scroll position of the main content area (Dashboard's own scroll container)
+        if (contentRef.current) {
+          contentRef.current.scrollTop = 0
+        }
+        // Also reset the parent scroll container (MainPagesLayout's scrollable div)
+        // Try multiple selectors to find the scroll container
+        const selectors = [
+          'div.flex-1.overflow-y-auto.scrollbar-hide',
+          'div.flex-1.overflow-y-auto',
+          'section.flex-1 div.overflow-y-auto'
+        ]
+        
+        for (const selector of selectors) {
+          const parentScrollContainer = document.querySelector(selector)
+          if (parentScrollContainer) {
+            parentScrollContainer.scrollTop = 0
+            break
+          }
+        }
+        
+        // Reset window scroll (in case of any window-level scrolling)
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        
+        // Also reset any nested scrollable containers
+        const nestedScrollContainers = document.querySelectorAll('[class*="overflow-y-auto"], [class*="overflow-auto"]')
+        nestedScrollContainers.forEach(container => {
+          if (container.scrollTop > 0) {
+            container.scrollTop = 0
+          }
+        })
       }
-      // Also reset the parent scroll container (MainPagesLayout's scrollable div)
-      const parentScrollContainer = document.querySelector('section.flex-1.overflow-y-auto')
-      if (parentScrollContainer) {
-        parentScrollContainer.scrollTop = 0
-      }
-      // Reset window scroll (in case of any window-level scrolling)
-      window.scrollTo(0, 0)
-    }, 100)
-    
-    return () => clearTimeout(timer)
+      
+      // Reset immediately
+      resetScroll()
+      
+      // Try multiple times to ensure scroll reset happens
+      requestAnimationFrame(() => {
+        resetScroll()
+        setTimeout(resetScroll, 0)
+        setTimeout(resetScroll, 10)
+        setTimeout(resetScroll, 50)
+        setTimeout(resetScroll, 100)
+      })
+    }
   }, [location.pathname]) // Reset when route changes
   
   // Get reimbursement data from Redux (cached)

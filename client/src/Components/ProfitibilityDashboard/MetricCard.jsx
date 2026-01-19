@@ -1,5 +1,5 @@
 import React from 'react';
-import { DollarSign, Percent, List, TrendingUp, TrendingDown } from 'lucide-react';
+import { DollarSign, Percent, List, TrendingUp, TrendingDown, Zap, Target } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const MetricCard = ({ label, value, icon }) => {
@@ -10,6 +10,8 @@ const MetricCard = ({ label, value, icon }) => {
         case 'list': return List;
         case 'trending-up': return TrendingUp;
         case 'trending-down': return TrendingDown;
+        case 'zap': return Zap;
+        case 'target': return Target;
         default: return DollarSign;
       }
     };
@@ -21,6 +23,8 @@ const MetricCard = ({ label, value, icon }) => {
         case 'list': return 'from-orange-500 to-red-600';
         case 'trending-up': return 'from-blue-500 to-indigo-600';
         case 'trending-down': return 'from-amber-500 to-orange-600';
+        case 'zap': return 'from-blue-500 to-cyan-600';
+        case 'target': return 'from-purple-500 to-pink-600';
         default: return 'from-blue-500 to-blue-600';
       }
     };

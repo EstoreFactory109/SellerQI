@@ -207,12 +207,17 @@ const generateAdsRefreshToken = async (authCode,region) => {
 const generateAccessToken=async(userId,refreshToken)=>{
   
     if(!refreshToken){
-        logger.error(new ApiError(400,"Refresh token is missing"));
+        logger.error(new ApiError(400,"Refresh token is missing"), { userId });
         return false;
     }
 
     const clientId=credentials.clientId;
     const clientSecret=credentials.clientSecret;
+    
+    if(!clientId || !clientSecret){
+        logger.error(new ApiError(500,"SP-API credentials not configured"), { userId });
+        return false;
+    }
 
     
     try {
@@ -234,12 +239,48 @@ const generateAccessToken=async(userId,refreshToken)=>{
                 return false;
             }
             const accessToken = response.data.access_token;
+            
+            // Try to save the access token to user, but don't fail if save fails
+            try {
             const getUser=await User.findById(userId);
+                if (getUser) {
             getUser.spiAccessToken=accessToken;
             await getUser.save();
+                } else {
+                    logger.warn(`User not found when saving access token: ${userId}`);
+                }
+            } catch (saveError) {
+                // Log the error but don't fail the token generation
+                // The access token is still valid even if we can't save it
+                logger.error(`Error saving access token to user (non-critical): ${saveError.message}`, {
+                    userId,
+                    errorName: saveError.name,
+                    errorCode: saveError.code
+                });
+            }
+            
             return accessToken;
     } catch (error) {
-        logger.error(new ApiError(500, `Error generating access token: ${error.message}`));
+        // Log detailed error information
+        if (error.response) {
+            const status = error.response.status;
+            const errorCode = error.response.data?.error;
+            const errorDescription = error.response.data?.error_description;
+            
+            logger.error(`Error generating access token - Amazon API error: ${status} - ${errorCode}: ${errorDescription}`, {
+                userId,
+                status,
+                errorCode,
+                errorDescription,
+                fullResponse: error.response.data
+            });
+        } else {
+            logger.error(`Error generating access token: ${error.message}`, {
+                userId,
+                errorMessage: error.message,
+                errorStack: error.stack
+            });
+        }
         return false; 
     }
 

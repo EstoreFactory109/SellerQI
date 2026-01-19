@@ -383,6 +383,22 @@ const ProfitabilityDashboard = () => {
         .reduce((sum, item) => sum + (item.spend || 0), 0);
     };
     
+    const getFilteredPPCSales = () => {
+      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
+      
+      if (!isDateRangeSelected) return 0;
+      
+      const start = parseLocalDate(info.startDate);
+      const end = parseLocalDate(info.endDate);
+      
+      return ppcDateWiseMetrics
+        .filter(item => {
+          const itemDate = new Date(item.date);
+          return itemDate >= start && itemDate <= end;
+        })
+        .reduce((sum, item) => sum + (item.sales || 0), 0);
+    };
+    
     if (useFilteredData && filteredData?.ppcSpent?.amount !== undefined) {
       // PRIMARY: Use PPC spent from the filtered API response for consistency
       // This ensures the same value is shown regardless of how the date range was selected
@@ -477,11 +493,52 @@ const ProfitabilityDashboard = () => {
     // Calculate profit margin using gross profit (matching Total Sales component)
     const profitMargin = totalSales > 0 ? ((grossProfit / totalSales) * 100) : 0;
     
+    // Calculate Total PPC Sales and ACOS% (same logic as PPC Dashboard/Campaign Analysis page)
+    let ppcSales = 0;
+    let acos = 0;
+    
+    // Use the same calculation logic as PPC Dashboard with date filtering support
+    if (isDateRangeSelected) {
+      // PRIMARY: Use filtered PPCMetrics data when date range is selected
+      const filteredPPCSales = getFilteredPPCSales();
+      if (filteredPPCSales > 0) {
+        ppcSales = filteredPPCSales;
+        console.log('=== Profitability Dashboard: Using filtered PPCMetrics sales ===');
+        console.log('Filtered PPCMetrics sales:', ppcSales);
+      } else if (filteredDateWiseTotalCosts.length > 0) {
+        // FALLBACK: Use legacy filtered data
+        ppcSales = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (parseFloat(item.sales) || 0), 0);
+        console.log('=== Profitability Dashboard: Using legacy filtered sales data ===');
+        console.log('Legacy filtered sales:', ppcSales);
+      }
+    } else {
+      // PRIMARY: Use PPCMetrics model summary (no date filtering)
+      if (ppcSummary?.totalSales > 0 || ppcSummary?.totalSpend > 0) {
+        ppcSales = ppcSummary.totalSales || 0;
+        acos = ppcSummary.overallAcos || 0;
+        console.log('=== Profitability Dashboard: Using PPCMetrics model for PPC Sales ===');
+        console.log('PPCMetrics totalSales:', ppcSales);
+        console.log('PPCMetrics overallAcos:', acos);
+      } else {
+        // FALLBACK: Use legacy sponsoredAdsMetrics
+        ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
+        console.log('=== Profitability Dashboard: Using legacy data for PPC Sales ===');
+        console.log('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
+      }
+    }
+    
+    // Calculate ACOS if not already set (same as PPC Dashboard)
+    if (!acos && ppcSales > 0 && adSpend > 0) {
+      acos = (adSpend / ppcSales) * 100;
+    }
+    
     return [
       { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Gross Profit', value: `${currency}${grossProfit.toFixed(2)}`, icon: 'dollar-sign' }, // Matches Total Sales component (Backend GP - PPC)
+      { label: 'Total PPC Sales', value: `${currency}${ppcSales.toFixed(2)}`, icon: 'zap' },
       { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
+      { label: 'ACOS%', value: `${acos.toFixed(2)}%`, icon: 'target' },
       { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
+      { label: 'Gross Profit', value: `${currency}${grossProfit.toFixed(2)}`, icon: 'dollar-sign' }, // Matches Total Sales component (Backend GP - PPC)
     ];
   }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency]);
 
@@ -1339,7 +1396,7 @@ const ProfitabilityDashboard = () => {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="mb-8"
             >
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 {metrics.map((metric, index) => (
                   <motion.div
                     key={metric.label}

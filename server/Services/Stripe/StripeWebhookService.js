@@ -419,6 +419,22 @@ class StripeWebhookService {
      */
     async addPaymentToHistory(userId, paymentData) {
         try {
+            // Check if payment already exists to prevent duplicates
+            const subscription = await Subscription.findOne({ userId });
+            
+            if (subscription && subscription.paymentHistory) {
+                // Check for duplicate by stripePaymentIntentId or stripeInvoiceId
+                const existingPayment = subscription.paymentHistory.find(payment => 
+                    (paymentData.stripePaymentIntentId && payment.stripePaymentIntentId === paymentData.stripePaymentIntentId) ||
+                    (paymentData.stripeInvoiceId && payment.stripeInvoiceId === paymentData.stripeInvoiceId)
+                );
+                
+                if (existingPayment) {
+                    logger.info(`Payment already exists in history for user ${userId}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}, invoiceId: ${paymentData.stripeInvoiceId || 'N/A'}, skipping duplicate`);
+                    return;
+                }
+            }
+            
             await Subscription.findOneAndUpdate(
                 { userId },
                 { 
@@ -427,6 +443,8 @@ class StripeWebhookService {
                     } 
                 }
             );
+            
+            logger.info(`Payment added to history via webhook for user ${userId}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}, invoiceId: ${paymentData.stripeInvoiceId || 'N/A'}`);
         } catch (error) {
             logger.error('Error adding payment to history:', error);
             throw error;
