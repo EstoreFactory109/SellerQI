@@ -283,6 +283,18 @@ const BackendKeyWordOrAttributesStatus = (str) => {
     let result = {};
     let errorCount = 0;
 
+    // Handle null or undefined values
+    if (!str || typeof str !== 'string') {
+        errorCount++;
+        result.charLim = {
+            status: "Error",
+            Message: "Backend keywords are missing or invalid.",
+            HowTOSolve: "Please ensure backend keywords are properly set for this product."
+        };
+        result.NumberOfErrors = errorCount;
+        return result;
+    }
+
     if (str.length < 450) {
         errorCount++;
         result.charLim = {

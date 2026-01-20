@@ -24,7 +24,12 @@ const filterTotalSales = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const country = req.country;
     const region = req.region;
-    const { startDate, endDate, periodType = 'last30' } = req.query;
+    let { startDate, endDate, periodType = 'last30' } = req.query;
+    
+    // Handle case where periodType is sent as string "undefined"
+    if (periodType === 'undefined' || !periodType) {
+        periodType = 'last30';
+    }
 
     if (!userId || !country || !region) {
         throw new ApiError(400, 'User ID, country, and region are required');
