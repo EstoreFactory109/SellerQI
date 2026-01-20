@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, Info } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
+import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import {
   setAsinsList,
   setLoadingAsins,
@@ -39,6 +40,7 @@ const KeywordAnalysisDashboard = () => {
   // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
+  const currency = useSelector((state) => state.currency?.currency) || '$';
 
   // Helper function to get product name by ASIN
   const getProductName = (asin) => {
@@ -1184,7 +1186,7 @@ const KeywordAnalysisDashboard = () => {
           <div className="metric-card">
             <div className="metric-content">
               <div className="metric-label">Avg. Bid</div>
-              <div className="metric-value">${metrics.avgBid}</div>
+              <div className="metric-value">{formatCurrencyWithLocale(parseFloat(metrics.avgBid) || 0, currency, 2)}</div>
               <div className="metric-trend">
                 <DollarSign size={14} />
                 Average bid amount
