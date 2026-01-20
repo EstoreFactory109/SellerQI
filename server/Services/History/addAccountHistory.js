@@ -96,7 +96,7 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
                 historyId: createAccountHistory._id
             });
 
-            return createAccountHistory.accountHistory;
+            return createAccountHistory;
         }
 
         // Check if accountHistory array is valid
@@ -124,7 +124,38 @@ const addAccountHistory = async(userId, country, region, HealthScore, TotalProdu
             return getAccountHistory;
         }
 
+        // Validate last entry exists and has required fields before accessing
         const lastEntry = getAccountHistory.accountHistory[getAccountHistory.accountHistory.length - 1];
+        
+        // Check if lastEntry is valid and has expireDate
+        if (!lastEntry || !lastEntry.expireDate) {
+            logger.warn("Account history exists but last entry is invalid, adding first entry", {
+                userId,
+                country,
+                region,
+                hasLastEntry: !!lastEntry,
+                hasExpireDate: !!(lastEntry && lastEntry.expireDate),
+                arrayLength: getAccountHistory.accountHistory.length
+            });
+
+            // Set expiry to next Sunday at 23:59:59 UTC
+            const expireDate = getNextSundayExpiry();
+
+            // Replace invalid entries with a new valid entry
+            getAccountHistory.accountHistory = [{
+                Date: today,
+                HealthScore: healthScoreStr,
+                TotalProducts: totalProductsNum,
+                ProductsWithIssues: productsWithIssuesNum,
+                TotalNumberOfIssues: totalIssuesNum,
+                expireDate: expireDate
+            }];
+
+            await getAccountHistory.save();
+            logger.info("First history entry added after fixing invalid entries", { userId, country, region });
+            return getAccountHistory;
+        }
+
         const getAccountHistoryExpireDate = lastEntry.expireDate;
         const ExpireDate = new Date(getAccountHistoryExpireDate);
 

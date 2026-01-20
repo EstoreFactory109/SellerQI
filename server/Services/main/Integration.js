@@ -401,6 +401,21 @@ class Integration {
                 }
             }
 
+            // Still try to add account history even if there was an error
+            // This ensures history is recorded even on failed fetches
+            try {
+                await this.addNewAccountHistory(userId, Country, Region);
+                logger.info("Account history added after unexpected error", { userId, country: Country, region: Region });
+            } catch (historyError) {
+                logger.error("Error adding account history after unexpected error", {
+                    error: historyError.message,
+                    stack: historyError.stack,
+                    userId,
+                    country: Country,
+                    region: Region
+                });
+            }
+
             return {
                 success: false,
                 statusCode: 500,
