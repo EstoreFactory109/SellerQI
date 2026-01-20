@@ -46,11 +46,13 @@ export default function Navbar() {
     if (showMobileMenu) {
       document.body.style.overflow = 'hidden';
     } else {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = '';
+      document.body.style.overflowY = 'auto';
     }
     
     return () => {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = '';
+      document.body.style.overflowY = 'auto';
     };
   }, [showMobileMenu]);
 

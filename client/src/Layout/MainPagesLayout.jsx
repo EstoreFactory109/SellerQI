@@ -57,7 +57,7 @@ const MainPagesLayout = () => {
             <div 
               ref={scrollContainerRef}
               className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide" 
-              style={{ overscrollBehavior: 'contain' }}
+              style={{ overscrollBehaviorY: 'auto', overscrollBehaviorX: 'contain' }}
             >
                 <div className="lg:pt-0 pt-[8vh]">
                     <Outlet/>
