@@ -649,56 +649,75 @@ class StripeService {
 
     /**
      * Get subscription details
-     * Auto-syncs from Stripe if subscription is incomplete but has Stripe subscription ID
+     * Auto-syncs from Stripe if subscription is incomplete but has Stripe subscription ID or session ID
      */
     async getSubscription(userId) {
         try {
             const subscription = await Subscription.findOne({ userId });
             
-            // Auto-sync if subscription is incomplete but has Stripe subscription ID
-            if (subscription && 
-                subscription.status === 'incomplete' && 
-                subscription.stripeSubscriptionId) {
-                
+            // Auto-sync if subscription is incomplete and has Stripe subscription ID or session ID
+            if (subscription && subscription.status === 'incomplete') {
                 try {
-                    logger.info(`Auto-syncing incomplete subscription for user ${userId} from Stripe`);
-                    const stripeSub = await this.stripe.subscriptions.retrieve(
-                        subscription.stripeSubscriptionId
-                    );
+                    let subscriptionId = subscription.stripeSubscriptionId;
                     
-                    const isTrialing = stripeSub.status === 'trialing';
-                    
-                    // Update local subscription with actual Stripe status
-                    const subscriptionData = {
-                        status: stripeSub.status,
-                        paymentStatus: isTrialing ? 'no_payment_required' : 
-                                      (stripeSub.status === 'active' ? 'paid' : 'pending'),
-                        currentPeriodStart: this.safeDate(stripeSub.current_period_start),
-                        currentPeriodEnd: this.safeDate(stripeSub.current_period_end),
-                        nextBillingDate: this.safeDate(stripeSub.trial_end || stripeSub.current_period_end),
-                        cancelAtPeriodEnd: stripeSub.cancel_at_period_end || false,
-                    };
-                    
-                    await this.updateOrCreateSubscription(userId, subscriptionData);
-                    
-                    // Update user record too
-                    const userUpdateData = {
-                        subscriptionStatus: stripeSub.status,
-                        isInTrialPeriod: isTrialing,
-                    };
-                    
-                    if (isTrialing && stripeSub.trial_end) {
-                        userUpdateData.trialEndsDate = this.safeDate(stripeSub.trial_end);
-                    } else {
-                        userUpdateData.isInTrialPeriod = false;
+                    // If no subscriptionId, try to get it from checkout session
+                    if (!subscriptionId && subscription.stripeSessionId) {
+                        logger.info(`Auto-syncing: retrieving subscription from checkout session ${subscription.stripeSessionId} for user ${userId}`);
+                        try {
+                            const session = await this.stripe.checkout.sessions.retrieve(subscription.stripeSessionId, {
+                                expand: ['subscription']
+                            });
+                            
+                            if (session.subscription) {
+                                subscriptionId = typeof session.subscription === 'string' 
+                                    ? session.subscription 
+                                    : session.subscription.id;
+                                logger.info(`Found subscription ${subscriptionId} from session`);
+                            }
+                        } catch (sessionError) {
+                            logger.warn(`Failed to retrieve session ${subscription.stripeSessionId}: ${sessionError.message}`);
+                        }
                     }
                     
-                    await User.findByIdAndUpdate(userId, userUpdateData);
-                    
-                    logger.info(`Auto-synced subscription for user ${userId} from Stripe: ${stripeSub.status}, isTrialing: ${isTrialing}`);
-                    
-                    // Return updated subscription
-                    return await Subscription.findOne({ userId });
+                    if (subscriptionId) {
+                        logger.info(`Auto-syncing incomplete subscription for user ${userId} from Stripe`);
+                        const stripeSub = await this.stripe.subscriptions.retrieve(subscriptionId);
+                        
+                        const isTrialing = stripeSub.status === 'trialing';
+                        
+                        // Update local subscription with actual Stripe status
+                        const subscriptionData = {
+                            stripeSubscriptionId: subscriptionId, // Save subscriptionId if it was missing
+                            status: stripeSub.status,
+                            paymentStatus: isTrialing ? 'no_payment_required' : 
+                                          (stripeSub.status === 'active' ? 'paid' : 'pending'),
+                            currentPeriodStart: this.safeDate(stripeSub.current_period_start),
+                            currentPeriodEnd: this.safeDate(stripeSub.current_period_end),
+                            nextBillingDate: this.safeDate(stripeSub.trial_end || stripeSub.current_period_end),
+                            cancelAtPeriodEnd: stripeSub.cancel_at_period_end || false,
+                        };
+                        
+                        await this.updateOrCreateSubscription(userId, subscriptionData);
+                        
+                        // Update user record too
+                        const userUpdateData = {
+                            subscriptionStatus: stripeSub.status,
+                            isInTrialPeriod: isTrialing,
+                        };
+                        
+                        if (isTrialing && stripeSub.trial_end) {
+                            userUpdateData.trialEndsDate = this.safeDate(stripeSub.trial_end);
+                        } else {
+                            userUpdateData.isInTrialPeriod = false;
+                        }
+                        
+                        await User.findByIdAndUpdate(userId, userUpdateData);
+                        
+                        logger.info(`Auto-synced subscription for user ${userId} from Stripe: ${stripeSub.status}, isTrialing: ${isTrialing}`);
+                        
+                        // Return updated subscription
+                        return await Subscription.findOne({ userId });
+                    }
                 } catch (syncError) {
                     logger.warn(`Failed to auto-sync subscription from Stripe for user ${userId}: ${syncError.message}`);
                     // Return original subscription if sync fails
@@ -715,29 +734,66 @@ class StripeService {
     /**
      * Repair all incomplete subscriptions by syncing from Stripe
      * One-time repair function to fix existing users with incomplete status
+     * Handles both subscriptions with stripeSubscriptionId and those with only stripeSessionId
      */
     async repairAllIncompleteSubscriptions() {
         try {
-            const incompleteSubs = await Subscription.find({ 
+            // Find subscriptions with stripeSubscriptionId
+            const incompleteSubsWithSubId = await Subscription.find({ 
                 status: 'incomplete',
                 stripeSubscriptionId: { $exists: true, $ne: null }
             });
             
-            logger.info(`Found ${incompleteSubs.length} incomplete subscriptions to repair`);
+            // Find subscriptions with only stripeSessionId (no subscriptionId yet)
+            const incompleteSubsWithSessionId = await Subscription.find({ 
+                status: 'incomplete',
+                stripeSubscriptionId: { $exists: false },
+                stripeSessionId: { $exists: true, $ne: null }
+            });
+            
+            const allIncompleteSubs = [...incompleteSubsWithSubId, ...incompleteSubsWithSessionId];
+            logger.info(`Found ${allIncompleteSubs.length} incomplete subscriptions to repair (${incompleteSubsWithSubId.length} with subscriptionId, ${incompleteSubsWithSessionId.length} with sessionId only)`);
             
             const results = {
-                total: incompleteSubs.length,
+                total: allIncompleteSubs.length,
                 fixed: [],
                 errors: []
             };
             
-            for (const sub of incompleteSubs) {
+            for (const sub of allIncompleteSubs) {
                 try {
-                    const stripeSub = await this.stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+                    let stripeSub;
+                    let subscriptionId = sub.stripeSubscriptionId;
+                    
+                    // If no subscriptionId, get it from the checkout session
+                    if (!subscriptionId && sub.stripeSessionId) {
+                        logger.info(`Retrieving subscription from checkout session ${sub.stripeSessionId} for user ${sub.userId}`);
+                        const session = await this.stripe.checkout.sessions.retrieve(sub.stripeSessionId, {
+                            expand: ['subscription']
+                        });
+                        
+                        if (!session.subscription) {
+                            throw new Error(`No subscription found in checkout session ${sub.stripeSessionId}`);
+                        }
+                        
+                        subscriptionId = typeof session.subscription === 'string' 
+                            ? session.subscription 
+                            : session.subscription.id;
+                        
+                        logger.info(`Found subscription ${subscriptionId} from session ${sub.stripeSessionId}`);
+                    }
+                    
+                    if (!subscriptionId) {
+                        throw new Error('No subscription ID available');
+                    }
+                    
+                    // Retrieve subscription from Stripe
+                    stripeSub = await this.stripe.subscriptions.retrieve(subscriptionId);
                     const isTrialing = stripeSub.status === 'trialing';
                     
                     // Update subscription record
                     const subscriptionData = {
+                        stripeSubscriptionId: subscriptionId, // Save subscriptionId if it was missing
                         status: stripeSub.status,
                         paymentStatus: isTrialing ? 'no_payment_required' : 
                                       (stripeSub.status === 'active' ? 'paid' : 'pending'),
@@ -771,14 +827,17 @@ class StripeService {
                     results.fixed.push({ 
                         userId: sub.userId.toString(), 
                         stripeStatus: stripeSub.status,
-                        isTrialing: isTrialing
+                        isTrialing: isTrialing,
+                        subscriptionId: subscriptionId
                     });
                     
-                    logger.info(`Repaired subscription for user ${sub.userId}: ${stripeSub.status}`);
+                    logger.info(`Repaired subscription for user ${sub.userId}: ${stripeSub.status}, subscriptionId: ${subscriptionId}`);
                 } catch (error) {
                     results.errors.push({ 
                         userId: sub.userId.toString(), 
-                        error: error.message 
+                        error: error.message,
+                        sessionId: sub.stripeSessionId || null,
+                        subscriptionId: sub.stripeSubscriptionId || null
                     });
                     logger.error(`Failed to repair subscription for user ${sub.userId}:`, error);
                 }
