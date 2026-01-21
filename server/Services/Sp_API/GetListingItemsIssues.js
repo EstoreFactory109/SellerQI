@@ -103,12 +103,12 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
 
-    // Check for B2B pricing in purchasable_offer array (always check, even if generic_keyword is missing)
+    // Check for B2B pricing in offers array (always check, even if generic_keyword is missing)
     let hasB2BPricing = false;
-    const purchasableOffer = response.data?.attributes?.purchasable_offer;
-    if (Array.isArray(purchasableOffer)) {
-      hasB2BPricing = purchasableOffer.some(offer => 
-        offer && offer.audience === "B2B"
+    const offers = response.data?.offers;
+    if (Array.isArray(offers)) {
+      hasB2BPricing = offers.some(offer => 
+        offer && offer.offerType === "B2B"
       );
     }
 
@@ -292,12 +292,12 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
       issuesMessages = issuesArray.map(issue => issue.message || JSON.stringify(issue));
     }
 
-    // Check for B2B pricing in purchasable_offer array
+    // Check for B2B pricing in offers array
     let hasB2BPricing = false;
-    const purchasableOffer = response.data?.attributes?.purchasable_offer;
-    if (Array.isArray(purchasableOffer)) {
-      hasB2BPricing = purchasableOffer.some(offer => 
-        offer && offer.audience === "B2B"
+    const offers = response.data?.offers;
+    if (Array.isArray(offers)) {
+      hasB2BPricing = offers.some(offer => 
+        offer && offer.offerType === "B2B"
       );
     }
 

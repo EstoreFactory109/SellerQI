@@ -29,6 +29,11 @@ const Products=new mongoose.Schema({
     type:String,
     required:true
   },
+  quantity:{
+    type: Number,
+    required: false,
+    default: 0
+  },
   issues:{
     type: [String],
     required: false,

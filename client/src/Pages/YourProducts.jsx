@@ -125,7 +125,7 @@ const YourProducts = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState('active');
   const [sortConfig, setSortConfig] = useState({ key: 'title', direction: 'asc' });
   const [loadingMore, setLoadingMore] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if this is the first load
@@ -273,6 +273,9 @@ const YourProducts = () => {
   const error = useSelector((state) => state.pageData?.yourProducts?.error);
   const lastFetched = useSelector((state) => state.pageData?.yourProducts?.lastFetched);
 
+  // Get Dashboard info (same as IssuesByProduct) for issue counts
+  const dashboardInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+
   // Extract products, summary, and pagination from Redux data
   const products = useMemo(() => yourProductsData?.products || [], [yourProductsData]);
   const summary = useMemo(() => yourProductsData?.summary || {}, [yourProductsData]);
@@ -299,9 +302,8 @@ const YourProducts = () => {
         return 'Incomplete';
       case 'withAPlus':
         return undefined; // Keep client-side filtering for A+ tab
-      case 'all':
       default:
-        return undefined; // No filter for 'all' tab
+        return undefined;
     }
   };
 
@@ -445,8 +447,19 @@ const YourProducts = () => {
         let aValue = a[sortConfig.key];
         let bValue = b[sortConfig.key];
 
+        // Handle totalIssues - calculate from issues data
+        if (sortConfig.key === 'totalIssues') {
+          aValue = a.status === 'Active' ? getTotalIssues(a) : null;
+          bValue = b.status === 'Active' ? getTotalIssues(b) : null;
+          // Handle null values (non-active products) - put them at the end
+          if (aValue === null && bValue === null) return 0;
+          if (aValue === null) return 1;
+          if (bValue === null) return -1;
+          aValue = aValue || 0;
+          bValue = bValue || 0;
+        }
         // Handle numeric values
-        if (sortConfig.key === 'price' || sortConfig.key === 'numRatings' || sortConfig.key === 'starRatings') {
+        else if (sortConfig.key === 'price' || sortConfig.key === 'numRatings' || sortConfig.key === 'starRatings' || sortConfig.key === 'quantity') {
           aValue = parseFloat(aValue) || 0;
           bValue = parseFloat(bValue) || 0;
         } else {
@@ -528,114 +541,171 @@ const YourProducts = () => {
     return { bg: '#dbeafe', color: '#1e40af', text: totalIssues.toString() };
   };
 
-  // Get issues data from Redux
-  const issuesData = useMemo(() => yourProductsData?.issuesData || null, [yourProductsData]);
+  // Pre-compute issue counts by ASIN from Dashboard info (same data structure as IssuesByProduct)
+  const issueCountsByAsin = useMemo(() => {
+    const countsMap = new Map();
+    
+    if (!dashboardInfo) return countsMap;
 
-  // Debug logging
-  useEffect(() => {
-    if (issuesData) {
-      console.log('[YourProducts] issuesData received:', {
-        hasRankingErrors: !!issuesData.rankingProductWiseErrors,
-        rankingErrorsCount: issuesData.rankingProductWiseErrors?.length || 0,
-        hasTotalProduct: !!issuesData.TotalProduct,
-        totalProductCount: issuesData.TotalProduct?.length || 0,
-        hasBuyBoxData: !!issuesData.buyBoxData,
-        sampleRankingError: issuesData.rankingProductWiseErrors?.[0],
-        sampleTotalProduct: issuesData.TotalProduct?.[0]
-      });
-    } else {
-      console.log('[YourProducts] issuesData is null or undefined');
-    }
-  }, [issuesData]);
+    // Build fast lookups (Issues-by-Product uses productWiseError as the primary source)
+    const productWiseErrorByAsin = new Map(
+      (dashboardInfo.productWiseError || []).map(p => [p.asin, p])
+    );
+    const totalProductByAsin = new Map(
+      (dashboardInfo.TotalProduct || []).map(p => [p.asin, p])
+    );
+    const rankingByAsin = new Map(
+      (dashboardInfo.rankingProductWiseErrors || []).map(r => [r.asin, r])
+    );
 
-  // Count ranking issues for a product (same logic as IssuesByProduct)
-  const countRankingIssues = (product) => {
-    if (!issuesData?.rankingProductWiseErrors) return 0;
-    const rankingData = issuesData.rankingProductWiseErrors.find(item => item.asin === product.asin);
-    if (!rankingData?.data) return 0;
-    
-    const rankingErrors = rankingData.data;
-    let count = 0;
-    const sections = ['TitleResult', 'BulletPoints', 'Description'];
-    const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
-    
-    sections.forEach(section => {
-      if (rankingErrors[section]) {
-        checks.forEach(check => {
-          if (rankingErrors[section][check]?.status === 'Error') count++;
-        });
-      }
-    });
-    
-    if (rankingErrors.charLim?.status === 'Error') count++;
-    return count;
-  };
+    const getIssueSourceProduct = (asin) =>
+      productWiseErrorByAsin.get(asin) || totalProductByAsin.get(asin) || null;
 
-  // Count conversion issues for a product (same logic as IssuesByProduct)
-  const countConversionIssues = (product) => {
-    if (!issuesData?.TotalProduct) return 0;
-    const productData = issuesData.TotalProduct.find(item => item.asin === product.asin);
-    if (!productData?.conversionErrors) return 0;
-    
-    const conversionErrors = productData.conversionErrors;
-    let count = 0;
-    
-    const checks = [
-      conversionErrors.imageResultErrorData,
-      conversionErrors.videoResultErrorData,
-      conversionErrors.productStarRatingResultErrorData,
-      conversionErrors.productsWithOutBuyboxErrorData,
-      conversionErrors.aplusErrorData,
-      conversionErrors.brandStoryErrorData
-    ];
-    
-    checks.forEach(check => {
-      if (check?.status === 'Error') count++;
-    });
-    
-    // Also count buybox issues
-    if (issuesData?.buyBoxData?.asinBuyBoxData) {
-      const buyBox = issuesData.buyBoxData.asinBuyBoxData.find(
-        item => item.childAsin === product.asin || item.parentAsin === product.asin
+    // Match buybox data with the same robustness as IssuesByProduct
+    const findBuyBoxForAsin = (asin) => {
+      const list = dashboardInfo.buyBoxData?.asinBuyBoxData;
+      if (!Array.isArray(list) || !asin) return null;
+
+      // Direct match
+      let match = list.find(item => item.childAsin === asin || item.parentAsin === asin);
+      if (match) return match;
+
+      // String trimmed match
+      const asinStr = String(asin).trim();
+      match = list.find(item =>
+        String(item.childAsin || '').trim() === asinStr ||
+        String(item.parentAsin || '').trim() === asinStr
       );
+      if (match) return match;
+
+      // Case-insensitive match
+      const asinLower = asinStr.toLowerCase();
+      return list.find(item =>
+        String(item.childAsin || '').trim().toLowerCase() === asinLower ||
+        String(item.parentAsin || '').trim().toLowerCase() === asinLower
+      ) || null;
+    };
+    
+    // Helper to count ranking issues (same logic as IssuesByProduct)
+    const countRankingForAsin = (asin) => {
+      const rankingData = rankingByAsin.get(asin);
+      if (!rankingData?.data) return 0;
+      
+      const rankingErrors = rankingData.data;
+      let count = 0;
+      const sections = ['TitleResult', 'BulletPoints', 'Description'];
+      const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
+      
+      sections.forEach(section => {
+        if (rankingErrors[section]) {
+          checks.forEach(check => {
+            if (rankingErrors[section][check]?.status === 'Error') count++;
+          });
+        }
+      });
+      
+      if (rankingErrors.charLim?.status === 'Error') count++;
+      return count;
+    };
+    
+    // Helper to count conversion issues (same logic as IssuesByProduct)
+    const countConversionForAsin = (asin) => {
+      const sourceProduct = getIssueSourceProduct(asin);
+      const conversionErrors = sourceProduct?.conversionErrors;
+      if (!conversionErrors) return 0;
+      let count = 0;
+      
+      const checks = [
+        conversionErrors.imageResultErrorData,
+        conversionErrors.videoResultErrorData,
+        conversionErrors.productStarRatingResultErrorData,
+        conversionErrors.productsWithOutBuyboxErrorData,
+        conversionErrors.aplusErrorData,
+        conversionErrors.brandStoryErrorData
+      ];
+      
+      checks.forEach(check => {
+        if (check?.status === 'Error') count++;
+      });
+      
+      // Also count buybox issues
+      const buyBox = findBuyBoxForAsin(asin);
       if (buyBox && (buyBox.buyBoxPercentage === 0 || buyBox.buyBoxPercentage < 50)) {
         count++;
       }
-    }
+      
+      return count;
+    };
     
-    return count;
-  };
+    // Helper to count inventory issues (same logic as IssuesByProduct)
+    const countInventoryForAsin = (asin) => {
+      const sourceProduct = getIssueSourceProduct(asin);
+      const inventoryErrors = sourceProduct?.inventoryErrors;
+      if (!inventoryErrors) return 0;
+      let count = 0;
+      
+      if (inventoryErrors.inventoryPlanningErrorData) {
+        const planning = inventoryErrors.inventoryPlanningErrorData;
+        if (planning.longTermStorageFees?.status === 'Error') count++;
+        if (planning.unfulfillable?.status === 'Error') count++;
+      }
+      
+      if (inventoryErrors.strandedInventoryErrorData) count++;
+      if (inventoryErrors.inboundNonComplianceErrorData) count++;
+      if (inventoryErrors.replenishmentErrorData) {
+        count += Array.isArray(inventoryErrors.replenishmentErrorData) 
+          ? inventoryErrors.replenishmentErrorData.length 
+          : 1;
+      }
+      
+      return count;
+    };
+    
+    // Get all unique ASINs from products
+    const allAsins = new Set();
+    products.forEach(product => {
+      if (product.asin) allAsins.add(product.asin);
+    });
+    
+    // Pre-compute counts for all ASINs
+    allAsins.forEach(asin => {
+      const rankingCount = countRankingForAsin(asin);
+      const conversionCount = countConversionForAsin(asin);
+      const inventoryCount = countInventoryForAsin(asin);
+      const totalCount = rankingCount + conversionCount + inventoryCount;
+      
+      countsMap.set(asin, {
+        ranking: rankingCount,
+        conversion: conversionCount,
+        inventory: inventoryCount,
+        total: totalCount
+      });
+    });
+    
+    return countsMap;
+  }, [dashboardInfo, products]);
 
-  // Count inventory issues for a product (same logic as IssuesByProduct)
-  const countInventoryIssues = (product) => {
-    if (!issuesData?.TotalProduct) return 0;
-    const productData = issuesData.TotalProduct.find(item => item.asin === product.asin);
-    if (!productData?.inventoryErrors) return 0;
-    
-    const inventoryErrors = productData.inventoryErrors;
-    let count = 0;
-    
-    if (inventoryErrors.inventoryPlanningErrorData) {
-      const planning = inventoryErrors.inventoryPlanningErrorData;
-      if (planning.longTermStorageFees?.status === 'Error') count++;
-      if (planning.unfulfillable?.status === 'Error') count++;
-    }
-    
-    if (inventoryErrors.strandedInventoryErrorData) count++;
-    if (inventoryErrors.inboundNonComplianceErrorData) count++;
-    if (inventoryErrors.replenishmentErrorData) {
-      count += Array.isArray(inventoryErrors.replenishmentErrorData) 
-        ? inventoryErrors.replenishmentErrorData.length 
-        : 1;
-    }
-    
-    return count;
-  };
-
-  // Calculate total issues for a product
+  // Get total issues for a product using pre-computed map
   const getTotalIssues = (product) => {
     if (product.status !== 'Active') return null;
-    return countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
+    const counts = issueCountsByAsin.get(product.asin);
+    return counts ? counts.total : 0;
+  };
+  
+  // Helper functions for CSV export (using pre-computed map)
+  const countRankingIssues = (product) => {
+    const counts = issueCountsByAsin.get(product.asin);
+    return counts ? counts.ranking : 0;
+  };
+  
+  const countConversionIssues = (product) => {
+    const counts = issueCountsByAsin.get(product.asin);
+    return counts ? counts.conversion : 0;
+  };
+  
+  const countInventoryIssues = (product) => {
+    const counts = issueCountsByAsin.get(product.asin);
+    return counts ? counts.inventory : 0;
   };
 
   // Export to CSV
@@ -722,7 +792,7 @@ const YourProducts = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans overflow-x-hidden">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans overflow-x-hidden" style={{ overflowY: 'visible' }}>
       <style>{`
         .tooltip-container {
           position: relative;
@@ -790,26 +860,30 @@ const YourProducts = () => {
           gap: 4px;
         }
         
+        .th-with-tooltip.center {
+          justify-content: center;
+        }
+        
         .tooltip-container.tooltip-last {
           position: relative;
         }
         
         .tooltip-container.tooltip-last .tooltip-content {
-          left: 50%;
-          right: auto;
-          transform: translateX(-50%) translateY(4px);
+          left: auto;
+          right: 0;
+          transform: translateY(4px);
           text-align: left;
           max-width: min(250px, calc(100vw - 40px));
         }
         
         .tooltip-container.tooltip-last:hover .tooltip-content {
-          transform: translateX(-50%) translateY(0);
+          transform: translateY(0);
         }
         
         .tooltip-container.tooltip-last .tooltip-content::before {
-          left: 50%;
-          right: auto;
-          transform: translateX(-50%);
+          left: auto;
+          right: 20px;
+          transform: translateX(0);
         }
         
         /* Fix overflow for issues column */
@@ -855,10 +929,37 @@ const YourProducts = () => {
         .max-w-7xl {
           max-width: 100%;
           overflow-x: hidden;
+          overflow-y: visible;
+        }
+        
+        /* Ensure header tooltips are not clipped - keep them below but allow overflow */
+        table thead {
+          position: relative;
+        }
+        
+        table thead th {
+          overflow: visible !important;
+          position: relative;
+        }
+        
+        /* Ensure table wrapper allows tooltip overflow */
+        .bg-white.rounded-b-xl {
+          overflow: visible !important;
+          position: relative;
+        }
+        
+        /* Ensure tooltips can render outside table boundaries */
+        table {
+          position: relative;
+        }
+        
+        /* Add minimum height to table container to prevent clipping */
+        .bg-white.rounded-b-xl > div {
+          min-height: 200px;
         }
       `}</style>
 
-      <div className="max-w-7xl mx-auto" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
+      <div className="max-w-7xl mx-auto" style={{ maxWidth: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -952,7 +1053,6 @@ const YourProducts = () => {
         {/* Tabs */}
         <div className="bg-white rounded-t-xl shadow-sm px-4 flex gap-2 overflow-x-auto border-b border-gray-200">
           {[
-            { key: 'all', label: 'All', count: summary.totalProducts || 0 },
             { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
             { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
             { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 },
@@ -973,7 +1073,7 @@ const YourProducts = () => {
         </div>
 
         {/* Products Table */}
-        <div className="bg-white rounded-b-xl shadow-sm relative" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
+        <div className="bg-white rounded-b-xl shadow-sm relative" style={{ overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
           {/* Table loader overlay - shown when loading but not initial load (tab switch) */}
           {/* Don't show overlay when loadingMore (Load More has its own loader row) */}
           {loading && !isInitialLoad && !loadingMore && (
@@ -1007,7 +1107,7 @@ const YourProducts = () => {
                         Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '8%' }}>
-                        <div className="th-with-tooltip">
+                        <div className="th-with-tooltip center">
                           <span>B2B Pricing</span>
                           <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
@@ -1036,17 +1136,10 @@ const YourProducts = () => {
                       {/* Full columns for other tabs */}
                       <th 
                         className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '10%' : '9%' }}
+                        style={{ width: activeTab === 'active' ? '14%' : '12%' }}
                         onClick={() => handleSort('asin')}
                       >
-                        ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
-                        onClick={() => handleSort('sku')}
-                      >
-                        SKU {sortConfig.key === 'sku' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
                         className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
@@ -1062,8 +1155,37 @@ const YourProducts = () => {
                       >
                         Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
-                      {/* Status column - hidden in 'active' tab */}
-                      {activeTab !== 'active' && (
+                      {/* Total Issues column - shown for all tabs except inactive/incomplete */}
+                      {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
+                        <th 
+                          className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                          style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                          onClick={() => handleSort('totalIssues')}
+                        >
+                          <div className="th-with-tooltip">
+                            <span>Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
+                            <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
+                              <Info className="tooltip-icon" />
+                              <div className="tooltip-content">
+                                <strong>Total Issues</strong><br />
+                                Combined count of ranking, conversion, and inventory issues. Only shown for active products.
+                              </div>
+                            </div>
+                          </div>
+                        </th>
+                      )}
+                      {/* Quantity column - shown for all, active, and withAPlus tabs */}
+                      {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
+                        <th 
+                          className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                          style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                          onClick={() => handleSort('quantity')}
+                        >
+                          Qty {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                      )}
+                      {/* Status column - hidden in 'active' and 'withAPlus' tabs */}
+                      {activeTab !== 'active' && activeTab !== 'withAPlus' && (
                         <th 
                           className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                           style={{ width: '7%' }}
@@ -1073,8 +1195,8 @@ const YourProducts = () => {
                         </th>
                       )}
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip">
-                          <span>Has A+</span>
+                        <div className="th-with-tooltip center">
+                          <span>A+</span>
                           <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
@@ -1085,8 +1207,8 @@ const YourProducts = () => {
                         </div>
                       </th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip">
-                          <span>Has Videos</span>
+                        <div className="th-with-tooltip center">
+                          <span>Videos</span>
                           <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
@@ -1097,8 +1219,8 @@ const YourProducts = () => {
                         </div>
                       </th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip">
-                          <span>B2B Pricing</span>
+                        <div className="th-with-tooltip center">
+                          <span>B2B</span>
                           <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
                             <Info className="tooltip-icon" />
                             <div className="tooltip-content">
@@ -1140,7 +1262,7 @@ const YourProducts = () => {
                           </div>
                         </div>
                       </th>
-                      {/* Issues column - hidden in 'all' and 'active' tabs */}
+                      {/* Issues column - shown only for inactive/incomplete tabs */}
                       {(activeTab === 'inactive' || activeTab === 'incomplete') && (
                         <th 
                           className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
@@ -1263,10 +1385,10 @@ const YourProducts = () => {
                     return (
                       <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50 transition-colors">
                         <td className="px-2 py-3 text-left align-top">
-                          <code className="text-xs font-mono text-gray-900 break-all">{product.asin}</code>
-                        </td>
-                        <td className="px-2 py-3 text-left align-top">
-                          <span className="text-xs text-gray-600 break-words">{product.sku || '—'}</span>
+                          <div className="flex flex-col gap-1">
+                            <code className="text-xs font-mono text-gray-900 break-all">{product.asin || '—'}</code>
+                            <span className="text-xs text-gray-600 break-words">{product.sku || '—'}</span>
+                          </div>
                         </td>
                         <td className="px-2 py-3 text-left align-top">
                           <span className="text-xs text-gray-900 break-words line-clamp-2" title={product.title}>
@@ -1278,8 +1400,44 @@ const YourProducts = () => {
                             {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
                           </span>
                         </td>
-                        {/* Status column - hidden in 'active' tab */}
-                        {activeTab !== 'active' && (
+                        {/* Total Issues column - shown for all tabs except inactive/incomplete */}
+                        {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
+                          <td className="px-2 py-3 text-center align-top">
+                            {product.status === 'Active' ? (() => {
+                              const totalIssues = getTotalIssues(product);
+                              const rankingIssues = countRankingIssues(product);
+                              const conversionIssues = countConversionIssues(product);
+                              const inventoryIssues = countInventoryIssues(product);
+                              const badge = getIssuesBadge(totalIssues);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/seller-central-checker/issues/${product.asin}`)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all hover:opacity-95 hover:shadow-sm hover:-translate-y-[1px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                                  style={{ backgroundColor: badge.bg, color: badge.color }}
+                                  title={totalIssues > 0 ? `Ranking: ${rankingIssues}, Conversion: ${conversionIssues}, Inventory: ${inventoryIssues}` : 'No issues'}
+                                >
+                                  {totalIssues > 0 && <AlertTriangle size={12} />}
+                                  {badge.text}
+                                </button>
+                              );
+                            })() : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                        )}
+                        {/* Quantity column - shown for all, active, and withAPlus tabs */}
+                        {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
+                          <td className="px-2 py-3 text-center align-top">
+                            <span className="text-xs font-semibold text-gray-900 whitespace-nowrap">
+                              {product.quantity !== undefined && product.quantity !== null 
+                                ? parseInt(product.quantity).toLocaleString() 
+                                : '—'}
+                            </span>
+                          </td>
+                        )}
+                        {/* Status column - hidden in 'active' and 'withAPlus' tabs */}
+                        {activeTab !== 'active' && activeTab !== 'withAPlus' && (
                           <td className="px-2 py-3 text-center align-top">
                             <span 
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
@@ -1324,7 +1482,7 @@ const YourProducts = () => {
                             </span>
                           </div>
                         </td>
-                        {/* Issues column - hidden in 'all' and 'active' tabs */}
+                        {/* Issues column - shown only for inactive/incomplete tabs */}
                         {(activeTab === 'inactive' || activeTab === 'incomplete') && (
                           <td className="px-4 py-3 text-center">
                             {product.status === 'Active' ? (() => {
@@ -1356,8 +1514,7 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      activeTab === 'all' ? 10 : 
-                      activeTab === 'active' ? 9 : 10
+                      (activeTab === 'active' || activeTab === 'withAPlus') ? 10 : 11
                     } className="px-4 py-12 text-center text-gray-500">
                       {products.length === 0 
                         ? 'No products found. Please ensure your account is connected and data is synced.'
@@ -1371,8 +1528,7 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      activeTab === 'all' ? 9 : 
-                      activeTab === 'active' ? 8 : 9
+                      (activeTab === 'active' || activeTab === 'withAPlus') ? 10 : 11
                     } className="px-4 py-8 text-center bg-gray-50">
                       <div className="flex items-center justify-center gap-3">
                         <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>

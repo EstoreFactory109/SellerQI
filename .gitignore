@@ -1,9 +1,11 @@
 # Node modules
 node_modules
 
-# Logs
+
 *.log
 logs/
+logs.txt
+server/logs.txt
 
 # Environment files
 .env

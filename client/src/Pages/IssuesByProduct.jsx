@@ -799,7 +799,15 @@ const IssuesByProduct = () => {
     };
     
     const countConversionIssues = (product) => {
-        const conversionErrors = product.conversionErrors;
+        // First try to get conversionErrors from product.conversionErrors (for productWiseError products)
+        // If not found, look it up from info?.TotalProduct (same as YourProducts.jsx)
+        let conversionErrors = product.conversionErrors;
+        
+        if (!conversionErrors && info?.TotalProduct) {
+            const productData = info.TotalProduct.find(item => item.asin === product.asin);
+            conversionErrors = productData?.conversionErrors;
+        }
+        
         let count = 0;
         
         if (conversionErrors) {
@@ -824,7 +832,15 @@ const IssuesByProduct = () => {
     };
     
     const countInventoryIssues = (product) => {
-        const inventoryErrors = product.inventoryErrors;
+        // First try to get inventoryErrors from product.inventoryErrors (for productWiseError products)
+        // If not found, look it up from info?.TotalProduct (same as YourProducts.jsx)
+        let inventoryErrors = product.inventoryErrors;
+        
+        if (!inventoryErrors && info?.TotalProduct) {
+            const productData = info.TotalProduct.find(item => item.asin === product.asin);
+            inventoryErrors = productData?.inventoryErrors;
+        }
+        
         if (!inventoryErrors) return 0;
         
         let count = 0;

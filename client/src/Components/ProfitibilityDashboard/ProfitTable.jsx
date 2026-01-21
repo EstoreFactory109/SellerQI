@@ -645,7 +645,8 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 <th className="w-8 px-2 py-4 text-center text-xs font-semibold text-gray-500">#</th>
                 <th className="w-1/5 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">Product</th>
                 <th className="w-28 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
-                <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units</th>
+                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
+                <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units Sold</th>
                 <th className="w-32 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
                 <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
                 <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
@@ -696,6 +697,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
                             {product.isExpandable && (
                               <span className="text-xs text-blue-600 mt-0.5 font-medium">Parent</span>
                             )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.sales, currency)}>
+                            {formatCurrencyWithLocale(product.sales, currency)}
                           </div>
                         </td>
                         <td className="px-3 py-5 text-center align-middle">
@@ -857,6 +863,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                     <span className="text-xs text-purple-600 mt-0.5">Child</span>
                                   </div>
                                 </td>
+                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.sales || 0, currency)}>
+                                    {formatCurrencyWithLocale(child.sales || 0, currency)}
+                                  </div>
+                                </td>
                                 <td className="px-3 py-4 text-center align-middle">
                                   <span className="text-sm text-gray-700">{child.units?.toLocaleString() || 0}</span>
                                 </td>
@@ -935,7 +946,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="9" className="px-3 py-12 text-center">
+                    <td colSpan="10" className="px-3 py-12 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                           <Package className="w-8 h-8 text-gray-400" />

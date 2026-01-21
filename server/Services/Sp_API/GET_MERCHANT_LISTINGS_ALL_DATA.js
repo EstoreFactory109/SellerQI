@@ -165,6 +165,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 itemName:data["item-name"]|| "Unknown Product",
                 price:data.price||0,
                 status: data.status,
+                quantity: parseInt(data.quantity || data["quantity-available"] || data["fulfillable-quantity"] || 0) || 0,
             });
         });
 

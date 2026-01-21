@@ -10,9 +10,7 @@ const {
     reactivateSubscription,
     getPaymentHistory,
     getInvoiceDownloadUrl,
-    getSubscriptionConfig,
-    repairAllIncompleteSubscriptions,
-    repairUserSubscription
+    getSubscriptionConfig
 } = require('../controllers/payments/StripeController');
 
 const {
@@ -38,9 +36,5 @@ router.get('/invoice-download', auth, getInvoiceDownloadUrl);
 
 // Configuration routes (no auth required for config)
 router.get('/config', getSubscriptionConfig);
-
-// Repair routes (auth required - one-time fix for incomplete subscriptions)
-router.post('/repair-subscriptions', auth, repairAllIncompleteSubscriptions);
-router.post('/repair-subscription/:userId', auth, repairUserSubscription);
 
 module.exports = router; 

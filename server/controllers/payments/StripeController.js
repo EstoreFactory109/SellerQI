@@ -288,62 +288,6 @@ const getSubscriptionConfig = asyncHandler(async (req, res) => {
     }
 });
 
-/**
- * Repair all incomplete subscriptions by syncing from Stripe
- * One-time repair endpoint to fix existing users with incomplete status
- */
-const repairAllIncompleteSubscriptions = asyncHandler(async (req, res) => {
-    try {
-        logger.info('Repair incomplete subscriptions endpoint called');
-        
-        const results = await stripeService.repairAllIncompleteSubscriptions();
-        
-        return res.status(200).json(
-            new ApiResponse(200, {
-                total: results.total,
-                fixed: results.fixed.length,
-                errors: results.errors.length,
-                details: results
-            }, `Repair completed: ${results.fixed.length} subscriptions fixed, ${results.errors.length} errors`)
-        );
-
-    } catch (error) {
-        logger.error('Error repairing incomplete subscriptions:', error);
-        return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to repair subscriptions')
-        );
-    }
-});
-
-/**
- * Repair a specific user's incomplete subscription by syncing from Stripe
- */
-const repairUserSubscription = asyncHandler(async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        if (!userId) {
-            return res.status(400).json(
-                new ApiResponse(400, null, 'User ID is required')
-            );
-        }
-        
-        logger.info(`Repair user subscription endpoint called for user: ${userId}`);
-        
-        const result = await stripeService.repairUserSubscription(userId);
-        
-        return res.status(200).json(
-            new ApiResponse(200, result, result.message || 'Subscription repaired successfully')
-        );
-
-    } catch (error) {
-        logger.error('Error repairing user subscription:', error);
-        return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to repair subscription')
-        );
-    }
-});
-
 module.exports = {
     createCheckoutSession,
     handlePaymentSuccess,
@@ -352,7 +296,5 @@ module.exports = {
     reactivateSubscription,
     getPaymentHistory,
     getInvoiceDownloadUrl,
-    getSubscriptionConfig,
-    repairAllIncompleteSubscriptions,
-    repairUserSubscription
+    getSubscriptionConfig
 }; 

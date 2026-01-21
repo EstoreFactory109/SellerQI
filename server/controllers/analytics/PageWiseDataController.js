@@ -967,6 +967,7 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 title: product.itemName || reviewData.title || '',
                 price: product.price || '0',
                 status: product.status || 'Unknown',
+                quantity: product.quantity !== undefined && product.quantity !== null ? product.quantity : 0,
                 numRatings: reviewData.numRatings || '0',
                 starRatings: reviewData.starRatings || '0',
                 hasAPlus: hasAPlusContent,
