@@ -649,13 +649,145 @@ class StripeService {
 
     /**
      * Get subscription details
+     * Auto-syncs from Stripe if subscription is incomplete but has Stripe subscription ID
      */
     async getSubscription(userId) {
         try {
             const subscription = await Subscription.findOne({ userId });
+            
+            // Auto-sync if subscription is incomplete but has Stripe subscription ID
+            if (subscription && 
+                subscription.status === 'incomplete' && 
+                subscription.stripeSubscriptionId) {
+                
+                try {
+                    logger.info(`Auto-syncing incomplete subscription for user ${userId} from Stripe`);
+                    const stripeSub = await this.stripe.subscriptions.retrieve(
+                        subscription.stripeSubscriptionId
+                    );
+                    
+                    const isTrialing = stripeSub.status === 'trialing';
+                    
+                    // Update local subscription with actual Stripe status
+                    const subscriptionData = {
+                        status: stripeSub.status,
+                        paymentStatus: isTrialing ? 'no_payment_required' : 
+                                      (stripeSub.status === 'active' ? 'paid' : 'pending'),
+                        currentPeriodStart: this.safeDate(stripeSub.current_period_start),
+                        currentPeriodEnd: this.safeDate(stripeSub.current_period_end),
+                        nextBillingDate: this.safeDate(stripeSub.trial_end || stripeSub.current_period_end),
+                        cancelAtPeriodEnd: stripeSub.cancel_at_period_end || false,
+                    };
+                    
+                    await this.updateOrCreateSubscription(userId, subscriptionData);
+                    
+                    // Update user record too
+                    const userUpdateData = {
+                        subscriptionStatus: stripeSub.status,
+                        isInTrialPeriod: isTrialing,
+                    };
+                    
+                    if (isTrialing && stripeSub.trial_end) {
+                        userUpdateData.trialEndsDate = this.safeDate(stripeSub.trial_end);
+                    } else {
+                        userUpdateData.isInTrialPeriod = false;
+                    }
+                    
+                    await User.findByIdAndUpdate(userId, userUpdateData);
+                    
+                    logger.info(`Auto-synced subscription for user ${userId} from Stripe: ${stripeSub.status}, isTrialing: ${isTrialing}`);
+                    
+                    // Return updated subscription
+                    return await Subscription.findOne({ userId });
+                } catch (syncError) {
+                    logger.warn(`Failed to auto-sync subscription from Stripe for user ${userId}: ${syncError.message}`);
+                    // Return original subscription if sync fails
+                }
+            }
+            
             return subscription;
         } catch (error) {
             logger.error('Error getting subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Repair all incomplete subscriptions by syncing from Stripe
+     * One-time repair function to fix existing users with incomplete status
+     */
+    async repairAllIncompleteSubscriptions() {
+        try {
+            const incompleteSubs = await Subscription.find({ 
+                status: 'incomplete',
+                stripeSubscriptionId: { $exists: true, $ne: null }
+            });
+            
+            logger.info(`Found ${incompleteSubs.length} incomplete subscriptions to repair`);
+            
+            const results = {
+                total: incompleteSubs.length,
+                fixed: [],
+                errors: []
+            };
+            
+            for (const sub of incompleteSubs) {
+                try {
+                    const stripeSub = await this.stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+                    const isTrialing = stripeSub.status === 'trialing';
+                    
+                    // Update subscription record
+                    const subscriptionData = {
+                        status: stripeSub.status,
+                        paymentStatus: isTrialing ? 'no_payment_required' : 
+                                      (stripeSub.status === 'active' ? 'paid' : 'pending'),
+                        currentPeriodStart: this.safeDate(stripeSub.current_period_start),
+                        currentPeriodEnd: this.safeDate(stripeSub.current_period_end),
+                        nextBillingDate: this.safeDate(stripeSub.trial_end || stripeSub.current_period_end),
+                        cancelAtPeriodEnd: stripeSub.cancel_at_period_end || false,
+                    };
+                    
+                    await this.updateOrCreateSubscription(sub.userId, subscriptionData);
+                    
+                    // Update user record
+                    const userUpdateData = {
+                        subscriptionStatus: stripeSub.status,
+                        isInTrialPeriod: isTrialing,
+                    };
+                    
+                    if (isTrialing && stripeSub.trial_end) {
+                        userUpdateData.trialEndsDate = this.safeDate(stripeSub.trial_end);
+                    } else {
+                        userUpdateData.isInTrialPeriod = false;
+                    }
+                    
+                    // If user purchased AGENCY plan, update accessType
+                    if (sub.planType === 'AGENCY') {
+                        userUpdateData.accessType = 'enterpriseAdmin';
+                    }
+                    
+                    await User.findByIdAndUpdate(sub.userId, userUpdateData);
+                    
+                    results.fixed.push({ 
+                        userId: sub.userId.toString(), 
+                        stripeStatus: stripeSub.status,
+                        isTrialing: isTrialing
+                    });
+                    
+                    logger.info(`Repaired subscription for user ${sub.userId}: ${stripeSub.status}`);
+                } catch (error) {
+                    results.errors.push({ 
+                        userId: sub.userId.toString(), 
+                        error: error.message 
+                    });
+                    logger.error(`Failed to repair subscription for user ${sub.userId}:`, error);
+                }
+            }
+            
+            logger.info(`Repair completed: ${results.fixed.length} fixed, ${results.errors.length} errors`);
+            return results;
+        } catch (error) {
+            logger.error('Error repairing incomplete subscriptions:', error);
             throw error;
         }
     }
