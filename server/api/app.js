@@ -6,6 +6,7 @@ const _dirname=path.resolve()
  
 const cors = require('cors')
 const cookieParser=require('cookie-parser')
+const helmet = require('helmet')
 
 
 const userRoute=require('../routes/user.routes.js')
@@ -46,10 +47,57 @@ const { jobScheduler } = require('../Services/BackgroundJobs/JobScheduler.js')
 const { initializeEmailReminderJob } = require('../Services/BackgroundJobs/sendEmailAfter48Hrs.js')
 const { setupDailyUpdateCron } = require('../Services/BackgroundJobs/cronProducer.js')
 const config = require('../config/config.js')
+const { globalRateLimiter } = require('../middlewares/rateLimiting.js')
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
 app.use(cookieParser());
+
+// Helmet security headers - configured to work with existing setup
+// Applied early in middleware chain, before routes
+app.use(helmet({
+    // Content Security Policy - configured to allow your frontend and APIs
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles (common in React apps)
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Allow inline scripts and eval (needed for React/Vite)
+            imgSrc: ["'self'", "data:", "https:"], // Allow images from any HTTPS source
+            connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN].filter(Boolean), // Allow API connections
+            fontSrc: ["'self'", "data:"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'self'"], // Allow iframes from same origin (for Stripe/Razorpay if needed)
+            upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null, // Only in production
+        },
+    },
+    // Cross-Origin policies - configured to work with CORS and cookies
+    crossOriginEmbedderPolicy: false, // Disabled to avoid breaking frontend
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }, // Allows popups for OAuth/payments
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allows cross-origin resources (needed for CORS)
+    // HSTS - only in production with HTTPS
+    hsts: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: true,
+        preload: true
+    },
+    // X-Frame-Options - allow same origin framing (for iframes if needed)
+    frameguard: { action: 'sameorigin' },
+    // X-Content-Type-Options - prevent MIME type sniffing
+    noSniff: true,
+    // X-XSS-Protection - legacy browser protection
+    xssFilter: true,
+    // Referrer Policy
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    // Permissions Policy (formerly Feature Policy)
+    permissionsPolicy: {
+        features: {
+            geolocation: ["'self'"],
+            microphone: ["'none'"],
+            camera: ["'none'"],
+        },
+    },
+}));
  
 // Stripe webhook route MUST come before express.json() middleware
 // because Stripe requires raw body for signature verification
@@ -58,6 +106,11 @@ app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
 // Apply JSON parsing for all other routes
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
+
+// Global rate limiting - applies to all API routes as baseline protection
+// Webhooks are automatically skipped (handled in rateLimiting.js)
+// Static files are excluded (handled by express.static before this)
+app.use(globalRateLimiter);
 
 
 app.use('/app',userRoute)

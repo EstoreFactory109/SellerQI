@@ -26,14 +26,14 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
     }
 
     try {
-       // const hashedPassword = await hashPassword(password);
+        const hashedPassword = await hashPassword(password);
         const userData = {
             firstName: firstname,
             lastName: lastname,
             phone: phone,
             whatsapp: whatsapp,
             email: email,
-            password: password,
+            password: hashedPassword,
             OTP: otp,
             allTermsAndConditionsAgreed: allTermsAndConditionsAgreed,
             packageType: packageType,
@@ -194,10 +194,10 @@ const updatePassword = async (email, newPassword) => {
         }
 
         // Hash the new password
-       // const hashedPassword = await hashPassword(newPassword);
+        const hashedPassword = await hashPassword(newPassword);
         
         // Update the password and clear the reset code
-        user.password = newPassword;
+        user.password = hashedPassword;
         user.resetPasswordCode = null;
         
         await user.save();

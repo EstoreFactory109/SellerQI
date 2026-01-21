@@ -1,6 +1,10 @@
 const { body, validationResult } = require("express-validator");
 
-const validateSignup = [
+/**
+ * Validate agency client registration
+ * Similar to regular registration but for agency clients
+ */
+const validateAgencyClientRegistration = [
     body("firstname")
         .trim()
         .notEmpty().withMessage("First name is required")
@@ -16,31 +20,8 @@ const validateSignup = [
     body("phone")
         .trim()
         .notEmpty().withMessage("Phone number is required")
-        .custom((value) => {
-            // Remove country code, spaces, dashes, and parentheses
-            const cleaned = value.replace(/[\s\-\(\)\+]/g, '');
-            // Check if it's numeric and has at least 10 digits
-            if (!/^\d+$/.test(cleaned)) {
-                throw new Error('Phone number must contain only numbers');
-            }
-            // Extract last 10 digits (in case country code is included)
-            const last10Digits = cleaned.slice(-10);
-            if (last10Digits.length !== 10) {
-                throw new Error('Phone number must contain at least 10 digits');
-            }
-            return true;
-        })
-        .customSanitizer((value) => {
-            // Extract last 10 digits and store in req.body for controller use
-            const cleaned = value.replace(/[\s\-\(\)\+]/g, '');
-            return cleaned.slice(-10);
-        }),
-        
-    body("whatsapp")
-        .optional() // WhatsApp is optional - controller uses phone as whatsapp if not provided
-        .trim()
-        .isNumeric().withMessage("WhatsApp number must contain only numbers")
-        .isLength({ min: 10, max: 10 }).withMessage("WhatsApp number must be exactly 10 digits"),
+        .isNumeric().withMessage("Phone number must contain only numbers")
+        .isLength({ min: 10, max: 10 }).withMessage("Phone number must be exactly 10 digits"),
         
     body("email")
         .trim()
@@ -56,14 +37,30 @@ const validateSignup = [
         .matches(/[a-z]/).withMessage("Password must contain at least one lowercase letter")
         .matches(/[0-9]/).withMessage("Password must contain at least one number")
         .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage("Password must contain at least one special character"),
+
+    body("allTermsAndConditionsAgreed")
+        .optional()
+        .isBoolean().withMessage("Terms agreement must be a boolean")
+        .custom((value) => {
+            if (value !== undefined && value !== true) {
+                throw new Error('You must agree to the Terms of Use and Privacy Policy');
+            }
+            return true;
+        }),
         
     (req, res, next) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({ 
+                statusCode: 400,
+                message: "Validation failed",
+                errors: errors.array() 
+            });
         }
         next();
     }
 ];
 
-module.exports = validateSignup;
+module.exports = {
+    validateAgencyClientRegistration
+};

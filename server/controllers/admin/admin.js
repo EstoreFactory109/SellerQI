@@ -37,9 +37,7 @@ const adminLogin = asyncHandler(async (req, res) => {
     }
 
     // Verify password
-  //  const isPasswordValid = await verifyPassword(password, user.password);
-
-    const isPasswordValid = user.password === password;
+    const isPasswordValid = await verifyPassword(password, user.password);
     if (!isPasswordValid) {
         logger.error(new ApiError(401, "Invalid credentials"));
         return res.status(401).json(new ApiResponse(401, "", "Invalid credentials"));

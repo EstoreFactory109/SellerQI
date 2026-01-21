@@ -358,10 +358,7 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(401).json(new ApiResponse(401, "", "User not verified"));
     }
 
-    //  const checkPassword = await verifyPassword(password, checkUserIfExists.password);
-    //console.log(checkPassword);
-
-    const checkPassword = checkUserIfExists.password === password;
+    const checkPassword = await verifyPassword(password, checkUserIfExists.password);
 
     if (!checkPassword) {
         logger.error(new ApiError(401, "Password not matched"))

@@ -17,6 +17,7 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { integrationRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
     triggerIntegrationJob,
     getJobStatus,
@@ -26,7 +27,7 @@ const {
 
 // All routes require authentication
 // Trigger a new integration job (requires auth + location for country/region)
-router.post('/trigger', auth, getLocation, triggerIntegrationJob);
+router.post('/trigger', integrationRateLimiter, auth, getLocation, triggerIntegrationJob);
 
 // Get job status by job ID (requires auth only)
 router.get('/status/:jobId', auth, getJobStatus);
