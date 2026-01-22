@@ -64,7 +64,7 @@ app.use(helmet({
             scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Allow inline scripts and eval (needed for React/Vite)
             imgSrc: ["'self'", "data:", "https:"], // Allow images from any HTTPS source
             connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN].filter(Boolean), // Allow API connections
-            fontSrc: ["'self'", "data:"],
+            fontSrc: ["'self'", "data:", "https://members.sellerqi.com"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'self'"], // Allow iframes from same origin (for Stripe/Razorpay if needed)
@@ -148,8 +148,24 @@ app.use('/api/integration',integrationRoute)
  
 app.use(express.static(path.join(_dirname,'/client/dist')))
  
-app.get('*',(req,res)=>{
-    res.sendFile(path.resolve(_dirname,'client/dist/index.html'))
+app.get('*',(req,res,next)=>{
+    const indexPath = path.resolve(_dirname,'client/dist/index.html');
+    res.sendFile(indexPath, (err) => {
+        if (err) {
+            logger.error('Error serving index.html:', {
+                error: err.message,
+                stack: err.stack,
+                path: indexPath,
+                url: req.url
+            });
+            // If file doesn't exist or there's an error, send a 404 or 500
+            if (err.code === 'ENOENT') {
+                res.status(404).json({ error: 'Page not found' });
+            } else {
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        }
+    });
 })
 
 
