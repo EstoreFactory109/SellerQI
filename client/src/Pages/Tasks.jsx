@@ -14,9 +14,50 @@ import {
 } from 'lucide-react';
 import { fetchTasks, updateTaskStatus } from '../redux/slices/TasksSlice.js';
 
+// Helper function to escape special regex characters in currency symbol
+const escapeRegex = (str) => {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+// Common currency symbols to detect in messages
+// Order matters: longer symbols first to avoid partial matches (e.g., "C$" before "$")
+const CURRENCY_SYMBOLS = ['C$', 'A$', 'S$', 'R$', 'MX$', 'E£', 'AED', 'SAR', 'د.إ', '﷼', '$', '€', '£', '¥', '₹', '₺', 'kr', 'zł'];
+
+// Helper function to detect and convert currency in a message
+const convertCurrencyInMessage = (message, targetCurrency = '$') => {
+  if (!message) return message;
+  
+  let convertedMessage = message;
+  
+  // Replace each currency symbol with the target currency
+  // Process longer symbols first to avoid partial matches
+  CURRENCY_SYMBOLS.forEach(originalSymbol => {
+    if (originalSymbol === targetCurrency) return; // Skip if already the target currency
+    
+    const escapedSymbol = escapeRegex(originalSymbol);
+    
+    // Pattern to match: currency symbol + optional negative + number (with commas/decimals)
+    // Examples: $123.45, -$123.45, $1,234.56, €100, £50.00, C$100.00
+    const pattern = new RegExp(`${escapedSymbol}(-?[\\d,.]+)`, 'g');
+    
+    convertedMessage = convertedMessage.replace(pattern, (match, numberPart) => {
+      // Keep the number part, just replace the currency symbol
+      return `${targetCurrency}${numberPart}`;
+    });
+  });
+  
+  return convertedMessage;
+};
+
 // Helper function to format messages with important details highlighted on separate line
-const formatMessageWithHighlight = (message) => {
+const formatMessageWithHighlight = (message, currency = '$') => {
   if (!message) return { mainText: '', highlightedText: '' };
+  
+  // First, convert any currency in the message to the target currency
+  const convertedMessage = convertCurrencyInMessage(message, currency);
+  
+  // Escape currency symbol for use in regex
+  const escapedCurrency = escapeRegex(currency);
   
   // Patterns to extract and highlight on a separate line
   // These patterns match the exact formats from the backend
@@ -48,22 +89,24 @@ const formatMessageWithHighlight = (message) => {
     // Unfulfillable inventory quantity
     /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
     
-    // Profitability patterns
-    /^(.*?)(Revenue:\s*\$[\d,.]+.*)$/i,
-    /^(.*?)(Net Profit:\s*-?\$[\d,.]+.*)$/i,
+    // Profitability patterns - using dynamic currency (after conversion)
+    new RegExp(`^(.*?)(Revenue:\\s*${escapedCurrency}[\\d,.]+.*)$`, 'i'),
+    new RegExp(`^(.*?)(Net Profit:\\s*-?${escapedCurrency}[\\d,.]+.*)$`, 'i'),
+    new RegExp(`^(.*?)(Total Costs:\\s*${escapedCurrency}[\\d,.]+.*)$`, 'i'),
     
     // PPC/Sponsored Ads patterns - match complete parenthetical expressions first (most specific)
-    /^(.*?)(\([^)]*Spend:\s*\$[\d,.]+[^)]*\))/i,  // Match complete (Spend: ...) with brackets
-    /^(.*?)(\([^)]*Sales:\s*\$[\d,.]+[^)]*\))/i,  // Match complete (Sales: ...) with brackets
+    new RegExp(`^(.*?)(\\([^)]*Spend:\\s*${escapedCurrency}[\\d,.]+[^)]*\\))`, 'i'),  // Match complete (Spend: ...) with brackets
+    new RegExp(`^(.*?)(\\([^)]*Sales:\\s*${escapedCurrency}[\\d,.]+[^)]*\\))`, 'i'),  // Match complete (Sales: ...) with brackets
     /^(.*?)(\([^)]*ACOS:\s*[\d.]+%[^)]*\))/i,  // Match complete (ACOS: ...) with brackets
-    /^(.*?)(\([^)]*Spend:\s*\$[\d,.]+[^)]*Sales:\s*\$[\d,.]+[^)]*\))/i,  // Match (Spend: ... Sales: ...) together
-    /^(.*?)(Spend:\s*\$[\d,.]+(?:\s*,\s*Sales:\s*\$[\d,.]+)?[^.)]*)/i,  // Fallback for Spend without brackets (stop at period or closing paren)
+    new RegExp(`^(.*?)(\\([^)]*Spend:\\s*${escapedCurrency}[\\d,.]+[^)]*Sales:\\s*${escapedCurrency}[\\d,.]+[^)]*\\))`, 'i'),  // Match (Spend: ... Sales: ...) together
+    new RegExp(`^(.*?)(Spend:\\s*${escapedCurrency}[\\d,.]+(?:\\s*,\\s*Sales:\\s*${escapedCurrency}[\\d,.]+)?[^.)]*)`, 'i'),  // Fallback for Spend without brackets (stop at period or closing paren)
+    new RegExp(`^(.*?)(Sales:\\s*${escapedCurrency}[\\d,.]+[^.)]*)`, 'i'),  // Fallback for Sales without brackets
     /^(.*?)(ACOS:\s*[\d.]+%[^.(]*)/i,  // Fallback for ACOS without brackets (stop before opening paren or period)
     /^(.*?)(\d+ clicks from \d+ impressions.*)$/i,
   ];
   
   for (const pattern of patterns) {
-    const match = message.match(pattern);
+    const match = convertedMessage.match(pattern);
     if (match && match[2]) {
       return {
         mainText: match[1].trim(),
@@ -72,12 +115,12 @@ const formatMessageWithHighlight = (message) => {
     }
   }
   
-  return { mainText: message, highlightedText: '' };
+  return { mainText: convertedMessage, highlightedText: '' };
 };
 
 // Component to render message with highlighted part
-const FormattedMessage = ({ message, errorCategory }) => {
-  const { mainText, highlightedText } = formatMessageWithHighlight(message);
+const FormattedMessage = ({ message, errorCategory, currency }) => {
+  const { mainText, highlightedText } = formatMessageWithHighlight(message, currency);
   
   // Don't make bold for profitability and sponsored ads errors
   const shouldBold = errorCategory?.toLowerCase() !== 'profitability' && 
@@ -163,6 +206,9 @@ export default function Tasks() {
 
   // Get user data from Redux store
   const userData = useSelector(state => state.Auth?.user);
+  
+  // Get currency from Redux store
+  const currency = useSelector(state => state.currency?.currency) || '$';
   
   // Get products data from Redux store for product name lookup
   const totalProducts = useSelector(state => state.Dashboard?.DashBoardInfo?.TotalProduct) || [];
@@ -680,7 +726,7 @@ export default function Tasks() {
                       <td className='px-4 py-4 text-sm text-gray-900'>
                         <div>
                           <p className='whitespace-normal'>
-                            <FormattedMessage message={item.error} errorCategory={item.errorCategory} />
+                            <FormattedMessage message={item.error} errorCategory={item.errorCategory} currency={currency} />
                           </p>
                         </div>
                       </td>
