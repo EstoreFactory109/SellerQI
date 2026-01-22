@@ -67,7 +67,7 @@ app.use(helmet({
             scriptSrcElem: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com", "https://static.hotjar.com", "https://connect.facebook.net", "https://analytics.ahrefs.com", "https://mediaassets-in.blr1.cdn.digitaloceanspaces.com", "https:"], // Allow script elements (like dynamically loaded scripts)
             scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers (onclick, etc.)
             imgSrc: ["'self'", "data:", "https:"], // Allow images from any HTTPS source
-            connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN, "https://www.google-analytics.com", "https://www.googletagmanager.com", "https://static.hotjar.com", "https://api.hotjar.com", "https://www.facebook.com", "https://mpc-prod-16-s6uit34pua-uk.a.run.app", "https://demo-1.conversionsapigateway.com", "https://www.google.com", "https://www.googleadservices.com", "https:"].filter(Boolean), // Allow API connections from any HTTPS source
+            connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN, "https://www.google-analytics.com", "https://www.googletagmanager.com", "https://static.hotjar.com", "https://api.hotjar.com", "wss://ws.hotjar.com", "https://www.facebook.com", "https://mpc-prod-16-s6uit34pua-uk.a.run.app", "https://demo-1.conversionsapigateway.com", "https://www.google.com", "https://www.googleadservices.com", "https:", "wss:"].filter(Boolean), // Allow API connections and WebSockets from any HTTPS/WSS source
             fontSrc: ["'self'", "data:", "https://members.sellerqi.com", "https://*.sellerqi.com", "https:"], // Allow fonts from members.sellerqi.com, all sellerqi.com subdomains, and any HTTPS source
             objectSrc: ["'none'"],
             mediaSrc: ["'self'", "https:"],
