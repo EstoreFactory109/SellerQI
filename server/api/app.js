@@ -2,6 +2,7 @@ require('dotenv').config()
 const express=require('express')
 const app=express();
 const path=require('path')
+const fs=require('fs')
 const _dirname=path.resolve()
  
 const cors = require('cors')
@@ -58,16 +59,21 @@ app.use(cookieParser());
 app.use(helmet({
     // Content Security Policy - configured to allow your frontend and APIs
     contentSecurityPolicy: {
+        useDefaults: false, // Disable defaults to have full control
         directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles (common in React apps)
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Allow inline scripts and eval (needed for React/Vite)
+            defaultSrc: ["'self'"], // Base policy - allow same origin
+            styleSrc: ["'self'", "'unsafe-inline'", "https:"], // Allow inline styles and external stylesheets
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://www.googletagmanager.com", "https://static.hotjar.com", "https://connect.facebook.net", "https://analytics.ahrefs.com", "https://mediaassets-in.blr1.cdn.digitaloceanspaces.com"], // Allow inline scripts, eval, and external analytics
             imgSrc: ["'self'", "data:", "https:"], // Allow images from any HTTPS source
-            connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN].filter(Boolean), // Allow API connections
-            fontSrc: ["'self'", "data:", "https://members.sellerqi.com"],
+            connectSrc: ["'self'", process.env.CORS_ORIGIN_DOMAIN, "https://www.google-analytics.com", "https://www.googletagmanager.com", "https://static.hotjar.com", "https://api.hotjar.com", "https://www.facebook.com"].filter(Boolean), // Allow API connections
+            fontSrc: ["'self'", "data:", "https://members.sellerqi.com", "https://*.sellerqi.com", "https:"], // Allow fonts from members.sellerqi.com, all sellerqi.com subdomains, and any HTTPS source
             objectSrc: ["'none'"],
-            mediaSrc: ["'self'"],
-            frameSrc: ["'self'"], // Allow iframes from same origin (for Stripe/Razorpay if needed)
+            mediaSrc: ["'self'", "https:"],
+            frameSrc: ["'self'", "https://www.facebook.com"], // Allow iframes from same origin and Facebook
+            workerSrc: ["'self'", "blob:"], // Allow web workers
+            childSrc: ["'self'", "blob:"], // Allow child contexts
+            baseUri: ["'self'"], // Allow base URI from same origin
+            formAction: ["'self'"], // Allow form submissions to same origin
             upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null, // Only in production
         },
     },
@@ -149,20 +155,40 @@ app.use('/api/integration',integrationRoute)
 app.use(express.static(path.join(_dirname,'/client/dist')))
  
 app.get('*',(req,res,next)=>{
+    // Skip API routes - they should be handled by their respective routers
+    if (req.path.startsWith('/app/') || req.path.startsWith('/api/')) {
+        return next();
+    }
+    
     const indexPath = path.resolve(_dirname,'client/dist/index.html');
+    
+    // Check if file exists before trying to send it
+    if (!fs.existsSync(indexPath)) {
+        logger.error('index.html file not found:', {
+            path: indexPath,
+            url: req.url,
+            dirname: _dirname
+        });
+        return res.status(500).json({ 
+            error: 'Frontend build not found. Please build the client application.',
+            path: indexPath
+        });
+    }
+    
     res.sendFile(indexPath, (err) => {
         if (err) {
             logger.error('Error serving index.html:', {
                 error: err.message,
                 stack: err.stack,
                 path: indexPath,
-                url: req.url
+                url: req.url,
+                code: err.code
             });
             // If file doesn't exist or there's an error, send a 404 or 500
             if (err.code === 'ENOENT') {
                 res.status(404).json({ error: 'Page not found' });
             } else {
-                res.status(500).json({ error: 'Internal server error' });
+                res.status(500).json({ error: 'Internal server error', details: err.message });
             }
         }
     });
