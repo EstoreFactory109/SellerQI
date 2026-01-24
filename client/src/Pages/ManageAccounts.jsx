@@ -860,6 +860,9 @@ const ManageAccounts = () => {
                     <span className="text-xs">Type</span>
                   </th>
                   <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <span className="text-xs">Brands</span>
+                  </th>
+                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     <span className="text-xs">Status</span>
                   </th>
                   <th className="w-1/12 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -937,6 +940,15 @@ const ManageAccounts = () => {
                                 {packageInfo.label.split(' ')[0]}
                               </span>
                             </div>
+                          </div>
+                        </td>
+
+                        {/* Brands */}
+                        <td className="px-2 py-3 text-center">
+                          <div className="flex items-center justify-center">
+                            <span className="text-xs text-gray-700 font-medium truncate max-w-full">
+                              {user.brand || 'N/A'}
+                            </span>
                           </div>
                         </td>
 

@@ -213,7 +213,9 @@ const getAllAccounts = asyncHandler(async (req, res) => {
             isAdmin: account.accessType === 'superAdmin',
             hasValidSubscription: account.subscriptionStatus === 'active',
             // Check if trial is expired
-            isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate)
+            isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate),
+            // Include brand from sellerCentral
+            brand: account.sellerCentral?.brand || null
         }));
 
         // PERFORMANCE OPTIMIZATION: Calculate stats in a single pass instead of multiple filter operations
