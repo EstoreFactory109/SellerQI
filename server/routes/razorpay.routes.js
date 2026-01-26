@@ -26,8 +26,9 @@ router.post('/webhook', webhookRateLimiter, handleWebhook);
 router.get('/config', getConfig);
 
 // Payment routes (auth required)
-router.post('/create-order', paymentRateLimiter, auth, validateRazorpayOrder, createOrder);
-router.post('/verify-payment', paymentRateLimiter, auth, validateRazorpayPayment, verifyPayment);
+// Note: Rate limiting temporarily disabled on payment routes to prevent blocking legitimate payment flows
+router.post('/create-order', auth, validateRazorpayOrder, createOrder);
+router.post('/verify-payment', auth, validateRazorpayPayment, verifyPayment);
 
 // Subscription management routes (auth required)
 router.get('/subscription', paymentRateLimiter, auth, getSubscription);
