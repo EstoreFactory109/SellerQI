@@ -338,24 +338,18 @@ const loginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in generating OTP"));
         }
 
-          let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.checkUserIfExists, otp);
+        let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.firstName, otp);
   
-          if (!emailSent) {
-              logger.error(new ApiError(500, "Internal server error in sending email"));
-              return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
-          }
-
-        /*let smsSent = await sendVerificationCode(otp, checkUserIfExists.phone);
-        if (!smsSent) {
-            logger.error(new ApiError(500, "Internal server error in sending SMS"));
-            return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
-        }*/
+        if (!emailSent) {
+            logger.error(new ApiError(500, "Internal server error in sending email"));
+            return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
+        }
 
         checkUserIfExists.OTP = otp;
         await checkUserIfExists.save();
 
-        logger.error(new ApiError(401, "User not verified"));
-        return res.status(401).json(new ApiResponse(401, "", "User not verified"));
+        logger.info(`OTP sent to unverified user: ${checkUserIfExists.email}`);
+        return res.status(401).json(new ApiResponse(401, { email: checkUserIfExists.email }, "User not verified"));
     }
 
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
@@ -894,13 +888,17 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         } else {
             getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
             if (!getSellerCentral) {
-                logger.error(new ApiError(404, "Seller central not found"));
-                return res.status(404).json(new ApiResponse(404, "", "Seller central not found"));
+                // User exists but doesn't have SellerCentral yet - allow login with default location
+                // This can happen if user signed up but hasn't connected Amazon account yet
+                AccessToken = await createAccessToken(checkUserIfExists._id);
+                RefreshToken = await createRefreshToken(checkUserIfExists._id);
+                LocationToken = await createLocationToken("US", "NA");
+            } else {
+                // For regular users and enterpriseAdmin, get their own seller central
+                AccessToken = await createAccessToken(checkUserIfExists._id);
+                RefreshToken = await createRefreshToken(checkUserIfExists._id);
+                LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
             }
-            // For regular users and enterpriseAdmin, get their own seller central
-            AccessToken = await createAccessToken(checkUserIfExists._id);
-            RefreshToken = await createRefreshToken(checkUserIfExists._id);
-            LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
         }
 
         if (!AccessToken || !RefreshToken || !LocationToken) {
@@ -908,7 +906,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        const option = getHttpsCookieOptions();;
+        const option = getHttpsCookieOptions();
 
         // Prepare response data
         const responseData = {
@@ -1005,75 +1003,9 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         const checkUserIfExists = await getUserByEmail(email);
 
         if (checkUserIfExists) {
-            // User exists, perform login instead
-            logger.info("User already exists, redirecting to login flow");
-
-            let getSellerCentral;
-            let allSellerAccounts = null;
-            let AccessToken, RefreshToken, LocationToken, adminToken = "";
-
-            // Check if user is superAdmin
-            if (checkUserIfExists.accessType === 'superAdmin') {
-                // Get all seller central accounts from the database
-                const allSellerCentrals = await SellerCentralModel.find({});
-
-                if (!allSellerCentrals || allSellerCentrals.length === 0) {
-                    logger.error(new ApiError(404, "No seller central accounts found"));
-                    return res.status(404).json(new ApiResponse(404, "", "No seller central accounts found"));
-                }
-
-                // Use the first seller central account for tokens
-                getSellerCentral = allSellerCentrals[0];
-
-                adminToken = await createAccessToken(checkUserIfExists._id);
-                AccessToken = await createAccessToken(getSellerCentral.User);
-                RefreshToken = await createRefreshToken(getSellerCentral.User);
-                LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
-            } else {
-                getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
-                if (!getSellerCentral) {
-                    logger.error(new ApiError(404, "Seller central not found"));
-                    return res.status(404).json(new ApiResponse(404, "", "Seller central not found"));
-                }
-                // For regular users and enterpriseAdmin, get their own seller central
-                AccessToken = await createAccessToken(checkUserIfExists._id);
-                RefreshToken = await createRefreshToken(checkUserIfExists._id);
-                LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
-            }
-
-            if (!AccessToken || !RefreshToken || !LocationToken) {
-                logger.error(new ApiError(500, "Internal server error in creating tokens"));
-                return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
-            }
-
-            const option = getHttpsCookieOptions();
-
-            // Prepare response data
-            const responseData = {
-                firstName: checkUserIfExists.firstName,
-                lastName: checkUserIfExists.lastName,
-                email: checkUserIfExists.email,
-                phone: checkUserIfExists.phone,
-                whatsapp: checkUserIfExists.whatsapp,
-                accessType: checkUserIfExists.accessType
-            };
-
-            // Add all seller accounts data if user is superAdmin
-            if (checkUserIfExists.accessType === 'superAdmin' && allSellerAccounts) {
-                responseData.allSellerAccounts = allSellerAccounts;
-                responseData.activeAccount = {
-                    sellingPartnerId: getSellerCentral.selling_partner_id,
-                    country: getSellerCentral.sellerAccount[0].country,
-                    region: getSellerCentral.sellerAccount[0].region
-                };
-            }
-
-            return res.status(200)
-                .cookie("AdminToken", adminToken, option)
-                .cookie("IBEXAccessToken", AccessToken, option)
-                .cookie("IBEXRefreshToken", RefreshToken, option)
-                .cookie("IBEXLocationToken", LocationToken, option)
-                .json(new ApiResponse(200, responseData, "Existing user logged in via Google"));
+            // User already exists - return 409 Conflict
+            logger.error(new ApiError(409, "User already exists. Please login instead."));
+            return res.status(409).json(new ApiResponse(409, { email: email }, "User already exists. Please login instead."));
         }
 
         // Create new user

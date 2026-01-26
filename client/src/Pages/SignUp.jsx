@@ -287,12 +287,13 @@ const SignUp = () => {
       
       const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
         
-        if (response.status === 200 || response.status === 201) {
+        if (response.statusCode === 201) {
+          // New user registration - continue with signup flow
           // Clear any cached auth state to force fresh checks
           clearAuthCache();
           // Store auth information
           localStorage.setItem("isAuth", true);
-          dispatch(loginSuccess(response.data.data || response.data));
+          dispatch(loginSuccess(response.data || response));
           
           // If no plan selected, redirect to connect-to-amazon page (skip pricing)
           if (noPlanSelected) {
@@ -364,12 +365,21 @@ const SignUp = () => {
           
         } else {
             // Non-200/201 response - treat as error
-            console.error('Google sign-up returned unexpected status:', response.status);
-            setErrorMessage('Google sign-up failed. Please try again.');
+            console.error('Google sign-up returned unexpected status:', response.statusCode);
+            setErrorMessage(response.message || 'Google sign-up failed. Please try again.');
         }
     } catch (error) {
         console.error('Google sign-up failed:', error);
-        setErrorMessage(error.response?.data?.message || 'Google sign-up failed. Please try again.');
+        
+        // Handle 409 Conflict - user already exists
+        if (error.response?.status === 409) {
+          setErrorMessage('An account with this email already exists. Please login instead.');
+          setTimeout(() => {
+            navigate('/');
+          }, 2000);
+        } else {
+          setErrorMessage(error.response?.data?.message || 'Google sign-up failed. Please try again.');
+        }
     } finally {
         setGoogleLoading(false);
     }

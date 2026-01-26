@@ -8,7 +8,6 @@ import { loginSuccess } from '../redux/slices/authSlice.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
 import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
-import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -123,34 +122,24 @@ export default function Login() {
           token: 'stored_in_cookies' // Token is stored in HTTP-only cookies
         }));
 
-        // Check SP-API first, then subscription
+        // Check if accounts are connected
         const user = response.data.data;
         console.log("user: ",user);
         
-        const hasPremium = hasPremiumAccess(user);
         const spApiConnected = isSpApiConnected(user);
         const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
         
-        console.log('Login: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        console.log('Login: spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
         
-        // Flow: Check SP-API first, then subscription
-        // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+        // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
+        // Payment handling is done on profile id page and continue button on connect-accounts page
         if (spApiConnected) {
-          // SP-API is connected → always redirect to dashboard (regardless of subscription)
+          // SP-API is connected → redirect to dashboard
           console.log('Login: SP-API connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
-        } else if (!hasSellerCentralData) {
-          // sellerCentral data not available in login response → redirect to dashboard
-          // ProtectedRouteWrapper will do full check with complete user data
-          console.log('Login: sellerCentral data not available - redirecting to dashboard for full check');
-          navigate('/seller-central-checker/dashboard');
-        } else if (!hasPremium) {
-          // SP-API not connected AND no subscription → redirect to pricing
-          console.log('Login: No SP-API and no subscription - redirecting to pricing');
-          navigate('/pricing');
         } else {
-          // SP-API not connected BUT has subscription → redirect to connect-to-amazon
-          console.log('Login: Has subscription but no SP-API - redirecting to connect-to-amazon');
+          // Accounts not connected → redirect to connect-to-amazon (payment handled later)
+          console.log('Login: Accounts not connected - redirecting to connect-to-amazon');
           navigate('/connect-to-amazon');
         }
       }
@@ -161,20 +150,9 @@ export default function Login() {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
         } else if(error.response?.data?.message === "Seller central not found"){
-          // Check if user has premium access before redirecting to connect-to-amazon
-          // If LITE user, they need to subscribe first
-          const user = error.response?.data?.user;
-          const hasPremium = user ? hasPremiumAccess(user) : false;
-          
-          if (hasPremium) {
-            // User has subscription, redirect to connect-to-amazon
-            localStorage.setItem('isAuth', 'true');
-            navigate('/connect-to-amazon');
-          } else {
-            // LITE user or no subscription, redirect to pricing
-            localStorage.setItem('isAuth', 'true');
-            navigate('/pricing');
-          }
+          // Accounts not connected → redirect to connect-to-amazon (payment handled later)
+          localStorage.setItem('isAuth', 'true');
+          navigate('/connect-to-amazon');
         } else {
           // Handle wrong password or invalid credentials
           setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
@@ -206,34 +184,24 @@ export default function Login() {
         
         // Store auth information
         localStorage.setItem("isAuth", true);
-        dispatch(loginSuccess(response.data.data));
+        dispatch(loginSuccess(response.data || response));
         
-        // Check SP-API first, then subscription
-        const user = response.data.data;
-        const hasPremium = hasPremiumAccess(user);
+        // Check if accounts are connected
+        const user = response.data || response;
         const spApiConnected = isSpApiConnected(user);
         const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
         
-        console.log('Google Login: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        console.log('Google Login: spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
         
-        // Flow: Check SP-API first, then subscription
-        // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+        // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
+        // Payment handling is done on profile id page and continue button on connect-accounts page
         if (spApiConnected) {
-          // SP-API is connected → always redirect to dashboard (regardless of subscription)
+          // SP-API is connected → redirect to dashboard
           console.log('Google Login: SP-API connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
-        } else if (!hasSellerCentralData) {
-          // sellerCentral data not available in login response → redirect to dashboard
-          // ProtectedRouteWrapper will do full check with complete user data
-          console.log('Google Login: sellerCentral data not available - redirecting to dashboard for full check');
-          navigate('/seller-central-checker/dashboard');
-        } else if (!hasPremium) {
-          // SP-API not connected AND no subscription → redirect to pricing
-          console.log('Google Login: No SP-API and no subscription - redirecting to pricing');
-          navigate('/pricing');
         } else {
-          // SP-API not connected BUT has subscription → redirect to connect-to-amazon
-          console.log('Google Login: Has subscription but no SP-API - redirecting to connect-to-amazon');
+          // Accounts not connected → redirect to connect-to-amazon (payment handled later)
+          console.log('Google Login: Accounts not connected - redirecting to connect-to-amazon');
           navigate('/connect-to-amazon');
         }
         

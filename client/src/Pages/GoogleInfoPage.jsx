@@ -7,7 +7,6 @@ import { loginSuccess } from "../redux/slices/authSlice.js";
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from "../services/googleAuthService.js";
 import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
-import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -183,61 +182,41 @@ const GoogleInfoPage = () => {
         ? await googleAuthService.handleGoogleSignUp()
         : await googleAuthService.handleGoogleSignIn();
       
-      if (response.status === 200) {
+      if (response.statusCode === 200) {
         // Existing user login
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
-        dispatch(loginSuccess(response.data));
+        dispatch(loginSuccess(response.data || response));
         localStorage.setItem("isAuth", true);
         
-        setStatus('Checking subscription status...');
+        setStatus('Checking account connection...');
         
-        // Check SP-API first, then subscription
-        const user = response.data;
+        // Check if accounts are connected
+        const user = response.data || response;
         
-        // Debug logging
-        console.log('=== GOOGLE LOGIN DEBUG ===');
-        console.log('Full user data:', user);
-        console.log('packageType:', user.packageType);
-        console.log('subscriptionStatus:', user.subscriptionStatus);
-        console.log('isInTrialPeriod:', user.isInTrialPeriod);
-        
-        const hasPremium = hasPremiumAccess(user);
         const spApiConnected = isSpApiConnected(user);
-        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
         
-        console.log('hasPremiumAccess:', hasPremium);
-        console.log('spApiConnected:', spApiConnected);
-        console.log('hasSellerCentralData:', hasSellerCentralData);
+        console.log('Google: spApiConnected:', spApiConnected);
         
         setTimeout(() => {
-          // Flow: Check SP-API first, then subscription
-          // If sellerCentral data is missing, redirect to dashboard and let ProtectedRouteWrapper handle full check
+          // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
+          // Payment handling is done on profile id page and continue button on connect-accounts page
           if (spApiConnected) {
-            // SP-API is connected → always redirect to dashboard (regardless of subscription)
+            // SP-API is connected → redirect to dashboard
             console.log('Google: SP-API connected - redirecting to dashboard');
             window.location.href = "/seller-central-checker/dashboard";
-          } else if (!hasSellerCentralData) {
-            // sellerCentral data not available in login response → redirect to dashboard
-            // ProtectedRouteWrapper will do full check with complete user data
-            console.log('Google: sellerCentral data not available - redirecting to dashboard for full check');
-            window.location.href = "/seller-central-checker/dashboard";
-          } else if (!hasPremium) {
-            // SP-API not connected AND no subscription → redirect to connect-to-amazon (skip pricing)
-            console.log('Google: No SP-API and no subscription - redirecting to connect-to-amazon');
-            window.location.href = "/connect-to-amazon";
           } else {
-            // SP-API not connected BUT has subscription → redirect to connect-to-amazon
-            console.log('Google: Has subscription but no SP-API - redirecting to connect-to-amazon');
+            // Accounts not connected → redirect to connect-to-amazon (payment handled later)
+            console.log('Google: Accounts not connected - redirecting to connect-to-amazon');
             window.location.href = "/connect-to-amazon";
           }
         }, 1000);
         
-      } else if (response.status === 201) {
+      } else if (response.statusCode === 201) {
         // New user registration
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
-        dispatch(loginSuccess(response.data));
+        dispatch(loginSuccess(response.data || response));
         localStorage.setItem("isAuth", true);
         
         setStatus('Registration successful! Redirecting to connect Amazon...');

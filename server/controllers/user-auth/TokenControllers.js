@@ -59,13 +59,28 @@ const SaveAllDetails = asyncHandler(async (req, res) => {
         );
         
         if (!existingAccount) {
-            // Add new sellerAccount if it doesn't exist for this country/region
-            console.log(`SaveAllDetails: Adding new sellerAccount for ${country}/${region}`);
-            sellerCentralDoc.sellerAccount.push({
-                selling_partner_id: uuidv4(),
-                country: country,
-                region: region,
-            });
+            // Check if any existing account has SP-API token
+            const hasSpApiToken = sellerCentralDoc.sellerAccount.some(
+                acc => acc.spiRefreshToken && acc.spiRefreshToken.trim() !== ''
+            );
+            
+            if (hasSpApiToken) {
+                // At least one account has SP-API token - add new account to the array
+                console.log(`SaveAllDetails: Existing accounts have SP-API token, adding new sellerAccount for ${country}/${region}`);
+                sellerCentralDoc.sellerAccount.push({
+                    selling_partner_id: uuidv4(),
+                    country: country,
+                    region: region,
+                });
+            } else {
+                // No account has SP-API token - replace the existing accounts
+                console.log(`SaveAllDetails: No SP-API token found in existing accounts, replacing with new account for ${country}/${region}`);
+                sellerCentralDoc.sellerAccount = [{
+                    selling_partner_id: uuidv4(),
+                    country: country,
+                    region: region,
+                }];
+            }
             await sellerCentralDoc.save();
         } else {
             // Account already exists for this country/region - use existing
@@ -129,10 +144,21 @@ const saveDetailsOfOtherAccounts = asyncHandler(async (req, res) => {
     );
     
     if (!existingAccount) {
-        // Only add if it doesn't exist
-        sellerCentral.sellerAccount.push({ country: country, region: region });
+        // Check if any existing account has SP-API token
+        const hasSpApiToken = sellerCentral.sellerAccount.some(
+            acc => acc.spiRefreshToken && acc.spiRefreshToken.trim() !== ''
+        );
+        
+        if (hasSpApiToken) {
+            // At least one account has SP-API token - add new account to the array
+            console.log(`saveDetailsOfOtherAccounts: Existing accounts have SP-API token, adding new sellerAccount for ${country}/${region}`);
+            sellerCentral.sellerAccount.push({ country: country, region: region });
+        } else {
+            // No account has SP-API token - replace the existing accounts
+            console.log(`saveDetailsOfOtherAccounts: No SP-API token found in existing accounts, replacing with new account for ${country}/${region}`);
+            sellerCentral.sellerAccount = [{ country: country, region: region }];
+        }
         await sellerCentral.save();
-        console.log(`saveDetailsOfOtherAccounts: Added new sellerAccount for ${country}/${region}`);
     } else {
         console.log(`saveDetailsOfOtherAccounts: Seller account for ${country}/${region} already exists, using existing`);
     }
@@ -174,10 +200,21 @@ const addNewSellerCentralAccount = asyncHandler(async (req, res) => {
     );
     
     if (!existingAccount) {
-        // Only add if it doesn't exist
-        sellerCentral.sellerAccount.push({ region: region, country: country });
+        // Check if any existing account has SP-API token
+        const hasSpApiToken = sellerCentral.sellerAccount.some(
+            acc => acc.spiRefreshToken && acc.spiRefreshToken.trim() !== ''
+        );
+        
+        if (hasSpApiToken) {
+            // At least one account has SP-API token - add new account to the array
+            console.log(`addNewSellerCentralAccount: Existing accounts have SP-API token, adding new sellerAccount for ${country}/${region}`);
+            sellerCentral.sellerAccount.push({ region: region, country: country });
+        } else {
+            // No account has SP-API token - replace the existing accounts
+            console.log(`addNewSellerCentralAccount: No SP-API token found in existing accounts, replacing with new account for ${country}/${region}`);
+            sellerCentral.sellerAccount = [{ region: region, country: country }];
+        }
         await sellerCentral.save();
-        console.log(`addNewSellerCentralAccount: Added new sellerAccount for ${country}/${region}`);
     } else {
         console.log(`addNewSellerCentralAccount: Seller account for ${country}/${region} already exists, using existing`);
     }
