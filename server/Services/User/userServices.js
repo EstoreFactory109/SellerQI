@@ -70,7 +70,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate");
+    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -91,6 +91,7 @@ const getUserById =async(id)=>{
         subscriptionStatus: user.subscriptionStatus,
         isInTrialPeriod: user.isInTrialPeriod,
         trialEndsDate: user.trialEndsDate,
+        accessType: user.accessType,
         // Include sellerCentral data for SP-API connection check
         sellerCentral: sellerCentral ? {
             sellerAccount: sellerCentral.sellerAccount || []

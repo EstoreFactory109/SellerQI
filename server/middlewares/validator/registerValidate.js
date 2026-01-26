@@ -46,7 +46,7 @@ const validateSignup = [
         .trim()
         .notEmpty().withMessage("Email is required")
         .isEmail().withMessage("Invalid email format")
-        .normalizeEmail(),
+        .normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false, outlookdotcom_remove_subaddress: false, yahoo_remove_subaddress: false, icloud_remove_subaddress: false }),
         
     body("password")
         .trim()

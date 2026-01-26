@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
@@ -45,5 +45,8 @@ router.get('/admin/clients', auth, getAdminClients);
 router.delete('/admin/clients/:clientId', auth, removeAdminClient);
 router.get('/admin/billing', auth, getAdminBillingInfo);
 router.post('/resend-otp', otpRateLimiter, validateOtpResend, resendOtp);
+
+// Super Admin routes
+router.put('/super-admin/update-user-password', auth, superAdminUpdateUserPassword);
 
 module.exports=router;

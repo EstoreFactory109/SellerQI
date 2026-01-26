@@ -30,9 +30,10 @@ export const isSpApiConnected = (user) => {
   console.log('sellerAccount array:', user.sellerCentral.sellerAccount);
   
   // Check if any seller account has SP-API refresh token
+  // Note: Backend may return 'connected' string instead of actual token for security
   const hasSpApiToken = user.sellerCentral.sellerAccount.some(account => {
-    const hasToken = account.spiRefreshToken && account.spiRefreshToken.trim() !== '';
-    console.log('Account:', account.country, 'hasToken:', hasToken);
+    const hasToken = account.spiRefreshToken && account.spiRefreshToken.toString().trim() !== '';
+    console.log('Account:', account.country, 'hasToken:', hasToken, 'tokenValue:', account.spiRefreshToken);
     return hasToken;
   });
 

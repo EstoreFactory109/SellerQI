@@ -127,15 +127,14 @@ export default function Login() {
         console.log("user: ",user);
         
         const spApiConnected = isSpApiConnected(user);
-        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
+        const isSuperAdmin = user?.accessType === 'superAdmin';
         
-        console.log('Login: spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        console.log('Login: spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
-        // Payment handling is done on profile id page and continue button on connect-accounts page
-        if (spApiConnected) {
-          // SP-API is connected → redirect to dashboard
-          console.log('Login: SP-API connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users check SP-API connection.
+        if (isSuperAdmin || spApiConnected) {
+          // Super admin or SP-API is connected → redirect to dashboard
+          console.log('Login: Super admin or SP-API connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
@@ -189,15 +188,14 @@ export default function Login() {
         // Check if accounts are connected
         const user = response.data || response;
         const spApiConnected = isSpApiConnected(user);
-        const hasSellerCentralData = user?.sellerCentral && user?.sellerCentral?.sellerAccount;
+        const isSuperAdmin = user?.accessType === 'superAdmin';
         
-        console.log('Google Login: spApiConnected:', spApiConnected, 'hasSellerCentralData:', hasSellerCentralData);
+        console.log('Google Login: spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
-        // Payment handling is done on profile id page and continue button on connect-accounts page
-        if (spApiConnected) {
-          // SP-API is connected → redirect to dashboard
-          console.log('Google Login: SP-API connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users check SP-API connection.
+        if (isSuperAdmin || spApiConnected) {
+          // Super admin or SP-API is connected → redirect to dashboard
+          console.log('Google Login: Super admin or SP-API connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)

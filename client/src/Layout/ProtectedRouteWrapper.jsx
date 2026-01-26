@@ -64,23 +64,25 @@ const ProtectedRouteWrapper = ({ children }) => {
           // Check SP-API first, then subscription
           const hasPremium = hasPremiumAccess(userData);
           const spApiConnected = isSpApiConnected(userData);
+          const isSuperAdmin = userData?.accessType === 'superAdmin';
+          const isSuperAdminSession = userData?.isSuperAdminSession === true;
           const currentPath = window.location.pathname;
           const isDashboardRoute = currentPath.includes('/dashboard') || currentPath.includes('/seller-central-checker');
           
-          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected);
+          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin, 'isSuperAdminSession:', isSuperAdminSession);
           
-          // Flow: Check SP-API first, then subscription
+          // Flow: Super admins (or super admin sessions) always have access. For regular users, check SP-API first, then subscription
           // Only apply redirects if user is trying to access dashboard routes
           if (isDashboardRoute) {
-            if (spApiConnected) {
-              // SP-API is connected → always allow dashboard access (regardless of subscription)
-              console.log('ProtectedRouteWrapper: SP-API connected - allowing dashboard access');
+            if (isSuperAdmin || isSuperAdminSession || spApiConnected) {
+              // Super admin or super admin session or SP-API is connected → always allow dashboard access
+              console.log('ProtectedRouteWrapper: Super admin/session or SP-API connected - allowing dashboard access');
               // Continue with normal flow
             } else if (!hasPremium) {
-              // SP-API not connected AND no subscription → redirect to pricing
-              console.log('ProtectedRouteWrapper: No SP-API and no subscription - redirecting to pricing');
+              // SP-API not connected AND no subscription → redirect to connect-to-amazon
+              console.log('ProtectedRouteWrapper: No SP-API and no subscription - redirecting to connect-to-amazon');
               localStorage.setItem("isAuth", "true"); // Keep them logged in
-              navigate("/pricing", { replace: true });
+              navigate("/connect-to-amazon", { replace: true });
               return;
             } else {
               // SP-API not connected BUT has subscription → redirect to connect-to-amazon

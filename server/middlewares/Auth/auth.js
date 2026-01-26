@@ -7,6 +7,7 @@ const { ApiResponse } = require('../../utils/ApiResponse');
 const auth=asyncHandler(async(req,res,next)=>{
     const accesstoken=req.cookies.IBEXAccessToken;
     const adminToken=req.cookies.AdminToken;
+    const superAdminToken=req.cookies.SuperAdminToken;
     
     
     
@@ -30,6 +31,21 @@ const auth=asyncHandler(async(req,res,next)=>{
         req.adminId=decodedAdmin.tokenData;
     }else{
         req.adminId=null;
+    }
+
+    // Check for SuperAdminToken to track super admin session
+    if(superAdminToken && superAdminToken.length!==0){
+        const decodedSuperAdmin=await verifyAccessToken(superAdminToken);
+        if(decodedSuperAdmin && decodedSuperAdmin.isvalid){
+            req.isSuperAdminSession=true;
+            req.superAdminId=decodedSuperAdmin.tokenData;
+        }else{
+            req.isSuperAdminSession=false;
+            req.superAdminId=null;
+        }
+    }else{
+        req.isSuperAdminSession=false;
+        req.superAdminId=null;
     }
 
     if(decoded.isvalid){

@@ -284,8 +284,11 @@ const verifyUser = asyncHandler(async (req, res) => {
 
 const profileUser = asyncHandler(async (req, res) => {
     const userId = req.userId;
+    const isSuperAdminSession = req.isSuperAdminSession || false;
+    
     console.log('=== PROFILE ENDPOINT CALLED ===');
     console.log('userId:', userId);
+    console.log('isSuperAdminSession:', isSuperAdminSession);
 
     if (!userId) {
         logger.error(new ApiError(400, "User id is missing"));
@@ -300,7 +303,14 @@ const profileUser = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
-    return res.status(200).json(new ApiResponse(200, userProfile, "User profile fetched successfully"));
+    // Add super admin session flag to the response
+    // This tells the frontend that a super admin is viewing this account
+    const responseData = {
+        ...userProfile,
+        isSuperAdminSession: isSuperAdminSession
+    };
+
+    return res.status(200).json(new ApiResponse(200, responseData, "User profile fetched successfully"));
 })
 
 
@@ -475,6 +485,18 @@ const loginUser = asyncHandler(async (req, res) => {
         isInTrialPeriod: checkUserIfExists.isInTrialPeriod || false,
         trialEndsDate: checkUserIfExists.trialEndsDate || null
     };
+
+    // Add sellerCentral data if available (needed for SP-API connection check on frontend)
+    if (getSellerCentral) {
+        responseData.sellerCentral = {
+            sellerAccount: getSellerCentral.sellerAccount.map(account => ({
+                country: account.country,
+                region: account.region,
+                selling_partner_id: account.selling_partner_id,
+                spiRefreshToken: account.spiRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+            }))
+        };
+    }
 
     // Add all seller accounts data if user is superAdmin
     if (checkUserIfExists.accessType === 'superAdmin' && allSellerAccounts) {
@@ -921,6 +943,18 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             isInTrialPeriod: checkUserIfExists.isInTrialPeriod || false,
             trialEndsDate: checkUserIfExists.trialEndsDate || null
         };
+
+        // Add sellerCentral data if available (needed for SP-API connection check on frontend)
+        if (getSellerCentral) {
+            responseData.sellerCentral = {
+                sellerAccount: getSellerCentral.sellerAccount.map(account => ({
+                    country: account.country,
+                    region: account.region,
+                    selling_partner_id: account.selling_partner_id,
+                    spiRefreshToken: account.spiRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+                }))
+            };
+        }
 
         // Add all seller accounts data if user is superAdmin
         if (checkUserIfExists.accessType === 'superAdmin' && allSellerAccounts) {
@@ -1481,6 +1515,61 @@ const getAdminBillingInfo = asyncHandler(async (req, res) => {
     }
 });
 
+// Super Admin - Update any user's password
+const superAdminUpdateUserPassword = asyncHandler(async (req, res) => {
+    // Use superAdminId if available (when super admin is logged in as another user), otherwise use userId
+    const adminId = req.superAdminId || req.userId;
+    const isSuperAdminSession = req.isSuperAdminSession || false;
+    const { userId, newPassword } = req.body;
+
+    // Validate required fields
+    if (!userId || !newPassword) {
+        logger.error(new ApiError(400, "User ID and new password are required"));
+        return res.status(400).json(new ApiResponse(400, "", "User ID and new password are required"));
+    }
+
+    // Check if the requester is a super admin
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin' && !isSuperAdminSession) {
+        logger.error(new ApiError(403, "Unauthorized: Only super admin can update user passwords"));
+        return res.status(403).json(new ApiResponse(403, "", "Unauthorized: Only super admin can update user passwords"));
+    }
+
+    // Find the target user
+    const targetUser = await UserModel.findById(userId);
+    if (!targetUser) {
+        logger.error(new ApiError(404, "Target user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Target user not found"));
+    }
+
+    // Validate password strength (minimum 8 characters)
+    if (newPassword.length < 8) {
+        logger.error(new ApiError(400, "Password must be at least 8 characters long"));
+        return res.status(400).json(new ApiResponse(400, "", "Password must be at least 8 characters long"));
+    }
+
+    // Hash the new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // Update the user's password
+    targetUser.password = hashedPassword;
+    await targetUser.save();
+
+    logger.info(`Super admin ${adminId} updated password for user ${userId} (${targetUser.email})`);
+
+    return res.status(200).json(new ApiResponse(200, {
+        userId: targetUser._id,
+        email: targetUser.email,
+        firstName: targetUser.firstName,
+        lastName: targetUser.lastName
+    }, "User password updated successfully"));
+});
+
 const resendOtp = asyncHandler(async (req, res) => {
     const { email, phone } = req.body;
 
@@ -1530,5 +1619,7 @@ module.exports = {
     getAdminClients,
     removeAdminClient,
     getAdminBillingInfo,
-    resendOtp
+    resendOtp,
+    // Super Admin endpoints
+    superAdminUpdateUserPassword
 };

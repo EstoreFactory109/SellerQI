@@ -6,7 +6,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { updateProfileDetails } from '../../../redux/slices/authSlice.js';
 import axios from 'axios';
 import BeatLoader from "react-spinners/BeatLoader";
-import { User, Phone, Mail, Edit3 } from "lucide-react";
+import { User, Phone, Mail, Edit3, Lock, Eye, EyeOff, Shield, CheckCircle, AlertCircle } from "lucide-react";
 
 export default function ProfileForm() {
   const dispatch = useDispatch();
@@ -22,6 +22,18 @@ export default function ProfileForm() {
   const [loading, setLoading] = useState(false);
   const [image, setImage] = useState(null);
   const [close, setClose] = useState(true);
+
+  // Super Admin Password Update States
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
+  // Check if current session is a super admin session
+  const isSuperAdminSession = Details?.isSuperAdminSession === true;
 
   const [firstNameStatus, setFirstNameStatus] = useState(true);
   const [firstNameColor, setFirstNameColor] = useState('#9ba3ad');
@@ -101,6 +113,55 @@ export default function ProfileForm() {
   const clickSave = (e) => {
     e.preventDefault();
     submitBtn.current.click();
+  };
+
+  // Super Admin: Update user password
+  const handlePasswordUpdate = async (e) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    // Validation
+    if (!newPassword || !confirmPassword) {
+      setPasswordError('Please fill in both password fields');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters long');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    setPasswordLoading(true);
+
+    try {
+      const response = await axios.put(
+        `${import.meta.env.VITE_BASE_URI}/app/super-admin/update-user-password`,
+        { 
+          userId: Details?.userId,
+          newPassword: newPassword 
+        },
+        { withCredentials: true }
+      );
+
+      if (response.status === 200) {
+        setPasswordSuccess('Password updated successfully!');
+        setNewPassword('');
+        setConfirmPassword('');
+        // Clear success message after 5 seconds
+        setTimeout(() => setPasswordSuccess(''), 5000);
+      }
+    } catch (error) {
+      console.error('Password update error:', error);
+      setPasswordError(error.response?.data?.message || 'Failed to update password. Please try again.');
+    } finally {
+      setPasswordLoading(false);
+    }
   };
 
   return (
@@ -230,6 +291,104 @@ export default function ProfileForm() {
             )}
           </button>
         </div>
+
+        {/* Super Admin: Password Update Section */}
+        {isSuperAdminSession && (
+          <div className="mt-8 pt-8 border-t border-gray-200/80">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <Shield className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Super Admin: Update User Password</h3>
+                <p className="text-sm text-gray-500">Set a new password for this user account</p>
+              </div>
+            </div>
+
+            <form onSubmit={handlePasswordUpdate} className="space-y-4">
+              {/* Success Message */}
+              {passwordSuccess && (
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="text-sm font-medium">{passwordSuccess}</span>
+                </div>
+              )}
+
+              {/* Error Message */}
+              {passwordError && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="text-sm font-medium">{passwordError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* New Password */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">New Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      className="w-full pl-10 pr-12 py-3 border-2 border-gray-200 rounded-xl transition-all duration-200 font-medium bg-white text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm Password */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">Confirm Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm new password"
+                      className="w-full pl-10 pr-12 py-3 border-2 border-gray-200 rounded-xl transition-all duration-200 font-medium bg-white text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <button
+                  type="submit"
+                  disabled={passwordLoading}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-medium rounded-xl hover:from-amber-600 hover:to-amber-700 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[180px] justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {passwordLoading ? <BeatLoader color="#fff" size={8} /> : (
+                    <>
+                      <Lock className="w-4 h-4" />
+                      Update Password
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );
