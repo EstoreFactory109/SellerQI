@@ -15,12 +15,12 @@ const {
 
 // Import middleware
 const auth = require('../middlewares/Auth/auth');
-const { webhookRateLimiter, paymentRateLimiter } = require('../middlewares/rateLimiting.js');
+// Rate limiters disabled except for authentication
+// const { webhookRateLimiter, paymentRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateRazorpayOrder, validateRazorpayPayment } = require('../middlewares/validator/razorpayValidate.js');
 
 // Webhook route (no auth required, Razorpay handles verification)
-// Webhooks are whitelisted in the rate limiter (skipped if signature is present)
-router.post('/webhook', webhookRateLimiter, handleWebhook);
+router.post('/webhook', handleWebhook);
 
 // Configuration route (no auth required)
 router.get('/config', getConfig);
@@ -31,10 +31,10 @@ router.post('/create-order', auth, validateRazorpayOrder, createOrder);
 router.post('/verify-payment', auth, validateRazorpayPayment, verifyPayment);
 
 // Subscription management routes (auth required)
-router.get('/subscription', paymentRateLimiter, auth, getSubscription);
-router.post('/cancel-subscription', paymentRateLimiter, auth, cancelSubscription);
-router.get('/payment-history', paymentRateLimiter, auth, getPaymentHistory);
-router.get('/invoice-download', paymentRateLimiter, auth, getInvoiceDownloadUrl);
+router.get('/subscription', auth, getSubscription);
+router.post('/cancel-subscription', auth, cancelSubscription);
+router.get('/payment-history', auth, getPaymentHistory);
+router.get('/invoice-download', auth, getInvoiceDownloadUrl);
 
 module.exports = router;
 

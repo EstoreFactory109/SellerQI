@@ -48,7 +48,8 @@ const { jobScheduler } = require('../Services/BackgroundJobs/JobScheduler.js')
 const { initializeEmailReminderJob } = require('../Services/BackgroundJobs/sendEmailAfter48Hrs.js')
 const { setupDailyUpdateCron } = require('../Services/BackgroundJobs/cronProducer.js')
 const config = require('../config/config.js')
-const { globalRateLimiter } = require('../middlewares/rateLimiting.js')
+// Global rate limiter disabled - only authentication rate limiters are active
+// const { globalRateLimiter } = require('../middlewares/rateLimiting.js')
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
@@ -115,10 +116,10 @@ app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
 
-// Global rate limiting - applies to all API routes as baseline protection
+// Global rate limiting disabled - only authentication rate limiters are active
 // Webhooks are automatically skipped (handled in rateLimiting.js)
 // Static files are excluded (handled by express.static before this)
-app.use(globalRateLimiter);
+// app.use(globalRateLimiter);
 
 
 app.use('/app',userRoute)
