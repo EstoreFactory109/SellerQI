@@ -34,8 +34,9 @@ export const hasPremiumAccess = (user) => {
     }
 
     // For paid PRO/AGENCY users, check subscription status
-    // Active or undefined subscription status means valid access
-    if (!subscriptionStatus || subscriptionStatus === 'active') {
+    // Active, trialing, or undefined subscription status means valid access
+    // 'trialing' status is set when user starts a trial period via Stripe/Razorpay
+    if (!subscriptionStatus || subscriptionStatus === 'active' || subscriptionStatus === 'trialing') {
       return true;
     }
 

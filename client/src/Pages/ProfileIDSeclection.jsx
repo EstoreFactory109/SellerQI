@@ -249,13 +249,39 @@ const ProfileIDSelection = () => {
   // Navigate to payment based on country
   const navigateToPayment = async () => {
     try {
-      // Check if user already has premium access (PRO subscription or active trial)
-      // If so, skip payment and go directly to analyzing page
+      // First check Redux state for premium access
       if (hasPremiumAccess(userData)) {
-        console.log('[ProfileIDSelection] User already has premium access, skipping payment...');
+        console.log('[ProfileIDSelection] User already has premium access (from Redux), skipping payment...');
         setWaitingForAnalysis(false);
         navigate('/analysing-account');
         return;
+      }
+      
+      // Fetch fresh user data from API to ensure we have the latest subscription status
+      // This handles cases where Redux state might be stale
+      try {
+        console.log('[ProfileIDSelection] Fetching fresh user data to verify subscription status...');
+        const profileResponse = await axiosInstance.get('/app/profile');
+        if (profileResponse?.status === 200 && profileResponse.data?.data) {
+          const freshUserData = profileResponse.data.data;
+          console.log('[ProfileIDSelection] Fresh user data:', {
+            packageType: freshUserData.packageType,
+            subscriptionStatus: freshUserData.subscriptionStatus,
+            isInTrialPeriod: freshUserData.isInTrialPeriod,
+            trialEndsDate: freshUserData.trialEndsDate
+          });
+          
+          // Check fresh data for premium access (PRO, AGENCY, or active trial)
+          if (hasPremiumAccess(freshUserData)) {
+            console.log('[ProfileIDSelection] User already has premium access (from fresh API data), skipping payment...');
+            setWaitingForAnalysis(false);
+            navigate('/analysing-account');
+            return;
+          }
+        }
+      } catch (profileError) {
+        console.warn('[ProfileIDSelection] Could not fetch fresh profile data, proceeding with Redux state:', profileError);
+        // Continue with payment flow if we can't fetch fresh data
       }
       
       // Detect user's country
