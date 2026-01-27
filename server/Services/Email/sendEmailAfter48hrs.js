@@ -12,6 +12,14 @@ const isValidEmail = (email) => {
 };
 
 const sendAnalysisReadyEmail = async (email, firstName, loginUrl, userId = null) => {
+    // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
+    const adminEmail = process.env.ADMIN_EMAIL_ID 
+        ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()
+        : 'support@sellerqi.com'; // fallback
+
+    // Use SELF_MAIL_ID or first admin email as sender
+    const senderEmail = process.env.SELF_MAIL_ID || adminEmail;
+
     // Create email log entry
     const emailLog = new EmailLogs({
         emailType: 'CONNECTION_REMINDER',
@@ -70,9 +78,8 @@ const sendAnalysisReadyEmail = async (email, firstName, loginUrl, userId = null)
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: process.env.ADMIN_EMAIL_ID, // Sender address
-            to: email, // List of receivers
-            bcc: process.env.ADMIN_EMAIL_ID, // BCC to admin
+            from: senderEmail, // Sender address (first email only)
+            to: email, // User's email
             subject: subject, // Subject line
             text: text, // Plain text body
             html: body, // HTML body

@@ -13,10 +13,18 @@ let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..'
 
 
 const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, RegisteredEmail, sellerId, userId = null) => {
+    // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
+    const adminEmail = process.env.ADMIN_EMAIL_ID 
+        ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()
+        : 'support@sellerqi.com'; // fallback
+
+    // Use SELF_MAIL_ID or first admin email as sender
+    const senderEmail = process.env.SELF_MAIL_ID || adminEmail;
+
     // Create email log entry
     const emailLog = new EmailLogs({
         emailType: 'USER_REGISTERED',
-        receiverEmail: process.env.ADMIN_EMAIL_ID, // This goes to admin
+        receiverEmail: adminEmail, // First admin email only
         receiverId: userId,
         status: 'PENDING',
         subject: "New User Registered",
@@ -61,8 +69,8 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: process.env.SELF_MAIL_ID, // Sender address
-            to: process.env.ADMIN_EMAIL_ID, // List of receivers
+            from: senderEmail, // Sender address (first email only)
+            to: adminEmail, // First admin email only
             subject: "New User Registered", // Subject line
             text: text, // Plain text body
             html: body, // HTML body
@@ -73,7 +81,7 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
         logger.info(`User registered email sent successfully. Message ID: ${info.messageId}`);
         return info.messageId; // Return the message ID on success
     } catch (error) {
-        logger.error(`Failed to send email to ${process.env.ADMIN_EMAIL_ID}:`, error);
+        logger.error(`Failed to send email to ${adminEmail}:`, error);
         await emailLog.markAsFailed(error.message);
         return false;
 

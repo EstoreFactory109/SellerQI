@@ -75,7 +75,13 @@ const sendTrialExpirationReminder = async (email, firstName, lastName, trialEnds
             throw new Error('Email credentials not configured (ADMIN_USERNAME or APP_PASSWORD missing)');
         }
 
-        const fromEmail = process.env.SELF_MAIL_ID || process.env.ADMIN_EMAIL_ID;
+        // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
+        const adminEmail = process.env.ADMIN_EMAIL_ID 
+            ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()
+            : 'support@sellerqi.com'; // fallback
+
+        // Use SELF_MAIL_ID or first admin email as sender
+        const fromEmail = process.env.SELF_MAIL_ID || adminEmail;
         if (!fromEmail) {
             throw new Error('Sender email not configured (SELF_MAIL_ID or ADMIN_EMAIL_ID missing)');
         }

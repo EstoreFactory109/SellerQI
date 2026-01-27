@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign, Search, Lock, Package} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign, Search, Lock, Package, BarChart3} from 'lucide-react'
 import LogoutIcon from '../../assets/Icons/Logout.png';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -226,6 +226,23 @@ const LeftNavSection = () => {
                                 )}
                             </NavLink>
                         )}
+
+                        {/* Listing Analyzer - Available for ALL users */}
+                        <NavLink
+                            to="/seller-central-checker/pre-analysis"
+                            className={({ isActive }) =>
+                                `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
+                            }
+                        >
+                            {({ isActive }) => (
+                                <>
+                                    <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-violet-50 group-hover:bg-violet-100'}`}>
+                                        <BarChart3 className={`${iconClass} ${isActive ? 'text-white' : 'text-violet-600'}`}/>
+                                    </div>
+                                    <span className="font-medium flex-1">Listing Analyzer</span>
+                                </>
+                            )}
+                        </NavLink>
                         
                         {/* Issues with Dropdown - For PRO/AGENCY users and expired trial users */}
                         {(!isLiteUser || isPremiumLocked) && (

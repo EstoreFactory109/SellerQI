@@ -284,17 +284,23 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
 
         await sellerCentral.save();
 
-        const getUser = await User.findById(userId).select("firstName lastName phone email");
+        // Send registration email in background - don't block the main flow
+        try {
+            const getUser = await User.findById(userId).select("firstName lastName phone email");
 
-        if(!getUser){
-            logger.error(new ApiError(404,"User not found"));
+            if(getUser){
+                const sendEmail = await sendRegisteredEmail(userId, getUser.firstName, getUser.lastName, getUser.phone, getUser.email, sellingPartnerId);
+                if(!sendEmail){
+                    logger.warn("Failed to send registration email, but token was saved successfully");
+                }
+            } else {
+                logger.warn("User not found for sending registration email, but token was saved successfully");
+            }
+        } catch (emailError) {
+            // Log email error but don't fail the main flow - token is already saved
+            logger.error(`Error sending registration email (non-critical): ${emailError.message}`);
         }
 
-        const sendEmail = await sendRegisteredEmail(userId,getUser.firstName,getUser.lastName,getUser.phone,getUser.email,sellingPartnerId);
-        if(!sendEmail){
-            logger.error(new ApiError(500, "Internal server error in sending email"));
-           // return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
-        }
         return res.status(200).json(new ApiResponse(200, sellerCentral, "Tokens generated successfully"));
 
     } catch (error) {

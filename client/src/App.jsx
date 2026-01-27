@@ -54,6 +54,7 @@ import Tasks from './Pages/Tasks.jsx';
 import EcommerceHolidaysCalendar from './Pages/EventCalender.jsx';
 import ReimbursementDashboard from './Pages/ReimbursementDashboard.jsx';
 import YourProducts from './Pages/YourProducts.jsx';
+import PreAnalysis from './Pages/PreAnalysis.jsx';
 
 const App = () => {
 
@@ -124,6 +125,7 @@ const App = () => {
             <Route path='settings' element={<Settings />} />
             <Route path='reimbursement-dashboard' element={<ReimbursementDashboard />} />
             <Route path='your-products' element={<YourProducts />} />
+            <Route path='pre-analysis' element={<PreAnalysis />} />
             <Route path='tasks' element={<Tasks />} />
             <Route path='ecommerce-calendar' element={<EcommerceHolidaysCalendar />} />
             <Route path='user-logging' element={<UserLogging />} />
