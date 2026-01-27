@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser } = require('../controllers/admin/admin.js');
+const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser, deleteUser } = require('../controllers/admin/admin.js');
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
@@ -12,5 +12,6 @@ router.post('/admin-login', authRateLimiter, validateAdminLogin, adminLogin);
 router.post('/admin-logout', superAdminAuth, adminLogout);
 router.get('/admin/accounts', superAdminAuth, getAllAccounts);
 router.post('/admin/login-as-user', superAdminAuth, loginSelectedUser);
+router.delete('/admin/users/:userId', superAdminAuth, deleteUser);
 
 module.exports = router;

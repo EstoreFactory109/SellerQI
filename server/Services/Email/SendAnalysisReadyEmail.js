@@ -30,8 +30,10 @@ const sendAnalysisReadyEmail = async (email, firstName, dashboardUrl, userId = n
         .replace('{{twitterUrl}}', process.env.TWITTER_URL || '#')
         .replace('{{linkedinUrl}}', process.env.LINKEDIN_URL || '#')
         .replace('{{youtubeUrl}}', process.env.YOUTUBE_URL || '#')
-        .replace('{{privacyUrl}}', process.env.PRIVACY_POLICY_URL || '#')
-        .replace('{{termsUrl}}', process.env.TERMS_OF_SERVICE_URL || '#')
+        .replace('{{privacyUrl}}', process.env.PRIVACY_POLICY_URL || 'https://www.sellerqi.com/privacy-policy')
+        .replace('{{termsUrl}}', process.env.TERMS_OF_SERVICE_URL || 'https://www.sellerqi.com/terms-of-use')
+        .replace('{{refundUrl}}', process.env.REFUND_URL || 'https://www.sellerqi.com/terms-of-use')
+        .replace('{{cancellationUrl}}', process.env.CANCELLATION_URL || 'https://www.sellerqi.com/terms-of-use')
         .replace('{{unsubscribeUrl}}', process.env.UNSUBSCRIBE_URL || '#');
 
     try {

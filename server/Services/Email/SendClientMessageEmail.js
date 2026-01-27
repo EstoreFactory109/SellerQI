@@ -10,15 +10,28 @@ const path = require('path');
 
 
 const sendEmail = async (email, firstName, message, subject, topic, userId = null) => {
+    // Parse multiple emails from environment variable (comma-separated)
+    const adminEmails = process.env.ADMIN_EMAIL_ID 
+        ? process.env.ADMIN_EMAIL_ID.split(',').map(email => email.trim()).filter(email => email)
+        : ['support@sellerqi.com']; // fallback
+
+    // Use first email as primary receiver for logging (schema requires single email)
+    const primaryReceiverEmail = adminEmails[0];
+
     // Create email log entry
     const emailLog = new EmailLogs({
         emailType: 'SUPPORT_MESSAGE',
-        receiverEmail: process.env.ADMIN_EMAIL_ID, // This goes to admin
+        receiverEmail: primaryReceiverEmail, // Primary receiver (schema requires single email)
         receiverId: userId,
         status: 'PENDING',
         subject: subject,
         emailContent: `Support message from ${firstName} (${email}): ${message}`,
-        emailProvider: 'AWS_SES'
+        emailProvider: 'AWS_SES',
+        metadata: {
+            allRecipients: adminEmails, // Store all recipients in metadata
+            userEmail: email,
+            userName: firstName
+        }
     });
 
     console.log(email,firstName,message,subject,topic);
@@ -62,14 +75,22 @@ const sendEmail = async (email, firstName, message, subject, topic, userId = nul
             `;
         const body = template;
 
+        // Use first email as sender
+        const senderEmail = adminEmails[0];
+
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: process.env.ADMIN_EMAIL_ID, // Sender address
-            to: process.env.ADMIN_EMAIL_ID, // List of receivers
-            bcc: process.env.ADMIN_EMAIL_ID, // BCC to admin
+            from: senderEmail, // Sender address
+            to: adminEmails, // Array of recipients
+            replyTo: email, // Reply-To set to user's email so replies go directly to them
             subject: subject, // Subject line
             text: text, // Plain text body
             html: body, // HTML body
+            headers: {
+                'Reply-To': email, // Explicit Reply-To header
+                'X-Support-Ticket-User': email, // Custom header for tracking
+                'X-Support-Ticket-Name': firstName || 'Unknown' // Custom header for user name
+            }
         });
 
         // Mark email as sent

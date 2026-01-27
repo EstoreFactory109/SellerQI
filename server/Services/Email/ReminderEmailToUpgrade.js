@@ -39,6 +39,17 @@ const RemiderEmail = async (Email, days, userName, upgradeUrl, userId = null) =>
     template = safeReplace(template, '{{userName}}', userName);
     template = safeReplace(template, '{{upgradeUrl}}', upgradeUrl);
     
+    // Replace social media and policy URLs
+    template = safeReplace(template, '{{facebookUrl}}', process.env.FACEBOOK_URL || 'https://www.facebook.com/sellerqi');
+    template = safeReplace(template, '{{twitterUrl}}', process.env.TWITTER_URL || 'https://www.twitter.com/sellerqi');
+    template = safeReplace(template, '{{linkedinUrl}}', process.env.LINKEDIN_URL || 'https://www.linkedin.com/company/sellerqi');
+    template = safeReplace(template, '{{youtubeUrl}}', process.env.YOUTUBE_URL || 'https://www.youtube.com/@sellerqi');
+    template = safeReplace(template, '{{privacyUrl}}', process.env.PRIVACY_URL || 'https://www.sellerqi.com/privacy-policy');
+    template = safeReplace(template, '{{termsUrl}}', process.env.TERMS_URL || 'https://www.sellerqi.com/terms-of-use');
+    template = safeReplace(template, '{{refundUrl}}', process.env.REFUND_URL || 'https://www.sellerqi.com/terms-of-use');
+    template = safeReplace(template, '{{cancellationUrl}}', process.env.CANCELLATION_URL || 'https://www.sellerqi.com/terms-of-use');
+    template = safeReplace(template, '{{unsubscribeUrl}}', process.env.UNSUBSCRIBE_URL || 'https://sellerqi.com/unsubscribe');
+    
     
 
 

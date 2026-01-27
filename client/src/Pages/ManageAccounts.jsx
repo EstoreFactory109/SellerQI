@@ -20,7 +20,8 @@ import {
   Download,
   FileText,
   Link,
-  Zap
+  Zap,
+  Trash2
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 
@@ -125,6 +126,11 @@ const ManageAccounts = () => {
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [deletingUsers, setDeletingUsers] = useState(new Set());
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
+  const [deleteSuccess, setDeleteSuccess] = useState('');
 
   // Helper functions to check API connection status (defined before useMemo)
   const getSpApiConnectionStatus = (user) => {
@@ -429,13 +435,17 @@ const ManageAccounts = () => {
   const exportToCSV = async () => {
     try {
       setIsExporting(true);
+      setExportError('');
       const csvContent = convertToCSV(filteredUsers);
       const timestamp = new Date().toISOString().split('T')[0];
       const filename = `users-export-${timestamp}.csv`;
       downloadFile(csvContent, filename, 'text/csv;charset=utf-8;');
     } catch (error) {
       console.error('Error exporting to CSV:', error);
-      alert('Error exporting to CSV. Please try again.');
+      setExportError('Error exporting to CSV. Please try again.');
+      setTimeout(() => {
+        setExportError('');
+      }, 5000);
     } finally {
       setIsExporting(false);
     }
@@ -508,6 +518,59 @@ const ManageAccounts = () => {
     } finally {
       setIsLoggingOut(false);
     }
+  };
+
+  const handleDeleteUser = async (user) => {
+    try {
+      // Add user to deleting set
+      setDeletingUsers(prev => new Set([...prev, user._id]));
+      setDeleteError('');
+      
+      console.log('Deleting user:', user);
+      
+      // Call the delete user API
+      const response = await axiosInstance.delete(`/app/auth/admin/users/${user._id}`);
+      
+      if (response.data.statusCode === 200) {
+        console.log('Successfully deleted user:', response.data.data);
+        
+        // Remove user from local state
+        setUsers(prevUsers => prevUsers.filter(u => u._id !== user._id));
+        
+        // Close confirmation dialog
+        setDeleteConfirmUser(null);
+        
+        // Show success message
+        setDeleteSuccess(`User ${user.firstName} ${user.lastName} (${user.email}) has been deleted successfully.`);
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          setDeleteSuccess('');
+        }, 5000);
+      } else {
+        setDeleteError(response.data.message || 'Failed to delete user');
+      }
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      setDeleteError(error.response?.data?.message || 'Failed to delete user');
+    } finally {
+      // Remove user from deleting set
+      setDeletingUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(user._id);
+        return newSet;
+      });
+    }
+  };
+
+  const openDeleteConfirm = (user) => {
+    setDeleteConfirmUser(user);
+    setDeleteError('');
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmUser(null);
+    setDeleteError('');
   };
 
   const getPaginationGroup = () => {
@@ -622,6 +685,127 @@ const ManageAccounts = () => {
               Dismiss
             </button>
           </div>
+        )}
+
+        {/* Delete Error State */}
+        {deleteError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <p className="text-red-700 font-medium">Delete Error: {deleteError}</p>
+            <button 
+              onClick={() => setDeleteError('')}
+              className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Delete Success State */}
+        {deleteSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6"
+          >
+            <p className="text-green-700 font-medium">✓ {deleteSuccess}</p>
+          </motion.div>
+        )}
+
+        {/* Export Error State */}
+        {exportError && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6"
+          >
+            <p className="text-red-700 font-medium">Export Error: {exportError}</p>
+            <button 
+              onClick={() => setExportError('')}
+              className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Dismiss
+            </button>
+          </motion.div>
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        {deleteConfirmUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            onClick={closeDeleteConfirm}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Delete User</h3>
+                  <p className="text-sm text-gray-600">This action cannot be undone</p>
+                </div>
+              </div>
+              
+              <div className="mb-6">
+                <p className="text-gray-700 mb-2">
+                  Are you sure you want to delete this user?
+                </p>
+                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                  <p className="font-medium text-gray-900">
+                    {deleteConfirmUser.firstName} {deleteConfirmUser.lastName}
+                  </p>
+                  <p className="text-sm text-gray-600">{deleteConfirmUser.email}</p>
+                </div>
+                <p className="text-sm text-red-600 mt-3">
+                  ⚠️ This will permanently delete the user account and all associated seller documents.
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-700">{deleteError}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={closeDeleteConfirm}
+                  disabled={deletingUsers.has(deleteConfirmUser._id)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDeleteUser(deleteConfirmUser)}
+                  disabled={deletingUsers.has(deleteConfirmUser._id)}
+                  className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                    deletingUsers.has(deleteConfirmUser._id)
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                >
+                  {deletingUsers.has(deleteConfirmUser._id) ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Deleting...
+                    </span>
+                  ) : (
+                    'Delete User'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
 
         {/* Search and Filter Bar */}
@@ -859,7 +1043,7 @@ const ManageAccounts = () => {
                   <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     <span className="text-xs">Type</span>
                   </th>
-                  <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="w-1/8 px-2 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     <span className="text-xs">Brands</span>
                   </th>
                   <th className="w-1/8 px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -944,8 +1128,8 @@ const ManageAccounts = () => {
                         </td>
 
                         {/* Brands */}
-                        <td className="px-2 py-3 text-center">
-                          <div className="flex items-center justify-center">
+                        <td className="px-2 py-3 text-left">
+                          <div className="flex items-center justify-start">
                             <span className="text-xs text-gray-700 font-medium truncate max-w-full">
                               {user.brand || 'N/A'}
                             </span>
@@ -1001,7 +1185,7 @@ const ManageAccounts = () => {
 
                         {/* Actions */}
                         <td className="px-2 py-3 text-center">
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => handleLoginAsUser(user)}
                               disabled={loginLoadingUsers.has(user._id)}
@@ -1018,6 +1202,22 @@ const ManageAccounts = () => {
                                   <LogIn className="w-3 h-3" />
                                   <span className="hidden lg:inline">Login</span>
                                 </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => openDeleteConfirm(user)}
+                              disabled={deletingUsers.has(user._id)}
+                              className={`flex items-center justify-center w-8 h-8 text-base font-medium rounded transition-all duration-200 ${
+                                deletingUsers.has(user._id)
+                                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                  : 'bg-red-600 text-white hover:bg-red-700 hover:scale-105 active:scale-95'
+                              }`}
+                              title="Delete user"
+                            >
+                              {deletingUsers.has(user._id) ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
                               )}
                             </button>
                           </div>

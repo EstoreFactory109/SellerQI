@@ -63,12 +63,21 @@ const Support = () => {
     try {
       // Prepare the data for the backend
       const supportTicketData = {
-        name: form.name,
-        email: form.email,
-        subject: form.subject,
-        message: form.message,
-        topic: form.helpType // Backend expects 'topic', frontend uses 'helpType'
+        name: form.name.trim(),
+        email: form.email.trim(),
+        subject: form.subject.trim(),
+        message: form.message.trim(),
+        topic: form.helpType.trim() // Backend expects 'topic', frontend uses 'helpType'
       };
+
+      // Validate required fields before sending
+      if (!supportTicketData.name || !supportTicketData.email || !supportTicketData.subject || !supportTicketData.message || !supportTicketData.topic) {
+        setError('Please fill in all required fields.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log('Submitting support ticket:', supportTicketData);
 
       // Send data to the backend
       const response = await axiosInstance.post('/app/support', supportTicketData);
@@ -85,7 +94,16 @@ const Support = () => {
       if (error.response?.status === 401) {
         setError('Please log in to submit a support ticket.');
       } else if (error.response?.status === 400) {
-        setError('Please fill in all required fields correctly.');
+        // Check if there are validation errors
+        if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+          // Extract validation error messages
+          const validationErrors = error.response.data.errors.map(err => err.msg || err.message).join(', ');
+          setError(`Validation error: ${validationErrors}`);
+        } else if (error.response?.data?.message) {
+          setError(error.response.data.message);
+        } else {
+          setError('Please fill in all required fields correctly.');
+        }
       } else if (error.response?.data?.message) {
         setError(error.response.data.message);
       } else {

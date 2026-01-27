@@ -1,4 +1,5 @@
 const { getUserByEmail } = require('../../Services/User/userServices.js');
+const { deleteUserById } = require('../../Services/User/deleteUserService.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
@@ -379,9 +380,69 @@ const loginSelectedUser = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Delete User Controller
+ * Deletes a user and all associated seller documents from the database
+ * Protected route - requires superAdmin access
+ */
+const deleteUser = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId; // Should be set by auth middleware
+    const { userId } = req.params;
+
+    // Validate required fields
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is required"));
+        return res.status(400).json(new ApiResponse(400, "", "User ID is required"));
+    }
+
+    // Verify admin exists and has superAdmin access
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        // Prevent admin from deleting themselves
+        if (adminId.toString() === userId.toString()) {
+            logger.error(new ApiError(400, "Cannot delete your own account"));
+            return res.status(400).json(new ApiResponse(400, "", "Cannot delete your own account"));
+        }
+
+        // Use the delete service to delete user and seller documents
+        const result = await deleteUserById(userId);
+
+        logger.info(`SuperAdmin ${adminId} deleted user ${userId}`);
+
+        return res.status(200).json(new ApiResponse(200, result.data, result.message));
+
+    } catch (error) {
+        // Handle ApiError instances
+        if (error instanceof ApiError) {
+            logger.error(error);
+            return res.status(error.statusCode || 500).json(new ApiResponse(error.statusCode || 500, "", error.message));
+        }
+
+        // Handle other errors
+        logger.error(new ApiError(500, `Error deleting user: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to delete user"));
+    }
+});
+
 module.exports = {
     adminLogin,
     adminLogout,
     getAllAccounts,
-    loginSelectedUser
+    loginSelectedUser,
+    deleteUser
 };

@@ -67,7 +67,14 @@ const sendSixMonthsFreePromotion = async () => {
 
                 // Prepare email content
                 const customerName = `${user.firstName} ${user.lastName}`;
-                const emailContent = sixMonthsFreeTemplate.replace('{{customerName}}', customerName);
+                let emailContent = sixMonthsFreeTemplate.replace('{{customerName}}', customerName);
+                
+                // Replace URL placeholders
+                emailContent = emailContent.replace(/\{\{privacyUrl\}\}/g, process.env.PRIVACY_URL || 'https://www.sellerqi.com/privacy-policy');
+                emailContent = emailContent.replace(/\{\{termsUrl\}\}/g, process.env.TERMS_URL || 'https://www.sellerqi.com/terms-of-use');
+                emailContent = emailContent.replace(/\{\{refundUrl\}\}/g, process.env.REFUND_URL || 'https://www.sellerqi.com/terms-of-use');
+                emailContent = emailContent.replace(/\{\{cancellationUrl\}\}/g, process.env.CANCELLATION_URL || 'https://www.sellerqi.com/terms-of-use');
+                emailContent = emailContent.replace(/\{\{unsubscribeUrl\}\}/g, process.env.UNSUBSCRIBE_URL || 'https://sellerqi.com/unsubscribe');
 
                 // Send email
                 const info = await transporter.sendMail({

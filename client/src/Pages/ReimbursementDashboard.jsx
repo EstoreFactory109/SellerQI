@@ -699,8 +699,19 @@ const ReimbursementDashboard = () => {
                           {summary.feeProtector.backendShipmentItems.count || summary.feeProtector.backendShipmentItems.data.length} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
                         </p>
                     </div>
-                    <div className="w-full overflow-hidden">
-                      <table className="w-full table-fixed">
+                    <div className="w-full overflow-x-auto">
+                      <table className="w-full table-fixed" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '15%' }} />
+                          <col style={{ width: '15%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '8%' }} />
+                          <col style={{ width: '8%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '12%' }} />
+                        </colgroup>
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -717,15 +728,15 @@ const ReimbursementDashboard = () => {
                         <tbody className="bg-white divide-y divide-gray-200">
                           {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
                             <tr key={index} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
-                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words">{item.shipmentId || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 break-words">{item.shipmentName || 'N/A'}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.quantityShipped || 0}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.quantityReceived || 0}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.discrepancyUnits || 0}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
+                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.shipmentId || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.shipmentName || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.quantityShipped || 0}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.quantityReceived || 0}</td>
+                              <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.discrepancyUnits || 0}</td>
+                              <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -765,8 +776,19 @@ const ReimbursementDashboard = () => {
                           {showUnderpaidOnly ? 'Show All' : 'Show Underpaid Only'}
                         </button>
                     </div>
-                    <div className="w-full overflow-hidden">
-                      <table className="w-full table-fixed">
+                    <div className="w-full overflow-x-auto">
+                      <table className="w-full table-fixed" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '8%' }} />
+                          <col style={{ width: '8%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '13%' }} />
+                          <col style={{ width: '15%' }} />
+                        </colgroup>
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
@@ -785,14 +807,14 @@ const ReimbursementDashboard = () => {
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
                               <tr key={index} className={`hover:bg-gray-50 transition-colors ${item.isUnderpaid ? 'bg-orange-50' : ''}`}>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatMonthName(item.date)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.lostUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.foundUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.reimbursedUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.discrepancyUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatMonthName(item.date)}</td>
+                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.lostUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.foundUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.reimbursedUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.discrepancyUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">
                                   {item.isUnderpaid && item.underpaidExpectedAmount ? (
                                     <div>
                                       <div className="text-gray-900">{formatCurrency(item.expectedAmount || 0)}</div>
@@ -802,7 +824,7 @@ const ReimbursementDashboard = () => {
                                     formatCurrency(item.expectedAmount || 0)
                                   )}
                                 </td>
-                                <td className="px-4 py-3 whitespace-nowrap">
+                                <td className="px-4 py-3 align-top">
                                   {item.isUnderpaid ? (
                                     <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                                       Underpaid
@@ -837,8 +859,19 @@ const ReimbursementDashboard = () => {
                           {filteredDamagedInventoryData.length} items (last 30 days) • {formatCurrency(damagedInventoryTotal)} total
                         </p>
                     </div>
-                    <div className="w-full overflow-hidden">
-                      <table className="w-full table-fixed">
+                    <div className="w-full overflow-x-auto">
+                      <table className="w-full table-fixed" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '11%' }} />
+                          <col style={{ width: '11%' }} />
+                          <col style={{ width: '11%' }} />
+                          <col style={{ width: '11%' }} />
+                        </colgroup>
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -855,15 +888,15 @@ const ReimbursementDashboard = () => {
                         <tbody className="bg-white divide-y divide-gray-200">
                             {filteredDamagedInventoryData.map((item, index) => (
                               <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.fnsku || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.damagedUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.fnsku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.damagedUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
                               </tr>
                             ))}
                         </tbody>
@@ -888,8 +921,19 @@ const ReimbursementDashboard = () => {
                           {filteredDisposedInventoryData.length} items (last 30 days) • {formatCurrency(disposedInventoryTotal)} total
                         </p>
             </div>
-            <div className="w-full overflow-hidden">
-              <table className="w-full table-fixed">
+            <div className="w-full overflow-x-auto">
+              <table className="w-full table-fixed" style={{ tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '11%' }} />
+                </colgroup>
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -906,15 +950,15 @@ const ReimbursementDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                             {filteredDisposedInventoryData.map((item, index) => (
                       <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(item.date)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{item.fnsku || 'N/A'}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-red-600">{item.disposedUnits || 0}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
+                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.fnsku || 'N/A'}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.disposedUnits || 0}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
                       </tr>
                             ))}
                           </tbody>
