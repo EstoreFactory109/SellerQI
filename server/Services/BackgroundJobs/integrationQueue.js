@@ -134,10 +134,32 @@ function getIntegrationQueue() {
  */
 async function getCurrentAccountStatus(userId, country, region) {
     try {
+        // Validate userId before converting to ObjectId
+        if (!userId || typeof userId !== 'string') {
+            logger.warn(`[IntegrationQueue] Invalid userId type: ${typeof userId}, value: ${userId}`);
+            return { 
+                hasSpApiAccount: false, 
+                hasAdsAccount: false,
+                tokenUpdatedAt: null
+            };
+        }
+
+        // Validate ObjectId format
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            logger.warn(`[IntegrationQueue] Invalid userId format: ${userId}`);
+            return { 
+                hasSpApiAccount: false, 
+                hasAdsAccount: false,
+                tokenUpdatedAt: null
+            };
+        }
+
         const Seller = require('../../models/user-auth/sellerCentralModel.js');
         
-        const sellerCentral = await Seller.findOne({ User: mongoose.Types.ObjectId(userId) });
-        if (!sellerCentral || !sellerCentral.sellerAccount) {
+        // Use 'new' for ObjectId conversion (safer, works with all mongoose versions)
+        const sellerCentral = await Seller.findOne({ User: new mongoose.Types.ObjectId(userId) }).lean();
+        
+        if (!sellerCentral || !sellerCentral.sellerAccount || !Array.isArray(sellerCentral.sellerAccount)) {
             return { 
                 hasSpApiAccount: false, 
                 hasAdsAccount: false,
@@ -146,7 +168,7 @@ async function getCurrentAccountStatus(userId, country, region) {
         }
         
         const sellerAccount = sellerCentral.sellerAccount.find(
-            acc => acc.country === country && acc.region === region
+            acc => acc && acc.country === country && acc.region === region
         );
         
         if (!sellerAccount) {
@@ -157,8 +179,8 @@ async function getCurrentAccountStatus(userId, country, region) {
             };
         }
         
-        const hasSpApiAccount = sellerAccount.spiRefreshToken && sellerAccount.spiRefreshToken.trim() !== '';
-        const hasAdsAccount = sellerAccount.adsRefreshToken && sellerAccount.adsRefreshToken.trim() !== '';
+        const hasSpApiAccount = sellerAccount.spiRefreshToken && typeof sellerAccount.spiRefreshToken === 'string' && sellerAccount.spiRefreshToken.trim() !== '';
+        const hasAdsAccount = sellerAccount.adsRefreshToken && typeof sellerAccount.adsRefreshToken === 'string' && sellerAccount.adsRefreshToken.trim() !== '';
         
         // Get when the sellerAccount was last updated (MongoDB auto-managed timestamp)
         const tokenUpdatedAt = sellerAccount.updatedAt ? new Date(sellerAccount.updatedAt) : null;
@@ -169,7 +191,7 @@ async function getCurrentAccountStatus(userId, country, region) {
             tokenUpdatedAt
         };
     } catch (error) {
-        logger.error(`[IntegrationQueue] Error getting current account status:`, error);
+        logger.error(`[IntegrationQueue] Error getting current account status for userId ${userId}:`, error.message || error);
         // On error, return false values (fail-safe - won't bypass cooldown)
         return { 
             hasSpApiAccount: false, 
