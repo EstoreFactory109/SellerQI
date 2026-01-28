@@ -10,6 +10,10 @@ const { UserSchedulingService } = require('../../Services/BackgroundJobs/UserSch
 const { v4: uuidv4 } = require('uuid');
 const { getHttpCookieOptions } = require('../../utils/cookieConfig.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
+const {
+    clearAdsRefreshTokenForAccount,
+    clearAllRefreshTokensForAccount
+} = require('../../Services/User/sellerTokenServices.js');
 
 const SaveAllDetails = asyncHandler(async (req, res) => {
     const { region, country } = req.body;
@@ -375,5 +379,53 @@ const generateAmazonAdsTokens = asyncHandler(async (req, res) => {
     }
 })
 
+// Delete only Amazon Ads refresh token for the current location
+const deleteAmazonAdsRefreshToken = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
 
-module.exports = { generateSPAPITokens, SaveAllDetails, addNewSellerCentralAccount, saveDetailsOfOtherAccounts, generateAmazonAdsTokens }
+    const result = await clearAdsRefreshTokenForAccount(userId, country, region);
+
+    if (!result.success) {
+        const error = result.error || new ApiError(500, 'Failed to clear ads refresh token');
+        const statusCode = error.statusCode || 500;
+        logger.error(error);
+        return res.status(statusCode).json(new ApiResponse(statusCode, '', error.message || 'Failed to clear ads refresh token'));
+    }
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, result.data, 'Amazon Ads refresh token removed successfully'));
+});
+
+// Delete both SP-API and Amazon Ads refresh tokens for the current location
+const deleteAllSellerRefreshTokens = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    const result = await clearAllRefreshTokensForAccount(userId, country, region);
+
+    if (!result.success) {
+        const error = result.error || new ApiError(500, 'Failed to clear seller refresh tokens');
+        const statusCode = error.statusCode || 500;
+        logger.error(error);
+        return res.status(statusCode).json(new ApiResponse(statusCode, '', error.message || 'Failed to clear seller refresh tokens'));
+    }
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, result.data, 'SP-API and Ads refresh tokens removed successfully'));
+});
+
+
+module.exports = {
+    generateSPAPITokens,
+    SaveAllDetails,
+    addNewSellerCentralAccount,
+    saveDetailsOfOtherAccounts,
+    generateAmazonAdsTokens,
+    deleteAmazonAdsRefreshToken,
+    deleteAllSellerRefreshTokens
+}

@@ -1,15 +1,59 @@
-import React,{useState} from "react";
-import { useSelector } from "react-redux";
+import React,{useState, useEffect} from "react";
 import { useNavigate } from "react-router-dom";
 import AmazonConnectPopup from "./AmazonConnectPopup";
-import { Link, Plus, Globe, ShoppingBag, MapPin, Building, CheckCircle, AlertCircle, Zap } from "lucide-react";
+import { Link, Plus, Globe, ShoppingBag, MapPin, Building, CheckCircle, AlertCircle, Zap, Trash2, ChevronDown } from "lucide-react";
+import axiosInstance from "../../../config/axios.config";
 
 export default function AccountCards() {
 
   const [open,setOpen]=useState(false)
-  const accounts=useSelector(state=>state.AllAccounts?.AllAccounts)
+  const [selectedActions, setSelectedActions] = useState({});
+  const [openDropdowns, setOpenDropdowns] = useState({});
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const navigate = useNavigate()
   console.log(accounts)
+
+  // Always fetch latest accounts directly from the database for this page
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchAccounts = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await axiosInstance.get("/app/token/seller-accounts");
+        if (!isMounted) return;
+
+        const fetched =
+          response?.data?.data?.accounts && Array.isArray(response.data.data.accounts)
+            ? response.data.data.accounts
+            : [];
+
+        setAccounts(fetched);
+      } catch (err) {
+        if (!isMounted) return;
+        console.error("Error fetching seller accounts for Account Integrations:", err);
+        setError(
+          err?.response?.data?.message ||
+          "Failed to load accounts. Please refresh the page."
+        );
+        setAccounts([]);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchAccounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Function to get status info based on token status
   const getConnectionStatus = (spApiStatus, adsApiStatus) => {
@@ -73,12 +117,42 @@ export default function AccountCards() {
     }
   }
 
-  const handleConnectAccount = (country, region) => {
-    navigate(`/connect-accounts?country=${country}&region=${region}`)
+  const handleConnectAccount = (country, region, spApiConnected = false) => {
+    const params = new URLSearchParams({
+      country: country || '',
+      region: region || ''
+    });
+    if (spApiConnected) {
+      params.append('spApiConnected', 'true');
+    }
+    navigate(`/connect-accounts?${params.toString()}`)
   }
-  const handleRemove = (id) => {
-    console.log("Remove account ID:", id);
-    // Add your remove logic here
+  const handleApplyAction = async (account) => {
+    const action = selectedActions[account._id] || 'removeAll';
+
+    try {
+      // These endpoints are mounted under /app/token and use IBEXLocationToken
+      // (country/region) to determine which seller account to act on.
+      if (action === 'removeAll') {
+        await axiosInstance.delete('/app/token/deleteAllSellerRefreshTokens');
+      } else if (action === 'removeAds') {
+        await axiosInstance.delete('/app/token/deleteAdsRefreshToken');
+      }
+
+      setOpenDropdowns(prev => ({
+        ...prev,
+        [account._id]: false
+      }));
+
+      // Reload to refresh integration statuses without touching other state
+      window.location.reload();
+    } catch (error) {
+      console.error('Error applying account action:', error);
+      alert(
+        error?.response?.data?.message ||
+        'Failed to update account tokens. Please try again.'
+      );
+    }
   };
 
   const handleAddAccount = (e) => {
@@ -126,7 +200,15 @@ export default function AccountCards() {
 
       {/* Content Section */}
       <div className="p-6">
-        {accounts && accounts.length > 0 ? (
+        {loading ? (
+          <div className="py-12 text-center text-sm text-gray-600">
+            Loading your Amazon accounts...
+          </div>
+        ) : error ? (
+          <div className="py-12 text-center text-sm text-red-600">
+            {error}
+          </div>
+        ) : accounts && accounts.length > 0 ? (
           <div className="grid gap-6 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
             {accounts.map((account, index) => {
               const statusInfo = getConnectionStatus(account.SpAPIrefreshTokenStatus, account.AdsAPIrefreshTokenStatus)
@@ -150,6 +232,97 @@ export default function AccountCards() {
                         <h3 className="text-lg font-bold text-gray-900">Amazon</h3>
                         <p className="text-sm text-gray-600">{account.brand || 'Amazon Seller'}</p>
                       </div>
+                    </div>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenDropdowns(prev => ({
+                            ...prev,
+                            [account._id]: !prev[account._id]
+                          }))
+                        }
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-800 bg-white border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-150"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-500" />
+                        <span>
+                          {selectedActions[account._id] === 'removeAds'
+                            ? 'Remove Ads account'
+                            : 'Remove all integrations'}
+                        </span>
+                        <ChevronDown className="w-3 h-3 text-gray-500" />
+                      </button>
+
+                      {openDropdowns[account._id] && (
+                        <div className="absolute right-0 mt-2 w-60 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-2">
+                          <p className="px-3 pb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                            Account actions
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedActions(prev => ({
+                                ...prev,
+                                [account._id]: 'removeAll'
+                              }))
+                            }
+                            className={`flex w-full items-start gap-2 px-3 py-2 text-xs text-left hover:bg-red-50 ${
+                              (selectedActions[account._id] || 'removeAll') === 'removeAll'
+                                ? 'bg-red-50 text-red-700'
+                                : 'text-gray-700'
+                            }`}
+                          >
+                            <span className="mt-0.5 h-4 w-4 rounded-full border border-red-300 flex items-center justify-center">
+                              {(selectedActions[account._id] || 'removeAll') === 'removeAll' && (
+                                <span className="h-2 w-2 rounded-full bg-red-500" />
+                              )}
+                            </span>
+                            <div>
+                              <div className="font-semibold">Remove all integrations</div>
+                              <div className="text-[11px] text-gray-500">
+                                Disconnect both Seller Central and Ads for this account.
+                              </div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedActions(prev => ({
+                                ...prev,
+                                [account._id]: 'removeAds'
+                              }))
+                            }
+                            className={`flex w-full items-start gap-2 px-3 py-2 text-xs text-left hover:bg-gray-50 ${
+                              selectedActions[account._id] === 'removeAds'
+                                ? 'bg-gray-50 text-gray-800'
+                                : 'text-gray-700'
+                            }`}
+                          >
+                            <span className="mt-0.5 h-4 w-4 rounded-full border border-gray-300 flex items-center justify-center">
+                              {selectedActions[account._id] === 'removeAds' && (
+                                <span className="h-2 w-2 rounded-full bg-gray-600" />
+                              )}
+                            </span>
+                            <div>
+                              <div className="font-semibold">Remove Ads account</div>
+                              <div className="text-[11px] text-gray-500">
+                                Keep Seller Central connected and only remove Ads.
+                              </div>
+                            </div>
+                          </button>
+
+                          <div className="border-t border-gray-100 mt-2 pt-2 px-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleApplyAction(account)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 rounded-full shadow-sm hover:shadow-md transition-all duration-150"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -225,7 +398,7 @@ export default function AccountCards() {
                   {buttonInfo && (
                     <div className="mt-6 pt-4 border-t border-gray-200/80">
                       <button
-                        onClick={() => handleConnectAccount(account.country, account.region)}
+                        onClick={() => handleConnectAccount(account.country, account.region, account.SpAPIrefreshTokenStatus)}
                         className={`w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl font-medium text-sm whitespace-nowrap ${buttonInfo.color}`}
                       >
                         {buttonInfo.icon}

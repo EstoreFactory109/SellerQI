@@ -44,16 +44,33 @@ export const isSpApiConnected = (user) => {
 /**
  * Check if SP-API is connected from AllAccounts Redux state
  * @param {Array} allAccounts - Array of seller accounts from Redux state
+ * @param {string} country - Optional country code to check specific account
+ * @param {string} region - Optional region code to check specific account
  * @returns {boolean} - True if SP-API is connected, false otherwise
  */
-export const isSpApiConnectedFromAccounts = (allAccounts) => {
+export const isSpApiConnectedFromAccounts = (allAccounts, country = null, region = null) => {
   if (!allAccounts || !Array.isArray(allAccounts) || allAccounts.length === 0) {
     return false;
   }
 
+  // If country and region are provided, check specific account
+  if (country && region) {
+    const specificAccount = allAccounts.find(
+      acc => acc.country === country && acc.region === region
+    );
+    if (specificAccount) {
+      // Check both property names for backward compatibility
+      return specificAccount.SpAPIrefreshTokenStatus === true ||
+             (specificAccount.spiRefreshToken && specificAccount.spiRefreshToken.trim() !== '');
+    }
+    return false;
+  }
+
   // Check if any account has SP-API refresh token
+  // Support both property names: SpAPIrefreshTokenStatus (boolean) and spiRefreshToken (string)
   const hasSpApiToken = allAccounts.some(account => 
-    account.spiRefreshToken && account.spiRefreshToken && account.spiRefreshToken.trim() !== ''
+    account.SpAPIrefreshTokenStatus === true ||
+    (account.spiRefreshToken && account.spiRefreshToken && account.spiRefreshToken.trim() !== '')
   );
 
   return hasSpApiToken;

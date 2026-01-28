@@ -170,6 +170,7 @@ const ConnectAccounts = () => {
   // Get country code and region from URL parameters
   const countryCode = searchParams.get('country') || searchParams.get('countryCode');
   const region = searchParams.get('region');
+  const spApiConnectedFromUrl = searchParams.get('spApiConnected') === 'true';
 
   // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
@@ -193,6 +194,16 @@ const ConnectAccounts = () => {
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
     const checkSpApiConnection = async () => {
+      // If SP-API connection status is passed via URL (from Account Integrations page),
+      // use that directly to avoid unnecessary checks
+      if (spApiConnectedFromUrl) {
+        console.log('ConnectAccounts: SP-API connected status from URL parameter');
+        setIsSpApiConnectedState(true);
+        setIsSellerCentralConnected(true);
+        setCheckingSpApi(false);
+        return;
+      }
+
       // Check if we just came back from SP-API OAuth flow
       const justConnected = sessionStorage.getItem('sp_api_just_connected') === 'true';
       
@@ -219,6 +230,20 @@ const ConnectAccounts = () => {
         }
         setCheckingSpApi(false);
         return;
+      }
+      
+      // Check SP-API status for the specific account (country/region) if provided
+      if (countryCode && region && allAccounts && allAccounts.length > 0) {
+        const specificAccount = allAccounts.find(
+          acc => acc.country === countryCode && acc.region === region
+        );
+        if (specificAccount && specificAccount.SpAPIrefreshTokenStatus) {
+          console.log('ConnectAccounts: SP-API connected for specific account from Redux');
+          setIsSpApiConnectedState(true);
+          setIsSellerCentralConnected(true);
+          setCheckingSpApi(false);
+          return;
+        }
       }
       
       // Initial check from Redux state (no API call)
@@ -265,7 +290,7 @@ const ConnectAccounts = () => {
     
     checkSpApiConnection();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency - only run on mount
+  }, [spApiConnectedFromUrl, countryCode, region]); // Include URL params in dependencies
 
   // Update SP-API connection state if Redux state changes (after successful connection)
   useEffect(() => {
