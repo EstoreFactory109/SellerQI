@@ -368,31 +368,37 @@ const ProfileIDSelection = () => {
           
           let jobId = null;
           
-          // First check if there's an active job
+          // First check if there's an active job (waiting/active/delayed - NOT completed)
           const activeResponse = await axiosInstance.get('/api/integration/active');
           
           if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
-            // Job already exists
+            // Job exists - check if it's actually running or just completed
             jobId = activeResponse.data.data.jobId;
             const existingStatus = activeResponse.data.data.status?.toLowerCase();
-            console.log('[ProfileIDSelection] Active job already exists:', existingStatus);
+            console.log('[ProfileIDSelection] Existing job found:', existingStatus);
             
-            // If already active or completed, proceed immediately
-            if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'completed') {
+            // Only skip triggering if job is actively running (not completed)
+            // When user re-saves profile ID, they want a FRESH integration even if previous one completed
+            if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'waiting' || existingStatus === 'delayed') {
+              console.log('[ProfileIDSelection] Job is currently in progress, reusing existing job');
               setAnalysisStarted(true);
               await navigateToPayment();
               return;
             }
-          } else {
-            // No active job, trigger new one
-            const triggerResponse = await axiosInstance.post('/api/integration/trigger');
             
-            if (triggerResponse.status === 202 || triggerResponse.status === 200) {
-              jobId = triggerResponse.data.data.jobId;
-              console.log('[ProfileIDSelection] Integration job triggered successfully, jobId:', jobId);
-            } else {
-              throw new Error('Failed to trigger integration job');
-            }
+            // If status is 'completed' or 'failed', trigger a NEW job
+            // This handles the case where user disconnected and reconnected their accounts
+            console.log('[ProfileIDSelection] Previous job was completed/failed, triggering fresh integration...');
+          }
+          
+          // No active job OR previous job completed - trigger new one
+          const triggerResponse = await axiosInstance.post('/api/integration/trigger');
+          
+          if (triggerResponse.status === 202 || triggerResponse.status === 200) {
+            jobId = triggerResponse.data.data.jobId;
+            console.log('[ProfileIDSelection] Integration job triggered successfully, jobId:', jobId);
+          } else {
+            throw new Error('Failed to trigger integration job');
           }
           
           // Wait for job to start (status becomes 'active')
