@@ -253,7 +253,7 @@ const ProfileIDSelection = () => {
       if (hasPremiumAccess(userData)) {
         console.log('[ProfileIDSelection] User already has premium access (from Redux), skipping payment...');
         setWaitingForAnalysis(false);
-        navigate('/analysing-account');
+        navigate('/analyse-account');
         return;
       }
       
@@ -275,7 +275,7 @@ const ProfileIDSelection = () => {
           if (hasPremiumAccess(freshUserData)) {
             console.log('[ProfileIDSelection] User already has premium access (from fresh API data), skipping payment...');
             setWaitingForAnalysis(false);
-            navigate('/analysing-account');
+            navigate('/analyse-account');
             return;
           }
         }

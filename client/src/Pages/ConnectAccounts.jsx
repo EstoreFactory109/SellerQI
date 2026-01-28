@@ -642,7 +642,7 @@ const ConnectAccounts = () => {
       if (hasPremiumAccess(userData)) {
         console.log('[ConnectAccounts] User already has premium access (from Redux), skipping payment...');
         setWaitingForAnalysis(false);
-        navigate('/analysing-account');
+        navigate('/analyse-account');
         return;
       }
       
@@ -664,7 +664,7 @@ const ConnectAccounts = () => {
           if (hasPremiumAccess(freshUserData)) {
             console.log('[ConnectAccounts] User already has premium access (from fresh API data), skipping payment...');
             setWaitingForAnalysis(false);
-            navigate('/analysing-account');
+            navigate('/analyse-account');
             return;
           }
         }
