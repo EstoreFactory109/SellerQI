@@ -24,7 +24,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const { Worker } = require('bullmq');
 const { getQueueRedisConnection } = require('../../config/queueRedisConn.js');
 const { Integration } = require('../main/Integration.js');
-const { INTEGRATION_QUEUE_NAME } = require('./integrationQueue.js');
+const { INTEGRATION_QUEUE_NAME, getCurrentAccountStatus } = require('./integrationQueue.js');
 const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
@@ -103,12 +103,29 @@ async function processIntegrationJob(job) {
 
     logger.info(`[IntegrationWorker:${WORKER_NAME}] Starting integration job ${job.id} for user ${userId}, ${country}-${region}`);
 
+    // Get current account connection status to store in metadata
+    // This is critical for detecting account changes in future runs
+    let accountStatus = { hasSpApiAccount: false, hasAdsAccount: false, tokenUpdatedAt: null };
     try {
-        // Update job status to 'running'
+        accountStatus = await getCurrentAccountStatus(userId, country, region);
+        logger.info(`[IntegrationWorker:${WORKER_NAME}] Account status for job ${job.id}: SP-API=${accountStatus.hasSpApiAccount}, Ads=${accountStatus.hasAdsAccount}`);
+    } catch (error) {
+        logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not fetch account status for metadata:`, error.message);
+    }
+
+    try {
+        // Update job status to 'running' with account status
         await updateJobStatus(job.id, userId, 'running', {
             startedAt: new Date().toISOString(),
             workerName: WORKER_NAME,
-            metadata: { country, region, jobType: 'integration' }
+            metadata: { 
+                country, 
+                region, 
+                jobType: 'integration',
+                hasSpApiAccount: accountStatus.hasSpApiAccount,
+                hasAdsAccount: accountStatus.hasAdsAccount,
+                tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
+            }
         });
 
         // Update job progress
@@ -125,7 +142,8 @@ async function processIntegrationJob(job) {
         const duration = Date.now() - jobStartTime;
 
         if (result.success) {
-            // Update job status to 'completed'
+            // Update job status to 'completed' with account status in metadata
+            // This metadata is used to detect account changes in future runs
             await updateJobStatus(job.id, userId, 'completed', {
                 completedAt: new Date().toISOString(),
                 duration,
@@ -133,6 +151,9 @@ async function processIntegrationJob(job) {
                     country,
                     region,
                     jobType: 'integration',
+                    hasSpApiAccount: accountStatus.hasSpApiAccount,
+                    hasAdsAccount: accountStatus.hasAdsAccount,
+                    tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null,
                     successRate: result.summary?.successRate,
                     totalServices: result.summary?.totalServices,
                     successfulServices: result.summary?.successfulServices,
@@ -145,13 +166,20 @@ async function processIntegrationJob(job) {
 
             logger.info(`[IntegrationWorker:${WORKER_NAME}] Integration job ${job.id} completed successfully for user ${userId}`, {
                 duration,
-                successRate: result.summary?.successRate
+                successRate: result.summary?.successRate,
+                hasSpApiAccount: accountStatus.hasSpApiAccount,
+                hasAdsAccount: accountStatus.hasAdsAccount
             });
 
             return {
                 success: true,
                 duration,
-                summary: result.summary
+                summary: result.summary,
+                metadata: {
+                    hasSpApiAccount: accountStatus.hasSpApiAccount,
+                    hasAdsAccount: accountStatus.hasAdsAccount,
+                    tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
+                }
             };
         } else {
             // Integration returned failure
@@ -163,7 +191,7 @@ async function processIntegrationJob(job) {
 
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Integration job ${job.id} failed for user ${userId}:`, error);
 
-        // Update job status to 'failed'
+        // Update job status to 'failed' with account status in metadata
         await updateJobStatus(job.id, userId, 'failed', {
             failedAt: new Date().toISOString(),
             duration,
@@ -171,7 +199,14 @@ async function processIntegrationJob(job) {
             stack: error.stack,
             attemptNumber: job.attemptsMade + 1,
             maxAttempts: job.opts.attempts,
-            metadata: { country, region, jobType: 'integration' }
+            metadata: { 
+                country, 
+                region, 
+                jobType: 'integration',
+                hasSpApiAccount: accountStatus.hasSpApiAccount,
+                hasAdsAccount: accountStatus.hasAdsAccount,
+                tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
+            }
         });
 
         // Re-throw to trigger BullMQ retry mechanism
