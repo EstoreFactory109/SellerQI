@@ -249,11 +249,26 @@ const ProfileIDSelection = () => {
   // Navigate to payment based on country
   const navigateToPayment = async () => {
     try {
+      // Debug: Log Redux userData
+      console.log('[ProfileIDSelection] navigateToPayment called');
+      console.log('[ProfileIDSelection] Redux userData:', userData);
+      console.log('[ProfileIDSelection] Redux userData details:', {
+        packageType: userData?.packageType,
+        subscriptionStatus: userData?.subscriptionStatus,
+        isInTrialPeriod: userData?.isInTrialPeriod,
+        trialEndsDate: userData?.trialEndsDate
+      });
+      
       // First check Redux state for premium access
-      if (hasPremiumAccess(userData)) {
+      const hasPremiumFromRedux = hasPremiumAccess(userData);
+      console.log('[ProfileIDSelection] hasPremiumAccess(userData) result:', hasPremiumFromRedux);
+      
+      if (hasPremiumFromRedux) {
         console.log('[ProfileIDSelection] User already has premium access (from Redux), skipping payment...');
+        console.log('[ProfileIDSelection] Navigating to /analyse-account...');
         setWaitingForAnalysis(false);
         navigate('/analyse-account');
+        console.log('[ProfileIDSelection] navigate() called successfully');
         return;
       }
       
@@ -262,6 +277,8 @@ const ProfileIDSelection = () => {
       try {
         console.log('[ProfileIDSelection] Fetching fresh user data to verify subscription status...');
         const profileResponse = await axiosInstance.get('/app/profile');
+        console.log('[ProfileIDSelection] Profile API response:', profileResponse);
+        
         if (profileResponse?.status === 200 && profileResponse.data?.data) {
           const freshUserData = profileResponse.data.data;
           console.log('[ProfileIDSelection] Fresh user data:', {
@@ -272,12 +289,19 @@ const ProfileIDSelection = () => {
           });
           
           // Check fresh data for premium access (PRO, AGENCY, or active trial)
-          if (hasPremiumAccess(freshUserData)) {
+          const hasPremiumFromApi = hasPremiumAccess(freshUserData);
+          console.log('[ProfileIDSelection] hasPremiumAccess(freshUserData) result:', hasPremiumFromApi);
+          
+          if (hasPremiumFromApi) {
             console.log('[ProfileIDSelection] User already has premium access (from fresh API data), skipping payment...');
+            console.log('[ProfileIDSelection] Navigating to /analyse-account...');
             setWaitingForAnalysis(false);
             navigate('/analyse-account');
+            console.log('[ProfileIDSelection] navigate() called successfully');
             return;
           }
+        } else {
+          console.log('[ProfileIDSelection] Profile API returned unexpected response:', profileResponse?.status);
         }
       } catch (profileError) {
         console.warn('[ProfileIDSelection] Could not fetch fresh profile data, proceeding with Redux state:', profileError);
