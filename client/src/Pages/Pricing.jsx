@@ -28,6 +28,19 @@ export default function PricingPage() {
   const user = useSelector((state) => state.Auth?.user);
   const currentPlan = user?.packageType || null;
   
+  // Redirect logged-in users away from pricing page
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Redirect to dashboard if user is logged in
+      navigate('/seller-central-checker/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  // Don't render pricing page if user is authenticated (redirecting)
+  if (isAuthenticated) {
+    return null;
+  }
+
   // Detect country on component mount
   useEffect(() => {
     const detectUserCountry = async () => {
