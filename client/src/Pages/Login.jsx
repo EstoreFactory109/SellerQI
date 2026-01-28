@@ -7,7 +7,7 @@ import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/slices/authSlice.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from '../services/googleAuthService.js';
-import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
+import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -128,13 +128,14 @@ export default function Login() {
         
         const spApiConnected = isSpApiConnected(user);
         const isSuperAdmin = user?.accessType === 'superAdmin';
+        const adsAccountConnected = isAdsAccountConnected(user);
         
-        console.log('Login: spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin);
+        console.log('Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users check SP-API connection.
-        if (isSuperAdmin || spApiConnected) {
-          // Super admin or SP-API is connected → redirect to dashboard
-          console.log('Login: Super admin or SP-API connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users need both SP-API and Ads account.
+        if (isSuperAdmin || (spApiConnected && adsAccountConnected)) {
+          // Super admin or both accounts connected → redirect to dashboard
+          console.log('Login: Super admin or both accounts connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
@@ -188,14 +189,15 @@ export default function Login() {
         // Check if accounts are connected
         const user = response.data || response;
         const spApiConnected = isSpApiConnected(user);
+        const adsAccountConnected = isAdsAccountConnected(user);
         const isSuperAdmin = user?.accessType === 'superAdmin';
         
-        console.log('Google Login: spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin);
+        console.log('Google Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users check SP-API connection.
-        if (isSuperAdmin || spApiConnected) {
-          // Super admin or SP-API is connected → redirect to dashboard
-          console.log('Google Login: Super admin or SP-API connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users need both SP-API and Ads account.
+        if (isSuperAdmin || (spApiConnected && adsAccountConnected)) {
+          // Super admin or both accounts connected → redirect to dashboard
+          console.log('Google Login: Super admin or both accounts connected - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)

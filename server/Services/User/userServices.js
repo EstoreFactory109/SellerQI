@@ -92,9 +92,15 @@ const getUserById =async(id)=>{
         isInTrialPeriod: user.isInTrialPeriod,
         trialEndsDate: user.trialEndsDate,
         accessType: user.accessType,
-        // Include sellerCentral data for SP-API connection check
+        // Include sellerCentral data for SP-API and Ads connection check
         sellerCentral: sellerCentral ? {
-            sellerAccount: sellerCentral.sellerAccount || []
+            sellerAccount: (sellerCentral.sellerAccount || []).map(account => ({
+                country: account.country,
+                region: account.region,
+                selling_partner_id: account.selling_partner_id,
+                spiRefreshToken: account.spiRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
+                adsRefreshToken: account.adsRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+            }))
         } : null
     };
     

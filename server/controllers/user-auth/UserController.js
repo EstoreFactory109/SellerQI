@@ -486,14 +486,15 @@ const loginUser = asyncHandler(async (req, res) => {
         trialEndsDate: checkUserIfExists.trialEndsDate || null
     };
 
-    // Add sellerCentral data if available (needed for SP-API connection check on frontend)
+    // Add sellerCentral data if available (needed for SP-API and Ads connection check on frontend)
     if (getSellerCentral) {
         responseData.sellerCentral = {
             sellerAccount: getSellerCentral.sellerAccount.map(account => ({
                 country: account.country,
                 region: account.region,
                 selling_partner_id: account.selling_partner_id,
-                spiRefreshToken: account.spiRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+                spiRefreshToken: account.spiRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
+                adsRefreshToken: account.adsRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
             }))
         };
     }
@@ -944,14 +945,15 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             trialEndsDate: checkUserIfExists.trialEndsDate || null
         };
 
-        // Add sellerCentral data if available (needed for SP-API connection check on frontend)
+        // Add sellerCentral data if available (needed for SP-API and Ads connection check on frontend)
         if (getSellerCentral) {
             responseData.sellerCentral = {
                 sellerAccount: getSellerCentral.sellerAccount.map(account => ({
                     country: account.country,
                     region: account.region,
                     selling_partner_id: account.selling_partner_id,
-                    spiRefreshToken: account.spiRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+                    spiRefreshToken: account.spiRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
+                    adsRefreshToken: account.adsRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
                 }))
             };
         }

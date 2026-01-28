@@ -6,7 +6,7 @@ import { useDispatch } from "react-redux";
 import { loginSuccess } from "../redux/slices/authSlice.js";
 import { clearAuthCache } from '../utils/authCoordinator.js';
 import googleAuthService from "../services/googleAuthService.js";
-import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
+import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 
 const GoogleInfoPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -195,15 +195,16 @@ const GoogleInfoPage = () => {
         const user = response.data || response;
         
         const spApiConnected = isSpApiConnected(user);
+        const adsAccountConnected = isAdsAccountConnected(user);
         
-        console.log('Google: spApiConnected:', spApiConnected);
+        console.log('Google: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected);
         
         setTimeout(() => {
-          // Flow: If accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
+          // Flow: If both accounts are connected, go to dashboard. Otherwise, go to connect-to-amazon
           // Payment handling is done on profile id page and continue button on connect-accounts page
-          if (spApiConnected) {
-            // SP-API is connected → redirect to dashboard
-            console.log('Google: SP-API connected - redirecting to dashboard');
+          if (spApiConnected && adsAccountConnected) {
+            // Both accounts connected → redirect to dashboard
+            console.log('Google: Both accounts connected - redirecting to dashboard');
             window.location.href = "/seller-central-checker/dashboard";
           } else {
             // Accounts not connected → redirect to connect-to-amazon (payment handled later)

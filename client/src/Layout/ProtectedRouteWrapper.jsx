@@ -12,7 +12,7 @@ import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defau
 import axiosInstance from '../config/axios.config.js';
 import { coordinatedAuthCheck, clearAuthCache } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
-import { isSpApiConnected } from '../utils/spApiConnectionCheck.js';
+import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 
 const ProtectedRouteWrapper = ({ children }) => {
@@ -61,32 +61,37 @@ const ProtectedRouteWrapper = ({ children }) => {
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
           
-          // Check SP-API first, then subscription
+          // Check SP-API and Ads account connections, then subscription
           const hasPremium = hasPremiumAccess(userData);
           const spApiConnected = isSpApiConnected(userData);
+          const adsAccountConnected = isAdsAccountConnected(userData);
           const isSuperAdmin = userData?.accessType === 'superAdmin';
           const isSuperAdminSession = userData?.isSuperAdminSession === true;
           const currentPath = window.location.pathname;
           const isDashboardRoute = currentPath.includes('/dashboard') || currentPath.includes('/seller-central-checker');
           
-          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'isSuperAdmin:', isSuperAdmin, 'isSuperAdminSession:', isSuperAdminSession);
+          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin, 'isSuperAdminSession:', isSuperAdminSession);
           
-          // Flow: Super admins (or super admin sessions) always have access. For regular users, check SP-API first, then subscription
+          // Flow: Super admins (or super admin sessions) always have access. For regular users, check both SP-API and Ads account
           // Only apply redirects if user is trying to access dashboard routes
           if (isDashboardRoute) {
-            if (isSuperAdmin || isSuperAdminSession || spApiConnected) {
-              // Super admin or super admin session or SP-API is connected → always allow dashboard access
-              console.log('ProtectedRouteWrapper: Super admin/session or SP-API connected - allowing dashboard access');
+            if (isSuperAdmin || isSuperAdminSession) {
+              // Super admin or super admin session → always allow dashboard access
+              console.log('ProtectedRouteWrapper: Super admin/session - allowing dashboard access');
               // Continue with normal flow
-            } else if (!hasPremium) {
-              // SP-API not connected AND no subscription → redirect to connect-to-amazon
-              console.log('ProtectedRouteWrapper: No SP-API and no subscription - redirecting to connect-to-amazon');
-              localStorage.setItem("isAuth", "true"); // Keep them logged in
-              navigate("/connect-to-amazon", { replace: true });
-              return;
+            } else if (spApiConnected && adsAccountConnected) {
+              // Both SP-API and Ads account are connected → allow dashboard access
+              console.log('ProtectedRouteWrapper: Both SP-API and Ads account connected - allowing dashboard access');
+              // Continue with normal flow
             } else {
-              // SP-API not connected BUT has subscription → redirect to connect-to-amazon
-              console.log('ProtectedRouteWrapper: Has subscription but no SP-API - redirecting to connect-to-amazon');
+              // Either SP-API or Ads account is missing → redirect to connect-to-amazon
+              if (!spApiConnected && !adsAccountConnected) {
+                console.log('ProtectedRouteWrapper: Both SP-API and Ads account missing - redirecting to connect-to-amazon');
+              } else if (!spApiConnected) {
+                console.log('ProtectedRouteWrapper: SP-API missing - redirecting to connect-to-amazon');
+              } else {
+                console.log('ProtectedRouteWrapper: Ads account missing - redirecting to connect-to-amazon');
+              }
               localStorage.setItem("isAuth", "true"); // Keep them logged in
               navigate("/connect-to-amazon", { replace: true });
               return;

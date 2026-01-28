@@ -990,40 +990,13 @@ const ConnectAccounts = () => {
             )}
 
             {/* Navigation Links */}
-            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-start mt-6 pt-4 border-t border-gray-200">
               <button
                 type="button"
                 onClick={navigateToLogin}
                 className="text-sm text-gray-600 hover:text-gray-800 font-medium hover:underline transition-colors"
               >
                 Back to Login
-              </button>
-              <button
-                type="button"
-                onClick={handleSkip}
-                disabled={!isSpApiConnectedState || checkingSpApi || waitingForAnalysis}
-                className={`px-4 py-2.5 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center gap-2 ${
-                  !isSpApiConnectedState || checkingSpApi || waitingForAnalysis
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-[#3B4A6B] to-[#2d3a52] text-white hover:from-[#2d3a52] hover:to-[#1f2937] shadow-md hover:shadow-lg transform hover:scale-[1.02] active:scale-[0.98]'
-                }`}
-              >
-                {waitingForAnalysis ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Starting analysis...</span>
-                  </>
-                ) : checkingSpApi ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Checking...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Don't have Ads Profile, continue</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
               </button>
             </div>
 
