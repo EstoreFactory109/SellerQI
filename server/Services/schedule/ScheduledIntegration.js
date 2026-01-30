@@ -300,6 +300,28 @@ class ScheduledIntegration {
                 // Don't fail the entire process if history fails
             }
 
+            // Run product content change + negative reviews alerts last (only on Sunday when productReview has run)
+            if (dayOfWeek === 0) {
+                try {
+                    const { detectAndStoreAlerts } = require('../Alerts/Other-Alerts/ProductContentChangeAlertService.js');
+                    await detectAndStoreAlerts(userId, Region, Country);
+                    logger.info('[ScheduledIntegration] Product content change / negative reviews alerts completed', { userId, Region, Country });
+                } catch (alertsError) {
+                    logger.error('[ScheduledIntegration] Product content change alerts failed (non-fatal)', { error: alertsError?.message, userId, Region, Country });
+                }
+            }
+
+            // Run buybox missing alerts last (only when mcpBuyBoxData has run: Sunday, Tuesday, Thursday, Saturday)
+            if (dayOfWeek === 0 || dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6) {
+                try {
+                    const { detectAndStoreBuyBoxMissingAlerts } = require('../Alerts/Other-Alerts/BuyBoxMissingAlertService.js');
+                    await detectAndStoreBuyBoxMissingAlerts(userId, Region, Country);
+                    logger.info('[ScheduledIntegration] Buybox missing alerts completed', { userId, Region, Country });
+                } catch (alertsError) {
+                    logger.error('[ScheduledIntegration] Buybox missing alerts failed (non-fatal)', { error: alertsError?.message, userId, Region, Country });
+                }
+            }
+
             // Build error message if there are failures
             let errorMessage = null;
             if (!serviceSummary.overallSuccess) {
@@ -1386,6 +1408,50 @@ class ScheduledIntegration {
             apiData.genericKeyWordArray = [];
         } else {
             apiData.genericKeyWordArray = [];
+        }
+
+        // Run Conversion Rates alerts after all scheduled services have executed (non-blocking; failures do not affect response)
+        // Sales drop alert temporarily removed from schedule
+        try {
+            const mongoose = require('mongoose');
+            const { getConversionRates } = require('../Alerts/Other-Alerts/ConversionAlertService.js');
+            const { ConversionRatesAlert } = require('../../models/alerts/Alert.js');
+            const User = require('../../models/user-auth/userModel.js');
+            const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
+
+            const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
+                ? new mongoose.Types.ObjectId(userId)
+                : userId;
+
+            // Conversion rates alert (uses Sales and Traffic API; requires RefreshToken)
+            if (RefreshToken) {
+                const convResult = await getConversionRates(RefreshToken, Region, Country, {});
+                if (convResult.success && convResult.conversionRates?.length > 0) {
+                    await ConversionRatesAlert.create({
+                        User: userIdObj,
+                        region: Region,
+                        country: Country,
+                        message: `Conversion rates for last 7 days (${convResult.dateRange.startDate} to ${convResult.dateRange.endDate})`,
+                        status: 'active',
+                        dateRange: convResult.dateRange,
+                        marketplace: convResult.marketplace,
+                        conversionRates: convResult.conversionRates,
+                    });
+                    const user = await User.findById(userIdObj).select('email firstName').lean();
+                    if (user?.email) {
+                        await sendAlertsEmail(user.email, user.firstName || 'Seller', {
+                            productContentChange: { count: 0, products: [] },
+                            negativeReviews: { count: 0, products: [] },
+                            buyBoxMissing: { count: 0, products: [] },
+                            aplusMissing: { count: 0, products: [] },
+                            salesDrop: { count: 0 },
+                            conversionRates: { count: 1, dateRange: convResult.dateRange, conversionRates: convResult.conversionRates },
+                        }, undefined, userIdObj);
+                    }
+                }
+            }
+        } catch (alertsError) {
+            logger.warn('Conversion rates alerts failed (non-fatal)', { userId, region: Region, country: Country, error: alertsError?.message });
         }
 
         return apiData;

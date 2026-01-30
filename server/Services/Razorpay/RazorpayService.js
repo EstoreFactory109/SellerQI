@@ -274,9 +274,12 @@ class RazorpayService {
                 isInTrialPeriod: isTrialing
             };
 
-            // Set trial end date if in trial
-            if (isTrialing && trialEndsDate) {
-                updateData.trialEndsDate = trialEndsDate;
+            // Set trial end date and mark served trial when user authorized payment method for free trial
+            if (isTrialing) {
+                updateData.servedTrial = true; // User authorized payment method for free trial
+                if (trialEndsDate) {
+                    updateData.trialEndsDate = trialEndsDate;
+                }
             }
 
             // If user purchased AGENCY plan, update accessType

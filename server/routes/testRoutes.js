@@ -5,6 +5,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
     testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews}=require('../controllers/test/TestController.js')
+const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
@@ -40,5 +41,8 @@ router.get('/ppc-units-sold/info', getUnitsMetricsInfo)  // Get info about avail
 
 // NumberOfProductReviews - Fetches product review data from RapidAPI
 router.post('/testNumberOfProductReviews', testNumberOfProductReviews)  // Fetch ASINs from DB and fetch product reviews data
+
+// Alerts - Fetches NumberOfProductReviews once; runs product content change + negative reviews (rating < 4)
+router.post('/testAlerts', testAlerts)  // Body: { userId, country, region }
 
 module.exports=router

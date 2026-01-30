@@ -84,6 +84,10 @@ const userSchema = new mongoose.Schema(
         type: Date,
         required: false
       },
+      servedTrial: {
+        type: Boolean,
+        default: false
+      },
       adminId:{
         type:mongoose.Schema.Types.ObjectId,
         ref:'User',

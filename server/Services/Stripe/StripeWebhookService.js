@@ -383,6 +383,7 @@ class StripeWebhookService {
             // Handle trial status
             if (subscriptionStatus === 'trialing') {
                 updateData.isInTrialPeriod = true;
+                updateData.servedTrial = true; // User authorized payment method for free trial
                 if (subscription && subscription.trial_end) {
                     updateData.trialEndsDate = this.safeDate(subscription.trial_end);
                 }

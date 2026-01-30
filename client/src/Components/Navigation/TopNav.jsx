@@ -3,7 +3,7 @@ import Notification from '../../assets/Icons/notification.png'
 import hamburger from '../../assets/Icons/hamburger.png'
 import { useSelector, useDispatch } from 'react-redux'
 import { setPosition } from '../../redux/slices/MobileMenuSlice.js'
-import { markAsRead, markAllAsRead } from '../../redux/slices/notificationsSlice.js'
+import { markAsRead, markAllAsRead, setAlertsFromApi } from '../../redux/slices/notificationsSlice.js'
 import { setCurrency } from '../../redux/slices/currencySlice.js'
 import ProfileIcon from '../../assets/Icons/ProfileIcon.jpg'
 import Arrow from '../../assets/Icons/Arrow.png'
@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
 import { Building, Plus, ChevronRight, Bell, User, Menu, ArrowLeftRight } from 'lucide-react'
 import axios from 'axios'
+import axiosInstance from '../../config/axios.config.js'
 import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.js'
 
 const TopNav = () => {
@@ -45,6 +46,14 @@ const TopNav = () => {
     const truncateBrandName = (brandName) => {
         const brand = brandName || "Brand Name";
         return brand.length > 10 ? brand.substring(0, 10) + "..." : brand;
+    };
+
+    const getAlertDropdownTitle = (alertType) => {
+        if (alertType === 'ProductContentChange') return 'Content change detected';
+        if (alertType === 'BuyBoxMissing') return 'Buy box missing';
+        if (alertType === 'NegativeReviews') return 'Negative reviews detected';
+        if (alertType === 'APlusMissing') return 'A+ content missing';
+        return 'Alert';
     };
 
 
@@ -146,9 +155,18 @@ const TopNav = () => {
         setOpenNotifications(!openNotifications);
     };
 
-    // Handle notification item click
-    const handleNotificationItemClick = (notificationId) => {
-        dispatch(markAsRead(notificationId));
+    // Handle notification item click: for alerts → navigate to notifications page + set viewed (dropdown and page stay in sync)
+    const handleNotificationItemClick = (notification) => {
+        if (notification.type === 'alert') {
+            if (!notification.isRead && notification.alertId) {
+                axiosInstance.patch(`/api/alerts/${notification.alertId}/viewed`).catch(() => {});
+            }
+            dispatch(markAsRead(notification.id)); // dropdown shows viewed colour immediately
+            setOpenNotifications(false);
+            navigate('/seller-central-checker/notifications', { state: { markedViewedId: notification.id } }); // page shows it as viewed on load
+            return;
+        }
+        dispatch(markAsRead(notification.id));
     };
 
     // Handle mark all as read
@@ -170,6 +188,25 @@ const TopNav = () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [])
+
+    // Fetch latest 10 alerts on first load (auth + location from cookies)
+    useEffect(() => {
+        let cancelled = false;
+        const fetchLatestAlerts = async () => {
+            try {
+                const res = await axiosInstance.get('/api/alerts/latest', { params: { limit: 10 } });
+                if (cancelled) return;
+                const alerts = res.data?.data?.alerts;
+                if (Array.isArray(alerts)) {
+                    dispatch(setAlertsFromApi({ alerts }));
+                }
+            } catch (err) {
+                // Non-fatal: leave notifications as-is (e.g. 401 when not logged in)
+            }
+        };
+        fetchLatestAlerts();
+        return () => { cancelled = true; };
+    }, [dispatch]);
 
     // Dispatch currency to Redux whenever Country changes
     useEffect(() => {
@@ -390,7 +427,7 @@ const TopNav = () => {
                                                 initial={{ opacity: 0, x: 20 }}
                                                 animate={{ opacity: 1, x: 0 }}
                                                 transition={{ duration: 0.2, delay: index * 0.05 }}
-                                                onClick={() => handleNotificationItemClick(notification.id)}
+                                                onClick={() => handleNotificationItemClick(notification)}
                                                 className={`group p-4 mx-2 my-1 rounded-xl cursor-pointer transition-all duration-200 hover:shadow-sm ${
                                                     !notification.isRead 
                                                         ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 hover:border-blue-200' 
@@ -399,9 +436,11 @@ const TopNav = () => {
                                             >
                                                 <div className="flex gap-3">
                                                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                                        notification.type === 'analysis_complete' 
-                                                            ? 'bg-gradient-to-br from-green-500 to-emerald-600' 
-                                                            : 'bg-gradient-to-br from-orange-500 to-red-600'
+                                                        notification.type === 'alert'
+                                                            ? (notification.alertType === 'ProductContentChange' ? 'bg-amber-500' : notification.alertType === 'BuyBoxMissing' ? 'bg-blue-500' : notification.alertType === 'APlusMissing' ? 'bg-emerald-500' : 'bg-red-500')
+                                                            : notification.type === 'analysis_complete' 
+                                                                ? 'bg-gradient-to-br from-green-500 to-emerald-600' 
+                                                                : 'bg-gradient-to-br from-orange-500 to-red-600'
                                                     }`}>
                                                         <Bell className="w-4 h-4 text-white" />
                                                     </div>
@@ -410,7 +449,7 @@ const TopNav = () => {
                                                             <h4 className={`text-sm font-semibold leading-tight ${
                                                                 !notification.isRead ? 'text-gray-900' : 'text-gray-700'
                                                             }`}>
-                                                                {notification.title}
+                                                                {notification.type === 'alert' ? getAlertDropdownTitle(notification.alertType) : notification.title}
                                                             </h4>
                                                             <div className="flex items-center gap-2 ml-2">
                                                                 {notification.type === 'issues_found' && notification.issueCount && (
@@ -423,19 +462,29 @@ const TopNav = () => {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <p className="text-xs text-gray-600 mb-3 line-clamp-2 leading-relaxed">
-                                                            {notification.message}
-                                                        </p>
+                                                        {notification.type === 'alert' ? (
+                                                            <p className="text-xs text-gray-600 mb-2 leading-relaxed">
+                                                                {notification.products?.length > 0
+                                                                    ? `${notification.products.length} product${notification.products.length === 1 ? '' : 's'} affected`
+                                                                    : (notification.message || 'Alert').slice(0, 50)}
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-xs text-gray-600 mb-3 line-clamp-2 leading-relaxed">
+                                                                {notification.message}
+                                                            </p>
+                                                        )}
                                                         <div className="flex justify-between items-center">
                                                             <span className="text-xs text-gray-400 font-medium">
                                                                 {formatTimestamp(notification.timestamp)}
                                                             </span>
                                                             <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                                                                notification.type === 'analysis_complete' 
-                                                                    ? 'bg-green-100 text-green-700 border border-green-200' 
-                                                                    : 'bg-orange-100 text-orange-700 border border-orange-200'
+                                                                notification.type === 'alert'
+                                                                    ? (notification.alertType === 'ProductContentChange' ? 'bg-amber-100 text-amber-800 border border-amber-200' : notification.alertType === 'BuyBoxMissing' ? 'bg-blue-100 text-blue-700 border border-blue-200' : notification.alertType === 'APlusMissing' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-red-100 text-red-700 border border-red-200')
+                                                                    : notification.type === 'analysis_complete' 
+                                                                        ? 'bg-green-100 text-green-700 border border-green-200' 
+                                                                        : 'bg-orange-100 text-orange-700 border border-orange-200'
                                                             }`}>
-                                                                {notification.type === 'analysis_complete' ? 'Analysis' : 'Issues'}
+                                                                {notification.type === 'alert' ? (notification.alertType === 'ProductContentChange' ? 'Content' : notification.alertType === 'BuyBoxMissing' ? 'Buy box' : notification.alertType === 'APlusMissing' ? 'A+ missing' : 'Reviews') : notification.type === 'analysis_complete' ? 'Analysis' : 'Issues'}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -445,14 +494,19 @@ const TopNav = () => {
                                     )}
                                 </div>
 
-                                {/* Footer */}
-                                {notifications.length > 10 && (
-                                    <div className="p-4 border-t border-gray-100/60 bg-gradient-to-r from-gray-50/30 to-blue-50/20 text-center">
-                                        <p className="text-xs font-medium text-gray-600">
-                                            Showing latest 10 of {notifications.length} notifications
-                                        </p>
-                                    </div>
-                                )}
+                                {/* Footer: See all */}
+                                <div className="p-3 border-t border-gray-100/60 bg-gradient-to-r from-gray-50/30 to-blue-50/20 text-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenNotifications(false);
+                                            navigate('/seller-central-checker/notifications');
+                                        }}
+                                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                        See all
+                                    </button>
+                                </div>
                             </motion.div>
                         )}
                     </AnimatePresence>

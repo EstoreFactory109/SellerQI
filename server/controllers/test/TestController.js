@@ -2283,5 +2283,5 @@ module.exports = { testReport, getTotalSales,
    testKeywordRecommendationsFromDB,
    getStoredKeywordRecommendations,
    testPPCMetrics,
-   testNumberOfProductReviews
+   testNumberOfProductReviews,
    }

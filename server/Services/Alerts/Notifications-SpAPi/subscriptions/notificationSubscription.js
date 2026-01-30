@@ -1,11 +1,11 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../.env') });
 
-const logger = require('../../../utils/Logger');
+const logger = require('../../../../utils/Logger');
 const axios = require('axios');
 const aws4 = require('aws4');
 const { URL } = require('url');
-const { ApiError } = require('../../../utils/ApiError');
+const { ApiError } = require('../../../../utils/ApiError');
 
 /**
  * Sign request with AWS Signature V4

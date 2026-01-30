@@ -1,9 +1,9 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../.env') });
 
-const logger=require('../../../utils/Logger');
+const logger=require('../../../../utils/Logger');
 const axios=require('axios');
-const { ApiError } = require('../../../utils/ApiError');
+const { ApiError } = require('../../../../utils/ApiError');
 
 const generateAccessToken = async()=>{
    

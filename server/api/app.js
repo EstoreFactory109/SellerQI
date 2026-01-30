@@ -41,6 +41,7 @@ const activeProductsTestRoute=require('../routes/activeProductsTest.routes.js')
 const merchantListingsTestRoute=require('../routes/merchantListingsTest.routes.js')
 const cogsRoute=require('../routes/cogs.routes.js')
 const integrationRoute=require('../routes/integration.routes.js')
+const alertsRoute=require('../routes/alerts.routes.js')
 const dbConnect=require('../config/dbConn.js')
 const logger=require('../utils/Logger.js')
 const {connectRedis} = require('../config/redisConn.js')
@@ -154,7 +155,8 @@ app.use('/api/test/active-products',activeProductsTestRoute)
 app.use('/api/test/merchant-listings',merchantListingsTestRoute)
 app.use('/api/cogs',cogsRoute)
 app.use('/api/integration',integrationRoute)
- 
+app.use('/api/alerts',alertsRoute)
+
 app.use(express.static(path.join(_dirname,'/client/dist')))
  
 app.get('*',(req,res,next)=>{

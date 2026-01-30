@@ -92,6 +92,23 @@ const notificationsSlice = createSlice({
       
       state.unreadCount = state.notifications.filter(n => !n.isRead).length;
     },
+
+    // Set notifications from alerts API (last N alerts for notification dropdown)
+    setAlertsFromApi: (state, action) => {
+      const alerts = action.payload?.alerts ?? [];
+      state.notifications = alerts.map((alert) => ({
+        id: alert._id,
+        alertId: alert._id,
+        type: 'alert',
+        alertType: alert.alertType,
+        title: alert.message || (alert.alertType === 'ProductContentChange' ? 'Product content change' : alert.alertType === 'BuyBoxMissing' ? 'Buy box missing' : alert.alertType === 'APlusMissing' ? 'A+ content missing' : 'Negative reviews'),
+        message: alert.message || '',
+        timestamp: alert.createdAt || new Date().toISOString(),
+        isRead: alert.viewed === true,
+        products: Array.isArray(alert.products) ? alert.products : [],
+      }));
+      state.unreadCount = state.notifications.filter((n) => !n.isRead).length;
+    },
   },
 });
 
@@ -102,6 +119,7 @@ export const {
   clearNotifications,
   addAnalysisCompleteNotification,
   addIssuesFoundNotification,
+  setAlertsFromApi,
 } = notificationsSlice.actions;
 
 export default notificationsSlice.reducer; 

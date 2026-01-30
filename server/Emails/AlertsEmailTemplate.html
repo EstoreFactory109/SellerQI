@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your SellerQI Alerts</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; background-color: #f8fafc; color: #334155;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8fafc; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; border-bottom: 1px solid #e2e8f0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr>
+                  <td align="left">
+                    <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI" style="height: 32px; width: auto; display: block;" />
+                  </td>
+                  <td align="right">
+                    <span style="background-color: #f1f5f9; color: #64748b; padding: 6px 12px; border-radius: 16px; font-size: 13px; font-weight: 500;">{{date}}</span>
+                  </td>
+                </tr>
+              </table>
+              <h1 style="margin: 24px 0 8px 0; font-size: 24px; font-weight: 600; color: #0f172a;">Alerts for your account</h1>
+              <p style="margin: 0; font-size: 16px; color: #64748b;">Hi {{userName}}, {{summaryText}}</p>
+            </td>
+          </tr>
+          <!-- Main Content: only sections with content are included (ProductContentChangeAlertService = content + negative reviews only; BuyBoxMissingAlertService = buybox only) -->
+          <tr>
+            <td style="padding: 32px 40px;">
+              {{productContentChangeSection}}
+              {{negativeReviewsSection}}
+              {{buyBoxMissingSection}}
+              {{aplusMissingSection}}
+              {{salesDropSection}}
+              {{conversionRatesSection}}
+              <!-- CTA -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="{{alertsDashboardUrl}}" style="background-color: #3b82f6; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block;">View all alerts</a>
+                  </td>
+                </tr>
+              </table>
+              <!-- Help -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr>
+                  <td align="center" style="padding: 16px; font-size: 14px; color: #64748b;">
+                    Need help? <a href="mailto:support@sellerqi.com" style="color: #3b82f6; text-decoration: none;">support@sellerqi.com</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <div style="font-size: 12px; color: #94a3b8;">
+                © 2025 SellerQI. All rights reserved.<br>
+                <a href="https://www.sellerqi.com/privacy-policy" style="color: #64748b; text-decoration: none;">Privacy</a> |
+                <a href="https://www.sellerqi.com/terms-of-use" style="color: #64748b; text-decoration: none;">Terms</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

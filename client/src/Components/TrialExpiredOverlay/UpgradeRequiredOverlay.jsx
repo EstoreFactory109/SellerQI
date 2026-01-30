@@ -104,9 +104,17 @@ const UpgradeRequiredOverlay = ({ children }) => {
             <div className="absolute inset-0 bg-gradient-to-r from-blue-700 via-purple-700 to-pink-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
           </motion.button>
 
+          {/* Free trial link */}
           <p className="text-xs text-gray-500 mt-4 relative">
             Unlock all features with a simple upgrade
           </p>
+          <button
+            type="button"
+            onClick={handleUpgrade}
+            className="relative mt-2 text-sm text-indigo-600 hover:text-indigo-800 hover:underline focus:outline-none focus:ring-0"
+          >
+            First time here? Start your 7-day free trial
+          </button>
         </motion.div>
       </div>
     </div>

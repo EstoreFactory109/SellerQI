@@ -334,10 +334,13 @@ class StripeService {
                 isInTrialPeriod: isTrialing, // Set based on Stripe subscription status
             };
             
-            // If subscription is in trial, set trial end date
-            if (isTrialing && stripeSubscription.trial_end) {
-                updateData.trialEndsDate = this.safeDate(stripeSubscription.trial_end);
-                logger.info(`User ${userId} is in trial period. Trial ends on ${updateData.trialEndsDate}`);
+            // If subscription is in trial, set trial end date and mark that user has been served a trial
+            if (isTrialing) {
+                updateData.servedTrial = true; // User authorized payment method for free trial
+                if (stripeSubscription.trial_end) {
+                    updateData.trialEndsDate = this.safeDate(stripeSubscription.trial_end);
+                    logger.info(`User ${userId} is in trial period. Trial ends on ${updateData.trialEndsDate}`);
+                }
             } else {
                 updateData.isInTrialPeriod = false;
             }

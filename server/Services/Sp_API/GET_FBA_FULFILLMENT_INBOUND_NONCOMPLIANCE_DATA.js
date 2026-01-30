@@ -156,34 +156,40 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, r
         const refinedData = convertTSVToJson(fullReport.data);
 
         const errorData = [];
+        const today = new Date();
+        today.setUTCHours(0, 0, 0, 0);
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
         refinedData.forEach(item => {
             const dateStr = item["issue-reported-date"];
+            if (!dateStr) return;
             const inputDate = new Date(dateStr);
+            inputDate.setUTCHours(0, 0, 0, 0);
 
-            const today = new Date();
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(today.getDate() - 30);
-
-            if(inputDate>=today && inputDate<=thirtyDaysAgo){
+            if (inputDate >= thirtyDaysAgo && inputDate <= today) {
                 errorData.push({
                     issueReportedDate: item["issue-reported-date"],
                     shipmentCreationDate: item["shipment-creation-date"],
                     asin: item["asin"],
-                    problemType:item["problem-type"]
-                })
+                    problemType: item["problem-type"]
+                });
             }
+        });
 
-        })
+        if (errorData.length === 0) {
+            logger.info("GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA ended with no issues (no document saved)");
+            return null;
+        }
 
-        const createData= GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.create({
-            userId:userId,
-            country:country,
-            region:region,
-            ErrorData:errorData
-        })
+        const createData = await GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.create({
+            userId,
+            country,
+            region,
+            ErrorData: errorData
+        });
 
-        if(!createData){
+        if (!createData) {
             return false;
         }
 

@@ -45,7 +45,11 @@ export default function PlansAndBilling() {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [visiblePayments, setVisiblePayments] = useState(5);
+  const [freeTrialLoading, setFreeTrialLoading] = useState(false);
   const user = useSelector((state) => state.Auth.user);
+
+  // Show "Try 7 days for Free" card only for LITE users who have not been served a trial (hide for PRO and for LITE users whose servedTrial is true)
+  const showFreeTrialCard = currentPlan === 'LITE' && user?.servedTrial !== true;
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
@@ -200,6 +204,19 @@ export default function PlansAndBilling() {
       setTimeout(() => {
         setLoading(prev => ({ ...prev, [planType]: false }));
       }, 1000);
+    }
+  };
+
+  const handleStartFreeTrial = async () => {
+    setFreeTrialLoading(true);
+    try {
+      localStorage.setItem('previousPlan', currentPlan);
+      await stripeService.createCheckoutSession('PRO', null, 7);
+    } catch (error) {
+      console.error('Error starting free trial:', error);
+      alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');
+    } finally {
+      setFreeTrialLoading(false);
     }
   };
 
@@ -502,6 +519,44 @@ export default function PlansAndBilling() {
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Upgrade Your Experience</h2>
             <p className="text-xl text-gray-600">Choose the plan that fits your business needs</p>
         </div>
+
+          {/* Try 7 days for Free card - visible only for LITE users who have not been served a trial */}
+          {showFreeTrialCard && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="mb-8 max-w-5xl mx-auto"
+            >
+              <div className="relative overflow-hidden bg-white rounded-xl shadow-lg border-2 border-amber-200 transition-all duration-300 hover:shadow-xl hover:border-amber-300">
+                <div className="p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="w-16 h-16 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md flex-shrink-0">
+                      <Zap className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold text-gray-900 mb-1">Try 7 days for Free</h3>
+                      <p className="text-gray-600">Start your PRO trial. No charge until trial ends. Cancel anytime.</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleStartFreeTrial}
+                    disabled={freeTrialLoading}
+                    className="w-full sm:w-auto py-4 px-8 rounded-2xl font-bold text-lg transition-all duration-300 flex items-center justify-center space-x-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white hover:shadow-xl transform hover:scale-105 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex-shrink-0"
+                  >
+                    {freeTrialLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        <span>Start Free Trial</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
             {Object.entries(plans)

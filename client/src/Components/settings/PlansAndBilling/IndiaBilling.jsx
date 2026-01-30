@@ -9,6 +9,7 @@ import {
   Crown, 
   Users, 
   Star,
+  Zap,
   CreditCard,
   Calendar,
   ArrowRight,
@@ -40,7 +41,11 @@ export default function IndiaBilling() {
   const [visiblePayments, setVisiblePayments] = useState(5);
   const [isTrialPeriod, setIsTrialPeriod] = useState(false);
   const [loadingInvoice, setLoadingInvoice] = useState({}); // Track loading state per payment
+  const [freeTrialLoading, setFreeTrialLoading] = useState(false);
   const user = useSelector((state) => state.Auth.user);
+
+  // Show "Try 7 days for Free" card only for LITE users who have not been served a trial (hide for PRO and for LITE users whose servedTrial is true)
+  const showFreeTrialCard = currentPlan === 'LITE' && user?.servedTrial !== true;
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
@@ -255,6 +260,60 @@ export default function IndiaBilling() {
       alert('Failed to process upgrade. Please try again.');
       setLoading(prev => ({ ...prev, [planType]: false }));
     }
+  };
+
+  const handleStartFreeTrial = () => {
+    setFreeTrialLoading(true);
+    razorpayService.initiatePayment(
+      'PRO',
+      async (result) => {
+        try {
+          const response = await axiosInstance.get('/app/profile');
+          if (response.status === 200 && response.data?.data) {
+            const freshUserData = response.data.data;
+            dispatch(loginSuccess(freshUserData));
+            const userIsInTrial = freshUserData.isInTrialPeriod || false;
+            setIsTrialPeriod(userIsInTrial);
+            if (freshUserData.packageType === 'PRO' && !userIsInTrial) {
+              setCurrentPlan('PRO');
+            } else if (freshUserData.packageType === 'AGENCY') {
+              setCurrentPlan('AGENCY');
+            } else {
+              setCurrentPlan('LITE');
+            }
+            setSubscriptionStatus(freshUserData.subscriptionStatus || 'active');
+          } else {
+            dispatch(updatePackageType({
+              packageType: 'PRO',
+              subscriptionStatus: 'active'
+            }));
+            setCurrentPlan('PRO');
+            setSubscriptionStatus('active');
+            setIsTrialPeriod(false);
+          }
+        } catch (error) {
+          console.error('Error fetching fresh user data after payment:', error);
+          dispatch(updatePackageType({
+            packageType: 'PRO',
+            subscriptionStatus: 'active'
+          }));
+          setCurrentPlan('PRO');
+          setSubscriptionStatus('active');
+          setIsTrialPeriod(false);
+        }
+        fetchUserSubscription();
+        fetchPaymentHistory();
+        setFreeTrialLoading(false);
+      },
+      (error) => {
+        if (error.message !== 'Payment cancelled by user') {
+          const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
+          alert(errorMsg);
+        }
+        setFreeTrialLoading(false);
+      },
+      7 // 7-day trial
+    );
   };
 
   const handleCancelSubscription = async () => {
@@ -535,6 +594,44 @@ export default function IndiaBilling() {
                 }
               </motion.p>
             </div>
+
+          {/* Try 7 days for Free card - visible only for LITE users who have not been served a trial */}
+          {showFreeTrialCard && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="mb-8 max-w-5xl mx-auto"
+            >
+              <div className="relative overflow-hidden bg-white rounded-xl shadow-lg border-2 border-amber-200 transition-all duration-300 hover:shadow-xl hover:border-amber-300">
+                <div className="p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="w-16 h-16 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md flex-shrink-0">
+                      <Zap className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold text-gray-900 mb-1">Try 7 days for Free</h3>
+                      <p className="text-gray-600">Start your PRO trial. No charge until trial ends. Cancel anytime.</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleStartFreeTrial}
+                    disabled={freeTrialLoading}
+                    className="w-full sm:w-auto py-4 px-8 rounded-2xl font-bold text-lg transition-all duration-300 flex items-center justify-center space-x-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white hover:shadow-xl transform hover:scale-105 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex-shrink-0"
+                  >
+                    {freeTrialLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        <span>Start Free Trial</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
             {/* PRO Plan Card */}
