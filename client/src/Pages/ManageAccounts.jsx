@@ -113,6 +113,7 @@ const ManageAccounts = () => {
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
+  const [brandSearchQuery, setBrandSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -170,17 +171,28 @@ const ManageAccounts = () => {
     
     let filtered = [...users]; // Create a copy to avoid mutations
 
-    // Apply search filter
+    // Apply search filter (name, email, brand)
     if (searchQuery) {
       filtered = filtered.filter(user => {
         const firstName = user.firstName?.toLowerCase() || '';
         const lastName = user.lastName?.toLowerCase() || '';
         const email = user.email?.toLowerCase() || '';
+        const brand = (user.brand && String(user.brand).toLowerCase()) || '';
         const searchLower = searchQuery.toLowerCase();
         
         return firstName.includes(searchLower) || 
                lastName.includes(searchLower) || 
-               email.includes(searchLower);
+               email.includes(searchLower) ||
+               brand.includes(searchLower);
+      });
+    }
+
+    // Apply brand filter
+    if (brandSearchQuery) {
+      const brandLower = brandSearchQuery.toLowerCase().trim();
+      filtered = filtered.filter(user => {
+        const brand = (user.brand && String(user.brand).toLowerCase()) || '';
+        return brand.includes(brandLower);
       });
     }
 
@@ -237,7 +249,7 @@ const ManageAccounts = () => {
     }
 
     return filtered;
-  }, [users, searchQuery, filterType, startDate, endDate, spApiFilter, adsFilter, loading]);
+  }, [users, searchQuery, brandSearchQuery, filterType, startDate, endDate, spApiFilter, adsFilter, loading]);
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / ITEMS_PER_PAGE));
 
@@ -818,7 +830,7 @@ const ManageAccounts = () => {
           className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6"
         >
           <div className="flex flex-col gap-4">
-            {/* First Row: Search and Package Filter */}
+            {/* First Row: Search, Brand Search, and Package Filter */}
             <div className="flex flex-col lg:flex-row gap-4">
               {/* Search */}
               <div className="flex-1">
@@ -826,11 +838,35 @@ const ManageAccounts = () => {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                   <input
                     type="text"
-                    placeholder="Search users by name or email..."
+                    placeholder="Search by name, email, or brand..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300"
                   />
+                </div>
+              </div>
+
+              {/* Brand Search */}
+              <div className="lg:w-56">
+                <div className="relative">
+                  <Briefcase className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    placeholder="Search by brand..."
+                    value={brandSearchQuery}
+                    onChange={(e) => setBrandSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300"
+                  />
+                  {brandSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setBrandSearchQuery('')}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label="Clear brand search"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -992,7 +1028,7 @@ const ManageAccounts = () => {
             {filteredUsers.length > 0 && (
               <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
                 <div className="text-sm text-gray-600">
-                  {searchQuery || filterType !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all' ? (
+                  {searchQuery || brandSearchQuery || filterType !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all' ? (
                     <span>
                       <span className="font-medium">{filteredUsers.length}</span> users match your filters
                     </span>
