@@ -399,6 +399,64 @@ const getUserEmailLogs = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get payment logs for the logged-in user
+ */
+const getMyPaymentLogs = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const limit = parseInt(req.query?.limit) || 50;
+    const page = parseInt(req.query?.page) || 1;
+    const eventType = req.query?.eventType;
+    const status = req.query?.status;
+    const startDate = req.query?.startDate;
+    const endDate = req.query?.endDate;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    try {
+        const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
+        const skip = (page - 1) * limit;
+
+        const logs = await PaymentLogs.getLogsByUser(userId, {
+            limit,
+            skip,
+            eventType,
+            status,
+            startDate,
+            endDate
+        });
+
+        const totalCount = await PaymentLogs.countByUser(userId, {
+            eventType,
+            status,
+            startDate,
+            endDate
+        });
+
+        const stats = await PaymentLogs.getUserPaymentStats(userId);
+
+        return res.status(200).json(new ApiResponse(200, {
+            logs,
+            pagination: {
+                currentPage: page,
+                totalPages: Math.ceil(totalCount / limit),
+                totalCount,
+                limit
+            },
+            stats
+        }, "Payment logs fetched successfully"));
+    } catch (error) {
+        logger.error("Error fetching user payment logs", {
+            error: error.message,
+            userId
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch payment logs"));
+    }
+});
+
 // Helper function to format duration
 function formatDuration(milliseconds) {
     if (!milliseconds) return 'N/A';
@@ -694,6 +752,7 @@ module.exports = {
     getUserLoggingStats,
     getUserErrorLogs,
     getUserEmailLogs,
+    getMyPaymentLogs,
     createSampleLoggingData,
     getKeywordTrackingData,
     getKeywordRecommendations,

@@ -3,6 +3,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const Subscription = require('../../models/user-auth/SubscriptionModel');
 const User = require('../../models/user-auth/userModel');
+const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 
 class RazorpayService {
@@ -110,13 +111,44 @@ class RazorpayService {
             logger.info(`Razorpay subscription created: ${razorpaySubscription.id} for user: ${userId}, plan: ${planType}${hasTrial ? ', with trial' : ''}`);
 
             // Save subscription info (pending state)
-            await this.updateOrCreateSubscription(userId, {
+            // Include trial info so we have a fallback if Razorpay API fetch fails during verification
+            const subscriptionData = {
                 razorpaySubscriptionId: razorpaySubscription.id,
                 planType: planType,
                 status: 'incomplete',
                 paymentStatus: 'pending',
                 paymentGateway: 'razorpay',
                 currency: 'inr'
+            };
+            
+            // Store trial info for fallback purposes
+            if (hasTrial) {
+                subscriptionData.hasTrial = true;
+                subscriptionData.trialEndsAt = new Date(subscriptionOptions.start_at * 1000);
+                logger.info(`Storing trial info in subscription: hasTrial=true, trialEndsAt=${subscriptionData.trialEndsAt.toISOString()}`);
+            } else {
+                subscriptionData.hasTrial = false;
+                subscriptionData.trialEndsAt = null;
+            }
+            
+            await this.updateOrCreateSubscription(userId, subscriptionData);
+
+            // Log subscription creation event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'RAZORPAY_SUBSCRIPTION_CREATED',
+                paymentGateway: 'RAZORPAY',
+                status: 'SUCCESS',
+                subscriptionId: razorpaySubscription.id,
+                planType: planType,
+                isTrialPayment: hasTrial,
+                trialEndsAt: hasTrial ? subscriptionData.trialEndsAt : null,
+                message: `Subscription created${hasTrial ? ` with ${trialPeriodDays}-day trial` : ''}`,
+                source: 'FRONTEND',
+                metadata: {
+                    trialDays: hasTrial ? trialPeriodDays : 0,
+                    planId: this.getPlanId(planType)
+                }
             });
 
             const keyId = process.env.RAZOR_PAY_ID;
@@ -142,6 +174,21 @@ class RazorpayService {
 
         } catch (error) {
             logger.error('Error creating Razorpay subscription:', error);
+            
+            // Log subscription creation failure
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'RAZORPAY_SUBSCRIPTION_CREATED',
+                paymentGateway: 'RAZORPAY',
+                status: 'FAILED',
+                planType: planType,
+                isTrialPayment: trialPeriodDays && trialPeriodDays > 0,
+                errorMessage: error.message,
+                errorDescription: error.error?.description,
+                message: 'Failed to create Razorpay subscription',
+                source: 'FRONTEND'
+            });
+            
             throw error;
         }
     }
@@ -235,11 +282,34 @@ class RazorpayService {
                     currentPeriodEnd = new Date(razorpaySub.current_end * 1000);
                 }
             } catch (fetchError) {
-                logger.warn('Could not fetch Razorpay subscription details, using default dates:', fetchError.message);
+                const errMsg = fetchError?.message ?? (typeof fetchError === 'string' ? fetchError : JSON.stringify(fetchError));
+                logger.warn('Could not fetch Razorpay subscription details, using fallback from stored subscription data:', {
+                    message: errMsg,
+                    userId,
+                    razorpaySubscriptionId,
+                    errorName: fetchError?.name,
+                    stack: fetchError?.stack ? String(fetchError.stack).slice(0, 500) : undefined,
+                    storedHasTrial: subscription.hasTrial,
+                    storedTrialEndsAt: subscription.trialEndsAt
+                });
+                
+                // FALLBACK: Use stored trial info from when subscription was created
+                // This prevents users from being incorrectly marked as "Pro active" when they should be in trial
+                if (subscription.hasTrial === true && subscription.trialEndsAt) {
+                    const trialEnd = new Date(subscription.trialEndsAt);
+                    if (trialEnd > new Date()) {
+                        isTrialing = true;
+                        trialEndsDate = trialEnd;
+                        logger.info(`Using fallback trial info: isTrialing=true, trialEndsDate=${trialEndsDate.toISOString()}`);
+                    } else {
+                        logger.info(`Stored trial has already ended (trialEndsAt=${trialEnd.toISOString()}), treating as active subscription`);
+                    }
+                }
+                
                 currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
             }
 
-            logger.info(`Razorpay payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}, isTrialing=${isTrialing}`);
+            logger.info(`Razorpay payment context: userId=${userId}, subscriptionId=${razorpaySubscriptionId}, wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}, isTrialing=${isTrialing}`);
 
             // Update subscription with payment details
             const subscriptionData = {
@@ -344,6 +414,32 @@ class RazorpayService {
                 : `Razorpay payment successful for user: ${userId}, payment: ${paymentId}, plan: ${planType}`;
             logger.info(statusMessage);
 
+            // Log payment success event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: isTrialing ? 'TRIAL_STARTED' : 'RAZORPAY_PAYMENT_SUCCESS',
+                paymentGateway: 'RAZORPAY',
+                status: 'SUCCESS',
+                subscriptionId: razorpaySubscriptionId,
+                paymentId: paymentId,
+                planType: planType,
+                previousPlanType: previousPackageType,
+                isTrialPayment: isTrialing,
+                trialEndsAt: trialEndsDate,
+                previousStatus: wasInTrial ? 'trialing' : previousPackageType,
+                newStatus: isTrialing ? 'trialing' : 'active',
+                message: isTrialing 
+                    ? `Trial started for ${planType} plan, ends ${trialEndsDate?.toISOString()}`
+                    : `Payment successful for ${planType} plan`,
+                source: 'FRONTEND',
+                metadata: {
+                    wasInTrial,
+                    isTrialUpgrade,
+                    isUpgrade,
+                    isNewSignup
+                }
+            });
+
             return { 
                 success: true, 
                 planType, 
@@ -367,6 +463,21 @@ class RazorpayService {
                 paymentId: paymentId,
                 errorName: error.name
             });
+            
+            // Log payment failure event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'RAZORPAY_PAYMENT_FAILED',
+                paymentGateway: 'RAZORPAY',
+                status: 'FAILED',
+                subscriptionId: razorpaySubscriptionId,
+                paymentId: paymentId,
+                errorMessage: error.message,
+                errorCode: error.name,
+                message: 'Payment verification failed',
+                source: 'FRONTEND'
+            });
+            
             throw error;
         }
     }
@@ -471,6 +582,28 @@ class RazorpayService {
             switch (event) {
                 case 'subscription.authenticated':
                     logger.info('Subscription authenticated:', payload);
+                    // Log subscription authenticated event (payment method authorized, trial started)
+                    if (payload.subscription?.entity?.id) {
+                        const sub = payload.subscription.entity;
+                        const dbSub = await Subscription.findOne({ razorpaySubscriptionId: sub.id });
+                        if (dbSub) {
+                            await PaymentLogs.logEvent({
+                                userId: dbSub.userId,
+                                eventType: 'RAZORPAY_SUBSCRIPTION_AUTHENTICATED',
+                                paymentGateway: 'RAZORPAY',
+                                status: 'SUCCESS',
+                                subscriptionId: sub.id,
+                                planType: dbSub.planType,
+                                isTrialPayment: dbSub.hasTrial,
+                                trialEndsAt: dbSub.trialEndsAt,
+                                message: dbSub.hasTrial 
+                                    ? `Payment method authenticated, trial started until ${dbSub.trialEndsAt?.toISOString()}`
+                                    : 'Payment method authenticated',
+                                source: 'WEBHOOK',
+                                webhookPayload: payload
+                            });
+                        }
+                    }
                     break;
                 case 'subscription.activated':
                     await this.handleSubscriptionActivated(payload);
@@ -486,6 +619,14 @@ class RazorpayService {
                     break;
                 case 'payment.failed':
                     await this.handlePaymentFailed(payload);
+                    break;
+                case 'subscription.halted':
+                    await this.handleSubscriptionHalted(payload);
+                    break;
+                case 'subscription.pending':
+                    // Subscription is pending due to payment failure, user still has access
+                    // but payment is being retried. We'll handle this with payment.failed
+                    logger.info(`Subscription pending: ${payload?.subscription?.entity?.id}`);
                     break;
                 default:
                     logger.info(`Unhandled Razorpay webhook event: ${event}`);
@@ -551,8 +692,38 @@ class RazorpayService {
 
                 if (wasInTrial) {
                     logger.info(`Trial ended for user: ${dbSubscription.userId}. Subscription activated and payment charged. User now on paid ${dbSubscription.planType} plan.`);
+                    
+                    // Log trial ended event
+                    await PaymentLogs.logEvent({
+                        userId: dbSubscription.userId,
+                        eventType: 'TRIAL_ENDED',
+                        paymentGateway: 'RAZORPAY',
+                        status: 'SUCCESS',
+                        subscriptionId: subscriptionId,
+                        planType: dbSubscription.planType,
+                        previousStatus: 'trialing',
+                        newStatus: 'active',
+                        message: `Trial ended, subscription activated for ${dbSubscription.planType} plan`,
+                        source: 'WEBHOOK',
+                        webhookPayload: payload
+                    });
                 } else {
                     logger.info(`Subscription activated via webhook: ${subscriptionId}`);
+                    
+                    // Log subscription activated event
+                    await PaymentLogs.logEvent({
+                        userId: dbSubscription.userId,
+                        eventType: 'RAZORPAY_SUBSCRIPTION_ACTIVATED',
+                        paymentGateway: 'RAZORPAY',
+                        status: 'SUCCESS',
+                        subscriptionId: subscriptionId,
+                        planType: dbSubscription.planType,
+                        previousStatus: 'incomplete',
+                        newStatus: 'active',
+                        message: `Subscription activated for ${dbSubscription.planType} plan`,
+                        source: 'WEBHOOK',
+                        webhookPayload: payload
+                    });
                 }
             }
 
@@ -626,6 +797,27 @@ class RazorpayService {
                 });
 
                 logger.info(`Subscription payment recorded via webhook: ${subscriptionId}`);
+                
+                // Log recurring payment event
+                await PaymentLogs.logEvent({
+                    userId: dbSubscription.userId,
+                    eventType: 'RAZORPAY_SUBSCRIPTION_CHARGED',
+                    paymentGateway: 'RAZORPAY',
+                    status: 'SUCCESS',
+                    subscriptionId: subscriptionId,
+                    paymentId: paymentId,
+                    amount: paymentAmountInRupees,
+                    currency: payment.currency?.toUpperCase() || 'INR',
+                    planType: dbSubscription.planType,
+                    message: `Recurring payment of ${payment.currency?.toUpperCase() || 'INR'} ${paymentAmountInRupees}`,
+                    source: 'WEBHOOK',
+                    webhookPayload: payload,
+                    metadata: {
+                        method: payment.method,
+                        bank: payment.bank,
+                        currentPeriodEnd: subscription.current_end ? new Date(subscription.current_end * 1000) : null
+                    }
+                });
             }
 
         } catch (error) {
@@ -663,6 +855,22 @@ class RazorpayService {
                 });
 
                 logger.info(`Subscription cancelled via webhook: ${subscriptionId}`);
+                
+                // Log subscription cancelled event
+                await PaymentLogs.logEvent({
+                    userId: dbSubscription.userId,
+                    eventType: 'RAZORPAY_SUBSCRIPTION_CANCELLED',
+                    paymentGateway: 'RAZORPAY',
+                    status: 'SUCCESS',
+                    subscriptionId: subscriptionId,
+                    planType: 'LITE',
+                    previousPlanType: dbSubscription.planType,
+                    previousStatus: dbSubscription.status,
+                    newStatus: 'cancelled',
+                    message: `Subscription cancelled, user downgraded to LITE`,
+                    source: 'WEBHOOK',
+                    webhookPayload: payload
+                });
             }
 
         } catch (error) {
@@ -692,6 +900,7 @@ class RazorpayService {
 
     /**
      * Handle payment.failed webhook event
+     * Updates both Subscription and User to reflect payment failure
      */
     async handlePaymentFailed(payload) {
         try {
@@ -700,19 +909,128 @@ class RazorpayService {
 
             logger.info(`Razorpay payment failed: ${paymentId}`);
 
+            // Find subscription to get userId for logging
+            let userId = null;
+            let subscription = null;
+            let previousStatus = 'active';
+            
             // If this is a subscription payment failure, update status
             if (payment.subscription_id) {
-                await Subscription.findOneAndUpdate(
+                // First get the current subscription to track previous status
+                const currentSubscription = await Subscription.findOne({ razorpaySubscriptionId: payment.subscription_id });
+                previousStatus = currentSubscription?.status || 'active';
+                
+                subscription = await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: payment.subscription_id },
                     {
                         status: 'past_due',
                         paymentStatus: 'unpaid'
-                    }
+                    },
+                    { new: true }
                 );
+                userId = subscription?.userId;
+                
+                // Also update User model to reflect payment failure
+                // User keeps their packageType (PRO) but subscriptionStatus becomes past_due
+                // This allows features to potentially show a "payment failed" warning
+                if (userId) {
+                    await User.findByIdAndUpdate(userId, {
+                        subscriptionStatus: 'past_due'
+                    });
+                    logger.info(`Updated user ${userId} subscriptionStatus to past_due due to payment failure`);
+                }
+            }
+
+            // Log payment failure from webhook
+            if (userId) {
+                await PaymentLogs.logEvent({
+                    userId,
+                    eventType: 'RAZORPAY_PAYMENT_FAILED',
+                    paymentGateway: 'RAZORPAY',
+                    status: 'FAILED',
+                    subscriptionId: payment.subscription_id,
+                    paymentId: paymentId,
+                    amount: payment.amount ? payment.amount / 100 : null, // Convert from paise
+                    currency: payment.currency?.toUpperCase() || 'INR',
+                    errorCode: payment.error_code,
+                    errorMessage: payment.error_description || payment.error_reason,
+                    errorDescription: payment.error_step,
+                    previousStatus: previousStatus,
+                    newStatus: 'past_due',
+                    message: `Payment failed: ${payment.error_description || payment.error_reason || 'Unknown error'}`,
+                    source: 'WEBHOOK',
+                    webhookPayload: payload,
+                    metadata: {
+                        method: payment.method,
+                        bank: payment.bank,
+                        wallet: payment.wallet,
+                        vpa: payment.vpa
+                    }
+                });
             }
 
         } catch (error) {
             logger.error('Error handling payment.failed webhook:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle subscription.halted webhook event
+     * This is triggered when Razorpay stops retrying after multiple payment failures
+     * At this point, we should downgrade the user to LITE
+     */
+    async handleSubscriptionHalted(payload) {
+        try {
+            const subscription = payload.subscription.entity;
+            const subscriptionId = subscription.id;
+
+            logger.info(`Razorpay subscription halted: ${subscriptionId}`);
+
+            // Find subscription by Razorpay subscription ID
+            const dbSubscription = await Subscription.findOne({ razorpaySubscriptionId: subscriptionId });
+            
+            if (dbSubscription) {
+                const previousStatus = dbSubscription.status;
+                const previousPlanType = dbSubscription.planType;
+                
+                // Update subscription to halted/cancelled
+                await Subscription.findOneAndUpdate(
+                    { razorpaySubscriptionId: subscriptionId },
+                    {
+                        status: 'cancelled',
+                        paymentStatus: 'unpaid'
+                    }
+                );
+
+                // Downgrade user to LITE since subscription is halted
+                await User.findByIdAndUpdate(dbSubscription.userId, {
+                    packageType: 'LITE',
+                    subscriptionStatus: 'cancelled',
+                    isInTrialPeriod: false
+                });
+
+                logger.info(`Subscription halted, user ${dbSubscription.userId} downgraded to LITE`);
+                
+                // Log subscription halted event
+                await PaymentLogs.logEvent({
+                    userId: dbSubscription.userId,
+                    eventType: 'RAZORPAY_SUBSCRIPTION_HALTED',
+                    paymentGateway: 'RAZORPAY',
+                    status: 'FAILED',
+                    subscriptionId: subscriptionId,
+                    planType: 'LITE',
+                    previousPlanType: previousPlanType,
+                    previousStatus: previousStatus,
+                    newStatus: 'cancelled',
+                    message: `Subscription halted due to repeated payment failures, user downgraded to LITE`,
+                    source: 'WEBHOOK',
+                    webhookPayload: payload
+                });
+            }
+
+        } catch (error) {
+            logger.error('Error handling subscription.halted webhook:', error);
             throw error;
         }
     }
@@ -778,6 +1096,21 @@ class RazorpayService {
 
             logger.info(`Razorpay subscription cancelled for user: ${userId}, subscription: ${subscription.razorpaySubscriptionId}`);
 
+            // Log subscription cancellation from user action
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'RAZORPAY_SUBSCRIPTION_CANCELLED',
+                paymentGateway: 'RAZORPAY',
+                status: 'SUCCESS',
+                subscriptionId: subscription.razorpaySubscriptionId,
+                planType: 'LITE',
+                previousPlanType: subscription.planType,
+                previousStatus: subscription.status,
+                newStatus: 'cancelled',
+                message: 'User cancelled subscription',
+                source: 'FRONTEND'
+            });
+
             return { 
                 success: true, 
                 message: 'Subscription cancelled successfully' 
@@ -785,6 +1118,18 @@ class RazorpayService {
 
         } catch (error) {
             logger.error('Error cancelling Razorpay subscription:', error);
+            
+            // Log cancellation failure
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'RAZORPAY_SUBSCRIPTION_CANCELLED',
+                paymentGateway: 'RAZORPAY',
+                status: 'FAILED',
+                errorMessage: error.message,
+                message: 'Failed to cancel subscription',
+                source: 'FRONTEND'
+            });
+            
             throw error;
         }
     }

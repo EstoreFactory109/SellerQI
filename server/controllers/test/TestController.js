@@ -593,6 +593,73 @@ const testAmazonAds = async (req, res) => {
     }
   }
 
+  /**
+   * Fetch the last stored ads keywords performance document for a user.
+   * Used to verify what keyword data (wasted spend source) is in the DB.
+   * POST body: { userId (required), country (optional), region (optional) }
+   * - If country and region are provided: returns last document for that user+country+region.
+   * - Otherwise: returns the single most recent document for the user (any country/region).
+   */
+  const getLastAdsKeywordsPerformanceDocument = async (req, res) => {
+    try {
+      const { userId, country, region } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId is required'
+        });
+      }
+
+      const mongoose = require('mongoose');
+      const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null;
+      if (!userIdObj) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId must be a valid MongoDB ObjectId'
+        });
+      }
+
+      const query = { userId: userIdObj };
+      if (country != null && country !== '') query.country = country;
+      if (region != null && region !== '') query.region = region;
+
+      const doc = await adsKeywordsPerformanceModel
+        .findOne(query)
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (!doc) {
+        return res.status(404).json({
+          success: false,
+          error: 'No ads keywords performance document found for the given criteria',
+          criteria: { userId: userId, ...(country != null && { country }), ...(region != null && { region }) }
+        });
+      }
+
+      const keywordsCount = Array.isArray(doc.keywordsData) ? doc.keywordsData.length : 0;
+      return res.status(200).json({
+        success: true,
+        message: 'Last ads keywords performance document retrieved',
+        data: doc,
+        summary: {
+          documentId: doc._id,
+          userId: doc.userId,
+          country: doc.country,
+          region: doc.region,
+          keywordsDataCount: keywordsCount,
+          createdAt: doc.createdAt,
+          updatedAt: doc.updatedAt
+        }
+      });
+    } catch (error) {
+      console.error('Error in getLastAdsKeywordsPerformanceDocument:', error);
+      return res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to fetch last ads keywords performance document'
+      });
+    }
+  };
 
   const testGetBrand = async (req, res) => {
     const { asin, marketplaceId, accessToken } = req.body;
@@ -2284,4 +2351,5 @@ module.exports = { testReport, getTotalSales,
    getStoredKeywordRecommendations,
    testPPCMetrics,
    testNumberOfProductReviews,
+   getLastAdsKeywordsPerformanceDocument,
    }

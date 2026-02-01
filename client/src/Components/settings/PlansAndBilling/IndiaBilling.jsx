@@ -24,7 +24,8 @@ import {
   ChevronDown,
   History,
   Shield,
-  Mail
+  Mail,
+  AlertTriangle
 } from 'lucide-react';
 import razorpayService from '../../../services/razorpayService';
 
@@ -449,6 +450,41 @@ export default function IndiaBilling() {
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Failed Warning Banner */}
+      <AnimatePresence>
+        {subscriptionStatus === 'past_due' && currentPlan !== 'LITE' && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white"
+          >
+            <div className="max-w-6xl mx-auto px-4 py-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-white/20 rounded-full">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-lg">Payment Failed</p>
+                    <p className="text-sm opacity-90">
+                      Your last payment was unsuccessful. Please update your payment method to avoid losing access to Pro features.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleUpgrade('PRO')}
+                  className="flex-shrink-0 px-6 py-3 bg-white text-orange-600 font-bold rounded-xl hover:bg-gray-100 transition-all duration-300 flex items-center space-x-2 shadow-lg"
+                >
+                  <CreditCard className="w-5 h-5" />
+                  <span>Update Payment</span>
+                </button>
+              </div>
             </div>
           </motion.div>
         )}

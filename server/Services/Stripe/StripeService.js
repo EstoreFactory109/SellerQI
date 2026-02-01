@@ -2,6 +2,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Subscription = require('../../models/user-auth/SubscriptionModel');
 const User = require('../../models/user-auth/userModel');
+const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 const { createAccessToken } = require('../../utils/Tokens');
 
@@ -178,17 +179,49 @@ class StripeService {
             });
 
             const trialInfo = trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO' ? `, trial: ${trialPeriodDays} days` : '';
+            const hasTrial = trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO';
             logger.info(`Created checkout session: ${session.id} for user: ${userId}, plan: ${planType}${trialInfo}`);
+            
+            // Log checkout session creation
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'STRIPE_CHECKOUT_CREATED',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: session.id,
+                planType: planType,
+                isTrialPayment: hasTrial,
+                message: `Checkout session created${hasTrial ? ` with ${trialPeriodDays}-day trial` : ''}`,
+                source: 'FRONTEND',
+                metadata: {
+                    trialDays: hasTrial ? trialPeriodDays : 0,
+                    priceId: priceId,
+                    couponCode: couponCode || null
+                }
+            });
             
             return {
                 sessionId: session.id,
                 url: session.url,
-                hasTrial: trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO',
+                hasTrial: hasTrial,
                 trialDays: trialPeriodDays && planType === 'PRO' ? trialPeriodDays : null
             };
 
         } catch (error) {
             logger.error('Error creating checkout session:', error);
+            
+            // Log checkout creation failure
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'STRIPE_CHECKOUT_CREATED',
+                paymentGateway: 'STRIPE',
+                status: 'FAILED',
+                planType: planType,
+                errorMessage: error.message,
+                message: 'Failed to create checkout session',
+                source: 'FRONTEND'
+            });
+            
             throw error;
         }
     }
@@ -407,6 +440,35 @@ class StripeService {
 
             logger.info(`Successfully processed payment for user: ${userId}, plan: ${planType}, isTrialing: ${isTrialing}`);
             
+            // Log payment success event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: isTrialing ? 'TRIAL_STARTED' : 'STRIPE_PAYMENT_SUCCESS',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: stripeSubscription.id,
+                paymentId: session.payment_intent,
+                amount: priceItem.price.unit_amount / 100, // Convert from cents
+                currency: priceItem.price.currency?.toUpperCase() || 'USD',
+                planType: planType,
+                previousPlanType: previousPackageType,
+                isTrialPayment: isTrialing,
+                trialEndsAt: isTrialing && stripeSubscription.trial_end ? this.safeDate(stripeSubscription.trial_end) : null,
+                previousStatus: wasInTrial ? 'trialing' : previousPackageType,
+                newStatus: stripeSubscription.status,
+                message: isTrialing 
+                    ? `Trial started for ${planType} plan`
+                    : `Payment successful for ${planType} plan`,
+                source: 'FRONTEND',
+                metadata: {
+                    wasInTrial,
+                    isTrialUpgrade,
+                    isUpgrade,
+                    isNewSignup,
+                    sessionId
+                }
+            });
+            
             return { 
                 success: true, 
                 planType, 
@@ -421,6 +483,19 @@ class StripeService {
 
         } catch (error) {
             logger.error('Error handling successful payment:', error);
+            
+            // Log payment failure event
+            await PaymentLogs.logEvent({
+                userId: null, // May not have userId if error occurs early
+                eventType: 'STRIPE_PAYMENT_FAILED',
+                paymentGateway: 'STRIPE',
+                status: 'FAILED',
+                errorMessage: error.message,
+                message: 'Payment processing failed',
+                source: 'FRONTEND',
+                metadata: { sessionId }
+            });
+            
             throw error;
         }
     }

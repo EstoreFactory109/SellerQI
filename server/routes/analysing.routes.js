@@ -9,6 +9,7 @@ const {
     getUserLoggingStats,
     getUserErrorLogs,
     getUserEmailLogs,
+    getMyPaymentLogs,
     createSampleLoggingData,
     getKeywordRecommendations,
     getKeywordRecommendationsAsins,
@@ -27,6 +28,7 @@ router.get('/logging/session/:sessionId', auth, getLoggingSessionDetails)
 router.get('/logging/stats', auth, getUserLoggingStats)
 router.get('/logging/errors', auth, getUserErrorLogs)
 router.get('/logging/emails', auth, getUserEmailLogs)
+router.get('/logging/payment-logs', auth, getMyPaymentLogs)
 router.post('/logging/create-sample', auth, createSampleLoggingData)
 
 // ===== KEYWORD RECOMMENDATIONS ROUTES =====

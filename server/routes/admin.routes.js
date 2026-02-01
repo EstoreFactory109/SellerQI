@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser, deleteUser } = require('../controllers/admin/admin.js');
+const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser, deleteUser, getPaymentLogs, getAllPaymentLogs } = require('../controllers/admin/admin.js');
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
@@ -13,5 +13,9 @@ router.post('/admin-logout', superAdminAuth, adminLogout);
 router.get('/admin/accounts', superAdminAuth, getAllAccounts);
 router.post('/admin/login-as-user', superAdminAuth, loginSelectedUser);
 router.delete('/admin/users/:userId', superAdminAuth, deleteUser);
+
+// Payment logs routes for superAdmin
+router.get('/admin/payment-logs', superAdminAuth, getAllPaymentLogs);
+router.get('/admin/payment-logs/:userId', superAdminAuth, getPaymentLogs);
 
 module.exports = router;

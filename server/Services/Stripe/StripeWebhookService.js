@@ -2,6 +2,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Subscription = require('../../models/user-auth/SubscriptionModel');
 const User = require('../../models/user-auth/userModel');
+const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 
 class StripeWebhookService {
@@ -154,6 +155,25 @@ class StripeWebhookService {
 
             logger.info(`Successfully updated subscription for user: ${userId}`);
 
+            // Log subscription created event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'STRIPE_SUBSCRIPTION_CREATED',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: subscription.id,
+                planType: planType,
+                isTrialPayment: isTrialing,
+                trialEndsAt: isTrialing && subscription.trial_end ? this.safeDate(subscription.trial_end) : null,
+                newStatus: subscription.status,
+                amount: subscription.items.data[0]?.price.unit_amount / 100,
+                currency: subscription.items.data[0]?.price.currency?.toUpperCase() || 'USD',
+                message: isTrialing 
+                    ? `Subscription created with trial for ${planType} plan`
+                    : `Subscription created for ${planType} plan`,
+                source: 'WEBHOOK'
+            });
+
         } catch (error) {
             logger.error('Error handling subscription created:', error);
             throw error;
@@ -201,6 +221,22 @@ class StripeWebhookService {
 
             logger.info(`Successfully updated subscription for user: ${userId}, status: ${subscription.status}`);
 
+            // Log subscription status change
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'STRIPE_SUBSCRIPTION_UPDATED',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: subscription.id,
+                planType: planType,
+                newStatus: subscription.status,
+                message: `Subscription status updated to ${subscription.status}`,
+                source: 'WEBHOOK',
+                metadata: {
+                    cancelAtPeriodEnd: subscription.cancel_at_period_end
+                }
+            });
+
         } catch (error) {
             logger.error('Error handling subscription updated:', error);
             throw error;
@@ -226,6 +262,21 @@ class StripeWebhookService {
             await this.downgradeUserToLite(userId);
 
             logger.info(`Successfully handled subscription deletion for user: ${userId}`);
+
+            // Log subscription cancelled event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: 'STRIPE_SUBSCRIPTION_CANCELLED',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: subscription.id,
+                planType: 'LITE',
+                previousPlanType: subscription.metadata?.planType,
+                previousStatus: 'active',
+                newStatus: 'cancelled',
+                message: 'Subscription cancelled, user downgraded to LITE',
+                source: 'WEBHOOK'
+            });
 
         } catch (error) {
             logger.error('Error handling subscription deleted:', error);
@@ -278,6 +329,7 @@ class StripeWebhookService {
 
             // Update user - if this was a trial that just ended, update trial status
             const user = await User.findById(userId);
+            const wasInTrial = user?.isInTrialPeriod === true;
             if (user && user.isInTrialPeriod) {
                 await User.findByIdAndUpdate(userId, {
                     isInTrialPeriod: false,
@@ -288,6 +340,29 @@ class StripeWebhookService {
 
             logger.info(`Successfully recorded payment for user: ${userId}`);
 
+            // Log payment success event
+            await PaymentLogs.logEvent({
+                userId,
+                eventType: wasInTrial ? 'TRIAL_ENDED' : 'STRIPE_PAYMENT_SUCCESS',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: subscriptionId,
+                paymentId: invoice.payment_intent,
+                amount: invoice.amount_paid / 100, // Convert from cents
+                currency: invoice.currency?.toUpperCase() || 'USD',
+                planType: planType,
+                previousStatus: wasInTrial ? 'trialing' : 'active',
+                newStatus: 'active',
+                message: wasInTrial 
+                    ? `Trial ended, payment of ${invoice.currency?.toUpperCase() || 'USD'} ${invoice.amount_paid / 100} charged`
+                    : `Recurring payment of ${invoice.currency?.toUpperCase() || 'USD'} ${invoice.amount_paid / 100}`,
+                source: 'WEBHOOK',
+                metadata: {
+                    billingReason: invoice.billing_reason,
+                    invoiceNumber: invoice.number
+                }
+            });
+
         } catch (error) {
             logger.error('Error handling invoice payment succeeded:', error);
             throw error;
@@ -296,6 +371,8 @@ class StripeWebhookService {
 
     /**
      * Handle failed invoice payment
+     * Updates both Subscription and User to reflect payment failure
+     * If Stripe has exhausted all retries, downgrade user to LITE
      */
     async handleInvoicePaymentFailed(invoice) {
         try {
@@ -305,21 +382,97 @@ class StripeWebhookService {
                 return; // Not a subscription invoice
             }
 
-            // Get subscription from Stripe to get metadata
+            // Get subscription from Stripe to get metadata and status
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
             const userId = subscription.metadata.userId;
+            const planType = subscription.metadata?.planType;
 
-            logger.warn(`Invoice payment failed for user: ${userId}, amount: ${invoice.amount_due}`);
+            logger.warn(`Invoice payment failed for user: ${userId}, amount: ${invoice.amount_due}, attempt: ${invoice.attempt_count}, next attempt: ${invoice.next_payment_attempt ? 'scheduled' : 'none'}`);
 
-            // Update subscription payment status
-            await this.updateSubscription(userId, {
-                paymentStatus: 'unpaid'
-            });
+            // Check if this is the final failure (no more retries scheduled)
+            // Stripe typically retries 3-4 times over ~3 weeks before giving up
+            const isFinalFailure = !invoice.next_payment_attempt || subscription.status === 'canceled' || subscription.status === 'unpaid';
 
-            // TODO: Send email notification about failed payment
-            // TODO: Implement retry logic or grace period
+            if (isFinalFailure) {
+                // No more retries - downgrade user to LITE
+                logger.warn(`Final payment failure for user ${userId}. No more retries. Downgrading to LITE.`);
+                
+                // Update subscription to cancelled
+                await this.updateSubscription(userId, {
+                    status: 'cancelled',
+                    paymentStatus: 'unpaid'
+                });
 
-            logger.info(`Updated payment status for failed payment, user: ${userId}`);
+                // Downgrade user to LITE
+                await User.findByIdAndUpdate(userId, {
+                    packageType: 'LITE',
+                    subscriptionStatus: 'cancelled',
+                    isInTrialPeriod: false
+                });
+
+                logger.info(`User ${userId} downgraded to LITE after final payment failure`);
+
+                // Log the downgrade event
+                await PaymentLogs.logEvent({
+                    userId,
+                    eventType: 'STRIPE_PAYMENT_FAILED',
+                    paymentGateway: 'STRIPE',
+                    status: 'FAILED',
+                    subscriptionId: subscriptionId,
+                    paymentId: invoice.payment_intent,
+                    amount: invoice.amount_due / 100, // Convert from cents
+                    currency: invoice.currency?.toUpperCase() || 'USD',
+                    planType: 'LITE',
+                    previousPlanType: planType,
+                    previousStatus: 'active',
+                    newStatus: 'cancelled',
+                    errorMessage: invoice.last_finalization_error?.message || 'All payment retries exhausted',
+                    errorCode: invoice.last_finalization_error?.code || 'FINAL_FAILURE',
+                    message: `Final payment failure. User downgraded to LITE after ${invoice.attempt_count} attempts.`,
+                    source: 'WEBHOOK',
+                    metadata: {
+                        attemptCount: invoice.attempt_count,
+                        nextPaymentAttempt: null,
+                        stripeSubscriptionStatus: subscription.status
+                    }
+                });
+            } else {
+                // More retries scheduled - mark as past_due but keep PRO access
+                await this.updateSubscription(userId, {
+                    status: 'past_due',
+                    paymentStatus: 'unpaid'
+                });
+
+                // Update User subscriptionStatus to past_due (but keep packageType as PRO)
+                await User.findByIdAndUpdate(userId, {
+                    subscriptionStatus: 'past_due'
+                });
+
+                logger.info(`User ${userId} marked as past_due. Payment retry scheduled.`);
+
+                // Log payment failure event
+                await PaymentLogs.logEvent({
+                    userId,
+                    eventType: 'STRIPE_PAYMENT_FAILED',
+                    paymentGateway: 'STRIPE',
+                    status: 'FAILED',
+                    subscriptionId: subscriptionId,
+                    paymentId: invoice.payment_intent,
+                    amount: invoice.amount_due / 100, // Convert from cents
+                    currency: invoice.currency?.toUpperCase() || 'USD',
+                    planType: planType,
+                    previousStatus: 'active',
+                    newStatus: 'past_due',
+                    errorMessage: invoice.last_finalization_error?.message,
+                    errorCode: invoice.last_finalization_error?.code,
+                    message: `Payment failed (attempt ${invoice.attempt_count}). Retry scheduled.`,
+                    source: 'WEBHOOK',
+                    metadata: {
+                        attemptCount: invoice.attempt_count,
+                        nextPaymentAttempt: invoice.next_payment_attempt ? new Date(invoice.next_payment_attempt * 1000) : null
+                    }
+                });
+            }
 
         } catch (error) {
             logger.error('Error handling invoice payment failed:', error);

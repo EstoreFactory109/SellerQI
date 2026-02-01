@@ -4,7 +4,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
@@ -24,6 +24,7 @@ router.post('/testSendEmailOnRegistered',testSendEmailOnRegistered)
 router.post('/testLedgerSummaryReport',testLedgerSummaryReport)
 router.post('/testGetProductWiseFBAData',testGetProductWiseFBAData)
 router.post('/testGetWastedSpendKeywords',testGetWastedSpendKeywords)
+router.post('/getLastAdsKeywordsPerformanceDocument', getLastAdsKeywordsPerformanceDocument)
 router.post('/testSearchKeywords',testSearchKeywords)
 router.post('/testFbaInventoryPlanningData',testFbaInventoryPlanningData)
 router.post('/testKeywordRecommendations',testKeywordRecommendations)

@@ -7,6 +7,7 @@ import {
   AlertCircle, 
   CheckCircle, 
   Clock, 
+  CreditCard,
   Filter,
   RefreshCw,
   Search,
@@ -68,6 +69,13 @@ const UserLogging = () => {
   const [emailStats, setEmailStats] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionDetails, setSessionDetails] = useState(null);
+  
+  // Payment logs (superadmin)
+  const [paymentLogs, setPaymentLogs] = useState([]);
+  const [paymentLogsPagination, setPaymentLogsPagination] = useState({ currentPage: 1, totalPages: 0, totalCount: 0, limit: 50 });
+  const [paymentEventFilter, setPaymentEventFilter] = useState('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
+  const [paymentPage, setPaymentPage] = useState(1);
   
   // Filters and pagination
   const [searchTerm, setSearchTerm] = useState('');
@@ -229,7 +237,7 @@ const UserLogging = () => {
   // Fetch data based on active tab
   useEffect(() => {
     fetchData();
-  }, [activeTab, dateFilter, emailTypeFilter, emailStatusFilter]);
+  }, [activeTab, dateFilter, emailTypeFilter, emailStatusFilter, paymentPage, paymentEventFilter, paymentStatusFilter]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -275,6 +283,29 @@ const UserLogging = () => {
           console.log("emailRes: ", emailRes);
           setEmailLogs(emailRes?.data?.data?.emailLogs || []);
           setEmailStats(emailRes?.data?.data?.stats || []);
+        }
+        
+        if (activeTab === 'payment-logs') {
+          // Fetch payment logs (superadmin - all logs)
+          const paymentParams = new URLSearchParams({
+            page: String(paymentPage),
+            limit: '50'
+          });
+          if (paymentEventFilter !== 'all') {
+            paymentParams.append('eventType', paymentEventFilter);
+          }
+          if (paymentStatusFilter !== 'all') {
+            paymentParams.append('status', paymentStatusFilter);
+          }
+          const paymentRes = await axiosInstance.get(`/app/auth/admin/payment-logs?${paymentParams.toString()}`);
+          const paymentData = paymentRes?.data?.data;
+          setPaymentLogs(paymentData?.logs || []);
+          setPaymentLogsPagination({
+            currentPage: paymentData?.pagination?.currentPage || 1,
+            totalPages: paymentData?.pagination?.totalPages || 0,
+            totalCount: paymentData?.pagination?.totalCount || 0,
+            limit: paymentData?.pagination?.limit || 50
+          });
         }
     } catch (err) {
       console.error('Error fetching logging data:', err);
@@ -455,7 +486,8 @@ const UserLogging = () => {
                   { id: 'overview', label: 'Overview', icon: BarChart3 },
                   { id: 'sessions', label: 'Sessions', icon: Database },
                   { id: 'errors', label: 'Error Logs', icon: AlertCircle },
-                  { id: 'emails', label: 'Email Logs', icon: Mail }
+                  { id: 'emails', label: 'Email Logs', icon: Mail },
+                  { id: 'payment-logs', label: 'Payment Logs', icon: CreditCard }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -1085,6 +1117,150 @@ const UserLogging = () => {
                     <p className="mt-1 text-sm text-gray-500">
                       No email logs match the current filters.
                     </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Logs Tab (superadmin) */}
+        {activeTab === 'payment-logs' && (
+          <div className="space-y-6">
+            {/* Filters */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Event Type</label>
+                  <select
+                    value={paymentEventFilter}
+                    onChange={(e) => { setPaymentEventFilter(e.target.value); setPaymentPage(1); }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Events</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CREATED">Razorpay Subscription Created</option>
+                    <option value="RAZORPAY_PAYMENT_SUCCESS">Razorpay Payment Success</option>
+                    <option value="RAZORPAY_PAYMENT_FAILED">Razorpay Payment Failed</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_AUTHENTICATED">Razorpay Authenticated</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_ACTIVATED">Razorpay Activated</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CHARGED">Razorpay Charged</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CANCELLED">Razorpay Cancelled</option>
+                    <option value="STRIPE_CHECKOUT_CREATED">Stripe Checkout Created</option>
+                    <option value="STRIPE_PAYMENT_SUCCESS">Stripe Payment Success</option>
+                    <option value="STRIPE_PAYMENT_FAILED">Stripe Payment Failed</option>
+                    <option value="TRIAL_STARTED">Trial Started</option>
+                    <option value="TRIAL_ENDED">Trial Ended</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select
+                    value={paymentStatusFilter}
+                    onChange={(e) => { setPaymentStatusFilter(e.target.value); setPaymentPage(1); }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="SUCCESS">Success</option>
+                    <option value="FAILED">Failed</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="PROCESSING">Processing</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Logs Table */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Payment Logs</h3>
+                <p className="text-gray-600 text-sm mt-1">Payment events and errors across all users</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gateway</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Message / Error</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {paymentLogs.length > 0 ? (
+                      paymentLogs.map((log, index) => (
+                        <tr key={log._id || index} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {formatDate(log.createdAt)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {log.userId?.firstName} {log.userId?.lastName}
+                            </div>
+                            <div className="text-xs text-gray-500">{log.userId?.email}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {log.eventType?.replace(/_/g, ' ')}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {log.paymentGateway}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' :
+                              log.status === 'FAILED' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {log.amount != null ? `${log.currency || ''} ${log.amount}` : '—'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                            {log.errorMessage ? (
+                              <span className="text-red-600" title={log.errorDescription}>{log.errorMessage}</span>
+                            ) : (
+                              log.message || '—'
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                          <CreditCard className="w-10 h-10 mx-auto text-gray-300 mb-2" />
+                          <p>No payment logs found</p>
+                          <p className="text-sm">Payment events will appear here</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                {paymentLogsPagination.totalPages > 1 && (
+                  <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                    <p className="text-sm text-gray-600">
+                      Page {paymentLogsPagination.currentPage} of {paymentLogsPagination.totalPages} ({paymentLogsPagination.totalCount} total)
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPaymentPage(p => Math.max(1, p - 1))}
+                        disabled={paymentLogsPagination.currentPage <= 1}
+                        className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setPaymentPage(p => p + 1)}
+                        disabled={paymentLogsPagination.currentPage >= paymentLogsPagination.totalPages}
+                        className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

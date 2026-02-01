@@ -48,6 +48,16 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // Trial info - stored when subscription is created with trial
+    // Used as fallback when Razorpay API fetch fails during verification
+    hasTrial: {
+      type: Boolean,
+      default: false,
+    },
+    trialEndsAt: {
+      type: Date,
+      required: false,
+    },
     // Common fields
     planType: {
       type: String,

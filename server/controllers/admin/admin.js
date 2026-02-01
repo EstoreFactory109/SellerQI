@@ -7,6 +7,7 @@ const { createAccessToken, createRefreshToken, createLocationToken } = require('
 const { verifyPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
+const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 
 /**
@@ -439,10 +440,184 @@ const deleteUser = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get Payment Logs for a specific user
+ * Returns payment history including successes, failures, webhooks for superAdmin viewing
+ * Protected route - requires superAdmin access
+ */
+const getPaymentLogs = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId; // Should be set by auth middleware
+    const { userId } = req.params;
+    const { 
+        page = 1, 
+        limit = 50, 
+        eventType, 
+        status, 
+        startDate, 
+        endDate 
+    } = req.query;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    // Verify admin exists and has superAdmin access
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is required"));
+        return res.status(400).json(new ApiResponse(400, "", "User ID is required"));
+    }
+
+    try {
+        // Verify user exists
+        const user = await UserModel.findById(userId).select('firstName lastName email packageType subscriptionStatus');
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Get payment logs with filters
+        const logs = await PaymentLogs.getLogsByUser(userId, {
+            limit: parseInt(limit),
+            skip,
+            eventType,
+            status,
+            startDate,
+            endDate
+        });
+
+        // Get total count for pagination
+        const totalCount = await PaymentLogs.countByUser(userId, {
+            eventType,
+            status,
+            startDate,
+            endDate
+        });
+
+        // Get payment statistics for the user
+        const stats = await PaymentLogs.getUserPaymentStats(userId);
+
+        const responseData = {
+            user: {
+                _id: user._id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                packageType: user.packageType,
+                subscriptionStatus: user.subscriptionStatus
+            },
+            logs,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / parseInt(limit)),
+                totalCount,
+                limit: parseInt(limit)
+            },
+            stats
+        };
+
+        logger.info(`SuperAdmin ${adminId} viewed payment logs for user ${userId}`);
+
+        return res.status(200).json(new ApiResponse(200, responseData, "Payment logs retrieved successfully"));
+
+    } catch (error) {
+        logger.error(new ApiError(500, `Error fetching payment logs: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch payment logs"));
+    }
+});
+
+/**
+ * Get All Payment Logs (for all users)
+ * Returns payment history for all users with filtering and pagination
+ * Protected route - requires superAdmin access
+ */
+const getAllPaymentLogs = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId; // Should be set by auth middleware
+    const { 
+        page = 1, 
+        limit = 100, 
+        userId,
+        eventType, 
+        status, 
+        paymentGateway,
+        startDate, 
+        endDate 
+    } = req.query;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    // Verify admin exists and has superAdmin access
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Get all payment logs with filters
+        const logs = await PaymentLogs.getAllLogs({
+            limit: parseInt(limit),
+            skip,
+            userId,
+            eventType,
+            status,
+            paymentGateway,
+            startDate,
+            endDate
+        });
+
+        // Get failed payments summary for last 30 days
+        const failedPaymentsSummary = await PaymentLogs.getFailedPaymentsSummary(30);
+
+        const responseData = {
+            logs,
+            pagination: {
+                currentPage: parseInt(page),
+                limit: parseInt(limit),
+                hasMore: logs.length === parseInt(limit)
+            },
+            failedPaymentsSummary
+        };
+
+        logger.info(`SuperAdmin ${adminId} viewed all payment logs`);
+
+        return res.status(200).json(new ApiResponse(200, responseData, "Payment logs retrieved successfully"));
+
+    } catch (error) {
+        logger.error(new ApiError(500, `Error fetching payment logs: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to fetch payment logs"));
+    }
+});
+
 module.exports = {
     adminLogin,
     adminLogout,
     getAllAccounts,
     loginSelectedUser,
-    deleteUser
+    deleteUser,
+    getPaymentLogs,
+    getAllPaymentLogs
 };
