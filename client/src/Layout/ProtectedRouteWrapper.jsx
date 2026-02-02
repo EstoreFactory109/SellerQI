@@ -47,8 +47,8 @@ const ProtectedRouteWrapper = ({ children }) => {
       setIsAuthenticating(true);
 
       try {
-        // Clear cache to ensure fresh data on each page load
-        clearAuthCache();
+        // Use coordinated auth check (will use cache if recent, otherwise fetch fresh)
+        // Cache is cleared after login/logout, not on every route visit
         const result = await coordinatedAuthCheck();
 
         // Check if component is still mounted before proceeding

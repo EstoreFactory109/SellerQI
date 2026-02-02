@@ -56,6 +56,7 @@ import ReimbursementDashboard from './Pages/ReimbursementDashboard.jsx';
 import YourProducts from './Pages/YourProducts.jsx';
 import PreAnalysis from './Pages/PreAnalysis.jsx';
 import NotificationsPage from './Pages/NotificationsPage.jsx';
+import AuthError from './Pages/AuthError.jsx';
 
 const App = () => {
 
@@ -108,6 +109,7 @@ const App = () => {
           }
         >
           <Route path='/profile-selection' element={<ProfileIDSelection />} />
+          <Route path='/auth-error' element={<AuthError />} />
 
           <Route path='/seller-central-checker' element={
             <PackageRouteWrapper>

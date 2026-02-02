@@ -369,21 +369,12 @@ class RazorpayService {
                 try {
                     const razorpayPayment = await this.razorpay.payments.fetch(paymentId);
                     
-                    // Razorpay returns amount in paise (smallest currency unit)
-                    // For INR: ₹1,999.00 = 199900 paise
-                    // Convert paise to rupees by dividing by 100
+                    // Razorpay always returns amount in paise (smallest currency unit)
+                    // For INR: ₹1,999.00 = 199900 paise, ₹100 = 10000 paise
                     if (razorpayPayment.amount) {
                         const rawAmount = razorpayPayment.amount;
-                        
-                        // If the amount is very large (like 199900), it's in paise - divide by 100
-                        if (rawAmount > 10000) {
-                            paymentAmount = rawAmount / 100; // Convert paise to rupees
-                            logger.info(`Razorpay payment amount: ${rawAmount} paise = ₹${paymentAmount}`);
-                        } else {
-                            // Amount is already in rupees (for test mode or certain cases)
-                            paymentAmount = rawAmount;
-                            logger.info(`Razorpay payment amount: ${rawAmount} (already in rupees) = ₹${paymentAmount}`);
-                        }
+                        paymentAmount = rawAmount / 100; // Always convert paise to rupees
+                        logger.info(`Razorpay payment amount: ${rawAmount} paise = ₹${paymentAmount}`);
                     }
                     
                     if (razorpayPayment.invoice_id) {
@@ -773,17 +764,11 @@ class RazorpayService {
                 logger.info(`Recurring payment processed, payment status updated to: ${chargedSubscription?.paymentStatus} for subscriptionId: ${subscriptionId}, paymentId: ${paymentId}`);
 
                 // Add to payment history
-                // Razorpay returns amount in paise (smallest currency unit)
-                // For INR: ₹1,999.00 = 199900 paise
-                // Convert paise to rupees by dividing by 100
-                // But check if it's already in rupees (amount <= 10000)
+                // Razorpay always returns amount in paise (smallest currency unit)
+                // For INR: ₹1,999.00 = 199900 paise, ₹100 = 10000 paise
                 let paymentAmountInRupees = 0;
                 if (payment.amount) {
-                    if (payment.amount > 10000) {
-                        paymentAmountInRupees = payment.amount / 100; // Convert paise to rupees
-                    } else {
-                        paymentAmountInRupees = payment.amount; // Already in rupees
-                    }
+                    paymentAmountInRupees = payment.amount / 100; // Always convert paise to rupees
                 }
                 
                 await this.addPaymentHistory(dbSubscription.userId, {

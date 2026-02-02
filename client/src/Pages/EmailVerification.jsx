@@ -161,7 +161,7 @@ const OtpVerification = () => {
       if (response.status === 200) {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
-        localStorage.setItem("isAuth", true);
+        localStorage.setItem("isAuth", "true");
         
         const isIndianUser = detectedCountry === 'IN';
         

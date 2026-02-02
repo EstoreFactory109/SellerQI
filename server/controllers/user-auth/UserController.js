@@ -2,7 +2,7 @@ const { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassw
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
-const { createAccessToken, createRefreshToken, createLocationToken } = require('../../utils/Tokens.js');
+const { createAccessToken, createRefreshToken, createLocationToken, refreshAccess } = require('../../utils/Tokens.js');
 const { verifyPassword, hashPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const { generateOTP } = require('../../utils/OTPGenerator.js');
@@ -20,6 +20,7 @@ const IPTrackingModel = require('../../models/system/IPTrackingModel.js');
 const { OAuth2Client } = require('google-auth-library');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
+const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage } = req.body;
@@ -374,20 +375,55 @@ const loginUser = asyncHandler(async (req, res) => {
         const currentDate = new Date();
         const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
 
-        // If trial has expired, update user status
+        // If trial has expired according to our database, verify with payment gateway before downgrading
         if (currentDate > trialEndDate) {
-            await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
-                isInTrialPeriod: false,
-                packageType: 'LITE',
-                subscriptionStatus: 'inactive'
+            // IMPORTANT: Verify with Stripe/Razorpay before downgrading
+            // This prevents incorrect downgrades when webhooks fail or are delayed
+            const verificationResult = await subscriptionVerificationService.verifySubscriptionBeforeDowngrade(checkUserIfExists._id);
+            
+            logger.info(`User ${checkUserIfExists._id} trial expired. Verification result:`, {
+                hasActiveSubscription: verificationResult.hasActiveSubscription,
+                gateway: verificationResult.gateway,
+                gatewayStatus: verificationResult.gatewayStatus,
+                shouldDowngrade: verificationResult.shouldDowngrade,
+                message: verificationResult.message
             });
 
-            // Update the local user object for the response
-            checkUserIfExists.isInTrialPeriod = false;
-            checkUserIfExists.packageType = 'LITE';
-            checkUserIfExists.subscriptionStatus = 'inactive';
+            if (verificationResult.shouldDowngrade) {
+                // Safe to downgrade - no active subscription with payment gateway
+                await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
+                    isInTrialPeriod: false,
+                    packageType: 'LITE',
+                    subscriptionStatus: 'inactive'
+                });
 
-            logger.info(`User ${checkUserIfExists._id} trial expired. Downgraded to LITE plan.`);
+                // Update the local user object for the response
+                checkUserIfExists.isInTrialPeriod = false;
+                checkUserIfExists.packageType = 'LITE';
+                checkUserIfExists.subscriptionStatus = 'inactive';
+
+                logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found. Downgraded to LITE plan.`);
+            } else if (verificationResult.hasActiveSubscription) {
+                // DON'T downgrade - user has an active subscription with the payment gateway
+                // Sync the subscription status from the gateway
+                const syncResult = await subscriptionVerificationService.syncSubscriptionFromGateway(
+                    checkUserIfExists._id, 
+                    verificationResult, 
+                    UserModel
+                );
+                
+                logger.info(`User ${checkUserIfExists._id} has active ${verificationResult.gateway} subscription (${verificationResult.gatewayStatus}). NOT downgrading. Sync result:`, syncResult);
+
+                // Update the local user object for the response based on sync
+                if (syncResult.synced) {
+                    checkUserIfExists.isInTrialPeriod = verificationResult.gatewayStatus === 'trialing' || verificationResult.gatewayStatus === 'authenticated';
+                    checkUserIfExists.subscriptionStatus = syncResult.newStatus === 'trialing' ? 'trialing' : 'active';
+                    // Keep their paid package type (don't change to LITE)
+                }
+            } else {
+                // Verification failed with an error - don't downgrade to be safe
+                logger.warn(`User ${checkUserIfExists._id} trial expired but verification failed. NOT downgrading to be safe. Reason: ${verificationResult.message}`);
+            }
         }
     }
 
@@ -399,7 +435,7 @@ const loginUser = asyncHandler(async (req, res) => {
     // Check if user is superAdmin
     if (checkUserIfExists.accessType === 'superAdmin') {
         // Get all seller central accounts from the database
-        const allSellerCentrals = await SellerCentralModel.find({})
+        const allSellerCentrals = await SellerCentralModel.find({}).populate('User', 'firstName lastName email');
 
         if (!allSellerCentrals || allSellerCentrals.length === 0) {
             logger.error(new ApiError(404, "No seller central accounts found"));
@@ -410,10 +446,24 @@ const loginUser = asyncHandler(async (req, res) => {
         getSellerCentral = allSellerCentrals[0];
 
         adminToken = await createAccessToken(checkUserIfExists._id);
-        AccessToken = await createAccessToken(getSellerCentral.User);
-        RefreshToken = await createRefreshToken(getSellerCentral.User);
+        AccessToken = await createAccessToken(getSellerCentral.User._id || getSellerCentral.User);
+        RefreshToken = await createRefreshToken(getSellerCentral.User._id || getSellerCentral.User);
         LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
-        // Prepare all accounts data to send in response
+        
+        // Prepare all accounts data to send in response for super admin
+        allSellerAccounts = allSellerCentrals.map(sc => ({
+            sellerCentralId: sc._id,
+            userId: sc.User._id || sc.User,
+            userName: sc.User.firstName ? `${sc.User.firstName} ${sc.User.lastName}` : 'Unknown',
+            userEmail: sc.User.email || 'Unknown',
+            sellerAccounts: sc.sellerAccount.map(acc => ({
+                country: acc.country,
+                region: acc.region,
+                selling_partner_id: acc.selling_partner_id,
+                hasSpApi: !!acc.spiRefreshToken,
+                hasAdsApi: !!acc.adsRefreshToken
+            }))
+        }));
 
     } else if (checkUserIfExists.accessType === 'enterpriseAdmin') {
         adminToken = await createAccessToken(checkUserIfExists._id);
@@ -461,7 +511,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
     if (!AccessToken || !RefreshToken || !LocationToken) {
-        logger.error(new AccessToken(500, "Internal server error in creating tokens"));
+        logger.error(new ApiError(500, "Internal server error in creating tokens"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
     }
 
@@ -548,6 +598,29 @@ const logoutUser = asyncHandler(async (req, res) => {
     res.clearCookie("IBEXLocationToken", option);
 
     res.status(200).json(new ApiResponse(200, "", "User logged out successfully"));
+})
+
+// Refresh access token using refresh token from cookie
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies.IBEXRefreshToken;
+
+    if (!refreshToken) {
+        logger.error(new ApiError(401, "Refresh token is missing"));
+        return res.status(401).json(new ApiResponse(401, "", "Refresh token is missing"));
+    }
+
+    const newAccessToken = await refreshAccess(refreshToken);
+
+    if (!newAccessToken) {
+        logger.error(new ApiError(401, "Invalid or expired refresh token"));
+        return res.status(401).json(new ApiResponse(401, "", "Invalid or expired refresh token. Please login again."));
+    }
+
+    const option = getHttpsCookieOptions();
+
+    return res.status(200)
+        .cookie("IBEXAccessToken", newAccessToken, option)
+        .json(new ApiResponse(200, "", "Access token refreshed successfully"));
 })
 
 const updateProfilePic = asyncHandler(async (req, res) => {
@@ -870,20 +943,55 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             const currentDate = new Date();
             const trialEndDate = new Date(checkUserIfExists.trialEndsDate);
 
-            // If trial has expired, update user status
+            // If trial has expired according to our database, verify with payment gateway before downgrading
             if (currentDate > trialEndDate) {
-                await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
-                    isInTrialPeriod: false,
-                    packageType: 'LITE',
-                    subscriptionStatus: 'inactive'
+                // IMPORTANT: Verify with Stripe/Razorpay before downgrading
+                // This prevents incorrect downgrades when webhooks fail or are delayed
+                const verificationResult = await subscriptionVerificationService.verifySubscriptionBeforeDowngrade(checkUserIfExists._id);
+                
+                logger.info(`User ${checkUserIfExists._id} trial expired (Google login). Verification result:`, {
+                    hasActiveSubscription: verificationResult.hasActiveSubscription,
+                    gateway: verificationResult.gateway,
+                    gatewayStatus: verificationResult.gatewayStatus,
+                    shouldDowngrade: verificationResult.shouldDowngrade,
+                    message: verificationResult.message
                 });
 
-                // Update the local user object for the response
-                checkUserIfExists.isInTrialPeriod = false;
-                checkUserIfExists.packageType = 'LITE';
-                checkUserIfExists.subscriptionStatus = 'inactive';
+                if (verificationResult.shouldDowngrade) {
+                    // Safe to downgrade - no active subscription with payment gateway
+                    await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
+                        isInTrialPeriod: false,
+                        packageType: 'LITE',
+                        subscriptionStatus: 'inactive'
+                    });
 
-                logger.info(`User ${checkUserIfExists._id} trial expired during Google login. Downgraded to LITE plan.`);
+                    // Update the local user object for the response
+                    checkUserIfExists.isInTrialPeriod = false;
+                    checkUserIfExists.packageType = 'LITE';
+                    checkUserIfExists.subscriptionStatus = 'inactive';
+
+                    logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found (Google login). Downgraded to LITE plan.`);
+                } else if (verificationResult.hasActiveSubscription) {
+                    // DON'T downgrade - user has an active subscription with the payment gateway
+                    // Sync the subscription status from the gateway
+                    const syncResult = await subscriptionVerificationService.syncSubscriptionFromGateway(
+                        checkUserIfExists._id, 
+                        verificationResult, 
+                        UserModel
+                    );
+                    
+                    logger.info(`User ${checkUserIfExists._id} has active ${verificationResult.gateway} subscription (${verificationResult.gatewayStatus}) during Google login. NOT downgrading. Sync result:`, syncResult);
+
+                    // Update the local user object for the response based on sync
+                    if (syncResult.synced) {
+                        checkUserIfExists.isInTrialPeriod = verificationResult.gatewayStatus === 'trialing' || verificationResult.gatewayStatus === 'authenticated';
+                        checkUserIfExists.subscriptionStatus = syncResult.newStatus === 'trialing' ? 'trialing' : 'active';
+                        // Keep their paid package type (don't change to LITE)
+                    }
+                } else {
+                    // Verification failed with an error - don't downgrade to be safe
+                    logger.warn(`User ${checkUserIfExists._id} trial expired but verification failed (Google login). NOT downgrading to be safe. Reason: ${verificationResult.message}`);
+                }
             }
         }
 
@@ -894,7 +1002,7 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         // Check if user is superAdmin
         if (checkUserIfExists.accessType === 'superAdmin') {
             // Get all seller central accounts from the database
-            const allSellerCentrals = await SellerCentralModel.find({});
+            const allSellerCentrals = await SellerCentralModel.find({}).populate('User', 'firstName lastName email');
 
             if (!allSellerCentrals || allSellerCentrals.length === 0) {
                 logger.error(new ApiError(404, "No seller central accounts found"));
@@ -905,9 +1013,24 @@ const googleLoginUser = asyncHandler(async (req, res) => {
             getSellerCentral = allSellerCentrals[0];
 
             adminToken = await createAccessToken(checkUserIfExists._id);
-            AccessToken = await createAccessToken(getSellerCentral.User);
-            RefreshToken = await createRefreshToken(getSellerCentral.User);
+            AccessToken = await createAccessToken(getSellerCentral.User._id || getSellerCentral.User);
+            RefreshToken = await createRefreshToken(getSellerCentral.User._id || getSellerCentral.User);
             LocationToken = await createLocationToken(getSellerCentral.sellerAccount[0].country, getSellerCentral.sellerAccount[0].region);
+            
+            // Prepare all accounts data to send in response for super admin
+            allSellerAccounts = allSellerCentrals.map(sc => ({
+                sellerCentralId: sc._id,
+                userId: sc.User._id || sc.User,
+                userName: sc.User.firstName ? `${sc.User.firstName} ${sc.User.lastName}` : 'Unknown',
+                userEmail: sc.User.email || 'Unknown',
+                sellerAccounts: sc.sellerAccount.map(acc => ({
+                    country: acc.country,
+                    region: acc.region,
+                    selling_partner_id: acc.selling_partner_id,
+                    hasSpApi: !!acc.spiRefreshToken,
+                    hasAdsApi: !!acc.adsRefreshToken
+                }))
+            }));
         } else {
             getSellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
             if (!getSellerCentral) {
@@ -1092,8 +1215,10 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         // Create tokens for the new user
         const AccessToken = await createAccessToken(savedUser._id);
         const RefreshToken = await createRefreshToken(savedUser._id);
+        // Set default location token (US/NA) for new users - will be updated when they connect Amazon
+        const LocationToken = await createLocationToken("US", "NA");
 
-        if (!AccessToken || !RefreshToken) {
+        if (!AccessToken || !RefreshToken || !LocationToken) {
             logger.error(new ApiError(500, "Internal server error in creating tokens"));
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
@@ -1130,6 +1255,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         res.status(201)
             .cookie("IBEXAccessToken", AccessToken, options)
             .cookie("IBEXRefreshToken", RefreshToken, options)
+            .cookie("IBEXLocationToken", LocationToken, options)
             .json(new ApiResponse(201, responseData, "Google registration successful"));
 
     } catch (error) {
@@ -1168,8 +1294,8 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
             );
         }
 
-        // Update user subscription plan
-        user.subscriptionPlan = planType;
+        // Update user subscription plan (using packageType which is the actual field in the model)
+        user.packageType = planType;
         user.subscriptionStatus = 'active';
         await user.save();
 
@@ -1177,7 +1303,7 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
 
         return res.status(200).json(
             new ApiResponse(200, {
-                subscriptionPlan: user.subscriptionPlan,
+                packageType: user.packageType,
                 subscriptionStatus: user.subscriptionStatus
             }, `Subscription plan updated to ${planType}`)
         );
@@ -1269,23 +1395,86 @@ const checkTrialStatus = asyncHandler(async (req, res) => {
             const currentDate = new Date();
             const trialEndDate = new Date(user.trialEndsDate);
 
-            // If trial has expired, update user status
+            // If trial has expired according to our database, verify with payment gateway before downgrading
             if (currentDate > trialEndDate) {
-                await UserModel.findByIdAndUpdate(userId, {
-                    isInTrialPeriod: false,
-                    packageType: 'LITE',
-                    subscriptionStatus: 'inactive'
+                // IMPORTANT: Verify with Stripe/Razorpay before downgrading
+                // This prevents incorrect downgrades when webhooks fail or are delayed
+                const verificationResult = await subscriptionVerificationService.verifySubscriptionBeforeDowngrade(userId);
+                
+                logger.info(`User ${userId} trial expired (checkTrialStatus). Verification result:`, {
+                    hasActiveSubscription: verificationResult.hasActiveSubscription,
+                    gateway: verificationResult.gateway,
+                    gatewayStatus: verificationResult.gatewayStatus,
+                    shouldDowngrade: verificationResult.shouldDowngrade,
+                    message: verificationResult.message
                 });
 
-                logger.info(`User ${userId} trial expired. Downgraded to LITE plan.`);
+                if (verificationResult.shouldDowngrade) {
+                    // Safe to downgrade - no active subscription with payment gateway
+                    await UserModel.findByIdAndUpdate(userId, {
+                        isInTrialPeriod: false,
+                        packageType: 'LITE',
+                        subscriptionStatus: 'inactive'
+                    });
 
-                return res.status(200).json(new ApiResponse(200, {
-                    isInTrialPeriod: false,
-                    packageType: 'LITE',
-                    subscriptionStatus: 'inactive',
-                    trialEndsDate: user.trialEndsDate,
-                    trialExpired: true
-                }, "Trial status updated"));
+                    logger.info(`User ${userId} trial expired and no active subscription found. Downgraded to LITE plan.`);
+
+                    return res.status(200).json(new ApiResponse(200, {
+                        isInTrialPeriod: false,
+                        packageType: 'LITE',
+                        subscriptionStatus: 'inactive',
+                        trialEndsDate: user.trialEndsDate,
+                        trialExpired: true,
+                        verificationDetails: {
+                            gateway: verificationResult.gateway,
+                            gatewayStatus: verificationResult.gatewayStatus
+                        }
+                    }, "Trial expired - downgraded to LITE"));
+                } else if (verificationResult.hasActiveSubscription) {
+                    // DON'T downgrade - user has an active subscription with the payment gateway
+                    // Sync the subscription status from the gateway
+                    const syncResult = await subscriptionVerificationService.syncSubscriptionFromGateway(
+                        userId, 
+                        verificationResult, 
+                        UserModel
+                    );
+                    
+                    logger.info(`User ${userId} has active ${verificationResult.gateway} subscription (${verificationResult.gatewayStatus}). NOT downgrading. Sync result:`, syncResult);
+
+                    // Determine the updated status after sync
+                    const isTrialing = verificationResult.gatewayStatus === 'trialing' || verificationResult.gatewayStatus === 'authenticated';
+                    const newSubscriptionStatus = isTrialing ? 'trialing' : 'active';
+
+                    return res.status(200).json(new ApiResponse(200, {
+                        isInTrialPeriod: isTrialing,
+                        packageType: user.packageType, // Keep their paid package type
+                        subscriptionStatus: newSubscriptionStatus,
+                        trialEndsDate: user.trialEndsDate,
+                        trialExpired: false,
+                        subscriptionActive: true,
+                        verificationDetails: {
+                            gateway: verificationResult.gateway,
+                            gatewayStatus: verificationResult.gatewayStatus,
+                            syncResult: syncResult
+                        }
+                    }, `Active ${verificationResult.gateway} subscription detected - NOT downgraded`));
+                } else {
+                    // Verification failed with an error - don't downgrade to be safe
+                    logger.warn(`User ${userId} trial expired but verification failed. NOT downgrading to be safe. Reason: ${verificationResult.message}`);
+
+                    return res.status(200).json(new ApiResponse(200, {
+                        isInTrialPeriod: user.isInTrialPeriod,
+                        packageType: user.packageType,
+                        subscriptionStatus: user.subscriptionStatus,
+                        trialEndsDate: user.trialEndsDate,
+                        trialExpired: true,
+                        verificationPending: true,
+                        verificationDetails: {
+                            message: verificationResult.message,
+                            error: verificationResult.error
+                        }
+                    }, "Trial expired but verification failed - not downgrading to be safe"));
+                }
             }
         }
 
@@ -1603,6 +1792,7 @@ module.exports = {
     loginUser,
     profileUser,
     logoutUser,
+    refreshAccessToken,
     updateProfilePic,
     updateDetails,
     switchAccount,

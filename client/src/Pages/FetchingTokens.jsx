@@ -38,7 +38,7 @@ const FetchingTokens = () => {
         setError("Invalid authorization response from Amazon");
         // Give user time to see the error before redirecting
         setTimeout(() => {
-          navigate('/seller-central-checker/auth-error', { 
+          navigate('/auth-error', { 
             state: { error: 'Missing authorization parameters' } 
           });
         }, 2000);
@@ -140,7 +140,7 @@ const FetchingTokens = () => {
        
         // Navigate to error page with context
         setTimeout(() => {
-          navigate('/seller-central-checker/auth-error', {
+          navigate('/auth-error', {
             state: { 
               error: errorMessage,
               errorCode: errorCode,
@@ -160,7 +160,7 @@ const FetchingTokens = () => {
         setError("Invalid authorization response from Amazon");
         // Give user time to see the error before redirecting
         setTimeout(() => {
-          navigate('/seller-central-checker/auth-error', { 
+          navigate('/auth-error', { 
             state: { error: 'Missing authorization parameters' } 
           });
         }, 2000);
@@ -272,7 +272,7 @@ const FetchingTokens = () => {
        
         // Navigate to error page with context
         setTimeout(() => {
-          navigate('/seller-central-checker/auth-error', {
+          navigate('/auth-error', {
             state: { 
               error: errorMessage,
               errorCode: errorCode,

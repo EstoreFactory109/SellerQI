@@ -69,7 +69,7 @@ function escapeHtml(str) {
  * Build summary sentence from only the counts that are included (non-zero).
  * Used so product-content email says only "content + negative reviews", buybox email says only "buybox", etc.
  */
-function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissingCount, aplusMissingCount = 0, salesDropCount = 0, conversionRatesCount = 0) {
+function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissingCount, aplusMissingCount = 0, salesDropCount = 0, conversionRatesCount = 0, lowInventoryCount = 0, strandedInventoryCount = 0, inboundShipmentCount = 0) {
   const parts = [];
   if (productContentCount > 0) {
     parts.push(`${productContentCount} product content change${productContentCount === 1 ? '' : 's'}`);
@@ -89,6 +89,15 @@ function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissi
   if (conversionRatesCount > 0) {
     parts.push('conversion rates snapshot');
   }
+  if (lowInventoryCount > 0) {
+    parts.push(`${lowInventoryCount} low inventory alert${lowInventoryCount === 1 ? '' : 's'}`);
+  }
+  if (strandedInventoryCount > 0) {
+    parts.push(`${strandedInventoryCount} stranded inventory alert${strandedInventoryCount === 1 ? '' : 's'}`);
+  }
+  if (inboundShipmentCount > 0) {
+    parts.push(`${inboundShipmentCount} inbound shipment alert${inboundShipmentCount === 1 ? '' : 's'}`);
+  }
   if (parts.length === 0) return 'you have no new alerts.';
   return `you have ${parts.join(', ')}.`;
 }
@@ -98,7 +107,7 @@ function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissi
  * Send alerts email to user.
  * @param {string} email - Recipient email
  * @param {string} firstName - User first name (for greeting)
- * @param {Object} alertsPayload - { productContentChange, negativeReviews, buyBoxMissing, aplusMissing, salesDrop, conversionRates }
+ * @param {Object} alertsPayload - { productContentChange, negativeReviews, buyBoxMissing, aplusMissing, salesDrop, conversionRates, lowInventory, strandedInventory, inboundShipment }
  * @param {string} [alertsDashboardUrl] - Link to alerts page
  * @param {mongoose.Types.ObjectId} [userId] - For EmailLogs
  * @returns {Promise<string|false>} messageId on success, false on failure
@@ -115,6 +124,9 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
   const aplusMissing = alertsPayload?.aplusMissing ?? { count: 0, products: [] };
   const salesDrop = alertsPayload?.salesDrop ?? { count: 0, drops: [] };
   const conversionRates = alertsPayload?.conversionRates ?? { count: 0, dateRange: null, conversionRates: [] };
+  const lowInventory = alertsPayload?.lowInventory ?? { count: 0, products: [] };
+  const strandedInventory = alertsPayload?.strandedInventory ?? { count: 0, products: [] };
+  const inboundShipment = alertsPayload?.inboundShipment ?? { count: 0, products: [] };
 
   const summaryText = buildSummaryText(
     productContent.count,
@@ -122,7 +134,10 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
     buyBoxMissing.count,
     aplusMissing.count,
     salesDrop.count,
-    conversionRates.count
+    conversionRates.count,
+    lowInventory.count,
+    strandedInventory.count,
+    inboundShipment.count
   );
   const dateStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -199,6 +214,14 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
       ? ''
       : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #eff6ff; border-radius: 8px; padding: 20px; border-left: 4px solid #3b82f6;"><h2 style="font-size: 16px; font-weight: 600; color: #1e40af; margin: 0 0 12px 0;">📊 Conversion rates snapshot</h2><p style="font-size: 14px; color: #1d4ed8; margin: 0 0 12px 0;">Daily sessions and conversion rate (unit session %) for the last 7 days.</p>${conversionRatesList}</td></tr></table>`;
 
+  // Inventory alerts: low inventory, stranded inventory, inbound shipment (same product list format: asin, sku?, message)
+  const lowInventoryList = (lowInventory.products?.length ?? 0) > 0 ? buildProductListHtml(lowInventory.products, 'No low inventory alerts.') : '';
+  const strandedInventoryList = (strandedInventory.products?.length ?? 0) > 0 ? buildProductListHtml(strandedInventory.products, 'No stranded inventory alerts.') : '';
+  const inboundShipmentList = (inboundShipment.products?.length ?? 0) > 0 ? buildProductListHtml(inboundShipment.products, 'No inbound shipment alerts.') : '';
+  const lowInventorySectionHtml = lowInventoryList === '' ? '' : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #fef3c7; border-radius: 8px; padding: 20px; border-left: 4px solid #f59e0b;"><h2 style="font-size: 16px; font-weight: 600; color: #92400e; margin: 0 0 12px 0;">📦 Low inventory / out of stock</h2><p style="font-size: 14px; color: #b45309; margin: 0 0 12px 0;">These products have low or no inventory. Replenish to avoid lost sales.</p>${lowInventoryList}</td></tr></table>`;
+  const strandedInventorySectionHtml = strandedInventoryList === '' ? '' : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #fef2f2; border-radius: 8px; padding: 20px; border-left: 4px solid #ef4444;"><h2 style="font-size: 16px; font-weight: 600; color: #991b1b; margin: 0 0 12px 0;">🔒 Stranded inventory</h2><p style="font-size: 14px; color: #b91c1c; margin: 0 0 12px 0;">These products have stranded inventory and may need attention.</p>${strandedInventoryList}</td></tr></table>`;
+  const inboundShipmentSectionHtml = inboundShipmentList === '' ? '' : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #f3e8ff; border-radius: 8px; padding: 20px; border-left: 4px solid #a855f7;"><h2 style="font-size: 16px; font-weight: 600; color: #6b21a8; margin: 0 0 12px 0;">🚚 Inbound shipment issues</h2><p style="font-size: 14px; color: #7c3aed; margin: 0 0 12px 0;">Inbound non-compliance or shipment issues detected for these products.</p>${inboundShipmentList}</td></tr></table>`;
+
   let template = getTemplate();
   template = safeReplace(template, '{{userName}}', firstName);
   template = safeReplace(template, '{{date}}', dateStr);
@@ -209,6 +232,9 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
   template = safeReplace(template, '{{aplusMissingSection}}', aplusMissingSectionHtml);
   template = safeReplace(template, '{{salesDropSection}}', salesDropSectionHtml);
   template = safeReplace(template, '{{conversionRatesSection}}', conversionRatesSectionHtml);
+  template = safeReplace(template, '{{lowInventorySection}}', lowInventorySectionHtml);
+  template = safeReplace(template, '{{strandedInventorySection}}', strandedInventorySectionHtml);
+  template = safeReplace(template, '{{inboundShipmentSection}}', inboundShipmentSectionHtml);
   template = safeReplace(template, '{{alertsDashboardUrl}}', alertsDashboardUrl);
 
   const subject = `SellerQI Alerts – ${summaryText}`;

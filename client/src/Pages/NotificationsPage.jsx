@@ -204,8 +204,13 @@ const NotificationsPage = () => {
       axiosInstance.patch(`/api/alerts/${notification.alertId}/viewed`).catch(() => {});
     }
 
-    // Navigate to issues by category (content change, negative reviews, buy box missing)
-    navigate('/seller-central-checker/issues?tab=category');
+    // Navigate to issues by category with filter based on alert type:
+    // Buy box, A+, negative reviews → Conversion; content change → Ranking
+    const conversionAlertTypes = ['BuyBoxMissing', 'APlusMissing', 'NegativeReviews'];
+    const isConversionAlert = conversionAlertTypes.includes(notification.alertType);
+    const filter = notification.alertType === 'ProductContentChange' ? 'Ranking' : isConversionAlert ? 'Conversion' : null;
+    const filterQuery = filter ? `&filter=${filter}` : '';
+    navigate(`/seller-central-checker/issues?tab=category${filterQuery}`);
   };
 
   const hasMore = notifications.length < total;

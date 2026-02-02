@@ -1412,31 +1412,74 @@ class ScheduledIntegration {
 
         // Run Conversion Rates alerts after all scheduled services have executed (non-blocking; failures do not affect response)
         // Sales drop alert temporarily removed from schedule
+        // Conversion rates (sales conversion) alert temporarily removed from schedule - re-enable by changing runConversionRatesAlert to true
+        const runConversionRatesAlert = false;
+        if (runConversionRatesAlert) {
+            try {
+                const mongoose = require('mongoose');
+                const { getConversionRates } = require('../Alerts/Other-Alerts/ConversionAlertService.js');
+                const { ConversionRatesAlert } = require('../../models/alerts/Alert.js');
+                const User = require('../../models/user-auth/userModel.js');
+                const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
+
+                const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
+                    ? new mongoose.Types.ObjectId(userId)
+                    : userId;
+
+                // Conversion rates alert (uses Sales and Traffic API; requires RefreshToken)
+                if (RefreshToken) {
+                    const convResult = await getConversionRates(RefreshToken, Region, Country, {});
+                    if (convResult.success && convResult.conversionRates?.length > 0) {
+                        await ConversionRatesAlert.create({
+                            User: userIdObj,
+                            region: Region,
+                            country: Country,
+                            message: `Conversion rates for last 7 days (${convResult.dateRange.startDate} to ${convResult.dateRange.endDate})`,
+                            status: 'active',
+                            dateRange: convResult.dateRange,
+                            marketplace: convResult.marketplace,
+                            conversionRates: convResult.conversionRates,
+                        });
+                        const user = await User.findById(userIdObj).select('email firstName').lean();
+                        if (user?.email) {
+                            await sendAlertsEmail(user.email, user.firstName || 'Seller', {
+                                productContentChange: { count: 0, products: [] },
+                                negativeReviews: { count: 0, products: [] },
+                                buyBoxMissing: { count: 0, products: [] },
+                                aplusMissing: { count: 0, products: [] },
+                                salesDrop: { count: 0 },
+                                conversionRates: { count: 1, dateRange: convResult.dateRange, conversionRates: convResult.conversionRates },
+                            }, undefined, userIdObj);
+                        }
+                    }
+                }
+            } catch (alertsError) {
+                logger.warn('Conversion rates alerts failed (non-fatal)', { userId, region: Region, country: Country, error: alertsError?.message });
+            }
+        }
+
+        // Run inventory alerts after all scheduled services (non-blocking; failures do not affect response)
         try {
-            const mongoose = require('mongoose');
-            const { getConversionRates } = require('../Alerts/Other-Alerts/ConversionAlertService.js');
-            const { ConversionRatesAlert } = require('../../models/alerts/Alert.js');
-            const User = require('../../models/user-auth/userModel.js');
-            const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
+            const { detectAndStoreLowInventoryAlerts } = require('../Alerts/Other-Alerts/LowInventoryAlertService.js');
+            const { detectAndStoreStrandedInventoryAlerts } = require('../Alerts/Other-Alerts/StrandedInventoryAlertService.js');
+            const { detectAndStoreInboundShipmentAlerts } = require('../Alerts/Other-Alerts/InboundShipmentAlertService.js');
+            const lowResult = await detectAndStoreLowInventoryAlerts(userId, Region, Country);
+            const strandedResult = await detectAndStoreStrandedInventoryAlerts(userId, Region, Country);
+            const inboundResult = await detectAndStoreInboundShipmentAlerts(userId, Region, Country);
 
-            const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
-                ? new mongoose.Types.ObjectId(userId)
-                : userId;
+            const lowProducts = lowResult?.alert?.products ?? [];
+            const strandedProducts = strandedResult?.alert?.products ?? [];
+            const inboundProducts = inboundResult?.alert?.products ?? [];
+            const totalInventoryAlerts = lowProducts.length + strandedProducts.length + inboundProducts.length;
 
-            // Conversion rates alert (uses Sales and Traffic API; requires RefreshToken)
-            if (RefreshToken) {
-                const convResult = await getConversionRates(RefreshToken, Region, Country, {});
-                if (convResult.success && convResult.conversionRates?.length > 0) {
-                    await ConversionRatesAlert.create({
-                        User: userIdObj,
-                        region: Region,
-                        country: Country,
-                        message: `Conversion rates for last 7 days (${convResult.dateRange.startDate} to ${convResult.dateRange.endDate})`,
-                        status: 'active',
-                        dateRange: convResult.dateRange,
-                        marketplace: convResult.marketplace,
-                        conversionRates: convResult.conversionRates,
-                    });
+            if (totalInventoryAlerts > 0) {
+                try {
+                    const mongoose = require('mongoose');
+                    const User = require('../../models/user-auth/userModel.js');
+                    const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
+                    const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
+                        ? new mongoose.Types.ObjectId(userId)
+                        : userId;
                     const user = await User.findById(userIdObj).select('email firstName').lean();
                     if (user?.email) {
                         await sendAlertsEmail(user.email, user.firstName || 'Seller', {
@@ -1444,14 +1487,19 @@ class ScheduledIntegration {
                             negativeReviews: { count: 0, products: [] },
                             buyBoxMissing: { count: 0, products: [] },
                             aplusMissing: { count: 0, products: [] },
-                            salesDrop: { count: 0 },
-                            conversionRates: { count: 1, dateRange: convResult.dateRange, conversionRates: convResult.conversionRates },
+                            salesDrop: { count: 0, drops: [] },
+                            conversionRates: { count: 0, dateRange: null, conversionRates: [] },
+                            lowInventory: { count: lowProducts.length, products: lowProducts },
+                            strandedInventory: { count: strandedProducts.length, products: strandedProducts },
+                            inboundShipment: { count: inboundProducts.length, products: inboundProducts },
                         }, undefined, userIdObj);
                     }
+                } catch (emailErr) {
+                    logger.warn('Inventory alerts email failed (non-fatal)', { userId, region: Region, country: Country, error: emailErr?.message });
                 }
             }
-        } catch (alertsError) {
-            logger.warn('Conversion rates alerts failed (non-fatal)', { userId, region: Region, country: Country, error: alertsError?.message });
+        } catch (inventoryAlertsError) {
+            logger.warn('Inventory alerts failed (non-fatal)', { userId, region: Region, country: Country, error: inventoryAlertsError?.message });
         }
 
         return apiData;

@@ -157,13 +157,30 @@ const GoogleInfoPage = () => {
 
   const handleAuthorizationCode = async (code, state) => {
     try {
-      // This would be used if you implement server-side authorization code flow
-      // For now, we'll redirect to the ID token flow
-      setStatus('Code received, proceeding with authentication...');
+      // Authorization code flow is not currently implemented on the server
+      // The app uses Google Identity Services (GIS) with ID token flow instead
+      // If we receive a code, it means the user was redirected from Google OAuth
+      // but we can't exchange it without server-side implementation
+      // Redirect to login page to use the proper ID token flow
+      setStatus('Redirecting to login...');
       
-      // You can implement server-side code exchange here if needed
-      // For now, fall back to the existing ID token flow
-      await handleIdTokenFlow();
+      console.log('Authorization code received but server-side exchange not implemented. Redirecting to login.');
+      
+      // Determine if this was supposed to be a signup or login flow
+      const isSignUp = searchParams.get('signup') === 'true' || 
+                       sessionStorage.getItem('googleAuthFlow') === 'signup';
+      
+      // Clear any stale session data
+      sessionStorage.removeItem('googleAuthFlow');
+      
+      setTimeout(() => {
+        // Redirect to appropriate page with a message
+        if (isSignUp) {
+          window.location.href = '/sign-up?googleRedirect=true';
+        } else {
+          window.location.href = '/?googleRedirect=true';
+        }
+      }, 500);
       
     } catch (error) {
       throw new Error(`Failed to process authorization code: ${error.message}`);
@@ -187,7 +204,7 @@ const GoogleInfoPage = () => {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
         dispatch(loginSuccess(response.data || response));
-        localStorage.setItem("isAuth", true);
+        localStorage.setItem("isAuth", "true");
         
         setStatus('Checking account connection...');
         
@@ -218,11 +235,12 @@ const GoogleInfoPage = () => {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
         dispatch(loginSuccess(response.data || response));
-        localStorage.setItem("isAuth", true);
+        localStorage.setItem("isAuth", "true");
         
         setStatus('Registration successful! Redirecting to connect Amazon...');
         setTimeout(() => {
-          navigate("/connect-to-amazon");
+          // Use window.location.href for consistency with login flow (full page redirect)
+          window.location.href = "/connect-to-amazon";
         }, 1000);
       }
       

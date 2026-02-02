@@ -292,7 +292,7 @@ const SignUp = () => {
           // Clear any cached auth state to force fresh checks
           clearAuthCache();
           // Store auth information
-          localStorage.setItem("isAuth", true);
+          localStorage.setItem("isAuth", "true");
           dispatch(loginSuccess(response.data || response));
           
           // If no plan selected, redirect to connect-to-amazon page (skip pricing)
@@ -324,7 +324,7 @@ const SignUp = () => {
                   if (error.message !== 'Payment cancelled by user') {
                     setErrorMessage(error.message || 'Failed to start free trial. Please try again.');
                   }
-                  setGoogleLoading(false);
+                  // Note: setGoogleLoading(false) is handled in the finally block
                 },
                 7 // 7-day trial period
               );
@@ -352,7 +352,7 @@ const SignUp = () => {
                   if (error.message !== 'Payment cancelled by user') {
                     setErrorMessage(error.message || 'Failed to process payment. Please try again.');
                   }
-                  setGoogleLoading(false);
+                  // Note: setGoogleLoading(false) is handled in the finally block
                 }
               );
             } else {

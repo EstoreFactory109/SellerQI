@@ -183,7 +183,7 @@ export default function Login() {
         clearAuthCache();
         
         // Store auth information
-        localStorage.setItem("isAuth", true);
+        localStorage.setItem("isAuth", "true");
         dispatch(loginSuccess(response.data || response));
         
         // Check if accounts are connected

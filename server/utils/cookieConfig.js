@@ -1,33 +1,35 @@
 /**
+ * Determine if we're running in a secure (HTTPS) environment
+ * Checks environment variables and defaults appropriately
+ */
+const isSecureEnvironment = () => {
+  // Explicit HTTPS setting takes priority
+  if (process.env.USE_HTTPS === 'true') return true;
+  if (process.env.USE_HTTPS === 'false') return false;
+  
+  // Production defaults to secure, development to non-secure
+  return process.env.NODE_ENV === 'production';
+};
+
+/**
  * Get cookie configuration based on environment and request protocol
  * @param {Object} req - Express request object (optional)
  * @returns {Object} Cookie options
  */
 const getCookieOptions = (req = null) => {
-  // Determine if we're in a secure context
-  const isSecure = process.env.NODE_ENV === 'production' && 
-                   process.env.USE_HTTPS === 'true';
+  let isSecure = isSecureEnvironment();
   
-  // For development or HTTP production, use less restrictive settings
-  const baseOptions = {
+  // If request is available, we can also check the protocol
+  if (req) {
+    const protocol = req.get('X-Forwarded-Proto') || req.protocol;
+    isSecure = protocol === 'https';
+  }
+  
+  return {
     httpOnly: true,
     secure: isSecure,
     sameSite: isSecure ? "None" : "Lax" // "None" requires secure=true, use "Lax" for HTTP
   };
-
-  // If request is available, we can also check the protocol
-  if (req) {
-    const protocol = req.get('X-Forwarded-Proto') || req.protocol;
-    const isHttps = protocol === 'https';
-    
-    return {
-      ...baseOptions,
-      secure: isHttps,
-      sameSite: isHttps ? "None" : "Lax"
-    };
-  }
-
-  return baseOptions;
 };
 
 /**
@@ -43,15 +45,21 @@ const getHttpCookieOptions = () => ({
 /**
  * Get cookie options specifically for HTTPS environments
  * Use this for HTTPS production environments
+ * Now also checks environment - falls back to HTTP options in development
  */
-const getHttpsCookieOptions = () => ({
-  httpOnly: true,
-  secure: true,
-  sameSite: "None"
-});
+const getHttpsCookieOptions = () => {
+  const isSecure = isSecureEnvironment();
+  
+  return {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: isSecure ? "None" : "Lax"
+  };
+};
 
 module.exports = {
   getCookieOptions,
   getHttpCookieOptions,
-  getHttpsCookieOptions
+  getHttpsCookieOptions,
+  isSecureEnvironment
 };

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers, ShoppingCart } from 'lucide-react';
 import dropdown from '../../assets/Icons/Arrow.png'
 
@@ -72,6 +72,7 @@ const FormattedMessage = ({ message }) => {
 
 const RankingTableSection = ({ title, data }) => {
   console.log("data: ",data)
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
   const info = useSelector((state) => state.Dashboard.DashBoardInfo);
@@ -176,12 +177,15 @@ const RankingTableSection = ({ title, data }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayedData.map((row, idx) => (
-                <motion.tr 
+                <tr 
                   key={idx} 
-                  whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-red-500 hover:shadow-sm"
                 >
-                  <td className="py-5 px-4 align-top w-40">
+                  <td className="py-5 px-4 align-top w-40 group-hover:bg-red-50/50">
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
                       {row.sku && (
@@ -189,7 +193,7 @@ const RankingTableSection = ({ title, data }) => {
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
                     <div className="flex items-start gap-2">
                       <div className="w-6 h-6 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                         <Package className="w-3 h-3 text-blue-600" />
@@ -197,7 +201,7 @@ const RankingTableSection = ({ title, data }) => {
                       <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
                     <div className="space-y-2">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                         {row.issueHeading}
@@ -207,10 +211,10 @@ const RankingTableSection = ({ title, data }) => {
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
                     <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -232,6 +236,7 @@ const RankingTableSection = ({ title, data }) => {
 };
 
 const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -362,12 +367,15 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayedData.map((row, idx) => (
-                <motion.tr 
+                <tr 
                   key={idx} 
-                  whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-blue-500 hover:shadow-sm"
                 >
-                  <td className="py-5 px-4 align-top w-40">
+                  <td className="py-5 px-4 align-top w-40 group-hover:bg-blue-50/50">
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
                       {row.sku && (
@@ -375,7 +383,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
                     <div className="flex items-start gap-2">
                       <div className="w-6 h-6 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                         <Package className="w-3 h-3 text-green-600" />
@@ -383,7 +391,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                       <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
                     <div className="space-y-2">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                         {row.issueHeading}
@@ -393,10 +401,10 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
                     <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -418,6 +426,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
 };
 
 const InventoryTableSection = ({ title, data }) => {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
   console.log("InventoryTableSection: ", data);
@@ -552,12 +561,15 @@ const InventoryTableSection = ({ title, data }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayedData.map((row, idx) => (
-                <motion.tr 
+                <tr 
                   key={idx} 
-                  whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-green-500 hover:shadow-sm"
                 >
-                  <td className="py-5 px-4 align-top w-40">
+                  <td className="py-5 px-4 align-top w-40 group-hover:bg-green-50/50">
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
                       {row.sku && (
@@ -565,7 +577,7 @@ const InventoryTableSection = ({ title, data }) => {
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
                     <div className="flex items-start gap-2">
                       <div className="w-6 h-6 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                         <Package className="w-3 h-3 text-yellow-600" />
@@ -573,7 +585,7 @@ const InventoryTableSection = ({ title, data }) => {
                       <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
                     <div className="space-y-2">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         {row.issueHeading}
@@ -589,10 +601,10 @@ const InventoryTableSection = ({ title, data }) => {
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
                     <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -614,6 +626,7 @@ const InventoryTableSection = ({ title, data }) => {
 };
 
 const BuyboxTableSection = ({ title, data, productInfo }) => {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -701,12 +714,15 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayedData.map((row, idx) => (
-                <motion.tr 
+                <tr 
                   key={idx} 
-                  whileHover={{ backgroundColor: '#f8fafc' }}
-                  className="text-sm text-gray-700 hover:shadow-sm transition-all duration-200"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-purple-500 hover:shadow-sm"
                 >
-                  <td className="py-5 px-4 align-top w-40">
+                  <td className="py-5 px-4 align-top w-40 group-hover:bg-purple-50/50">
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
                       {row.sku && (
@@ -714,7 +730,7 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
                     <div className="flex items-start gap-2">
                       <div className="w-6 h-6 bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                         <ShoppingCart className="w-3 h-3 text-purple-600" />
@@ -722,7 +738,7 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                       <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
                     <div className="space-y-2">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                         {row.issueHeading}
@@ -732,10 +748,10 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top">
+                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
                     <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>

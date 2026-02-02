@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
@@ -21,6 +21,7 @@ router.post('/register', registerRateLimiter, registerValidate, registerUser);
 router.post('/login', authRateLimiter, validateLogin, loginUser);
 router.post('/verify-user', authRateLimiter, verifyUser);
 router.get('/profile', auth, profileUser);
+router.post('/refresh-token', refreshAccessToken); // No auth middleware - uses refresh token from cookie
 router.get('/logout', auth, logoutUser);
 router.put('/updateProfilePic', auth, upload.single('avatar'), updateProfilePic);
 router.put('/updateDetails', auth, validateUpdateDetails, updateDetails);
