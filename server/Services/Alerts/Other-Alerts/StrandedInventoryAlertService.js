@@ -6,7 +6,8 @@
  * Creates StrandedInventory alerts for products in the stranded report.
  */
 
-const StrandedInventoryUIData = require('../../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
+// Use service layer for fetching data (handles both old and new formats)
+const { getStrandedInventoryUIData } = require('../../inventory/StrandedInventoryUIDataService.js');
 const { StrandedInventoryAlert } = require('../../../models/alerts/Alert.js');
 const logger = require('../../../utils/Logger.js');
 
@@ -57,14 +58,8 @@ async function detectAndStoreStrandedInventoryAlerts(userId, region, country) {
       };
     }
 
-    const doc = await StrandedInventoryUIData.findOne({
-      User: userId,
-      country,
-      region,
-    })
-      .sort({ createdAt: -1 })
-      .limit(1)
-      .lean();
+    // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+    const doc = await getStrandedInventoryUIData(userId, country, region);
 
     if (!doc) {
       logger.warn('[StrandedInventoryAlertService] No stranded inventory data found for user', {

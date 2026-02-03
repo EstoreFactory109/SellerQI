@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 
 // Animated DNA Helix Loader
@@ -95,28 +95,8 @@ const FloatingParticles = () => {
 };
 
 const AnalysingAccount = () => {
-    const [timeElapsed, setTimeElapsed] = useState(0);
     const [jobStatus] = useState('processing'); // Static status - always 'processing'
     const [progress] = useState(50); // Static progress - always 50%
-
-
-    // Update elapsed time every minute (client-side only)
-    useEffect(() => {
-        const timeInterval = setInterval(() => {
-            setTimeElapsed((prev) => prev + 1);
-        }, 60000); // 1 minute
-        return () => clearInterval(timeInterval);
-    }, []);
-
-    // Format elapsed time
-    const formatElapsedTime = (minutes) => {
-        if (minutes < 60) {
-            return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
-        }
-        const hours = Math.floor(minutes / 60);
-        const remainingMinutes = minutes % 60;
-        return `${hours} hour${hours !== 1 ? 's' : ''} ${remainingMinutes > 0 ? `${remainingMinutes} minute${remainingMinutes !== 1 ? 's' : ''}` : ''}`;
-    };
 
     // Get status message (static)
     const getStatusMessage = () => {
@@ -179,24 +159,13 @@ const AnalysingAccount = () => {
                             {getStatusMessage()}
                         </span>
                     </motion.div>
-                            
-                    {/* Time elapsed */}
-                    {timeElapsed > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="text-gray-500 text-xs mb-3"
-                        >
-                            Running for: {formatElapsedTime(timeElapsed)}
-                        </motion.div>
-                    )}
 
-                    {/* Safe to close card */}
+                    {/* Safe to close card - highlighted so users know they can leave */}
                     <motion.div
                         initial={{ opacity: 0, y: 30 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.6, delay: 0.5 }}
-                        className="w-full bg-white rounded-xl border border-gray-200 shadow-lg shadow-gray-200/50 p-5 mb-4"
+                        className="w-full bg-white rounded-xl border-2 border-emerald-300 shadow-lg shadow-emerald-200/50 p-5 mb-4 ring-2 ring-emerald-100"
                     >
                         <div className="flex items-start gap-4">
                             <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-lg flex items-center justify-center shadow-md shadow-emerald-200">
@@ -208,15 +177,19 @@ const AnalysingAccount = () => {
                                 <h3 className="text-lg font-semibold text-gray-900 mb-1.5">
                                     You can safely close this tab
                                 </h3>
-                                <p className="text-gray-600 text-sm leading-relaxed mb-3">
-                                    Your analysis is running in the background and will continue even if you close this page. 
-                                    We'll send you an <span className="text-gray-900 font-medium">email notification</span> when your comprehensive dashboard is ready.
+                                <p className="text-gray-600 text-sm leading-relaxed mb-4">
+                                    Your analysis is running in the background and will continue even if you close this page.
                                 </p>
-                                <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
-                                    <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span>Estimated completion time: <span className="text-gray-900 font-medium">60-90 minutes</span></span>
+                                <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border-2 border-emerald-200 px-4 py-3">
+                                    <div className="flex-shrink-0 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center">
+                                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-semibold text-emerald-900">We'll email you when it's ready</p>
+                                        <p className="text-xs text-emerald-700 mt-0.5">Feel free to close this page — you'll get a notification at your registered email.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

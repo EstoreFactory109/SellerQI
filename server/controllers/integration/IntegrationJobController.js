@@ -284,10 +284,82 @@ const getJobHistory = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Admin endpoint to trigger integration job for any user
+ * 
+ * This endpoint allows super admins to manually trigger integration
+ * for a specific user, useful for debugging or re-running failed integrations.
+ * 
+ * @route POST /api/integration/admin/trigger
+ */
+const adminTriggerIntegrationJob = asyncHandler(async (req, res) => {
+    const { userId, country, region } = req.body;
+
+    if (!userId) {
+        logger.error('[IntegrationJob] Admin trigger: Missing userId in request body');
+        return res.status(400).json(
+            new ApiError(400, 'User ID is required in request body')
+        );
+    }
+
+    if (!country || !region) {
+        logger.error('[IntegrationJob] Admin trigger: Missing country or region in request body');
+        return res.status(400).json(
+            new ApiError(400, 'Country and region are required in request body')
+        );
+    }
+
+    try {
+        logger.info(`[IntegrationJob] Admin triggering integration job for user ${userId}, ${country}-${region}`, {
+            triggeredBy: req.SuperAdminId || 'unknown'
+        });
+
+        // Add job to the integration queue
+        const result = await addIntegrationJob(userId, country, region);
+
+        if (result.isExisting) {
+            // Job already exists
+            logger.info(`[IntegrationJob] Admin trigger: Existing job found for user ${userId}. State: ${result.state}`);
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    jobId: result.jobId,
+                    status: result.state,
+                    isExisting: true,
+                    userId,
+                    country,
+                    region,
+                    message: 'An integration job is already in progress for this user'
+                }, 'Integration job already in progress')
+            );
+        }
+
+        // New job created
+        logger.info(`[IntegrationJob] Admin trigger: Created new integration job ${result.jobId} for user ${userId}`);
+        return res.status(202).json(
+            new ApiResponse(202, {
+                jobId: result.jobId,
+                status: 'waiting',
+                isExisting: false,
+                userId,
+                country,
+                region,
+                message: 'Integration job has been queued successfully'
+            }, 'Integration job queued successfully')
+        );
+
+    } catch (error) {
+        logger.error('[IntegrationJob] Admin trigger: Error triggering integration job:', error);
+        return res.status(500).json(
+            new ApiError(500, `Failed to trigger integration job: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     triggerIntegrationJob,
     getJobStatus,
     getActiveJob,
-    getJobHistory
+    getJobHistory,
+    adminTriggerIntegrationJob
 };
 

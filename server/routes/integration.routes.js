@@ -23,8 +23,10 @@ const {
     triggerIntegrationJob,
     getJobStatus,
     getActiveJob,
-    getJobHistory
+    getJobHistory,
+    adminTriggerIntegrationJob
 } = require('../controllers/integration/IntegrationJobController.js');
+const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 
 // All routes require authentication
 // Trigger a new integration job (requires auth + location for country/region)
@@ -38,6 +40,9 @@ router.get('/active', auth, getLocation, getActiveJob);
 
 // Get user's job history (requires auth only)
 router.get('/history', auth, getJobHistory);
+
+// Admin route - Trigger integration job for any user (requires super admin auth)
+router.post('/admin/trigger', superAdminAuth, adminTriggerIntegrationJob);
 
 module.exports = router;
 

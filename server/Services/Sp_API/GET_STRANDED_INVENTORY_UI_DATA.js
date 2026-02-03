@@ -2,7 +2,8 @@ const axios = require("axios");
 const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model=require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL');
+// Use service layer for saving data (handles 16MB limit with separate collection)
+const { saveStrandedInventoryUIData } = require('../inventory/StrandedInventoryUIDataService');
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     // console.log(marketplaceIds);
@@ -167,20 +168,22 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             strandedUIdata.push(data)
         })
 
-        const createStrandedUIdata = await GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.create({
-            User:userId,
-            region:region,
-            country:country,
-            strandedUIData:strandedUIdata
-        })
+        // Save to database using service layer (handles 16MB limit with separate collection)
+        const saveResult = await saveStrandedInventoryUIData(userId, country, region, strandedUIdata);
 
-        if(!createStrandedUIdata){
+        if(!saveResult || !saveResult.success){
             logger.error(new ApiError(500, "Error in saving the data"));
             return false;
         }
         logger.info("Data saved successfully");
         logger.info("GET_STRANDED_INVENTORY_UI_DATA ended");
-        return createStrandedUIdata;
+        return {
+            _id: saveResult.batchId,
+            User: userId,
+            region: region,
+            country: country,
+            itemCount: saveResult.itemCount
+        };
 
     } catch (error) {
         logger.error("Error in getReport:", error.message);

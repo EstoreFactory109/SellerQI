@@ -155,6 +155,7 @@ const productWiseFBADataSchema = new Schema({
 });
 
 // Add indexes for better query performance
+productWiseFBADataSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
 
 // Create and export the model
 const ProductWiseFBAData = mongoose.model('ProductWiseFBAData', productWiseFBADataSchema);

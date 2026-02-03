@@ -3,7 +3,8 @@ const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const zlib = require('zlib');
-const ProductWiseFBAData = require('../../models/inventory/ProductWiseFBADataModel');
+// Use service layer for saving data (handles 16MB limit with separate collection)
+const { saveProductWiseFBAData } = require('../inventory/ProductWiseFBADataService');
 
 const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     try {
@@ -182,15 +183,10 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
             return mappedItem;
         });
 
-        // Save to database
-        const createProductWiseFBAData = await ProductWiseFBAData.create({
-            userId: userId,
-            country: country,
-            region: region,
-            fbaData: fbaData
-        });
+        // Save to database using service layer (handles 16MB limit with separate collection)
+        const saveResult = await saveProductWiseFBAData(userId, country, region, fbaData);
 
-        if (!createProductWiseFBAData) {
+        if (!saveResult || !saveResult.success) {
             logger.error(new ApiError(500, "Internal server error in saving the report"));
             return {
                 success: false,
@@ -203,7 +199,13 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         return {
             success: true,
             message: "Report fetched and saved successfully",
-            data: createProductWiseFBAData,
+            data: {
+                userId: userId,
+                country: country,
+                region: region,
+                itemCount: saveResult.itemCount,
+                batchId: saveResult.batchId
+            },
         };
     } catch (error) {
         logger.error("Error in getReport:", error.message);

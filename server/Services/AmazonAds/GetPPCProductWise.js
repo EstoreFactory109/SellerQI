@@ -4,7 +4,8 @@ const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const userModel = require('../../models/user-auth/userModel.js');
-const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
+// Use service layer for saving data (handles 16MB limit with separate collection)
+const { saveProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 
 // Base URIs for different regions
 const BASE_URIS = {
@@ -379,13 +380,9 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region, 
             // Download and parse the report data (with token refresh support)
             const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
-            const createProductWiseSponsoredAdsData = await ProductWiseSponsoredAdsData.create({
-                userId: userId,
-                country: country,
-                region: region,
-                sponsoredAds: reportContent
-            })
-            if(!createProductWiseSponsoredAdsData){
+            // Save to database using service layer (handles 16MB limit with separate collection)
+            const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, reportContent);
+            if(!saveResult || !saveResult.success){
                 return {
                     success: false,
                     message: "Error in creating product wise sponsored ads data",
@@ -394,7 +391,13 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId,country,region, 
             return {
                 success: true,
                 message: "Product wise sponsored ads data fetched successfully",
-                data: createProductWiseSponsoredAdsData
+                data: {
+                    userId: userId,
+                    country: country,
+                    region: region,
+                    itemCount: saveResult.itemCount,
+                    batchId: saveResult.batchId
+                }
             };
         } else {
             console.error('Report generation failed:', reportStatus.error);

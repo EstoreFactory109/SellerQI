@@ -3,8 +3,8 @@
  * 
  * Service for managing economics metrics data in the database
  * 
- * For big accounts (totalSales > 5000), ASIN-wise data is stored in a separate
- * collection (AsinWiseSalesForBigAccounts) to prevent 16MB document size limit.
+ * ASIN-wise data is ALWAYS stored in a separate collection (AsinWiseSalesForBigAccounts)
+ * to prevent 16MB document size limit issues. This applies to ALL accounts regardless of size.
  */
 
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
@@ -12,12 +12,9 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const logger = require('../../utils/Logger');
 const { ApiError } = require('../../utils/ApiError');
 
-// Threshold for determining if an account is "big"
-const BIG_ACCOUNT_THRESHOLD = 5000;
-
 /**
  * Save economics metrics to database
- * For big accounts (totalSales > 5000), ASIN-wise data is stored separately
+ * ASIN-wise data is ALWAYS stored in a separate collection to prevent 16MB limit
  * @param {string} userId - User ID
  * @param {string} region - Region (NA, EU, FE)
  * @param {string} country - Country code
@@ -47,9 +44,8 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
             throw new ApiError(400, `Invalid User ID format: ${userId}`);
         }
 
-        // Check if this is a big account based on total sales
         const totalSalesAmount = metrics.totalSales?.amount || 0;
-        const isBigAccount = totalSalesAmount > BIG_ACCOUNT_THRESHOLD;
+        const asinCount = metrics.asinWiseSales?.length || 0;
 
         logger.info('Saving economics metrics to database', {
             userId: userObjectId.toString(),
@@ -57,17 +53,11 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
             country,
             dateRange: metrics.dateRange,
             totalSales: totalSalesAmount,
-            isBigAccount,
-            asinCount: metrics.asinWiseSales?.length || 0
+            asinCount
         });
 
-        if (isBigAccount) {
-            // BIG ACCOUNT: Store ASIN-wise data in separate collection
-            return await saveBigAccountMetrics(userObjectId, region, country, metrics, queryId, documentId);
-        } else {
-            // NORMAL ACCOUNT: Store everything in the main document
-            return await saveNormalAccountMetrics(userObjectId, region, country, metrics, queryId, documentId);
-        }
+        // ALWAYS store ASIN-wise data in separate collection to prevent 16MB limit
+        return await saveMetricsWithSeparateAsinData(userObjectId, region, country, metrics, queryId, documentId);
     } catch (error) {
         logger.error('Error saving economics metrics to database', {
             userId,
@@ -79,54 +69,11 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
 }
 
 /**
- * Save metrics for normal accounts (totalSales <= 5000)
- * All data stored in the main EconomicsMetrics document
- */
-async function saveNormalAccountMetrics(userObjectId, region, country, metrics, queryId, documentId) {
-    const economicsMetrics = new EconomicsMetrics({
-        User: userObjectId,
-        region: region,
-        country: country,
-        dateRange: {
-            startDate: metrics.dateRange.startDate,
-            endDate: metrics.dateRange.endDate
-        },
-        totalSales: metrics.totalSales,
-        grossProfit: metrics.grossProfit,
-        ppcSpent: metrics.ppcSpent,
-        fbaFees: metrics.fbaFees,
-        storageFees: metrics.storageFees,
-        totalFees: metrics.totalFees,
-        amazonFees: metrics.amazonFees || { amount: 0, currencyCode: 'USD' },
-        amazonFeesBreakdown: metrics.amazonFeesBreakdown || [],
-        refunds: metrics.refunds,
-        datewiseSales: metrics.datewiseSales || [],
-        datewiseGrossProfit: metrics.datewiseGrossProfit || [],
-        datewiseFeesAndRefunds: metrics.datewiseFeesAndRefunds || [],
-        datewiseAmazonFees: metrics.datewiseAmazonFees || [],
-        asinWiseSales: metrics.asinWiseSales || [],
-        queryId: queryId,
-        documentId: documentId,
-        dataSource: 'DataKiosk',
-        isBig: false
-    });
-
-    const savedMetrics = await economicsMetrics.save();
-
-    logger.info('Economics metrics saved successfully (normal account)', {
-        metricsId: savedMetrics._id,
-        userId: userObjectId.toString(),
-        region
-    });
-
-    return savedMetrics;
-}
-
-/**
- * Save metrics for big accounts (totalSales > 5000)
+ * Save metrics with ASIN-wise data in separate collection
+ * This is now used for ALL accounts to prevent 16MB document size limit
  * ASIN-wise data is stored in a separate collection, grouped by date
  */
-async function saveBigAccountMetrics(userObjectId, region, country, metrics, queryId, documentId) {
+async function saveMetricsWithSeparateAsinData(userObjectId, region, country, metrics, queryId, documentId) {
     // Step 1: Save main document WITHOUT asinWiseSales (to avoid 16MB limit)
     const economicsMetrics = new EconomicsMetrics({
         User: userObjectId,
@@ -153,16 +100,16 @@ async function saveBigAccountMetrics(userObjectId, region, country, metrics, que
         queryId: queryId,
         documentId: documentId,
         dataSource: 'DataKiosk',
-        isBig: true // Mark as big account
+        isBig: true // Always true now - ASIN data always in separate collection
     });
 
     const savedMetrics = await economicsMetrics.save();
 
-    logger.info('Main economics metrics saved for big account', {
+    logger.info('Main economics metrics saved (ASIN data in separate collection)', {
         metricsId: savedMetrics._id,
         userId: userObjectId.toString(),
         region,
-        isBig: true
+        country
     });
 
     // Step 2: Save ASIN-wise data in separate collection, grouped by date
@@ -210,7 +157,7 @@ async function saveBigAccountMetrics(userObjectId, region, country, metrics, que
         if (dateDocuments.length > 0) {
             await AsinWiseSalesForBigAccounts.insertMany(dateDocuments);
 
-            logger.info('ASIN-wise sales saved for big account', {
+            logger.info('ASIN-wise sales saved in separate collection', {
                 metricsId: savedMetrics._id,
                 userId: userObjectId.toString(),
                 region,
@@ -283,7 +230,9 @@ async function getLatestEconomicsMetrics(userId, region, country = 'US') {
 }
 
 /**
- * Combine ASIN data from separate collection if this is a big account
+ * Combine ASIN data from separate collection
+ * All accounts now store ASIN data in the separate collection, so this always fetches from there.
+ * For backward compatibility, also handles legacy documents where isBig=false and data is embedded.
  * Returns the metrics object with asinWiseSales populated
  * @param {Object} metrics - Economics metrics document
  * @returns {Promise<Object>} Metrics with combined ASIN data
@@ -293,17 +242,17 @@ async function combineAsinDataIfBigAccount(metrics) {
     
     const metricsObj = metrics.toObject ? metrics.toObject() : metrics;
     
-    // If not a big account, data is already in the document
-    if (!metricsObj.isBig) {
+    // For backward compatibility: if isBig=false and asinWiseSales has data, return as-is (legacy data)
+    if (!metricsObj.isBig && metricsObj.asinWiseSales && metricsObj.asinWiseSales.length > 0) {
         return metricsObj;
     }
     
-    // Big account: fetch ASIN data from separate collection
+    // Fetch ASIN data from separate collection (for isBig=true or when asinWiseSales is empty)
     try {
         const asinSalesDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(metricsObj._id);
         
         if (!asinSalesDocs || asinSalesDocs.length === 0) {
-            logger.debug('No ASIN sales found in separate collection for big account', {
+            logger.debug('No ASIN sales found in separate collection', {
                 metricsId: metricsObj._id
             });
             return metricsObj;
@@ -337,7 +286,7 @@ async function combineAsinDataIfBigAccount(metrics) {
             }
         });
         
-        logger.debug('Combined ASIN sales for big account', {
+        logger.debug('Combined ASIN sales from separate collection', {
             metricsId: metricsObj._id,
             totalDates: asinSalesDocs.length,
             totalAsinRecords: asinWiseSales.length
@@ -350,7 +299,7 @@ async function combineAsinDataIfBigAccount(metrics) {
         };
         
     } catch (error) {
-        logger.error('Error combining ASIN data for big account', {
+        logger.error('Error combining ASIN data from separate collection', {
             metricsId: metricsObj._id,
             error: error.message
         });
@@ -361,7 +310,7 @@ async function combineAsinDataIfBigAccount(metrics) {
 
 /**
  * Delete economics metrics by ID
- * Also deletes ASIN data from separate collection if big account
+ * Also deletes ASIN data from separate collection (always, since all accounts now use it)
  * @param {string} metricsId - Metrics document ID
  * @param {string} userId - User ID (for authorization)
  * @returns {Promise<Object>} Deleted document
@@ -377,10 +326,11 @@ async function deleteEconomicsMetrics(metricsId, userId) {
             throw new ApiError(404, 'Economics metrics not found or unauthorized');
         }
 
-        // If big account, also delete ASIN data from separate collection
-        if (metrics.isBig) {
-            const deleteResult = await AsinWiseSalesForBigAccounts.deleteByMetricsId(metricsId);
-            logger.info('ASIN sales deleted for big account', {
+        // Always delete ASIN data from separate collection (all accounts now use it)
+        // This also handles legacy isBig=true documents
+        const deleteResult = await AsinWiseSalesForBigAccounts.deleteByMetricsId(metricsId);
+        if (deleteResult.deletedCount > 0) {
+            logger.info('ASIN sales deleted from separate collection', {
                 metricsId,
                 userId,
                 deletedCount: deleteResult.deletedCount
@@ -389,8 +339,7 @@ async function deleteEconomicsMetrics(metricsId, userId) {
 
         logger.info('Economics metrics deleted successfully', {
             metricsId,
-            userId,
-            isBig: metrics.isBig
+            userId
         });
 
         return metrics;

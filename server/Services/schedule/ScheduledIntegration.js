@@ -16,10 +16,11 @@ const { URIs, marketplaceConfig, spapiRegions } = require('../../controllers/con
 const tokenManager = require('../../utils/TokenManager.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const { getFunctionsForDay } = require('./ScheduleConfig.js');
-const ListingItemsModel = require('../../models/products/GetListingItemsModel.js');
+// Use service layers for models that can hit 16MB limit
+const { saveListingItemsData } = require('../products/ListingItemsService.js');
+const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
-const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
 
 class ScheduledIntegration {
@@ -279,11 +280,11 @@ class ScheduledIntegration {
                 }
             } else {
                 if (loggingHelper) {
-                    loggingHelper.logFunctionWarning('ScheduledIntegration.getScheduledApiData', 'Some services failed', {
-                        criticalFailures: serviceSummary.criticalFailures,
+                    loggingHelper.logFunctionWarning('ScheduledIntegration.getScheduledApiData', 'All services failed', {
+                        failedServices: serviceSummary.failed,
                         successRate: serviceSummary.successPercentage
                     });
-                    await loggingHelper.endSession('partial');
+                    await loggingHelper.endSession('failed');
                 }
             }
 
@@ -325,13 +326,12 @@ class ScheduledIntegration {
             // Build error message if there are failures
             let errorMessage = null;
             if (!serviceSummary.overallSuccess) {
-                if (serviceSummary.criticalFailures.length > 0) {
-                    errorMessage = `Critical services failed: ${serviceSummary.criticalFailures.map(f => f.service).join(', ')}`;
-                } else if (serviceSummary.failed.length > 0) {
+                // All services failed (overallSuccess is false only when successful.length === 0)
+                if (serviceSummary.failed.length > 0) {
                     const failedServices = serviceSummary.failed.map(f => f.service).join(', ');
-                    errorMessage = `Some services failed: ${failedServices}`;
+                    errorMessage = `All services failed: ${failedServices}`;
                 } else {
-                    errorMessage = 'Some services failed (unknown reason)';
+                    errorMessage = 'All services failed (unknown reason)';
                 }
             }
 
@@ -381,7 +381,7 @@ class ScheduledIntegration {
                     successfulServices: serviceSummary.successful.length,
                     failedServices: serviceSummary.failed.length,
                     warnings: serviceSummary.warnings,
-                    criticalFailures: serviceSummary.criticalFailures
+                    failures: serviceSummary.failed
                 }
             };
 
@@ -1513,11 +1513,8 @@ class ScheduledIntegration {
         let adGroupIdArray = [];
 
         try {
-            const storedSponsoredAdsData = await ProductWiseSponsoredAdsData.findOne({
-                userId: userId,
-                region: Region,
-                country: Country
-            });
+            // Use service layer that handles both old (embedded array) and new (separate collection) formats
+            const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
             if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
                 const campaignIds = new Set();
@@ -1717,15 +1714,10 @@ class ScheduledIntegration {
         
         const { userId, Region, Country, apiData, productData, merchantListingsData, loggingHelper } = params;
 
-        // Save generic keywords if available
+        // Save generic keywords if available - Uses service layer to prevent 16MB limit
         if (Array.isArray(apiData.genericKeyWordArray) && apiData.genericKeyWordArray.length > 0) {
             try {
-                await ListingItemsModel.create({
-                    User: userId,
-                    region: Region,
-                    country: Country,
-                    GenericKeyword: apiData.genericKeyWordArray
-                });
+                await saveListingItemsData(userId, Country, Region, apiData.genericKeyWordArray);
             } catch (dbError) {
                 logger.error("Failed to save generic keywords to database", {
                     error: dbError.message
@@ -1801,26 +1793,25 @@ class ScheduledIntegration {
             }
         });
 
-        const criticalServices = ["mcpEconomicsData", "v2data", "campaignData"];
-        const criticalFailures = failed.filter(f => criticalServices.includes(f.service));
-
-        const overallSuccess = criticalFailures.length === 0;
+        // All services are treated equally - no critical/non-critical distinction
         // Calculate success percentage based on scheduled functions only
         const successPercentage = services.length > 0 ? Math.round((successful.length / services.length) * 100) : 0;
+        
+        // Consider overall success if at least one service succeeded
+        // This ensures partial data is still usable and the job doesn't fail entirely
+        const overallSuccess = successful.length > 0;
 
         logger.info('Service summary calculated', {
             totalScheduledServices: services.length,
             successful: successful.length,
             failed: failed.length,
-            successPercentage: `${successPercentage}%`,
-            criticalFailures: criticalFailures.length
+            successPercentage: `${successPercentage}%`
         });
 
         return {
             successful,
             failed,
             warnings,
-            criticalFailures,
             overallSuccess,
             successPercentage,
             totalServices: services.length // Only scheduled services are counted

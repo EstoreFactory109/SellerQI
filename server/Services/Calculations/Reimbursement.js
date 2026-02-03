@@ -1,9 +1,11 @@
 const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
-const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel.js');
+// Use service layer for LedgerSummaryView (handles both old and new formats)
+const { getLedgerSummaryViewData } = require('../Finance/LedgerSummaryViewService.js');
 const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
-const ProductWiseFBAData = require('../../models/inventory/ProductWiseFBADataModel.js');
+// Use service layer to get ProductWiseFBAData (handles both old and new formats)
+const { getProductWiseFBAData } = require('../inventory/ProductWiseFBADataService.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const { calculateFees } = require('./ActualFeesCalculations.js');
@@ -135,11 +137,8 @@ const calculateShipmentDiscrepancy = async (userId, country, region) => {
         }
 
         // 3. Get ledger summary data to get estimated fees by fnsku
-        const ledgerData = await LedgerSummaryView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const ledgerData = await getLedgerSummaryViewData(userId, country, region);
 
         // Create a map of fnsku to estimated fees from ledger data
         const fnskuToEstimatedFeesMap = new Map();
@@ -176,11 +175,8 @@ const calculateShipmentDiscrepancy = async (userId, country, region) => {
         }
 
         // Fallback: If no fees found in ledger, try ProductWiseFBAData model
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         if (productWiseFBAData && productWiseFBAData.fbaData && Array.isArray(productWiseFBAData.fbaData)) {
             productWiseFBAData.fbaData.forEach(fbaItem => {
@@ -310,11 +306,8 @@ const calculateShipmentDiscrepancy = async (userId, country, region) => {
 const calculateLostInventoryReimbursement = async (userId, country, region) => {
     try {
         // 1. Get ledger summary data to get lost and found units (Report 1)
-        const ledgerData = await LedgerSummaryView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const ledgerData = await getLedgerSummaryViewData(userId, country, region);
 
         if (!ledgerData || !ledgerData.data || ledgerData.data.length === 0) {
             logger.info(`[Lost Inventory] No ledger summary data found for userId: ${userId}, country: ${country}, region: ${region}`);
@@ -378,11 +371,8 @@ const calculateLostInventoryReimbursement = async (userId, country, region) => {
         }
 
         // 4. Get estimated fees from ProductWiseFBAData model
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         // Create maps for quick lookup
         const asinToPriceMap = new Map();
@@ -694,11 +684,8 @@ const calculateDamagedInventoryReimbursement = async (userId, country, region) =
         }
 
         // 3. Get estimated fees from ProductWiseFBAData model
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         // Create maps for quick lookup
         const asinToPriceMap = new Map();
@@ -846,11 +833,8 @@ const calculateDamagedInventoryReimbursement = async (userId, country, region) =
 const calculateDamagedInventoryFromSummary = async (userId, country, region) => {
     try {
         // Get ledger summary data
-        const ledgerData = await LedgerSummaryView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const ledgerData = await getLedgerSummaryViewData(userId, country, region);
 
         if (!ledgerData || !ledgerData.data || ledgerData.data.length === 0) {
             logger.info(`[Damaged Inventory Fallback] No ledger summary data found for userId: ${userId}`);
@@ -879,11 +863,8 @@ const calculateDamagedInventoryFromSummary = async (userId, country, region) => 
             };
         }
 
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         // Create maps
         const asinToPriceMap = new Map();
@@ -1042,11 +1023,8 @@ const calculateDisposedInventoryReimbursement = async (userId, country, region) 
         }
 
         // 3. Get estimated fees from ProductWiseFBAData model
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         // Create maps for quick lookup
         const asinToPriceMap = new Map();
@@ -1199,11 +1177,8 @@ const calculateDisposedInventoryReimbursement = async (userId, country, region) 
 const calculateDisposedInventoryFromSummary = async (userId, country, region) => {
     try {
         // Get ledger summary data
-        const ledgerData = await LedgerSummaryView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const ledgerData = await getLedgerSummaryViewData(userId, country, region);
 
         if (!ledgerData || !ledgerData.data || ledgerData.data.length === 0) {
             logger.info(`[Disposed Inventory Fallback] No ledger summary data found for userId: ${userId}`);
@@ -1232,11 +1207,8 @@ const calculateDisposedInventoryFromSummary = async (userId, country, region) =>
             };
         }
 
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         // Create maps
         const asinToPriceMap = new Map();
@@ -1447,11 +1419,8 @@ const convertWeightForFeeCalculation = (weightValue, unitOfWeight, feesRegion) =
 const calculateFeeReimbursement = async (userId, country, region) => {
     try {
         // 1. Get product wise FBA data (contains charged fees and dimensions)
-        const productWiseFBAData = await ProductWiseFBAData.findOne({
-            userId: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Uses service layer that handles both old (embedded array) and new (separate collection) formats
+        const productWiseFBAData = await getProductWiseFBAData(userId, country, region);
 
         if (!productWiseFBAData || !productWiseFBAData.fbaData || productWiseFBAData.fbaData.length === 0) {
             logger.info(`No product wise FBA data found for userId: ${userId}, country: ${country}, region: ${region}`);

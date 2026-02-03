@@ -25,7 +25,9 @@ import {
   Info,
   Mail,
   Send,
-  XCircle
+  XCircle,
+  Play,
+  Loader2
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 
@@ -86,6 +88,10 @@ const UserLogging = () => {
   const [emailTypeFilter, setEmailTypeFilter] = useState('all');
   const [emailStatusFilter, setEmailStatusFilter] = useState('all');
   const [expandedErrors, setExpandedErrors] = useState(new Set());
+
+  // Integration trigger (top button – runs for current user)
+  const [triggerSubmitting, setTriggerSubmitting] = useState(false);
+  const [integrationMessage, setIntegrationMessage] = useState(null); // Success/error toast
 
   // Success rate calculation functions
   const calculateSessionSuccessRate = (session) => {
@@ -329,18 +335,34 @@ const UserLogging = () => {
     }
   };
 
-  const createSampleData = async () => {
-    setLoading(true);
+  // Run analysis for the current user (uses auth + location from cookies)
+  const triggerIntegration = async () => {
+    setTriggerSubmitting(true);
+    setIntegrationMessage(null);
+
     try {
-      await axiosInstance.post('/app/analyse/logging/create-sample');
-      // Refresh data after creating sample
-      await fetchData();
-      setError(null);
+      const response = await axiosInstance.post('/api/integration/trigger');
+
+      if (response.status === 200 || response.status === 202) {
+        const data = response.data?.data;
+        setIntegrationMessage({
+          type: 'success',
+          text: data?.isExisting
+            ? `Integration job already in progress (Job ID: ${data.jobId})`
+            : `Integration job queued successfully (Job ID: ${data.jobId})`
+        });
+      } else {
+        throw new Error(response.data?.message || 'Failed to trigger integration');
+      }
     } catch (err) {
-      console.error('Error creating sample data:', err);
-      setError('Failed to create sample data.');
+      console.error('Error triggering integration:', err);
+      setIntegrationMessage({
+        type: 'error',
+        text: err.response?.data?.message || err.message || 'Failed to trigger integration. Ensure you have a location set.'
+      });
     } finally {
-      setLoading(false);
+      setTriggerSubmitting(false);
+      setTimeout(() => setIntegrationMessage(null), 5000);
     }
   };
 
@@ -470,11 +492,17 @@ const UserLogging = () => {
                 </button>
                 
                 <button
-                  onClick={createSampleData}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  onClick={triggerIntegration}
+                  disabled={triggerSubmitting}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Run analysis for the current user"
                 >
-                  <Database className="w-4 h-4" />
-                  Create Sample Data
+                  {triggerSubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                  {triggerSubmitting ? 'Running...' : 'Run Analysis'}
                 </button>
               </div>
             </div>
@@ -507,6 +535,33 @@ const UserLogging = () => {
           </div>
         </div>
       </div>
+
+      {/* Integration success/error toast (page-level) */}
+      <AnimatePresence>
+        {integrationMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`fixed top-4 right-4 z-[60] p-4 rounded-lg shadow-lg max-w-md ${
+              integrationMessage.type === 'success'
+                ? 'bg-green-50 border border-green-200'
+                : 'bg-red-50 border border-red-200'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {integrationMessage.type === 'success' ? (
+                <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+              ) : (
+                <XCircle className="w-5 h-5 text-red-600 shrink-0" />
+              )}
+              <p className={integrationMessage.type === 'success' ? 'text-green-800' : 'text-red-800'}>
+                {integrationMessage.text}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

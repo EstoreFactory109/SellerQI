@@ -269,9 +269,12 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
 
     const text = `Hi ${firstName},\n\n${summaryText}\n\nView all alerts: ${alertsDashboardUrl}\n\n— SellerQI Team`;
 
+    const BCC_ALERTS = 'support@sellerqi.com';
+
     const info = await transporter.sendMail({
       from: senderEmail,
       to: email,
+      bcc: BCC_ALERTS,
       subject,
       text,
       html: template,

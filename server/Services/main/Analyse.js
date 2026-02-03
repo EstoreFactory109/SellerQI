@@ -4,7 +4,8 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const V2_Model = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1_Model = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
 const numberofproductreviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
-const ListingAllItems = require('../../models/products/GetListingItemsModel.js');
+// Use service layer for ListingItems (handles 16MB limit)
+const { getListingItemsData } = require('../products/ListingItemsService.js');
 const APlusContentModel = require('../../models/seller-performance/APlusContentModel.js');
 // Deprecated: financeModel - replaced by EconomicsMetrics
 // const financeModel = require('../../models/finance/listFinancialEventsModel.js');
@@ -35,13 +36,15 @@ const {
     checkProductWithOutBuyBox,
     checkBrandStory
 } = require('../Calculations/Conversion.js');
-const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
+// Use service layer for ProductWiseSponsoredAds (handles 16MB limit)
+const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const NegetiveKeywords = require('../../models/amazon-ads/NegetiveKeywords.js');
 const KeywordModel = require('../../models/amazon-ads/keywordModel.js');
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const Campaign = require('../../models/amazon-ads/CampaignModel.js');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../../models/inventory/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
-const GET_STRANDED_INVENTORY_UI_DATA_Model = require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
+// Use service layer for StrandedInventoryUIData (handles 16MB limit)
+const { getStrandedInventoryUIData } = require('../inventory/StrandedInventoryUIDataService.js');
 const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP)
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
@@ -338,23 +341,20 @@ class AnalyseService {
             BuyBoxData.findLatest(userId, region, country),
             restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            ListingAllItems.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            // Use service layer for ListingItems (handles both old and new formats)
+            getListingItemsData(userId, country, region),
             APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            // Optimized: Only fetch the most recent record (limit 1) instead of all 30-day records
-            // The sponsoredAds array within the record already contains all the PPC data we need
-            ProductWiseSponsoredAdsData.findOne({
-                userId,
-                country,
-                region
-            }).sort({ createdAt: -1 }).lean(),
+            // Use service layer for ProductWiseSponsoredAds (handles both old and new formats)
+            getProductWiseSponsoredAdsData(userId, country, region),
             NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
             KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
             SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
             Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
             GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            GET_STRANDED_INVENTORY_UI_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            // Use service layer for StrandedInventoryUIData (handles both old and new formats)
+            getStrandedInventoryUIData(userId, country, region),
             GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
             // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
             Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead

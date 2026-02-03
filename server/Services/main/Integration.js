@@ -27,9 +27,11 @@ const withTimeout = (promise, timeoutMs, operationName) => {
     ]);
 };
 
-// Models
-const ListingItemsModel = require('../../models/products/GetListingItemsModel.js');
-const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
+// Models - use service layers for models that can hit 16MB limit
+// ListingItems service handles 16MB limit with separate collection
+const { saveListingItemsData } = require('../products/ListingItemsService.js');
+// ProductWiseSponsoredAds service handles 16MB limit with separate collection
+const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 
 // SP-API Services
 const GET_MERCHANT_LISTINGS_ALL_DATA = require('../Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
@@ -309,11 +311,11 @@ class Integration {
                 }
             } else {
                 if (loggingHelper) {
-                    loggingHelper.logFunctionWarning('Integration.getSpApiData', 'Critical services failed', {
-                        criticalFailures: serviceSummary.criticalFailures,
+                    loggingHelper.logFunctionWarning('Integration.getSpApiData', 'All services failed', {
+                        failedServices: serviceSummary.failed,
                         successRate: serviceSummary.successPercentage
                     });
-                    await loggingHelper.endSession('partial');
+                    await loggingHelper.endSession('failed');
                 }
             }
 
@@ -340,16 +342,20 @@ class Integration {
                             trackingId: trackingEntry._id
                         });
                     } else if (serviceSummary.failed.length > 0 && serviceSummary.successful.length > 0) {
-                        // Partial success
+                        // Partial success - some services succeeded, some failed
                         trackingEntry.status = 'partial';
                         await trackingEntry.save();
                         logger.info('[Integration] Data fetch tracking completed with partial success', {
-                            trackingId: trackingEntry._id
+                            trackingId: trackingEntry._id,
+                            successfulCount: serviceSummary.successful.length,
+                            failedCount: serviceSummary.failed.length
                         });
                     } else {
-                        await DataFetchTrackingService.failTracking(trackingEntry._id, 'Critical services failed');
+                        // All services failed
+                        await DataFetchTrackingService.failTracking(trackingEntry._id, 'All services failed');
                         logger.info('[Integration] Data fetch tracking marked as failed', {
-                            trackingId: trackingEntry._id
+                            trackingId: trackingEntry._id,
+                            failedCount: serviceSummary.failed.length
                         });
                     }
                 } catch (trackingError) {
@@ -371,7 +377,7 @@ class Integration {
                     successfulServices: serviceSummary.successful.length,
                     failedServices: serviceSummary.failed.length,
                     warnings: serviceSummary.warnings,
-                    criticalFailures: serviceSummary.criticalFailures
+                    failures: serviceSummary.failed
                 }
             };
 
@@ -1300,11 +1306,8 @@ class Integration {
         let adGroupIdArray = [];
 
         try {
-            const storedSponsoredAdsData = await ProductWiseSponsoredAdsData.findOne({
-                userId: userId,
-                region: Region,
-                country: Country
-            });
+            // Use service layer that handles both old (embedded array) and new (separate collection) formats
+            const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
             if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
                 const campaignIds = new Set();
@@ -1701,15 +1704,10 @@ class Integration {
         
         const { userId, Region, Country, apiData, productData, merchantListingsData, loggingHelper } = params;
 
-        // Save generic keywords - ACTIVE FOR GETLISTINGITEMSISSUES TESTING
+        // Save generic keywords - Uses service layer to prevent 16MB limit
         if (Array.isArray(apiData.genericKeyWordArray) && apiData.genericKeyWordArray.length > 0) {
             try {
-                await ListingItemsModel.create({
-                    User: userId,
-                    region: Region,
-                    country: Country,
-                    GenericKeyword: apiData.genericKeyWordArray
-                });
+                await saveListingItemsData(userId, Country, Region, apiData.genericKeyWordArray);
             } catch (dbError) {
                 logger.error("Failed to save generic keywords to database", {
                     error: dbError.message
@@ -1814,18 +1812,18 @@ class Integration {
             }
         });
 
-        // Updated critical services - MCP Economics replaces Financial Events and Amazon Fees
-        const criticalServices = ["MCP Economics Data", "V2 Seller Performance", "Campaign Data"];
-        const criticalFailures = failed.filter(f => criticalServices.includes(f.service));
-
-        const overallSuccess = criticalFailures.length === 0;
+        // All services are treated equally - no critical/non-critical distinction
+        // Success is determined by having at least one service succeed
         const successPercentage = Math.round((successful.length / services.length) * 100);
+        
+        // Consider overall success if at least one service succeeded
+        // This ensures partial data is still usable and the job doesn't fail entirely
+        const overallSuccess = successful.length > 0;
 
         return {
             successful,
             failed,
             warnings,
-            criticalFailures,
             overallSuccess,
             successPercentage,
             totalServices: services.length

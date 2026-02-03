@@ -3,7 +3,8 @@ const zlib = require("zlib");
 const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel');
+// Use service layer for saving data (handles 16MB limit with separate collection)
+const { saveLedgerSummaryViewData } = require('../Finance/LedgerSummaryViewService');
 
 const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     try {
@@ -214,14 +215,10 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         });
 
         try {
-            const ledgerSummaryRecord = await LedgerSummaryView.create({
-                User: userId,
-                country: country,
-                region: region,
-                data: mappedData
-            });
+            // Save to database using service layer (handles 16MB limit with separate collection)
+            const saveResult = await saveLedgerSummaryViewData(userId, country, region, mappedData);
 
-            if (!ledgerSummaryRecord) {
+            if (!saveResult || !saveResult.success) {
                 logger.error("Failed to save ledger summary data to database");
                 throw new ApiError(500, "Failed to save data to database");
             }
@@ -232,7 +229,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
                 success: true,
                 message: "Report fetched and saved successfully",
                 data: mappedData,
-                recordId: ledgerSummaryRecord._id,
+                recordId: saveResult.recordId,
                 totalRecords: mappedData.length
             };
         } catch (dbError) {
