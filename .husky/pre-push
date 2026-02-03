@@ -1,0 +1,19 @@
+#!/bin/sh
+
+echo "Running tests before push..."
+
+# Run server tests
+npm run test:server
+if [ $? -ne 0 ]; then
+  echo "Server tests failed. Push aborted."
+  exit 1
+fi
+
+# Run client tests
+npm run test:client
+if [ $? -ne 0 ]; then
+  echo "Client tests failed. Push aborted."
+  exit 1
+fi
+
+echo "All tests passed! Proceeding with push."
