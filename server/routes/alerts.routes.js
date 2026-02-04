@@ -25,6 +25,7 @@ const { getLocation } = require('../middlewares/Auth/getLocation.js');
 const {
   getAlerts,
   getLatestAlerts,
+  getAlertById,
   updateAlertViewed,
   testAlerts,
   testProductContentChangeAlerts,
@@ -36,10 +37,15 @@ const {
   testInboundShipmentAlerts,
   testInventoryAlerts,
 } = require('../controllers/alerts/AlertsController.js');
+const { unsubscribeAlertsByEmail } = require('../controllers/alerts/AlertsSubscriptionController.js');
 
 router.get('/', auth, getLocation, getAlerts);
 router.get('/latest', auth, getLocation, getLatestAlerts);
+router.get('/:id', auth, getAlertById);
 router.patch('/:id/viewed', auth, updateAlertViewed);
+
+// Public unsubscribe endpoint (body: { email })
+router.post('/unsubscribe', unsubscribeAlertsByEmail);
 
 // Test endpoints (body: userId, country, region)
 router.post('/test', testAlerts);

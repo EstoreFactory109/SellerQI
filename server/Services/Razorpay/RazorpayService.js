@@ -275,6 +275,17 @@ class RazorpayService {
                     logger.info(`Razorpay subscription is in trial period until: ${trialEndsDate.toISOString()}`);
                 }
                 
+                // FALLBACK: Even if Razorpay fetch succeeded but status is not 'authenticated',
+                // check stored trial info to ensure trial users are not incorrectly marked as paid Pro
+                if (!isTrialing && subscription.hasTrial === true && subscription.trialEndsAt) {
+                    const storedTrialEnd = new Date(subscription.trialEndsAt);
+                    if (storedTrialEnd > new Date()) {
+                        isTrialing = true;
+                        trialEndsDate = storedTrialEnd;
+                        logger.info(`Using stored trial info as fallback: isTrialing=true, trialEndsDate=${trialEndsDate.toISOString()}, razorpayStatus=${razorpaySub.status}`);
+                    }
+                }
+                
                 if (razorpaySub.current_start) {
                     currentPeriodStart = new Date(razorpaySub.current_start * 1000);
                 }

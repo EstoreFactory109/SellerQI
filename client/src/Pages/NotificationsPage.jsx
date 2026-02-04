@@ -75,60 +75,12 @@ function getDisplayTitle(notification) {
   return notification.title;
 }
 
-// Group products by same change type / message / rating to show compact rows
-function getGroupedProductLines(products, alertType) {
-  if (!products?.length) return [];
-  if (alertType === 'ProductContentChange') {
-    const byChangeTypes = {};
-    products.forEach((p) => {
-      const key = [...(p.changeTypes || [])].sort().join(',') || 'change';
-      if (!byChangeTypes[key]) byChangeTypes[key] = { asins: [], changeTypes: p.changeTypes || [] };
-      byChangeTypes[key].asins.push(p.asin);
-    });
-    return Object.values(byChangeTypes).map((g) => ({
-      asins: g.asins,
-      line: g.changeTypes.length ? `Changed: ${g.changeTypes.join(', ')}` : null,
-    }));
-  }
-  if (alertType === 'BuyBoxMissing' || alertType === 'APlusMissing') {
-    return [{ asins: products.map((p) => p.asin), line: products[0]?.message || null }];
-  }
-  if (alertType === 'NegativeReviews') {
-    const byRating = {};
-    products.forEach((p) => {
-      const key = `${p.rating ?? ''}_${p.reviewCount ?? ''}`;
-      if (!byRating[key]) byRating[key] = { asins: [], rating: p.rating, reviewCount: p.reviewCount };
-      byRating[key].asins.push(p.asin);
-    });
-    return Object.values(byRating).map((g) => ({
-      asins: g.asins,
-      line: [g.rating != null && `Rating: ${g.rating}`, g.reviewCount != null && `Reviews: ${g.reviewCount}`].filter(Boolean).join(' · ') || null,
-    }));
-  }
-  return [{ asins: products.map((p) => p.asin), line: null }];
-}
-
-function ProductDetailRows({ products, alertType }) {
-  const groups = getGroupedProductLines(products, alertType);
-  if (!groups.length) return null;
-  const formatAsins = (asins) => (asins.length === 2 ? asins.join(' and ') : asins.join(', '));
-
-  return (
-    <div className="mt-2 pt-2 border-t border-gray-200/60">
-      <div className="flex flex-wrap gap-2 sm:gap-3">
-        {groups.map((g, i) => (
-          <div
-            key={i}
-            className="flex-1 min-w-[180px] sm:min-w-[220px] max-w-full rounded-lg bg-gray-50/80 border border-gray-200/60 px-3 py-2 text-xs text-gray-600"
-          >
-            <div className="font-medium text-gray-700">Products: </div>
-            <div className="font-mono break-all">{formatAsins(g.asins)}</div>
-            {g.line && <div className="mt-1 text-gray-600">{g.line}</div>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+// One-line summary: only product count (no ASINs or product-level detail)
+function getSummaryLine(notification) {
+  const products = notification.products || [];
+  const count = products.length;
+  if (count === 0) return null;
+  return count === 1 ? '1 product' : `${count} products`;
 }
 
 const NotificationsPage = () => {
@@ -204,13 +156,8 @@ const NotificationsPage = () => {
       axiosInstance.patch(`/api/alerts/${notification.alertId}/viewed`).catch(() => {});
     }
 
-    // Navigate to issues by category with filter based on alert type:
-    // Buy box, A+, negative reviews → Conversion; content change → Ranking
-    const conversionAlertTypes = ['BuyBoxMissing', 'APlusMissing', 'NegativeReviews'];
-    const isConversionAlert = conversionAlertTypes.includes(notification.alertType);
-    const filter = notification.alertType === 'ProductContentChange' ? 'Ranking' : isConversionAlert ? 'Conversion' : null;
-    const filterQuery = filter ? `&filter=${filter}` : '';
-    navigate(`/seller-central-checker/issues?tab=category${filterQuery}`);
+    // Navigate to notification details page
+    navigate(`/seller-central-checker/notification-details/${notification.alertId}`);
   };
 
   const hasMore = notifications.length < total;
@@ -281,10 +228,12 @@ const NotificationsPage = () => {
                         )}
                       </div>
                     </div>
-                    {notification.message && notification.message !== getDisplayTitle(notification) && (
-                      <p className="text-sm text-gray-600 mb-2 whitespace-pre-wrap">{notification.message}</p>
+                    {getSummaryLine(notification) && (
+                      <p className="text-sm text-gray-600">{getSummaryLine(notification)}</p>
                     )}
-                    <ProductDetailRows products={notification.products} alertType={notification.alertType} />
+                    {notification.message && notification.message !== getDisplayTitle(notification) && !getSummaryLine(notification) && (
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{notification.message}</p>
+                    )}
                   </div>
                 </div>
               </motion.div>

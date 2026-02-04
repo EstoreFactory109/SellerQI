@@ -60,12 +60,13 @@ alertBaseSchema.index({ User: 1, 'products.asin': 1, createdAt: -1 });
 
 const Alert = mongoose.model('Alert', alertBaseSchema);
 
-// ----- Product content change (products: asin, sku, changeTypes[], message) -----
+// ----- Product content change (products: asin, sku, title, changeTypes[], message) -----
 const CHANGE_TYPES = ['title', 'description', 'bullet_points', 'images'];
 const productContentItemSchema = new mongoose.Schema(
   {
     asin: { type: String, required: true },
     sku: { type: String, required: false },
+    title: { type: String, required: false },
     changeTypes: { type: [String], enum: CHANGE_TYPES, required: true, default: [] },
     message: { type: String, required: false },
   },
@@ -90,11 +91,12 @@ const ProductContentChangeAlert = Alert.discriminator(
   )
 );
 
-// ----- Buy box missing (products: asin, sku, message) -----
+// ----- Buy box missing (products: asin, sku, title, message) -----
 const buyBoxProductItemSchema = new mongoose.Schema(
   {
     asin: { type: String, required: true },
     sku: { type: String, required: false },
+    title: { type: String, required: false },
     message: { type: String, required: false },
   },
   { _id: false }
@@ -118,11 +120,12 @@ const BuyBoxMissingAlert = Alert.discriminator(
   )
 );
 
-// ----- Negative reviews (products: asin, sku, rating, reviewCount, message) -----
+// ----- Negative reviews (products: asin, sku, title, rating, reviewCount, message) -----
 const negativeReviewProductItemSchema = new mongoose.Schema(
   {
     asin: { type: String, required: true },
     sku: { type: String, required: false },
+    title: { type: String, required: false },
     rating: { type: Number, required: false },
     reviewCount: { type: Number, required: false },
     message: { type: String, required: false },
@@ -148,11 +151,12 @@ const NegetiveReviewsAlert = Alert.discriminator(
   )
 );
 
-// ----- A+ missing (products: asin, sku, message) -----
+// ----- A+ missing (products: asin, sku, title, message) -----
 const aplusMissingProductItemSchema = new mongoose.Schema(
   {
     asin: { type: String, required: true },
     sku: { type: String, required: false },
+    title: { type: String, required: false },
     message: { type: String, required: false },
   },
   { _id: false }

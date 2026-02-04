@@ -137,6 +137,7 @@ async function runProductContentChangeCheck(newerDoc, olderDoc, userId, region, 
       products.push({
         asin: newerProduct.asin,
         sku: newerProduct.sku ?? undefined,
+        title: newerProduct.product_title ?? undefined,
         changeTypes,
         message: message || undefined,
       });
@@ -199,6 +200,7 @@ async function runNegativeReviewsCheck(lastDoc, userId, region, country) {
     products.push({
       asin: p.asin?.trim() || p.asin,
       sku: p.sku ?? undefined,
+      title: p.product_title ?? undefined,
       rating,
       reviewCount,
       message: `Star rating ${rating} is below ${NEGATIVE_REVIEW_RATING_THRESHOLD}`,
@@ -317,9 +319,11 @@ async function runAPlusMissingCheck(userId, region, country) {
  * @param {mongoose.Types.ObjectId} userId
  * @param {string} region
  * @param {string} country
+ * @param {Object} [options] - { sendEmail: boolean } - If false, do not send email (default true)
  * @returns {Promise<{ productContentChange, negativeReviews, aplusMissing, error?: string }>}
  */
-async function detectAndStoreAlerts(userId, region, country) {
+async function detectAndStoreAlerts(userId, region, country, options = {}) {
+  const sendEmail = options.sendEmail !== false;
   try {
     const regionNorm = (region && String(region).trim()) || '';
     const countryNorm = (country && String(country).trim()) || '';
@@ -377,7 +381,7 @@ async function detectAndStoreAlerts(userId, region, country) {
       });
     }
 
-    if (productContentChange.created || negativeReviews.created || aplusMissing.created) {
+    if (sendEmail && (productContentChange.created || negativeReviews.created || aplusMissing.created)) {
       try {
         const user = await User.findById(userId).select('email firstName').lean();
         if (user?.email) {

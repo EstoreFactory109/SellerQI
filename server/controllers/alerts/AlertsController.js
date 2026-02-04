@@ -10,6 +10,7 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const { Alert, SalesDropAlert, ConversionRatesAlert } = require('../../models/alerts/Alert.js');
 const User = require('../../models/user-auth/userModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { sendAlertsEmail } = require('../../Services/Email/SendAlertsEmail.js');
 
 const DEFAULT_LIMIT = 50;
@@ -82,6 +83,65 @@ const getLatestAlerts = asyncHandler(async (req, res) => {
 
   return res.status(200).json(
     new ApiResponse(200, { alerts }, 'Latest alerts retrieved successfully')
+  );
+});
+
+/**
+ * GET /api/alerts/:id
+ * Requires: auth (req.userId)
+ * Params: id - alert _id
+ * Returns: single alert with full details (products, etc.) for the notification details page.
+ */
+const getAlertById = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+  const alertId = req.params.id;
+
+  if (!userId) {
+    return res.status(400).json(new ApiResponse(400, null, 'User ID is required'));
+  }
+  if (!alertId) {
+    return res.status(400).json(new ApiResponse(400, null, 'Alert ID is required'));
+  }
+
+  const mongoose = require('mongoose');
+  if (!mongoose.Types.ObjectId.isValid(alertId)) {
+    return res.status(400).json(new ApiResponse(400, null, 'Invalid alert ID'));
+  }
+
+  const alert = await Alert.findOne({ _id: alertId, User: userId }).lean();
+  if (!alert) {
+    return res.status(404).json(new ApiResponse(404, null, 'Alert not found'));
+  }
+
+  // Enrich products with sku and title (itemName) from Seller model
+  if (alert.country != null && alert.region != null && Array.isArray(alert.products) && alert.products.length > 0) {
+    const seller = await Seller.findOne({ User: userId })
+      .select('sellerAccount')
+      .lean();
+    const account = (seller?.sellerAccount || []).find(
+      (acc) => acc.country === alert.country && acc.region === alert.region
+    );
+    const productList = account?.products || [];
+    const byAsin = {};
+    for (const p of productList) {
+      const a = (p.asin || '').toString().trim();
+      if (a && !byAsin[a]) {
+        byAsin[a] = { sku: p.sku != null ? String(p.sku) : undefined, title: p.itemName != null ? String(p.itemName) : undefined };
+      }
+    }
+    alert.products = alert.products.map((prod) => {
+      const asinKey = (prod.asin || '').toString().trim();
+      const fromSeller = byAsin[asinKey];
+      return {
+        ...prod,
+        sku: fromSeller?.sku ?? prod.sku ?? undefined,
+        title: fromSeller?.title ?? prod.title ?? undefined,
+      };
+    });
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200, alert, 'Alert retrieved successfully')
   );
 });
 
@@ -451,7 +511,7 @@ const testConversionRates = asyncHandler(async (req, res) => {
 /**
  * POST /api/alerts/testLowInventory
  * Body: { userId, country, region }
- * Runs low inventory / out of stock detection from stored Restock Inventory document. Only creates alert if document was created today.
+ * Runs low inventory / out of stock detection from stored Restock Inventory document. Only creates alert if document was created within the last 3 days.
  */
 const testLowInventoryAlerts = asyncHandler(async (req, res) => {
   const parsed = parseAlertsTestBody(req, res);
@@ -489,7 +549,7 @@ const testLowInventoryAlerts = asyncHandler(async (req, res) => {
 /**
  * POST /api/alerts/testStrandedInventory
  * Body: { userId, country, region }
- * Runs stranded inventory detection from stored Stranded Inventory UI document. Only creates alert if document was created today.
+ * Runs stranded inventory detection from stored Stranded Inventory UI document. Only creates alert if document was created within the last 3 days.
  */
 const testStrandedInventoryAlerts = asyncHandler(async (req, res) => {
   const parsed = parseAlertsTestBody(req, res);
@@ -527,7 +587,7 @@ const testStrandedInventoryAlerts = asyncHandler(async (req, res) => {
 /**
  * POST /api/alerts/testInboundShipment
  * Body: { userId, country, region }
- * Runs inbound shipment issues detection from stored Inbound Non-Compliance document. Only creates alert if document was created today.
+ * Runs inbound shipment issues detection from stored Inbound Non-Compliance document. Only creates alert if document was created within the last 3 days.
  */
 const testInboundShipmentAlerts = asyncHandler(async (req, res) => {
   const parsed = parseAlertsTestBody(req, res);
@@ -565,7 +625,7 @@ const testInboundShipmentAlerts = asyncHandler(async (req, res) => {
 /**
  * POST /api/alerts/testInventoryAlerts
  * Body: { userId, country, region }
- * Runs all three inventory alert services: low inventory, stranded inventory, inbound shipment. Each only creates alert if its document was created today.
+ * Runs all three inventory alert services: low inventory, stranded inventory, inbound shipment. Each only creates alert if its document was created within the last 3 days.
  */
 const testInventoryAlerts = asyncHandler(async (req, res) => {
   const parsed = parseAlertsTestBody(req, res);
@@ -616,13 +676,14 @@ const testInventoryAlerts = asyncHandler(async (req, res) => {
       lowInventory,
       strandedInventory,
       inboundShipment,
-    }, 'Inventory alerts check completed. Alerts are only created when today\'s data is available.')
+    }, 'Inventory alerts check completed. Alerts are only created when data from the last 3 days is available.')
   );
 });
 
 module.exports = {
   getAlerts,
   getLatestAlerts,
+  getAlertById,
   updateAlertViewed,
   testAlerts,
   testProductContentChangeAlerts,

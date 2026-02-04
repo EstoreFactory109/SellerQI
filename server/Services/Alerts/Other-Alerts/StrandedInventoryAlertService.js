@@ -2,7 +2,7 @@
  * StrandedInventoryAlertService.js
  *
  * Fetches the latest Stranded Inventory UI data document from the database.
- * Only proceeds if the document's createdAt date is today (same calendar day, UTC).
+ * Only proceeds if the document's createdAt is within the last 3 days (UTC).
  * Creates StrandedInventory alerts for products in the stranded report.
  */
 
@@ -11,20 +11,20 @@ const { getStrandedInventoryUIData } = require('../../inventory/StrandedInventor
 const { StrandedInventoryAlert } = require('../../../models/alerts/Alert.js');
 const logger = require('../../../utils/Logger.js');
 
+/** Number of days within which stored data is considered fresh enough for alerts */
+const ALERT_DATA_FRESH_DAYS = 3;
+
 /**
- * Check if a date is the same calendar day as today (UTC).
+ * Check if a date falls within the last N days (UTC).
  * @param {Date} date
+ * @param {number} [days=3]
  * @returns {boolean}
  */
-function isCreatedToday(date) {
+function isWithinLastNDays(date, days = ALERT_DATA_FRESH_DAYS) {
   if (!date) return false;
   const d = new Date(date);
-  const now = new Date();
-  return (
-    d.getUTCFullYear() === now.getUTCFullYear() &&
-    d.getUTCMonth() === now.getUTCMonth() &&
-    d.getUTCDate() === now.getUTCDate()
-  );
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return d >= cutoff;
 }
 
 /**
@@ -40,7 +40,7 @@ function flattenStrandedItems(raw) {
 
 /**
  * Detect stranded inventory from stored document and create alert.
- * Only runs when the latest document was created today; otherwise skips (data may be old).
+ * Only runs when the latest document was created within the last 3 days; otherwise skips (data may be old).
  *
  * @param {string|ObjectId} userId
  * @param {string} region
@@ -75,8 +75,8 @@ async function detectAndStoreStrandedInventoryAlerts(userId, region, country) {
     }
 
     const createdAt = doc.createdAt;
-    if (!isCreatedToday(createdAt)) {
-      logger.info('[StrandedInventoryAlertService] Latest stranded document is not from today; skipping to avoid using old data', {
+    if (!isWithinLastNDays(createdAt)) {
+      logger.info('[StrandedInventoryAlertService] Latest stranded document is older than 3 days; skipping to avoid using stale data', {
         userId: userId?.toString?.() || userId,
         region,
         country,
@@ -85,7 +85,7 @@ async function detectAndStoreStrandedInventoryAlerts(userId, region, country) {
       return {
         created: false,
         productsCount: 0,
-        skipped: 'Latest stranded inventory data is not from today. Data may be stale.',
+        skipped: 'Latest stranded inventory data is older than 3 days. Data may be stale.',
       };
     }
 
@@ -152,6 +152,7 @@ async function detectAndStoreStrandedInventoryAlerts(userId, region, country) {
 
 module.exports = {
   detectAndStoreStrandedInventoryAlerts,
-  isCreatedToday,
+  isWithinLastNDays,
+  ALERT_DATA_FRESH_DAYS,
   flattenStrandedItems,
 };

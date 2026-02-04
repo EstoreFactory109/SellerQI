@@ -56,7 +56,9 @@ import ReimbursementDashboard from './Pages/ReimbursementDashboard.jsx';
 import YourProducts from './Pages/YourProducts.jsx';
 import PreAnalysis from './Pages/PreAnalysis.jsx';
 import NotificationsPage from './Pages/NotificationsPage.jsx';
+import NotificationDetailsPage from './Pages/NotificationDetailsPage.jsx';
 import AuthError from './Pages/AuthError.jsx';
+import UnsubscribeAlerts from './Pages/UnsubscribeAlerts.jsx';
 
 const App = () => {
 
@@ -78,6 +80,7 @@ const App = () => {
         <Route path='/admin-login' element={<AdminLogin />} />
           <Route path='/manage-accounts' element={<ManageAccounts />} />
         <Route path='/verify-email' element={<EmailVerification />} />
+        <Route path='/unsubscribe-alerts' element={<UnsubscribeAlerts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/connect-accounts' element={<ConnectAccounts />} />
         <Route path='/agency-client-registration' element={<AgencyClientRegistration />} />
@@ -132,6 +135,7 @@ const App = () => {
             <Route path='tasks' element={<Tasks />} />
             <Route path='ecommerce-calendar' element={<EcommerceHolidaysCalendar />} />
             <Route path='notifications' element={<NotificationsPage />} />
+            <Route path='notification-details/:id' element={<NotificationDetailsPage />} />
             <Route path='user-logging' element={<UserLogging />} />
             <Route path='consultation' element={<CalendlyWidget />} />
             

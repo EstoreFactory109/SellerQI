@@ -9,6 +9,7 @@
     "start": "node server/index.js",
     "worker": "node server/Services/BackgroundJobs/worker.js",
     "integration-worker": "node server/Services/BackgroundJobs/integrationWorker.js",
+    "alerts:test-user": "node server/scripts/runAlertsWorkerForUser.js",
     "test": "npm run test:server && npm run test:client",
     "test:server": "jest --config server/jest.config.js",
     "test:server:watch": "jest --config server/jest.config.js --watch",

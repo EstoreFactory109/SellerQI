@@ -300,8 +300,8 @@ const YourProducts = () => {
         return 'Inactive';
       case 'incomplete':
         return 'Incomplete';
-      case 'withAPlus':
-        return undefined; // Keep client-side filtering for A+ tab
+      case 'withoutAPlus':
+        return undefined; // Keep client-side filtering for Without A+ tab
       default:
         return undefined;
     }
@@ -421,13 +421,13 @@ const YourProducts = () => {
   };
 
   // Filter products based on search and sort (client-side filtering)
-  // Note: Status filtering is now done on backend, but we keep client-side for 'withAPlus' tab
+  // Note: Status filtering is now done on backend, but we keep client-side for 'withoutAPlus' tab
   const filteredProducts = useMemo(() => {
     let filtered = [...products];
 
-    // Only apply client-side status filter for 'withAPlus' tab (backend doesn't filter by hasAPlus)
-    if (activeTab === 'withAPlus') {
-      filtered = filtered.filter(p => p.hasAPlus);
+    // Only apply client-side status filter for 'withoutAPlus' tab (backend doesn't filter by hasAPlus)
+    if (activeTab === 'withoutAPlus') {
+      filtered = filtered.filter(p => !p.hasAPlus);
     }
     // For other tabs (all, active, inactive, incomplete), backend already filters by status
 
@@ -1003,8 +1003,8 @@ const YourProducts = () => {
             <div className="text-2xl font-bold text-amber-600">{summary.incompleteProducts || 0}</div>
           </div>
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">With A+</div>
-            <div className="text-2xl font-bold text-purple-600">{summary.productsWithAPlus || 0}</div>
+            <div className="text-sm text-gray-500 mb-1">Without A+</div>
+            <div className="text-2xl font-bold text-purple-600">{summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0)}</div>
           </div>
           <div className="bg-white rounded-xl shadow-sm p-4">
             <div className="text-sm text-gray-500 mb-1">Brand Story</div>
@@ -1056,7 +1056,7 @@ const YourProducts = () => {
             { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
             { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
             { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 },
-            { key: 'withAPlus', label: 'With A+', count: summary.productsWithAPlus || 0 }
+            { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0) }
           ].map(tab => (
             <button
               key={tab.key}
@@ -1174,18 +1174,18 @@ const YourProducts = () => {
                           </div>
                         </th>
                       )}
-                      {/* Quantity column - shown for all, active, and withAPlus tabs */}
+                      {/* Quantity column - shown for all, active, and withoutAPlus tabs */}
                       {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
                         <th 
                           className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                           style={{ width: activeTab === 'active' ? '8%' : '7%' }}
                           onClick={() => handleSort('quantity')}
                         >
-                          Qty {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                          Available Stocks {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                         </th>
                       )}
-                      {/* Status column - hidden in 'active' and 'withAPlus' tabs */}
-                      {activeTab !== 'active' && activeTab !== 'withAPlus' && (
+                      {/* Status column - hidden in 'active' and 'withoutAPlus' tabs */}
+                      {activeTab !== 'active' && activeTab !== 'withoutAPlus' && (
                         <th 
                           className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                           style={{ width: '7%' }}
@@ -1426,7 +1426,7 @@ const YourProducts = () => {
                             )}
                           </td>
                         )}
-                        {/* Quantity column - shown for all, active, and withAPlus tabs */}
+                        {/* Quantity column - shown for all, active, and withoutAPlus tabs */}
                         {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
                           <td className="px-2 py-3 text-center align-top">
                             <span className="text-xs font-semibold text-gray-900 whitespace-nowrap">
@@ -1436,8 +1436,8 @@ const YourProducts = () => {
                             </span>
                           </td>
                         )}
-                        {/* Status column - hidden in 'active' and 'withAPlus' tabs */}
-                        {activeTab !== 'active' && activeTab !== 'withAPlus' && (
+                        {/* Status column - hidden in 'active' and 'withoutAPlus' tabs */}
+                        {activeTab !== 'active' && activeTab !== 'withoutAPlus' && (
                           <td className="px-2 py-3 text-center align-top">
                             <span 
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
@@ -1514,7 +1514,7 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withAPlus') ? 10 : 11
+                      (activeTab === 'active' || activeTab === 'withoutAPlus') ? 10 : 11
                     } className="px-4 py-12 text-center text-gray-500">
                       {products.length === 0 
                         ? 'No products found. Please ensure your account is connected and data is synced.'
@@ -1528,7 +1528,7 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withAPlus') ? 10 : 11
+                      (activeTab === 'active' || activeTab === 'withoutAPlus') ? 10 : 11
                     } className="px-4 py-8 text-center bg-gray-50">
                       <div className="flex items-center justify-center gap-3">
                         <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>

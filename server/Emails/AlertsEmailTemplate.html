@@ -4,32 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Your SellerQI Alerts</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; background-color: #f8fafc; color: #334155;">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8fafc; padding: 20px 0;">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; background-color: #f1f5f9; color: #1e293b;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f1f5f9; padding: 32px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+        <!-- Card container -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);">
+          <!-- Top accent bar -->
+          <tr>
+            <td style="height: 4px; background: linear-gradient(90deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%); font-size: 0; line-height: 0;">&nbsp;</td>
+          </tr>
           <!-- Header -->
           <tr>
-            <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; border-bottom: 1px solid #e2e8f0;">
+            <td style="background-color: #ffffff; padding: 28px 36px 20px 36px; border-bottom: 1px solid #e2e8f0;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
                 <tr>
-                  <td align="left">
-                    <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI" style="height: 32px; width: auto; display: block;" />
+                  <td align="left" style="vertical-align: middle;">
+                    <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI" width="140" height="32" style="height: 32px; width: auto; max-width: 140px; display: block;" />
                   </td>
-                  <td align="right">
-                    <span style="background-color: #f1f5f9; color: #64748b; padding: 6px 12px; border-radius: 16px; font-size: 13px; font-weight: 500;">{{date}}</span>
+                  <td align="right" style="vertical-align: middle;">
+                    <span style="background-color: #f1f5f9; color: #64748b; padding: 8px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;">{{date}}</span>
                   </td>
                 </tr>
               </table>
-              <h1 style="margin: 24px 0 8px 0; font-size: 24px; font-weight: 600; color: #0f172a;">Alerts for your account</h1>
-              <p style="margin: 0; font-size: 16px; color: #64748b;">Hi {{userName}}, {{summaryText}}</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 24px;">
+                <tr>
+                  <td>
+                    <span style="display: inline-block; background-color: #eff6ff; color: #2563eb; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px;">Alerts</span>
+                    <h1 style="margin: 0 0 8px 0; font-size: 26px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">Hi {{userName}}</h1>
+                    <p style="margin: 0; font-size: 16px; color: #64748b; line-height: 1.5;">{{summaryText}}</p>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
-          <!-- Main Content: only sections with content are included (ProductContentChangeAlertService = content + negative reviews only; BuyBoxMissingAlertService = buybox only) -->
+          <!-- Main Content -->
           <tr>
-            <td style="padding: 32px 40px;">
+            <td style="padding: 28px 36px 32px 36px;">
+              {{summaryRowsSection}}
               {{productContentChangeSection}}
               {{negativeReviewsSection}}
               {{buyBoxMissingSection}}
@@ -40,18 +62,18 @@
               {{strandedInventorySection}}
               {{inboundShipmentSection}}
               <!-- CTA -->
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 8px; margin-bottom: 28px;">
                 <tr>
-                  <td align="center">
-                    <a href="{{alertsDashboardUrl}}" style="background-color: #3b82f6; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block;">View all alerts</a>
+                  <td align="center" style="padding: 8px 0;">
+                    <a href="{{alertsDashboardUrl}}" style="display: inline-block; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #ffffff !important; text-decoration: none; padding: 16px 36px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);">View all alerts</a>
                   </td>
                 </tr>
               </table>
               <!-- Help -->
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
                 <tr>
-                  <td align="center" style="padding: 16px; font-size: 14px; color: #64748b;">
-                    Need help? <a href="mailto:support@sellerqi.com" style="color: #3b82f6; text-decoration: none;">support@sellerqi.com</a>
+                  <td align="center" style="padding: 16px 0; font-size: 14px; color: #94a3b8;">
+                    Need help? <a href="mailto:support@sellerqi.com" style="color: #3b82f6; text-decoration: none; font-weight: 500;">support@sellerqi.com</a>
                   </td>
                 </tr>
               </table>
@@ -59,12 +81,18 @@
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="background-color: #f8fafc; padding: 24px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <div style="font-size: 12px; color: #94a3b8;">
-                © 2025 SellerQI. All rights reserved.<br>
-                <a href="https://www.sellerqi.com/privacy-policy" style="color: #64748b; text-decoration: none;">Privacy</a> |
+            <td style="background-color: #f8fafc; padding: 24px 36px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+                © 2025 SellerQI. All rights reserved.
+              </p>
+              <p style="margin: 10px 0 0 0; font-size: 12px;">
+                <a href="https://www.sellerqi.com/privacy-policy" style="color: #64748b; text-decoration: none;">Privacy</a>
+                <span style="color: #cbd5e1;">&nbsp;·&nbsp;</span>
                 <a href="https://www.sellerqi.com/terms-of-use" style="color: #64748b; text-decoration: none;">Terms</a>
-              </div>
+              </p>
+              <p style="margin: 14px 0 0 0; font-size: 11px; color: #94a3b8;">
+                Don't want these alerts? <a href="https://members.sellerqi.com/unsubscribe-alerts" style="color: #64748b; text-decoration: underline;">Unsubscribe</a>
+              </p>
             </td>
           </tr>
         </table>

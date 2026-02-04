@@ -147,6 +147,10 @@ const userSchema = new mongoose.Schema(
       analyseAccountSuccess:{
         type:Number,
         default:1
+      },
+      subscribedToAlerts: {
+        type: Boolean,
+        default: true
       }
     },
     {

@@ -4,6 +4,9 @@
  * This file configures PM2 to run:
  * 1. API Server (main application)
  * 2. Worker processes (for processing queue jobs)
+ * 3. Integration Worker (first-time integration jobs)
+ * 4. Weekly History Worker (Sunday 23:59 UTC)
+ * 5. Alerts Worker (Sunday and Wednesday 06:00 UTC)
  * 
  * Usage:
  *   pm2 start ecosystem.config.js
@@ -148,6 +151,34 @@ module.exports = {
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
+            env_production: {
+                NODE_ENV: 'production'
+            },
+            env_development: {
+                NODE_ENV: 'development'
+            }
+        },
+        {
+            // Alerts Worker - Runs on Sunday and Wednesday at 06:00 UTC (cron: 0 6 * * 0,3)
+            // Runs all alert services and sends a single summary email per subscribed user
+            name: 'alerts-worker',
+            script: './server/Services/BackgroundJobs/alertsWorker.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                TIMEZONE: process.env.TIMEZONE || 'UTC',
+                ALERTS_WORKER_CRON: process.env.ALERTS_WORKER_CRON || '0 6 * * 0,3',
+            },
+            error_file: './logs/pm2-alerts-worker-error.log',
+            out_file: './logs/pm2-alerts-worker-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 5,
+            min_uptime: '10s',
+            max_memory_restart: '768M',
+            watch: false,
             env_production: {
                 NODE_ENV: 'production'
             },

@@ -301,28 +301,6 @@ class ScheduledIntegration {
                 // Don't fail the entire process if history fails
             }
 
-            // Run product content change + negative reviews alerts last (only on Sunday when productReview has run)
-            if (dayOfWeek === 0) {
-                try {
-                    const { detectAndStoreAlerts } = require('../Alerts/Other-Alerts/ProductContentChangeAlertService.js');
-                    await detectAndStoreAlerts(userId, Region, Country);
-                    logger.info('[ScheduledIntegration] Product content change / negative reviews alerts completed', { userId, Region, Country });
-                } catch (alertsError) {
-                    logger.error('[ScheduledIntegration] Product content change alerts failed (non-fatal)', { error: alertsError?.message, userId, Region, Country });
-                }
-            }
-
-            // Run buybox missing alerts last (only when mcpBuyBoxData has run: Sunday, Tuesday, Thursday, Saturday)
-            if (dayOfWeek === 0 || dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6) {
-                try {
-                    const { detectAndStoreBuyBoxMissingAlerts } = require('../Alerts/Other-Alerts/BuyBoxMissingAlertService.js');
-                    await detectAndStoreBuyBoxMissingAlerts(userId, Region, Country);
-                    logger.info('[ScheduledIntegration] Buybox missing alerts completed', { userId, Region, Country });
-                } catch (alertsError) {
-                    logger.error('[ScheduledIntegration] Buybox missing alerts failed (non-fatal)', { error: alertsError?.message, userId, Region, Country });
-                }
-            }
-
             // Build error message if there are failures
             let errorMessage = null;
             if (!serviceSummary.overallSuccess) {
@@ -1408,98 +1386,6 @@ class ScheduledIntegration {
             apiData.genericKeyWordArray = [];
         } else {
             apiData.genericKeyWordArray = [];
-        }
-
-        // Run Conversion Rates alerts after all scheduled services have executed (non-blocking; failures do not affect response)
-        // Sales drop alert temporarily removed from schedule
-        // Conversion rates (sales conversion) alert temporarily removed from schedule - re-enable by changing runConversionRatesAlert to true
-        const runConversionRatesAlert = false;
-        if (runConversionRatesAlert) {
-            try {
-                const mongoose = require('mongoose');
-                const { getConversionRates } = require('../Alerts/Other-Alerts/ConversionAlertService.js');
-                const { ConversionRatesAlert } = require('../../models/alerts/Alert.js');
-                const User = require('../../models/user-auth/userModel.js');
-                const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
-
-                const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
-                    ? new mongoose.Types.ObjectId(userId)
-                    : userId;
-
-                // Conversion rates alert (uses Sales and Traffic API; requires RefreshToken)
-                if (RefreshToken) {
-                    const convResult = await getConversionRates(RefreshToken, Region, Country, {});
-                    if (convResult.success && convResult.conversionRates?.length > 0) {
-                        await ConversionRatesAlert.create({
-                            User: userIdObj,
-                            region: Region,
-                            country: Country,
-                            message: `Conversion rates for last 7 days (${convResult.dateRange.startDate} to ${convResult.dateRange.endDate})`,
-                            status: 'active',
-                            dateRange: convResult.dateRange,
-                            marketplace: convResult.marketplace,
-                            conversionRates: convResult.conversionRates,
-                        });
-                        const user = await User.findById(userIdObj).select('email firstName').lean();
-                        if (user?.email) {
-                            await sendAlertsEmail(user.email, user.firstName || 'Seller', {
-                                productContentChange: { count: 0, products: [] },
-                                negativeReviews: { count: 0, products: [] },
-                                buyBoxMissing: { count: 0, products: [] },
-                                aplusMissing: { count: 0, products: [] },
-                                salesDrop: { count: 0 },
-                                conversionRates: { count: 1, dateRange: convResult.dateRange, conversionRates: convResult.conversionRates },
-                            }, undefined, userIdObj);
-                        }
-                    }
-                }
-            } catch (alertsError) {
-                logger.warn('Conversion rates alerts failed (non-fatal)', { userId, region: Region, country: Country, error: alertsError?.message });
-            }
-        }
-
-        // Run inventory alerts after all scheduled services (non-blocking; failures do not affect response)
-        try {
-            const { detectAndStoreLowInventoryAlerts } = require('../Alerts/Other-Alerts/LowInventoryAlertService.js');
-            const { detectAndStoreStrandedInventoryAlerts } = require('../Alerts/Other-Alerts/StrandedInventoryAlertService.js');
-            const { detectAndStoreInboundShipmentAlerts } = require('../Alerts/Other-Alerts/InboundShipmentAlertService.js');
-            const lowResult = await detectAndStoreLowInventoryAlerts(userId, Region, Country);
-            const strandedResult = await detectAndStoreStrandedInventoryAlerts(userId, Region, Country);
-            const inboundResult = await detectAndStoreInboundShipmentAlerts(userId, Region, Country);
-
-            const lowProducts = lowResult?.alert?.products ?? [];
-            const strandedProducts = strandedResult?.alert?.products ?? [];
-            const inboundProducts = inboundResult?.alert?.products ?? [];
-            const totalInventoryAlerts = lowProducts.length + strandedProducts.length + inboundProducts.length;
-
-            if (totalInventoryAlerts > 0) {
-                try {
-                    const mongoose = require('mongoose');
-                    const User = require('../../models/user-auth/userModel.js');
-                    const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
-                    const userIdObj = (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId))
-                        ? new mongoose.Types.ObjectId(userId)
-                        : userId;
-                    const user = await User.findById(userIdObj).select('email firstName').lean();
-                    if (user?.email) {
-                        await sendAlertsEmail(user.email, user.firstName || 'Seller', {
-                            productContentChange: { count: 0, products: [] },
-                            negativeReviews: { count: 0, products: [] },
-                            buyBoxMissing: { count: 0, products: [] },
-                            aplusMissing: { count: 0, products: [] },
-                            salesDrop: { count: 0, drops: [] },
-                            conversionRates: { count: 0, dateRange: null, conversionRates: [] },
-                            lowInventory: { count: lowProducts.length, products: lowProducts },
-                            strandedInventory: { count: strandedProducts.length, products: strandedProducts },
-                            inboundShipment: { count: inboundProducts.length, products: inboundProducts },
-                        }, undefined, userIdObj);
-                    }
-                } catch (emailErr) {
-                    logger.warn('Inventory alerts email failed (non-fatal)', { userId, region: Region, country: Country, error: emailErr?.message });
-                }
-            }
-        } catch (inventoryAlertsError) {
-            logger.warn('Inventory alerts failed (non-fatal)', { userId, region: Region, country: Country, error: inventoryAlertsError?.message });
         }
 
         return apiData;
