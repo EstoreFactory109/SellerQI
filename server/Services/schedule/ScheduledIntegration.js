@@ -1713,6 +1713,7 @@ class ScheduledIntegration {
         try {
             const userModel = require('../../models/user-auth/userModel.js');
             const { sendAnalysisReadyEmail } = require('../Email/SendAnalysisReadyEmail.js');
+            const { markFirstAnalysisDone } = require('../User/userServices.js');
             
             const userInfo = await userModel.findById(userId).select("analyseAccountSuccess email firstName");
 
@@ -1728,6 +1729,11 @@ class ScheduledIntegration {
                     if (emailSent) {
                         userInfo.analyseAccountSuccess = 0;
                         await userInfo.save();
+                        
+                        // Mark first analysis as done when email is successfully sent
+                        // This flag indicates the analysis is complete and dashboard is ready
+                        await markFirstAnalysisDone(userId);
+                        logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
                     }
                 }
             }

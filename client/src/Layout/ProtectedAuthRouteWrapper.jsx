@@ -13,7 +13,8 @@ const ProtectedAuthRouteWrapper = ({ children }) => {
 
     if (localAuth === "true") {
       setIsAuth(true);
-      navigate("/seller-central-checker/dashboard");
+      // Redirect to analyse-account page - dashboard access is determined there based on analysis status
+      navigate("/analyse-account");
       return;
     } else if (localAuth === "false") {
       setIsAuth(false);
@@ -27,7 +28,8 @@ const ProtectedAuthRouteWrapper = ({ children }) => {
         if (result.isAuthenticated) {
           localStorage.setItem("isAuth", "true");
           setIsAuth(true);
-          navigate("/seller-central-checker/dashboard");
+          // Redirect to analyse-account page - dashboard access is determined there based on analysis status
+          navigate("/analyse-account");
         } else {
           localStorage.setItem("isAuth", "false");
           setIsAuth(false);

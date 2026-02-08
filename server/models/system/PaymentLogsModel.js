@@ -24,25 +24,35 @@ const PaymentLogsSchema = new mongoose.Schema(
           "RAZORPAY_SUBSCRIPTION_CANCELLED",
           "RAZORPAY_SUBSCRIPTION_HALTED",
           "RAZORPAY_SUBSCRIPTION_PENDING",
+          "RAZORPAY_SUBSCRIPTION_EXPIRED",
+          "RAZORPAY_SUBSCRIPTION_COMPLETED",
           "RAZORPAY_WEBHOOK_RECEIVED",
           "RAZORPAY_FETCH_ERROR",
           // Stripe events
           "STRIPE_CHECKOUT_CREATED",
+          "STRIPE_CHECKOUT_COMPLETED",
+          "STRIPE_CHECKOUT_EXPIRED",
           "STRIPE_PAYMENT_SUCCESS",
           "STRIPE_PAYMENT_FAILED",
           "STRIPE_SUBSCRIPTION_CREATED",
           "STRIPE_SUBSCRIPTION_UPDATED",
           "STRIPE_SUBSCRIPTION_CANCELLED",
           "STRIPE_WEBHOOK_RECEIVED",
+          "STRIPE_INVOICE_PAID",
+          "STRIPE_INVOICE_PAYMENT_FAILED",
+          "STRIPE_REFUND_CREATED",
+          "STRIPE_CHARGE_REFUNDED",
           // Trial events
           "TRIAL_STARTED",
           "TRIAL_ENDED",
           "TRIAL_UPGRADED",
+          "TRIAL_WILL_END",
           // Generic events
           "SUBSCRIPTION_STATUS_CHANGED",
           "PLAN_UPGRADED",
           "PLAN_DOWNGRADED",
           "REFUND_PROCESSED",
+          "WEBHOOK_DUPLICATE_IGNORED",
           "OTHER"
         ],
         message: "Invalid event type"
@@ -199,6 +209,53 @@ PaymentLogsSchema.index({ eventType: 1, createdAt: -1 });
 PaymentLogsSchema.index({ paymentGateway: 1, createdAt: -1 });
 PaymentLogsSchema.index({ subscriptionId: 1, createdAt: -1 });
 PaymentLogsSchema.index({ paymentId: 1 });
+// Sparse unique index on webhookEventId to detect duplicate webhooks
+// Sparse allows multiple null values (for non-webhook events)
+PaymentLogsSchema.index({ webhookEventId: 1 }, { unique: true, sparse: true });
+
+/**
+ * Check if a webhook event has already been processed
+ * @param {string} webhookEventId - The unique webhook event ID
+ * @returns {boolean} - True if event was already processed
+ */
+PaymentLogsSchema.statics.isWebhookProcessed = async function(webhookEventId) {
+  if (!webhookEventId) return false;
+  const existing = await this.findOne({ webhookEventId });
+  return !!existing;
+};
+
+/**
+ * Mark a webhook event as processed and return true if successful
+ * Returns false if event was already processed (duplicate)
+ * @param {Object} eventData - Event data including webhookEventId
+ * @returns {Object} - { isNew: boolean, log: PaymentLog|null }
+ */
+PaymentLogsSchema.statics.logWebhookEvent = async function(eventData) {
+  if (!eventData.webhookEventId) {
+    // No webhook event ID, just log normally
+    const log = await this.logEvent(eventData);
+    return { isNew: true, log };
+  }
+  
+  try {
+    // Try to create the log - will fail if duplicate due to unique index
+    const log = await this.create({
+      ...eventData,
+      eventType: eventData.eventType?.toUpperCase(),
+      paymentGateway: eventData.paymentGateway?.toUpperCase(),
+      status: eventData.status?.toUpperCase() || 'SUCCESS'
+    });
+    return { isNew: true, log };
+  } catch (error) {
+    // Check if it's a duplicate key error (E11000)
+    if (error.code === 11000 && error.keyPattern?.webhookEventId) {
+      console.log(`Duplicate webhook event detected: ${eventData.webhookEventId}`);
+      return { isNew: false, log: null };
+    }
+    console.error('Error logging webhook event:', error);
+    return { isNew: true, log: null }; // Return true to allow processing on log failure
+  }
+};
 
 // Static method to log a payment event
 PaymentLogsSchema.statics.logEvent = async function(eventData) {

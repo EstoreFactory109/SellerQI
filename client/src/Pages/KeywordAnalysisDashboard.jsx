@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { ChevronDown, ChevronUp, Search, Download, TrendingUp, AlertCircle, CheckCircle, DollarSign, Target, Filter, MoreVertical, Info } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search, Download, AlertCircle, DollarSign, Target, Filter, MoreVertical, Info } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import {
@@ -11,6 +11,8 @@ import {
   setErrorForAsin,
   setError
 } from '../redux/slices/KeywordRecommendationsSlice.js';
+import { useKeywordAnalysisData } from '../hooks/usePageData.js';
+import { TablePageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
@@ -25,6 +27,10 @@ const KeywordAnalysisDashboard = () => {
   const [asinSearchQuery, setAsinSearchQuery] = useState('');
   const asinDropdownRef = useRef(null);
   const itemsPerLoad = 10;
+  const hasAutoSelectedRef = useRef(false);
+
+  // Fetch keyword analysis data using the hook (automatically fetches on mount)
+  const { data: keywordPageData, loading: keywordPageLoading, refetch: refetchKeywordData } = useKeywordAnalysisData();
 
   // Get data from Redux
   const asinsList = useSelector((state) => state.keywordRecommendations?.asinsList || []);
@@ -32,8 +38,10 @@ const KeywordAnalysisDashboard = () => {
   const keywordsByAsin = useSelector((state) => state.keywordRecommendations?.keywordsByAsin || {});
   const reduxError = useSelector((state) => state.keywordRecommendations?.error);
 
-  // Get product data from Dashboard to get product names
-  const dashboardInfo = useSelector((state) => state.Dashboard?.DashBoardInfo);
+  // Get product data from page-wise data if available, fall back to legacy DashboardSlice
+  // Backend returns data directly (not nested) e.g. { TotalProduct, productWiseError, ... }
+  const legacyDashboardInfo = useSelector((state) => state.Dashboard?.DashBoardInfo);
+  const dashboardInfo = keywordPageData || legacyDashboardInfo;
   const totalProducts = dashboardInfo?.TotalProduct || [];
   const productWiseError = dashboardInfo?.productWiseError || [];
 
@@ -91,13 +99,17 @@ const KeywordAnalysisDashboard = () => {
     const fetchAsinsList = async () => {
       // If ASINs list already exists in Redux, use it
       if (asinsList.length > 0) {
-        // Auto-select first ASIN if available and none selected
-        if (!selectedAsin) {
+        // Auto-select first ASIN if available and none selected (only once)
+        if (!selectedAsin && !hasAutoSelectedRef.current) {
           setSelectedAsin(asinsList[0].asin);
+          hasAutoSelectedRef.current = true;
         }
         return;
       }
 
+      // Reset auto-select flag when fetching new data
+      hasAutoSelectedRef.current = false;
+      
       dispatch(setLoadingAsins(true));
       try {
         const response = await axiosInstance.get('/app/analyse/keywordRecommendations/asins');
@@ -106,9 +118,10 @@ const KeywordAnalysisDashboard = () => {
           const asins = response.data.data.asins;
           dispatch(setAsinsList(asins));
           
-          // Auto-select first ASIN if available
-          if (asins.length > 0 && !selectedAsin) {
+          // Auto-select first ASIN if available (only once)
+          if (asins.length > 0 && !selectedAsin && !hasAutoSelectedRef.current) {
             setSelectedAsin(asins[0].asin);
+            hasAutoSelectedRef.current = true;
           }
         }
       } catch (err) {
@@ -120,7 +133,8 @@ const KeywordAnalysisDashboard = () => {
     };
 
     fetchAsinsList();
-  }, [asinsList.length, selectedAsin, dispatch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asinsList.length, dispatch]); // Removed selectedAsin from dependencies to prevent infinite loop
 
   // Use a ref to track keywordsByAsin without causing re-renders
   const keywordsByAsinRef = useRef(keywordsByAsin);
@@ -423,55 +437,15 @@ const KeywordAnalysisDashboard = () => {
     document.body.removeChild(link);
   };
 
-  if (loadingAsins) {
+  // Empty state only when not loading (when loading, we show header + skeleton below)
+  if (!loadingAsins && asinsList.length === 0) {
     return (
       <div className="dashboard-container">
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          minHeight: '100vh',
-          flexDirection: 'column',
-          gap: '20px'
-        }}>
-          <div className="loading" style={{ width: '40px', height: '40px' }}></div>
-          <p style={{ color: '#64748b', fontSize: '16px' }}>Loading ASINs list...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (asinsList.length === 0) {
-    return (
-      <div className="dashboard-container">
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          minHeight: '100vh',
-          flexDirection: 'column',
-          gap: '20px'
-        }}>
-          <AlertCircle size={48} color="#ef4444" />
-          <p style={{ color: '#ef4444', fontSize: '16px' }}>No ASINs with keyword recommendations found. Please ensure keyword data has been processed.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="dashboard-container">
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          minHeight: '100vh',
-          flexDirection: 'column',
-          gap: '20px'
-        }}>
-          <div className="loading" style={{ width: '40px', height: '40px' }}></div>
-          <p style={{ color: '#64748b', fontSize: '16px' }}>Loading keyword recommendations...</p>
+        <div className="container" style={{ padding: '10px 0' }}>
+          <div className="bg-[#161b22] rounded border border-[#30363d] p-4 text-center">
+            <AlertCircle size={32} color="#ef4444" className="mx-auto mb-2" />
+            <p style={{ color: '#ef4444', fontSize: '12px' }}>No ASINs with keyword recommendations found. Please ensure keyword data has been processed.</p>
+          </div>
         </div>
       </div>
     );
@@ -486,10 +460,10 @@ const KeywordAnalysisDashboard = () => {
           alignItems: 'center', 
           minHeight: '100vh',
           flexDirection: 'column',
-          gap: '20px'
+          gap: '10px'
         }}>
-          <AlertCircle size={48} color="#ef4444" />
-          <p style={{ color: '#ef4444', fontSize: '16px' }}>{error}</p>
+          <AlertCircle size={32} color="#ef4444" />
+          <p style={{ color: '#ef4444', fontSize: '12px' }}>{error}</p>
         </div>
       </div>
     );
@@ -503,8 +477,8 @@ const KeywordAnalysisDashboard = () => {
       <style>{`
         .dashboard-container {
           min-height: 100vh;
-          background: #f5f6fa;
-          padding: 20px;
+          background: #1a1a1a;
+          padding: 10px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
@@ -514,66 +488,67 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .header {
-          background: white;
-          padding: 20px 30px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-          margin-bottom: 24px;
+          background: #161b22;
+          padding: 10px 15px;
+          border-radius: 6px;
+          border: 1px solid #30363d;
+          margin-bottom: 10px;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
         
         .logo {
-          font-size: 24px;
+          font-size: 16px;
           font-weight: 700;
-          color: #1e293b;
+          color: #f3f4f6;
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
         }
         
         .asin-filter-container {
-          background: white;
-          padding: 16px 24px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-          margin-bottom: 24px;
+          background: #161b22;
+          padding: 8px 12px;
+          border-radius: 6px;
+          border: 1px solid #30363d;
+          margin-bottom: 10px;
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 8px;
         }
         
         .asin-filter-label {
-          font-size: 14px;
+          font-size: 12px;
           font-weight: 600;
-          color: #475569;
+          color: #9ca3af;
           white-space: nowrap;
         }
         
         .asin-filter-select {
           flex: 1;
-          max-width: 600px;
-          min-width: 300px;
-          padding: 10px 14px;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          background: white;
-          font-size: 14px;
+          min-width: 0;
+          padding: 6px 10px;
+          border: 1px solid #30363d;
+          border-radius: 6px;
+          background: #1a1a1a;
+          font-size: 12px;
           font-weight: 500;
-          color: #1e293b;
+          color: #f3f4f6;
           cursor: pointer;
           transition: all 0.2s;
           appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23334155' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
           background-repeat: no-repeat;
-          background-position: right 12px center;
-          padding-right: 36px;
+          background-position: right 10px center;
+          padding-right: 30px;
         }
         
         .asin-filter-select option {
-          padding: 8px;
+          padding: 6px;
           white-space: normal;
+          background: #21262d;
+          color: #f3f4f6;
         }
         
         .asin-filter-select:hover:not(:disabled) {
@@ -583,38 +558,27 @@ const KeywordAnalysisDashboard = () => {
         .asin-filter-select:focus:not(:disabled) {
           outline: none;
           border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
         }
         
         .asin-filter-select:disabled {
-          background-color: #f1f5f9;
-          color: #94a3b8;
+          background-color: #21262d;
+          color: #6b7280;
           cursor: not-allowed;
-        }
-        
-        .asin-info {
-          font-size: 13px;
-          color: #64748b;
-          display: flex;
-          align-items: center;
-          gap: 8px;
         }
         
         .metrics-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 20px;
-          margin-bottom: 24px;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
         }
         
         .metric-card {
-          background: white;
-          padding: 20px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
+          background: #161b22;
+          padding: 10px;
+          border-radius: 6px;
+          border: 1px solid #30363d;
         }
         
         .metric-content {
@@ -622,96 +586,92 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .metric-label {
-          font-size: 13px;
-          color: #64748b;
-          margin-bottom: 4px;
+          font-size: 11px;
+          color: #9ca3af;
+          margin-bottom: 2px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        
+        .metric-label-icon {
+          color: #60a5fa;
+          flex-shrink: 0;
         }
         
         .metric-value {
-          font-size: 28px;
+          font-size: 18px;
           font-weight: 700;
-          color: #1e293b;
+          color: #f3f4f6;
         }
         
-        .metric-trend {
-          font-size: 12px;
-          color: #10b981;
-          margin-top: 4px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-        
-        .metric-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        
-        .icon-blue { background: #dbeafe; color: #3b82f6; }
-        .icon-green { background: #d1fae5; color: #10b981; }
-        .icon-orange { background: #fed7aa; color: #f97316; }
-        .icon-purple { background: #e9d5ff; color: #a855f7; }
+        .icon-blue { color: #60a5fa; }
+        .icon-green { color: #34d399; }
+        .icon-orange { color: #fb923c; }
+        .icon-purple { color: #c084fc; }
         
         .tabs-container {
-          background: white;
-          border-radius: 12px 12px 0 0;
-          padding: 0 24px;
+          background: #161b22;
+          border-radius: 6px 6px 0 0;
+          padding: 0 12px;
           display: flex;
-          gap: 32px;
-          border-bottom: 1px solid #e2e8f0;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          gap: 16px;
+          border-bottom: 1px solid #30363d;
+          border: 1px solid #30363d;
+          border-bottom: 1px solid #30363d;
         }
         
         .tab {
-          padding: 16px 0;
-          border-bottom: 3px solid transparent;
+          padding: 8px 0;
+          border-bottom: 2px solid transparent;
           cursor: pointer;
           font-weight: 500;
-          color: #64748b;
+          color: #9ca3af;
           transition: all 0.2s;
+          font-size: 12px;
         }
         
         .tab:hover {
-          color: #475569;
+          color: #d1d5db;
         }
         
         .tab.active {
-          color: #3b82f6;
+          color: #60a5fa;
           border-bottom-color: #3b82f6;
         }
         
         .filters-bar {
-          background: #f8fafc;
-          padding: 16px 24px;
+          background: #21262d;
+          padding: 8px 12px;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          border-left: 1px solid #30363d;
+          border-right: 1px solid #30363d;
         }
         
         .filter-group {
           display: flex;
-          gap: 12px;
+          gap: 6px;
         }
         
         .filter-select {
-          padding: 8px 12px;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          background: white;
-          font-size: 13px;
+          padding: 4px 8px;
+          border: 1px solid #30363d;
+          border-radius: 4px;
+          background: #1a1a1a;
+          font-size: 11px;
+          color: #f3f4f6;
           cursor: pointer;
         }
         
         .table-container {
-          background: white;
-          border-radius: 0 0 12px 12px;
+          background: #161b22;
+          border-radius: 0 0 6px 6px;
           overflow-x: hidden;
           overflow-y: visible;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          border: 1px solid #30363d;
+          border-top: none;
         }
         
         table {
@@ -721,16 +681,16 @@ const KeywordAnalysisDashboard = () => {
         }
         
         thead {
-          background: #f8fafc;
+          background: #21262d;
           position: relative;
         }
         
         th {
-          padding: 12px 16px;
+          padding: 8px 10px;
           text-align: left;
-          font-size: 12px;
+          font-size: 10px;
           font-weight: 600;
-          color: #64748b;
+          color: #9ca3af;
           text-transform: uppercase;
           letter-spacing: 0.5px;
           cursor: pointer;
@@ -741,26 +701,27 @@ const KeywordAnalysisDashboard = () => {
         }
         
         th:hover {
-          color: #475569;
+          color: #d1d5db;
         }
         
         td {
-          padding: 12px 16px;
-          border-top: 1px solid #e2e8f0;
-          font-size: 14px;
+          padding: 8px 10px;
+          border-top: 1px solid #30363d;
+          font-size: 11px;
           text-align: left;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
+          color: #f3f4f6;
         }
         
-        tbody tr:hover {
-          background: #f8fafc;
+        tbody tr {
+          border-bottom: 1px solid #30363d;
         }
         
         .keyword-cell {
           font-weight: 500;
-          color: #1e293b;
+          color: #f3f4f6;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
@@ -797,45 +758,9 @@ const KeywordAnalysisDashboard = () => {
           animation: spin 0.8s linear infinite;
         }
         
-        .table-loading-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(255, 255, 255, 0.95);
-          backdrop-filter: blur(4px);
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          gap: 20px;
-          z-index: 100;
-          animation: fadeIn 0.2s ease-in;
-          border-radius: 0 0 12px 12px;
-        }
-        
         .table-container-wrapper {
           position: relative;
           overflow: visible;
-        }
-        
-        .loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #e2e8f0;
-          border-top-color: #3b82f6;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
-        }
-        
-        .loading-text {
-          font-size: 16px;
-          font-weight: 500;
-          color: #475569;
-          display: flex;
-          align-items: center;
-          gap: 8px;
         }
         
         @keyframes spin {
@@ -871,23 +796,24 @@ const KeywordAnalysisDashboard = () => {
           top: 100%;
           left: 0;
           transform: translateY(4px);
-          margin-top: 8px;
-          padding: 12px 16px;
-          background: #1e293b;
-          color: white;
-          border-radius: 8px;
-          font-size: 13px;
+          margin-top: 6px;
+          padding: 8px 10px;
+          background: #21262d;
+          color: #f3f4f6;
+          border: 1px solid #30363d;
+          border-radius: 6px;
+          font-size: 11px;
           font-weight: 400;
-          line-height: 1.5;
+          line-height: 1.4;
           white-space: normal;
-          width: 280px;
+          width: 240px;
           max-width: calc(100vw - 40px);
           z-index: 10000;
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.2s, transform 0.2s;
           text-align: left;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
         }
         
         .tooltip-container:hover .tooltip-content {
@@ -912,10 +838,10 @@ const KeywordAnalysisDashboard = () => {
           content: '';
           position: absolute;
           bottom: 100%;
-          left: 20px;
+          left: 16px;
           transform: translateX(0);
-          border: 6px solid transparent;
-          border-bottom-color: #1e293b;
+          border: 5px solid transparent;
+          border-bottom-color: #21262d;
         }
         
         .tooltip-container.tooltip-last .tooltip-content::before {
@@ -944,25 +870,56 @@ const KeywordAnalysisDashboard = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                padding: '8px 16px',
+                gap: '6px',
+                padding: '6px 12px',
                 backgroundColor: '#3b82f6',
                 color: 'white',
                 border: 'none',
-                borderRadius: '6px',
+                borderRadius: '4px',
                 cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: '11px',
                 fontWeight: '500',
                 transition: 'background-color 0.2s'
               }}
               onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
               onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
             >
-              <Download size={16} />
+              <Download size={14} />
               Export CSV
             </button>
-            <div style={{ fontSize: '14px', color: '#64748b' }}>
+            <div style={{ fontSize: '11px', color: '#9ca3af' }}>
               {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'Amazon Ads'}
+            </div>
+          </div>
+        </div>
+
+        {/* Metrics Grid - boxes first like other pages */}
+        <div className="metrics-grid">
+          <div className="metric-card">
+            <div className="metric-content">
+              <div className="metric-label">
+                <Search className="metric-label-icon" size={14} />
+                <span>Total Recommendations</span>
+              </div>
+              <div className="metric-value">{metrics.totalKeywords}</div>
+            </div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-content">
+              <div className="metric-label">
+                <DollarSign className="metric-label-icon" size={14} />
+                <span>Avg. Bid</span>
+              </div>
+              <div className="metric-value">{formatCurrencyWithLocale(parseFloat(metrics.avgBid) || 0, currency, 2)}</div>
+            </div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-content">
+              <div className="metric-label">
+                <Target className="metric-label-icon" size={14} />
+                <span>High Relevance Keywords</span>
+              </div>
+              <div className="metric-value">{metrics.highRankKeywords}</div>
             </div>
           </div>
         </div>
@@ -970,7 +927,7 @@ const KeywordAnalysisDashboard = () => {
         {/* ASIN Filter - Custom Dropdown with Search */}
         <div className="asin-filter-container" ref={asinDropdownRef}>
           <div className="asin-filter-label">Filter by ASIN:</div>
-          <div style={{ position: 'relative', flex: 1, maxWidth: '600px', minWidth: '300px' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
             <button
               type="button"
             className="asin-filter-select"
@@ -982,17 +939,17 @@ const KeywordAnalysisDashboard = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '10px 14px',
-                border: '1px solid #cbd5e1',
-                borderRadius: '8px',
-                background: 'white',
-                fontSize: '14px',
+                padding: '6px 10px',
+                border: '1px solid #30363d',
+                borderRadius: '6px',
+                background: '#1a1a1a',
+                fontSize: '12px',
                 fontWeight: '500',
-                color: selectedAsin ? '#1e293b' : '#94a3b8',
+                color: selectedAsin ? '#f3f4f6' : '#6b7280',
                 cursor: (loadingAsins || asinsList.length === 0) ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
                 appearance: 'none',
-                paddingRight: '36px'
+                paddingRight: '30px'
               }}
             >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1010,11 +967,11 @@ const KeywordAnalysisDashboard = () => {
                  })() : 'Select an ASIN'}
               </span>
               <ChevronDown 
-                size={16} 
+                size={14} 
                 style={{ 
                   position: 'absolute', 
-                  right: '12px', 
-                  color: '#64748b',
+                  right: '10px', 
+                  color: '#9ca3af',
                   transform: isAsinDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 0.2s'
                 }} 
@@ -1027,27 +984,27 @@ const KeywordAnalysisDashboard = () => {
                 top: '100%',
                 left: 0,
                 right: 0,
-                marginTop: '4px',
-                backgroundColor: 'white',
-                border: '1px solid #cbd5e1',
-                borderRadius: '8px',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                marginTop: '2px',
+                backgroundColor: '#21262d',
+                border: '1px solid #30363d',
+                borderRadius: '6px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2)',
                 zIndex: 1000,
-                maxHeight: '400px',
+                maxHeight: '300px',
                 display: 'flex',
                 flexDirection: 'column'
               }}>
                 {/* Search Bar */}
-                <div style={{ padding: '12px', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ padding: '6px', borderBottom: '1px solid #30363d' }}>
                   <div style={{ position: 'relative' }}>
                     <Search 
-                      size={16} 
+                      size={14} 
                       style={{ 
                         position: 'absolute', 
-                        left: '12px', 
+                        left: '8px', 
                         top: '50%', 
                         transform: 'translateY(-50%)', 
-                        color: '#94a3b8' 
+                        color: '#6b7280' 
                       }} 
                     />
                     <input
@@ -1058,31 +1015,33 @@ const KeywordAnalysisDashboard = () => {
                       onClick={(e) => e.stopPropagation()}
                       style={{
                         width: '100%',
-                        padding: '8px 12px 8px 36px',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '6px',
-                        fontSize: '14px',
+                        padding: '6px 8px 6px 28px',
+                        border: '1px solid #30363d',
+                        borderRadius: '4px',
+                        fontSize: '11px',
                         outline: 'none',
-                        transition: 'border-color 0.2s'
+                        transition: 'border-color 0.2s',
+                        backgroundColor: '#1a1a1a',
+                        color: '#f3f4f6'
                       }}
                       onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                      onBlur={(e) => e.target.style.borderColor = '#cbd5e1'}
+                      onBlur={(e) => e.target.style.borderColor = '#30363d'}
                     />
                   </div>
                 </div>
 
                 {/* Dropdown Options */}
                 <div style={{ 
-                  maxHeight: '300px', 
+                  maxHeight: '250px', 
                   overflowY: 'auto',
-                  padding: '4px'
+                  padding: '2px'
                 }}>
                   {filteredAsinsList.length === 0 ? (
                     <div style={{ 
-                      padding: '16px', 
+                      padding: '10px', 
                       textAlign: 'center', 
-                      color: '#64748b', 
-                      fontSize: '14px' 
+                      color: '#9ca3af', 
+                      fontSize: '11px' 
                     }}>
                       No ASINs found matching "{asinSearchQuery}"
                     </div>
@@ -1103,29 +1062,29 @@ const KeywordAnalysisDashboard = () => {
                           }}
                           style={{
                             width: '100%',
-                            padding: '12px 16px',
+                            padding: '8px 10px',
                             textAlign: 'left',
                             border: 'none',
-                            background: isSelected ? '#eff6ff' : 'white',
-                            color: isSelected ? '#1e40af' : '#1e293b',
+                            background: isSelected ? 'rgba(59, 130, 246, 0.2)' : '#21262d',
+                            color: isSelected ? '#60a5fa' : '#f3f4f6',
                             cursor: 'pointer',
-                            fontSize: '14px',
+                            fontSize: '11px',
                             transition: 'background-color 0.15s',
                             borderRadius: '6px',
                             margin: '2px 0'
                           }}
                           onMouseEnter={(e) => {
                             if (!isSelected) {
-                              e.target.style.backgroundColor = '#f1f5f9';
+                              e.target.style.backgroundColor = '#161b22';
                             }
                           }}
                           onMouseLeave={(e) => {
                             if (!isSelected) {
-                              e.target.style.backgroundColor = 'white';
+                              e.target.style.backgroundColor = '#21262d';
                             }
                           }}
                         >
-                          <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '4px' }}>
+                          <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '2px', fontSize: '11px' }}>
                             {productSku 
                               ? `ASIN: ${asinItem.asin} | SKU: ${productSku}`
                               : `ASIN: ${asinItem.asin}`
@@ -1133,8 +1092,8 @@ const KeywordAnalysisDashboard = () => {
                           </div>
                           {productName && (
                             <div style={{ 
-                              fontSize: '12px', 
-                              color: isSelected ? '#3b82f6' : '#64748b',
+                              fontSize: '10px', 
+                              color: isSelected ? '#60a5fa' : '#9ca3af',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap'
@@ -1144,8 +1103,8 @@ const KeywordAnalysisDashboard = () => {
                           )}
                           {asinItem.keywordCount && (
                             <div style={{ 
-                              fontSize: '12px', 
-                              color: isSelected ? '#3b82f6' : '#94a3b8',
+                              fontSize: '10px', 
+                              color: isSelected ? '#60a5fa' : '#9ca3af',
                               marginTop: '2px'
                             }}>
                               {asinItem.keywordCount} keywords
@@ -1159,58 +1118,15 @@ const KeywordAnalysisDashboard = () => {
               </div>
             )}
           </div>
-          {selectedAsinInfo && (
-            <div className="asin-info">
-              <CheckCircle size={16} />
-              <span>{selectedAsinInfo.keywordCount || 0} keywords available</span>
-            </div>
-          )}
         </div>
 
-        {/* Metrics Grid */}
-        <div className="metrics-grid">
-          <div className="metric-card">
-            <div className="metric-content">
-              <div className="metric-label">Total Recommendations</div>
-              <div className="metric-value">{metrics.totalKeywords}</div>
-              <div className="metric-trend">
-                <TrendingUp size={14} />
-                {metrics.uniqueKeywords} unique keywords
-              </div>
-            </div>
-            <div className="metric-icon icon-blue">
-              <Search size={24} />
-            </div>
+        {/* Only data-dependent content shows skeleton when loading */}
+        {(loadingAsins || (loading && selectedAsin)) ? (
+          <div style={{ marginTop: '24px' }}>
+            <TablePageSkeleton rows={10} />
           </div>
-          
-          <div className="metric-card">
-            <div className="metric-content">
-              <div className="metric-label">Avg. Bid</div>
-              <div className="metric-value">{formatCurrencyWithLocale(parseFloat(metrics.avgBid) || 0, currency, 2)}</div>
-              <div className="metric-trend">
-                <DollarSign size={14} />
-                Average bid amount
-              </div>
-            </div>
-            <div className="metric-icon icon-orange">
-              <DollarSign size={24} />
-            </div>
-          </div>
-          
-          <div className="metric-card">
-            <div className="metric-content">
-              <div className="metric-label">High Relevance Keywords</div>
-              <div className="metric-value">{metrics.highRankKeywords}</div>
-              <div className="metric-trend">
-                Relevance Rank ≤ 10
-              </div>
-            </div>
-            <div className="metric-icon icon-purple">
-              <Target size={24} />
-            </div>
-          </div>
-        </div>
-
+        ) : (
+        <>
         {/* Tabs */}
         <div className="tabs-container">
           <div 
@@ -1235,15 +1151,6 @@ const KeywordAnalysisDashboard = () => {
 
         {/* Keywords Table */}
         <div className="table-container-wrapper">
-          {(isSwitchingAsin || loading) && selectedAsin && (
-            <div className="table-loading-overlay">
-              <div className="loading-spinner"></div>
-              <div className="loading-text">
-                <Search size={20} />
-                {loading ? 'Loading keywords for ASIN:' : 'Switching to ASIN:'} <strong>{selectedAsin}</strong>
-              </div>
-            </div>
-          )}
           <div className="table-container">
           <table>
             <thead>
@@ -1311,7 +1218,7 @@ const KeywordAnalysisDashboard = () => {
                       </td>
                       <td>
                         {keyword.rank !== null ? (
-                          <span style={{ fontWeight: 600, color: keyword.rank <= 5 ? '#10b981' : keyword.rank <= 10 ? '#f59e0b' : '#ef4444' }}>
+                          <span style={{ fontWeight: 600, color: keyword.rank <= 5 ? '#34d399' : keyword.rank <= 10 ? '#fbbf24' : '#f87171' }}>
                             #{keyword.rank}
                           </span>
                         ) : '—'}
@@ -1324,10 +1231,10 @@ const KeywordAnalysisDashboard = () => {
                       </td>
                       <td>
                         {keyword.suggestedBid ? (
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          <span style={{ fontSize: '10px', color: '#9ca3af' }}>
                             ${(keyword.suggestedBid.rangeStart / 100).toFixed(2)} - ${(keyword.suggestedBid.rangeEnd / 100).toFixed(2)}
                             <br />
-                            <span style={{ color: '#3b82f6', fontWeight: 600 }}>
+                            <span style={{ color: '#60a5fa', fontWeight: 600 }}>
                               Median: ${(keyword.suggestedBid.rangeMedian / 100).toFixed(2)}
                             </span>
                           </span>
@@ -1351,29 +1258,29 @@ const KeywordAnalysisDashboard = () => {
           {/* Load More Controls */}
           {hasMoreItems && (
             <div style={{
-              padding: '16px 24px',
-              borderTop: '1px solid #e2e8f0',
+              padding: '8px 12px',
+              borderTop: '1px solid #30363d',
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#f8fafc'
+              background: '#21262d'
             }}>
-              <div style={{ fontSize: '14px', color: '#64748b', marginRight: '16px' }}>
+              <div style={{ fontSize: '11px', color: '#9ca3af', marginRight: '10px' }}>
                 Showing {displayedKeywords.length} of {filteredKeywords.length} keywords
               </div>
               <button
                 onClick={handleLoadMore}
                 style={{
-                  padding: '10px 24px',
+                  padding: '6px 12px',
                   border: '1px solid #3b82f6',
-                  borderRadius: '6px',
+                  borderRadius: '4px',
                   background: '#3b82f6',
                   color: 'white',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '14px',
+                  gap: '6px',
+                  fontSize: '11px',
                   fontWeight: '500',
                   transition: 'background-color 0.2s'
                 }}
@@ -1381,26 +1288,28 @@ const KeywordAnalysisDashboard = () => {
                 onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
               >
                 Load More
-                <ChevronDown size={16} />
+                <ChevronDown size={12} />
               </button>
             </div>
           )}
           {!hasMoreItems && displayedKeywords.length > itemsPerLoad && (
             <div style={{
-              padding: '16px 24px',
-              borderTop: '1px solid #e2e8f0',
+              padding: '8px 12px',
+              borderTop: '1px solid #30363d',
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#f8fafc'
+              background: '#21262d'
             }}>
-              <div style={{ fontSize: '14px', color: '#64748b' }}>
+              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
                 Showing all {filteredKeywords.length} keywords
               </div>
             </div>
           )}
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -104,7 +104,7 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['dashboard', 'profitability', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products'];
+        const pageTypes = ['navbar', 'dashboard', 'profitability', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {

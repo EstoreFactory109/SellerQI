@@ -165,36 +165,35 @@ export default function ProfileForm() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
+    <div className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-slate-900 via-purple-900 to-slate-900 px-6 py-8 text-white relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20" style={{backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")"}}></div>
+      <div className="bg-blue-600 px-4 py-5 text-white relative overflow-hidden">
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-2 h-6 bg-blue-400 rounded-full"></div>
             <div className="flex items-center gap-3">
-              <User className="w-6 h-6 text-white" />
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+              <User className="w-5 h-5 text-white" />
+              <h2 className="text-xl font-bold text-white">
                 Profile Details
               </h2>
             </div>
           </div>
-          <p className="text-gray-300 text-sm">Manage your personal information and account settings</p>
+          <p className="text-gray-200 text-xs">Manage your personal information and account settings</p>
         </div>
       </div>
 
       {/* Content Section */}
-      <div className="p-6">
+      <div className="p-4">
         {/* Profile Image Section */}
-        <div className="mb-8">
+        <div className="mb-4">
           {(!pic || pic.length === 0) && <Upload handleFile={handleFile} />}
           {!close && <Preview image={image} setImage={setImage} setClose={setClose} />}
           {(pic !== null && pic.length !== 0) && <ProfilePic handleFile={handleFile} setClose={setClose} />}
         </div>
 
         {/* Form Section */}
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* First Name */}
             <InputField
               label="First Name"
@@ -277,10 +276,10 @@ export default function ProfileForm() {
         </form>
 
         {/* Save Button */}
-        <div className="flex justify-end pt-6 border-t border-gray-200/80 mt-8">
+        <div className="flex justify-end pt-4 border-t border-[#30363d] mt-4">
           <button
             type="submit"
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[160px] justify-center"
+            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[160px] justify-center"
             onClick={clickSave}
           >
             {loading ? <BeatLoader color="#fff" size={8} /> : (
@@ -294,21 +293,21 @@ export default function ProfileForm() {
 
         {/* Super Admin: Password Update Section */}
         {isSuperAdminSession && (
-          <div className="mt-8 pt-8 border-t border-gray-200/80">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 bg-amber-100 rounded-lg">
-                <Shield className="w-5 h-5 text-amber-600" />
+          <div className="mt-4 pt-4 border-t border-[#30363d]">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-amber-500/20 rounded-lg">
+                <Shield className="w-5 h-5 text-amber-400" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Super Admin: Update User Password</h3>
-                <p className="text-sm text-gray-500">Set a new password for this user account</p>
+                <h3 className="text-lg font-semibold text-gray-100">Super Admin: Update User Password</h3>
+                <p className="text-sm text-gray-400">Set a new password for this user account</p>
               </div>
             </div>
 
             <form onSubmit={handlePasswordUpdate} className="space-y-4">
               {/* Success Message */}
               {passwordSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700">
+                <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/40 rounded-lg text-green-400">
                   <CheckCircle className="w-5 h-5" />
                   <span className="text-sm font-medium">{passwordSuccess}</span>
                 </div>
@@ -316,7 +315,7 @@ export default function ProfileForm() {
 
               {/* Error Message */}
               {passwordError && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-red-400">
                   <AlertCircle className="w-5 h-5" />
                   <span className="text-sm font-medium">{passwordError}</span>
                 </div>
@@ -325,7 +324,7 @@ export default function ProfileForm() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* New Password */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">New Password</label>
+                  <label className="block text-sm font-semibold text-gray-100">New Password</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="w-5 h-5 text-gray-400" />
@@ -335,11 +334,11 @@ export default function ProfileForm() {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Enter new password"
-                      className="w-full pl-10 pr-12 py-3 border-2 border-gray-200 rounded-xl transition-all duration-200 font-medium bg-white text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none"
+                      className="w-full pl-10 pr-12 py-2.5 border-2 border-[#30363d] rounded-xl transition-all duration-200 font-medium bg-[#1a1a1a] text-gray-100 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 focus:outline-none"
                     />
                     <button
                       type="button"
-                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600"
+                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-300"
                       onClick={() => setShowNewPassword(!showNewPassword)}
                     >
                       {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -349,7 +348,7 @@ export default function ProfileForm() {
 
                 {/* Confirm Password */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Confirm Password</label>
+                  <label className="block text-sm font-semibold text-gray-100">Confirm Password</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="w-5 h-5 text-gray-400" />
@@ -359,11 +358,11 @@ export default function ProfileForm() {
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirm new password"
-                      className="w-full pl-10 pr-12 py-3 border-2 border-gray-200 rounded-xl transition-all duration-200 font-medium bg-white text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none"
+                      className="w-full pl-10 pr-12 py-2.5 border-2 border-[#30363d] rounded-xl transition-all duration-200 font-medium bg-[#1a1a1a] text-gray-100 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 focus:outline-none"
                     />
                     <button
                       type="button"
-                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600"
+                      className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-300"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     >
                       {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -376,7 +375,7 @@ export default function ProfileForm() {
                 <button
                   type="submit"
                   disabled={passwordLoading}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-medium rounded-xl hover:from-amber-600 hover:to-amber-700 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[180px] justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-amber-600 text-white font-medium rounded-xl hover:bg-amber-700 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[180px] justify-center disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {passwordLoading ? <BeatLoader color="#fff" size={8} /> : (
                     <>
@@ -397,7 +396,7 @@ export default function ProfileForm() {
 // Updated InputField component with modern styling
 const InputField = ({ label, value, editable, color, name, func, onEdit, icon: Icon }) => (
   <div className="space-y-2">
-    <label className="block text-sm font-semibold text-gray-900">{label}</label>
+    <label className="block text-sm font-semibold text-gray-100">{label}</label>
     <div className="relative">
       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
         <Icon className="w-5 h-5 text-gray-400" />
@@ -408,21 +407,21 @@ const InputField = ({ label, value, editable, color, name, func, onEdit, icon: I
         value={value}
         onChange={func}
         name={name}
-        className={`w-full pl-10 pr-12 py-3 border-2 rounded-xl transition-all duration-200 font-medium ${
+        className={`w-full pl-10 pr-12 py-2.5 border-2 rounded-xl transition-all duration-200 font-medium ${
           editable 
-            ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' 
-            : 'bg-white border-blue-200 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none'
+            ? 'bg-[#1a1a1a] border-[#30363d] text-gray-500 cursor-not-allowed' 
+            : 'bg-[#1a1a1a] border-[#30363d] text-gray-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none'
         }`}
         style={{ 
-          borderColor: editable ? '#e5e7eb' : (color === '#333651' ? '#3b82f6' : '#e5e7eb')
+          borderColor: editable ? '#30363d' : (color === '#333651' ? '#3b82f6' : '#30363d')
         }}
       />
       <button
         type="button"
         className={`absolute inset-y-0 right-0 px-3 flex items-center transition-all duration-200 rounded-r-xl ${
           editable 
-            ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' 
-            : 'bg-blue-50 hover:bg-blue-100 text-blue-600'
+            ? 'bg-[#21262d] hover:bg-[#30363d] text-gray-400' 
+            : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-400'
         }`}
         onClick={onEdit}
       >

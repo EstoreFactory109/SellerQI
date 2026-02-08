@@ -1,6 +1,5 @@
 import React, { useRef,useState,useEffect } from 'react'
-import calenderIcon from '../assets/Icons/Calender.png'
-import Download from '../assets/Icons/download.png'
+import { Calendar } from 'lucide-react';
 import "../styles/Reports/style.css"
 import RowOne from '../Components/Reports/Reports_First_Row.jsx'
 import Health from '../Components/Reports/Reports_Third_Row/Health.jsx'
@@ -199,7 +198,7 @@ const Reports = () => {
                 : 'Last 30 Days'
               }
             </p>
-            <img src={calenderIcon} alt='' className='w-4 h-4' />
+            <Calendar className='w-4 h-4 text-gray-400' />
           </div>
           <AnimatePresence>
             {openCalender && (

@@ -51,11 +51,11 @@ const Settings = () => {
   };
 
   return (
-    <div className="h-[90vh] bg-[#eeeeee] w-full max-h-[90vh] p-6 lg:mt-0 mt-[8vh] overflow-y-auto">
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+    <div className="h-[90vh] bg-[#1a1a1a] w-full max-h-[90vh] p-4 lg:mt-0 mt-[8vh] overflow-y-auto">
+      <h1 className="text-2xl font-bold text-gray-100">Settings</h1>
 
       {/* Content Area */}
-      <div className="w-full mt-7">
+      <div className="w-full mt-4">
         {renderComponent()}
       </div>
     </div>

@@ -25,7 +25,9 @@ const {
     updateTaskStatus,
     getInventoryData,
     getAsinWiseSalesData,
-    getYourProductsData
+    getYourProductsData,
+    getNavbarData,
+    getAccountHistoryData
 } = require('../controllers/analytics/PageWiseDataController.js');
 
 const {
@@ -40,6 +42,11 @@ const {
     getPPCUnitsSoldByDateRange,
     getPPCUnitsSoldSummary
 } = require('../controllers/analytics/PPCUnitsSoldController.js');
+
+// ===== NAVBAR DATA =====
+// Returns minimal data for top navigation bar (user info, accounts, brand, health)
+// Cache TTL: 5 minutes (shorter as it's lightweight)
+router.get('/navbar', auth, getLocation, analyseDataCache(300, 'navbar'), getNavbarData);
 
 // ===== MAIN DASHBOARD =====
 // Returns full calculated dashboard data
@@ -84,6 +91,10 @@ router.get('/inventory', auth, getLocation, analyseDataCache(3600, 'inventory'),
 // Cache TTL: 15 minutes (shorter than other pages due to frequent product updates)
 // Only page 1 is cached - Load More requests (page > 1) bypass cache for data consistency
 router.get('/your-products', auth, getLocation, analyseDataCache(900, 'your-products'), getYourProductsData);
+
+// ===== ACCOUNT HISTORY PAGE =====
+// Returns historical account metrics data
+router.get('/account-history', auth, getLocation, analyseDataCache(3600, 'account-history'), getAccountHistoryData);
 
 // ===== TASKS PAGE =====
 // Returns tasks data

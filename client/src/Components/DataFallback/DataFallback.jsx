@@ -53,15 +53,15 @@ const DataFallback = ({
   return (
     <div className={`flex items-center justify-center ${getSizeClasses()} ${className}`}>
       <div className="text-center max-w-md">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-[#21262d] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#30363d]">
           {getIcon()}
         </div>
         
-        <h3 className="text-lg font-medium text-gray-900 mb-2">
+        <h3 className="text-lg font-medium text-gray-100 mb-2">
           Data Unavailable
         </h3>
         
-        <p className="text-gray-600 mb-6">
+        <p className="text-gray-400 mb-6">
           {message || getDefaultMessage()}
         </p>
 
@@ -92,21 +92,21 @@ export const PartialDataNotice = ({
   className = '' 
 }) => {
   return (
-    <div className={`bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 ${className}`}>
+    <div className={`bg-amber-500/10 border border-amber-500/40 rounded-lg p-4 mb-4 ${className}`}>
       <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+        <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
         <div>
-          <h4 className="text-sm font-medium text-amber-800 mb-1">
+          <h4 className="text-sm font-medium text-amber-300 mb-1">
             Partial Data Available
           </h4>
-          <p className="text-sm text-amber-700 mb-2">
+          <p className="text-sm text-amber-200/90 mb-2">
             Some data is currently unavailable, but we're showing what we have.
           </p>
           
           {availableItems.length > 0 && (
             <div className="mb-2">
-              <span className="text-xs font-medium text-amber-800">Available: </span>
-              <span className="text-xs text-amber-700">
+              <span className="text-xs font-medium text-amber-300">Available: </span>
+              <span className="text-xs text-amber-200/90">
                 {availableItems.join(', ')}
               </span>
             </div>
@@ -114,8 +114,8 @@ export const PartialDataNotice = ({
           
           {missingItems.length > 0 && (
             <div>
-              <span className="text-xs font-medium text-amber-800">Unavailable: </span>
-              <span className="text-xs text-amber-700">
+              <span className="text-xs font-medium text-amber-300">Unavailable: </span>
+              <span className="text-xs text-amber-200/90">
                 {missingItems.join(', ')}
               </span>
             </div>

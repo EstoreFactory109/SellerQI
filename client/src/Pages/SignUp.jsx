@@ -397,12 +397,7 @@ const SignUp = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
-      {/* Background Elements */}
-      <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:bg-grid-slate-700/25 dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))]"></div>
-      <div className="absolute top-10 right-10 w-72 h-72 bg-gray-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-      <div className="absolute top-40 left-10 w-72 h-72 bg-emerald-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
-      
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">
@@ -410,7 +405,7 @@ const SignUp = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6"
+            className="bg-[#161b22] rounded-2xl border border-[#30363d] p-6"
           >
             {/* Logo and Header */}
             <div className="text-center mb-6">
@@ -426,10 +421,10 @@ const SignUp = () => {
                   className="h-10 w-auto"
                 />
               </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-gray-900 mb-2">
+              <h1 className="text-xl lg:text-2xl font-bold text-gray-100 mb-2">
                 Join SellerQI Today
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-gray-500 text-sm">
                 Start optimizing your Amazon business with AI-powered insights
               </p>
             </div>
@@ -439,7 +434,7 @@ const SignUp = () => {
               {/* Name Fields */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     First Name
                   </label>
                   <div className="relative">
@@ -450,8 +445,8 @@ const SignUp = () => {
                        value={formData.firstname}
                        onChange={handleChange}
                        onFocus={handleFocus}
-                       className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                         errors.firstname ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                       className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
+                         errors.firstname ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                        }`}
                        placeholder="Enter first name"
                      />
@@ -460,14 +455,14 @@ const SignUp = () => {
                     <motion.p
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="text-red-500 text-xs mt-1"
+                      className="text-red-400 text-xs mt-1"
                     >
                       {errors.firstname}
                     </motion.p>
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     Last Name
                   </label>
                   <div className="relative">
@@ -478,8 +473,8 @@ const SignUp = () => {
                        value={formData.lastname}
                        onChange={handleChange}
                        onFocus={handleFocus}
-                       className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                         errors.lastname ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                       className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
+                         errors.lastname ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                        }`}
                        placeholder="Enter last name"
                      />
@@ -488,7 +483,7 @@ const SignUp = () => {
                     <motion.p
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="text-red-500 text-xs mt-1"
+                      className="text-red-400 text-xs mt-1"
                     >
                       {errors.lastname}
                     </motion.p>
@@ -498,14 +493,14 @@ const SignUp = () => {
 
               {/* Phone Field with Country Code */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Phone Number
                 </label>
                 <div className="flex">
                   {/* Country Code Input */}
                   <div className="relative">
-                    <div className={`flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-white ${
-                      errors.countryCode ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    <div className={`flex items-center gap-2 px-3 py-2.5 h-11 border rounded-l-lg bg-[#21262d] ${
+                      errors.countryCode ? 'border-red-500 bg-red-500/10' : 'border-[#30363d]'
                     }`}>
                       <div className="w-5 h-4 flex items-center justify-center">
                         {countryFlag.startsWith('http') ? (
@@ -527,8 +522,8 @@ const SignUp = () => {
                         value={countryCode}
                         onChange={handleCountryCodeChange}
                         onFocus={() => setErrors({ ...errors, countryCode: '' })}
-                        className={`w-16 text-sm font-medium text-gray-700 bg-transparent border-none outline-none focus:ring-0 ${
-                          errors.phone || errors.countryCode ? 'text-red-600' : ''
+                        className={`w-16 text-sm font-medium text-gray-100 bg-transparent border-none outline-none focus:ring-0 ${
+                          errors.phone || errors.countryCode ? 'text-red-400' : ''
                         }`}
                         placeholder="+1"
                         maxLength={4}
@@ -545,8 +540,8 @@ const SignUp = () => {
                       value={formData.phone}
                       onChange={handlePhoneChange}
                       onFocus={handleFocus}
-                      className={`w-full pl-10 pr-4 py-2.5 h-11 border-t border-r border-b rounded-r-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                        errors.phone ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                      className={`w-full pl-10 pr-4 py-2.5 h-11 border-t border-r border-b rounded-r-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
+                        errors.phone ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                       }`}
                       placeholder={selectedCountry.placeholder}
                       maxLength={selectedCountry.maxLength + Math.floor(selectedCountry.maxLength / 3)} // Extra space for formatting
@@ -557,7 +552,7 @@ const SignUp = () => {
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-red-500 text-xs mt-1"
+                    className="text-red-400 text-xs mt-1"
                   >
                     {errors.countryCode}
                   </motion.p>
@@ -566,7 +561,7 @@ const SignUp = () => {
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-red-500 text-xs mt-1"
+                    className="text-red-400 text-xs mt-1"
                   >
                     {errors.phone}
                   </motion.p>
@@ -578,7 +573,7 @@ const SignUp = () => {
 
               {/* Email Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Email Address
                 </label>
                 <div className="relative">
@@ -589,8 +584,8 @@ const SignUp = () => {
                      value={formData.email}
                      onChange={handleChange}
                      onFocus={handleFocus}
-                     className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                       errors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                     className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
+                       errors.email ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                      }`}
                      placeholder="Enter your email"
                    />
@@ -599,7 +594,7 @@ const SignUp = () => {
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-red-500 text-xs mt-1"
+                    className="text-red-400 text-xs mt-1"
                   >
                     {errors.email}
                   </motion.p>
@@ -608,7 +603,7 @@ const SignUp = () => {
 
               {/* Password Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Password
                 </label>
                 <div className="relative">
@@ -619,15 +614,15 @@ const SignUp = () => {
                      value={formData.password}
                      onChange={handleChange}
                      onFocus={handleFocus}
-                     className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                       errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                     className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
+                       errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                      }`}
                      placeholder="Create a password"
                    />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -636,7 +631,7 @@ const SignUp = () => {
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-red-500 text-xs mt-1"
+                    className="text-red-400 text-xs mt-1"
                   >
                     {errors.password}
                   </motion.p>
@@ -659,15 +654,15 @@ const SignUp = () => {
                         setErrors({ ...errors, terms: '' });
                       }
                     }}
-                    className="mt-1 w-4 h-4 text-[#3B4A6B] bg-gray-100 border-gray-300 rounded focus:ring-[#3B4A6B] focus:ring-2"
+                    className="mt-1 w-4 h-4 text-blue-500 bg-[#21262d] border-[#30363d] rounded focus:ring-blue-500 focus:ring-2"
                   />
-                  <label htmlFor="termsCheckbox" className="text-sm text-gray-700 leading-relaxed">
+                  <label htmlFor="termsCheckbox" className="text-sm text-gray-300 leading-relaxed">
                     I agree to the{' '}
-                    <Link to="https://www.sellerqi.com/terms-of-use" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
+                    <Link to="https://www.sellerqi.com/terms-of-use" className="text-blue-400 hover:text-blue-300 underline font-medium">
                       Terms of Use
                     </Link>
                     {' '}and{' '}
-                    <Link to="https://www.sellerqi.com/privacy-policy" className="text-[#3B4A6B] hover:text-[#2d3a52] underline font-medium">
+                    <Link to="https://www.sellerqi.com/privacy-policy" className="text-blue-400 hover:text-blue-300 underline font-medium">
                       Privacy Policy
                     </Link>
                   </label>
@@ -676,7 +671,7 @@ const SignUp = () => {
                   <motion.p
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-red-500 text-xs mt-2"
+                    className="text-red-400 text-xs mt-2"
                   >
                     {errors.terms}
                   </motion.p>
@@ -689,8 +684,8 @@ const SignUp = () => {
                  disabled={!termsAccepted || loading}
                  className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
                    !termsAccepted || loading
-                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                     : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
+                     ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                     : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30'
                  }`}
                >
                  {loading ? (
@@ -705,9 +700,9 @@ const SignUp = () => {
 
                {/* Divider */}
                <div className="flex items-center my-4">
-                 <div className="flex-1 border-t border-gray-300"></div>
+                 <div className="flex-1 border-t border-[#30363d]"></div>
                  <span className="mx-3 text-gray-500 text-sm font-medium">Or continue with</span>
-                 <div className="flex-1 border-t border-gray-300"></div>
+                 <div className="flex-1 border-t border-[#30363d]"></div>
                </div>
 
                              {/* Social Buttons */}
@@ -716,10 +711,10 @@ const SignUp = () => {
                    type="button"
                    onClick={handleGoogleSignUp}
                    disabled={googleLoading}
-                   className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg transition-all duration-300 font-medium text-sm ${
+                   className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-[#30363d] rounded-lg transition-all duration-300 font-medium text-sm bg-[#21262d] ${
                      googleLoading 
-                       ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                       : 'hover:bg-gray-50 hover:border-gray-400'
+                       ? 'text-gray-500 cursor-not-allowed' 
+                       : 'hover:bg-[#1c2128] hover:border-gray-500 text-gray-300'
                    }`}
                  >
                    {googleLoading ? (
@@ -754,12 +749,12 @@ const SignUp = () => {
 
                              {/* Login Link */}
                <div className="text-center pt-2">
-                 <p className="text-gray-600 text-sm">
+                 <p className="text-gray-500 text-sm">
                    Already have an account?{' '}
                    <button
                      type="button"
                      onClick={navigateToLogin}
-                     className="text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors"
+                     className="text-blue-400 hover:text-blue-300 font-semibold hover:underline transition-colors"
                    >
                      Sign in
                    </button>
@@ -773,18 +768,18 @@ const SignUp = () => {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 rounded-xl p-4 relative"
+                    className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 relative"
                   >
                     <div className="flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
-                        <p className="text-red-800 font-medium text-sm">Registration Failed</p>
-                        <p className="text-red-600 text-sm mt-1">{errorMessage}</p>
+                        <p className="text-red-300 font-medium text-sm">Registration Failed</p>
+                        <p className="text-red-400/90 text-sm mt-1">{errorMessage}</p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setErrorMessage('')}
-                        className="text-red-600 hover:text-red-800 transition-colors"
+                        className="text-red-400 hover:text-red-300 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>

@@ -46,39 +46,55 @@ class StripeWebhookService {
     }
 
     /**
-     * Handle webhook events
+     * Handle webhook events with idempotency check
+     * Prevents duplicate processing of the same webhook event
      */
     async handleWebhookEvent(event) {
         try {
             logger.info(`Processing webhook event: ${event.type}, ID: ${event.id}`);
 
+            // IDEMPOTENCY CHECK: Check if this event was already processed
+            const isAlreadyProcessed = await PaymentLogs.isWebhookProcessed(event.id);
+            if (isAlreadyProcessed) {
+                logger.info(`Webhook event ${event.id} already processed, skipping (idempotency)`);
+                return { success: true, eventType: event.type, skipped: true, reason: 'duplicate' };
+            }
+
             switch (event.type) {
                 case 'checkout.session.completed':
-                    await this.handleCheckoutSessionCompleted(event.data.object);
+                    await this.handleCheckoutSessionCompleted(event.data.object, event.id);
                     break;
 
                 case 'customer.subscription.created':
-                    await this.handleSubscriptionCreated(event.data.object);
+                    await this.handleSubscriptionCreated(event.data.object, event.id);
                     break;
 
                 case 'customer.subscription.updated':
-                    await this.handleSubscriptionUpdated(event.data.object);
+                    await this.handleSubscriptionUpdated(event.data.object, event.id);
                     break;
 
                 case 'customer.subscription.deleted':
-                    await this.handleSubscriptionDeleted(event.data.object);
+                    await this.handleSubscriptionDeleted(event.data.object, event.id);
                     break;
 
                 case 'invoice.payment_succeeded':
-                    await this.handleInvoicePaymentSucceeded(event.data.object);
+                    await this.handleInvoicePaymentSucceeded(event.data.object, event.id);
                     break;
 
                 case 'invoice.payment_failed':
-                    await this.handleInvoicePaymentFailed(event.data.object);
+                    await this.handleInvoicePaymentFailed(event.data.object, event.id);
                     break;
 
                 case 'customer.subscription.trial_will_end':
-                    await this.handleTrialWillEnd(event.data.object);
+                    await this.handleTrialWillEnd(event.data.object, event.id);
+                    break;
+
+                case 'checkout.session.expired':
+                    await this.handleCheckoutSessionExpired(event.data.object, event.id);
+                    break;
+
+                case 'charge.refunded':
+                    await this.handleChargeRefunded(event.data.object, event.id);
                     break;
 
                 default:
@@ -95,17 +111,72 @@ class StripeWebhookService {
 
     /**
      * Handle checkout session completed
+     * This is the ONLY place where we should activate the user's subscription/trial
+     * because this event only fires when the user completes checkout (not when they cancel)
      */
-    async handleCheckoutSessionCompleted(session) {
+    async handleCheckoutSessionCompleted(session, webhookEventId = null) {
         try {
-            const userId = session.metadata.userId;
-            const planType = session.metadata.planType;
+            const userId = session.metadata?.userId;
+            const planType = session.metadata?.planType;
 
-            logger.info(`Checkout completed for user: ${userId}, plan: ${planType}, session: ${session.id}`);
+            // Validate required metadata
+            if (!userId || !planType) {
+                logger.warn(`Checkout session ${session.id} missing required metadata (userId or planType)`);
+                return;
+            }
 
-            // If it's a subscription checkout, the subscription will be handled in subscription.created event
+            logger.info(`Checkout completed for user: ${userId}, plan: ${planType}, session: ${session.id}, payment_status: ${session.payment_status}`);
+
+            // If it's a subscription checkout, activate the subscription now
+            // This is called ONLY when checkout is completed (user didn't cancel)
             if (session.mode === 'subscription') {
-                logger.info(`Subscription checkout completed, waiting for subscription.created event`);
+                logger.info(`Subscription checkout completed for user: ${userId}, activating subscription...`);
+                
+                // Mark checkout as completed in subscription record
+                // This flag is checked by handleSubscriptionCreated to avoid duplicate activation
+                await Subscription.findOneAndUpdate(
+                    { userId },
+                    { 
+                        $set: { 
+                            checkoutCompleted: true,
+                            stripeSessionId: session.id
+                        } 
+                    }
+                );
+
+                // Get the subscription from Stripe to get trial info
+                if (session.subscription) {
+                    try {
+                        const stripeSubscription = await this.stripe.subscriptions.retrieve(session.subscription);
+                        const isTrialing = stripeSubscription.status === 'trialing';
+                        
+                        // Now activate the user's subscription
+                        await this.updateUserSubscription(userId, planType, stripeSubscription.status, stripeSubscription);
+                        
+                        logger.info(`User ${userId} subscription activated via checkout.session.completed: plan=${planType}, status=${stripeSubscription.status}, isTrialing=${isTrialing}`);
+                        
+                        // Log checkout completed event with webhookEventId for idempotency
+                        await PaymentLogs.logWebhookEvent({
+                            userId,
+                            eventType: 'STRIPE_CHECKOUT_COMPLETED',
+                            paymentGateway: 'STRIPE',
+                            status: 'SUCCESS',
+                            subscriptionId: session.subscription,
+                            planType: planType,
+                            isTrialPayment: isTrialing,
+                            trialEndsAt: isTrialing && stripeSubscription.trial_end ? this.safeDate(stripeSubscription.trial_end) : null,
+                            newStatus: stripeSubscription.status,
+                            message: isTrialing 
+                                ? `Checkout completed, trial started for ${planType} plan`
+                                : `Checkout completed for ${planType} plan`,
+                            source: 'WEBHOOK',
+                            webhookEventId
+                        });
+                    } catch (subError) {
+                        logger.error(`Error retrieving subscription ${session.subscription}:`, subError);
+                    }
+                }
+                
                 return;
             }
 
@@ -123,16 +194,30 @@ class StripeWebhookService {
 
     /**
      * Handle subscription created
+     * NOTE: This event fires when Stripe creates a subscription, which can happen
+     * when payment method is collected (before checkout is completed).
+     * We should NOT activate the user's trial here - that should only happen
+     * in handleCheckoutSessionCompleted to prevent cancelled checkouts from starting trials.
      */
-    async handleSubscriptionCreated(subscription) {
+    async handleSubscriptionCreated(subscription, webhookEventId = null) {
         try {
-            const userId = subscription.metadata.userId;
-            const planType = subscription.metadata.planType;
+            const userId = subscription.metadata?.userId;
+            const planType = subscription.metadata?.planType;
+
+            // Validate required metadata
+            if (!userId || !planType) {
+                logger.warn(`Subscription ${subscription.id} missing required metadata (userId or planType)`);
+                return;
+            }
             const isTrialing = subscription.status === 'trialing';
 
             logger.info(`Subscription created for user: ${userId}, plan: ${planType}, subscription: ${subscription.id}, status: ${subscription.status}, isTrialing: ${isTrialing}`);
 
-            // Update subscription in our database
+            // Check if checkout was already completed (handled by checkout.session.completed)
+            const existingSubscription = await Subscription.findOne({ userId });
+            const checkoutAlreadyCompleted = existingSubscription?.checkoutCompleted === true;
+
+            // Update subscription in our database with Stripe details
             const subscriptionData = {
                 stripeSubscriptionId: subscription.id,
                 stripeCustomerId: subscription.customer,
@@ -150,13 +235,26 @@ class StripeWebhookService {
 
             await this.updateSubscription(userId, subscriptionData);
 
-            // Update user's package type and subscription status
-            await this.updateUserSubscription(userId, planType, subscription.status, subscription);
+            // IMPORTANT: Only update user's package type if checkout was already completed
+            // OR if this is a non-trial subscription (direct payment completed)
+            // This prevents cancelled checkouts from activating trials
+            if (checkoutAlreadyCompleted) {
+                logger.info(`Checkout already completed for user ${userId}, skipping user update in subscription.created (already handled)`);
+            } else if (!isTrialing && subscription.status === 'active') {
+                // Non-trial subscription with active status means payment succeeded
+                // Safe to activate (this shouldn't normally happen as checkout.session.completed should fire first)
+                await this.updateUserSubscription(userId, planType, subscription.status, subscription);
+                logger.info(`Non-trial subscription activated for user: ${userId} (active status)`);
+            } else {
+                // For trial subscriptions, DO NOT activate user here
+                // Wait for checkout.session.completed to confirm user didn't cancel
+                logger.info(`Subscription created for user ${userId} but waiting for checkout.session.completed before activating trial`);
+            }
 
-            logger.info(`Successfully updated subscription for user: ${userId}`);
+            logger.info(`Successfully updated subscription record for user: ${userId}`);
 
-            // Log subscription created event
-            await PaymentLogs.logEvent({
+            // Log subscription created event with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
                 userId,
                 eventType: 'STRIPE_SUBSCRIPTION_CREATED',
                 paymentGateway: 'STRIPE',
@@ -169,9 +267,14 @@ class StripeWebhookService {
                 amount: subscription.items.data[0]?.price.unit_amount / 100,
                 currency: subscription.items.data[0]?.price.currency?.toUpperCase() || 'USD',
                 message: isTrialing 
-                    ? `Subscription created with trial for ${planType} plan`
+                    ? `Subscription created with trial for ${planType} plan (pending checkout completion)`
                     : `Subscription created for ${planType} plan`,
-                source: 'WEBHOOK'
+                source: 'WEBHOOK',
+                webhookEventId,
+                metadata: {
+                    checkoutCompleted: checkoutAlreadyCompleted,
+                    waitingForCheckout: isTrialing && !checkoutAlreadyCompleted
+                }
             });
 
         } catch (error) {
@@ -181,19 +284,39 @@ class StripeWebhookService {
     }
 
     /**
+     * Normalize subscription status from Stripe to our database format
+     * Stripe uses American spelling 'canceled', we use British spelling 'cancelled'
+     */
+    normalizeStatus(stripeStatus) {
+        if (stripeStatus === 'canceled') {
+            return 'cancelled';
+        }
+        return stripeStatus;
+    }
+
+    /**
      * Handle subscription updated
      */
-    async handleSubscriptionUpdated(subscription) {
+    async handleSubscriptionUpdated(subscription, webhookEventId = null) {
         try {
-            const userId = subscription.metadata.userId;
-            const planType = subscription.metadata.planType;
-            const isTrialing = subscription.status === 'trialing';
+            const userId = subscription.metadata?.userId;
+            const planType = subscription.metadata?.planType;
 
-            logger.info(`Subscription updated for user: ${userId}, status: ${subscription.status}, isTrialing: ${isTrialing}`);
+            // Validate required metadata
+            if (!userId) {
+                logger.warn(`Subscription ${subscription.id} missing userId in metadata`);
+                return;
+            }
+
+            const isTrialing = subscription.status === 'trialing';
+            // Normalize status from Stripe (canceled -> cancelled)
+            const normalizedStatus = this.normalizeStatus(subscription.status);
+
+            logger.info(`Subscription updated for user: ${userId}, status: ${normalizedStatus}, isTrialing: ${isTrialing}`);
 
             // Update subscription in our database
             const subscriptionData = {
-                status: subscription.status,
+                status: normalizedStatus,
                 currentPeriodStart: this.safeDate(subscription.current_period_start),
                 currentPeriodEnd: this.safeDate(subscription.current_period_end),
                 nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
@@ -201,39 +324,43 @@ class StripeWebhookService {
             };
 
             // Update payment status based on subscription status
-            if (subscription.status === 'active') {
+            if (normalizedStatus === 'active') {
                 subscriptionData.paymentStatus = 'paid';
-            } else if (subscription.status === 'trialing') {
+            } else if (normalizedStatus === 'trialing') {
                 subscriptionData.paymentStatus = 'no_payment_required';
-            } else if (subscription.status === 'past_due') {
+            } else if (normalizedStatus === 'past_due') {
                 subscriptionData.paymentStatus = 'unpaid';
             }
 
             await this.updateSubscription(userId, subscriptionData);
 
             // Update user subscription status
-            await this.updateUserSubscription(userId, planType, subscription.status, subscription);
+            if (planType) {
+                await this.updateUserSubscription(userId, planType, normalizedStatus, subscription);
+            }
 
             // If subscription is cancelled, downgrade user to LITE
-            if (subscription.status === 'canceled') {
+            if (normalizedStatus === 'cancelled') {
                 await this.downgradeUserToLite(userId);
             }
 
-            logger.info(`Successfully updated subscription for user: ${userId}, status: ${subscription.status}`);
+            logger.info(`Successfully updated subscription for user: ${userId}, status: ${normalizedStatus}`);
 
-            // Log subscription status change
-            await PaymentLogs.logEvent({
+            // Log subscription status change with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
                 userId,
                 eventType: 'STRIPE_SUBSCRIPTION_UPDATED',
                 paymentGateway: 'STRIPE',
                 status: 'SUCCESS',
                 subscriptionId: subscription.id,
                 planType: planType,
-                newStatus: subscription.status,
-                message: `Subscription status updated to ${subscription.status}`,
+                newStatus: normalizedStatus,
+                message: `Subscription status updated to ${normalizedStatus}`,
                 source: 'WEBHOOK',
+                webhookEventId,
                 metadata: {
-                    cancelAtPeriodEnd: subscription.cancel_at_period_end
+                    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+                    originalStripeStatus: subscription.status
                 }
             });
 
@@ -246,9 +373,15 @@ class StripeWebhookService {
     /**
      * Handle subscription deleted
      */
-    async handleSubscriptionDeleted(subscription) {
+    async handleSubscriptionDeleted(subscription, webhookEventId = null) {
         try {
-            const userId = subscription.metadata.userId;
+            const userId = subscription.metadata?.userId;
+
+            // Validate required metadata
+            if (!userId) {
+                logger.warn(`Subscription ${subscription.id} missing userId in metadata`);
+                return;
+            }
 
             logger.info(`Subscription deleted for user: ${userId}`);
 
@@ -263,8 +396,8 @@ class StripeWebhookService {
 
             logger.info(`Successfully handled subscription deletion for user: ${userId}`);
 
-            // Log subscription cancelled event
-            await PaymentLogs.logEvent({
+            // Log subscription cancelled event with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
                 userId,
                 eventType: 'STRIPE_SUBSCRIPTION_CANCELLED',
                 paymentGateway: 'STRIPE',
@@ -275,7 +408,8 @@ class StripeWebhookService {
                 previousStatus: 'active',
                 newStatus: 'cancelled',
                 message: 'Subscription cancelled, user downgraded to LITE',
-                source: 'WEBHOOK'
+                source: 'WEBHOOK',
+                webhookEventId
             });
 
         } catch (error) {
@@ -288,7 +422,7 @@ class StripeWebhookService {
      * Handle successful invoice payment
      * This is triggered when trial ends and payment is charged, or for regular renewals
      */
-    async handleInvoicePaymentSucceeded(invoice) {
+    async handleInvoicePaymentSucceeded(invoice, webhookEventId = null) {
         try {
             const subscriptionId = invoice.subscription;
             
@@ -298,8 +432,14 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-            const userId = subscription.metadata.userId;
-            const planType = subscription.metadata.planType;
+            const userId = subscription.metadata?.userId;
+            const planType = subscription.metadata?.planType;
+
+            // Validate required metadata
+            if (!userId) {
+                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata`);
+                return;
+            }
             
             // Check if this is a trial ending payment (billing_reason will be 'subscription_cycle' after trial)
             const isTrialEndPayment = invoice.billing_reason === 'subscription_cycle' || invoice.billing_reason === 'subscription_create';
@@ -340,10 +480,10 @@ class StripeWebhookService {
 
             logger.info(`Successfully recorded payment for user: ${userId}`);
 
-            // Log payment success event
-            await PaymentLogs.logEvent({
+            // Log payment success event with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
                 userId,
-                eventType: wasInTrial ? 'TRIAL_ENDED' : 'STRIPE_PAYMENT_SUCCESS',
+                eventType: wasInTrial ? 'TRIAL_ENDED' : 'STRIPE_INVOICE_PAID',
                 paymentGateway: 'STRIPE',
                 status: 'SUCCESS',
                 subscriptionId: subscriptionId,
@@ -357,6 +497,7 @@ class StripeWebhookService {
                     ? `Trial ended, payment of ${invoice.currency?.toUpperCase() || 'USD'} ${invoice.amount_paid / 100} charged`
                     : `Recurring payment of ${invoice.currency?.toUpperCase() || 'USD'} ${invoice.amount_paid / 100}`,
                 source: 'WEBHOOK',
+                webhookEventId,
                 metadata: {
                     billingReason: invoice.billing_reason,
                     invoiceNumber: invoice.number
@@ -374,7 +515,7 @@ class StripeWebhookService {
      * Updates both Subscription and User to reflect payment failure
      * If Stripe has exhausted all retries, downgrade user to LITE
      */
-    async handleInvoicePaymentFailed(invoice) {
+    async handleInvoicePaymentFailed(invoice, webhookEventId = null) {
         try {
             const subscriptionId = invoice.subscription;
             
@@ -384,8 +525,14 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata and status
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-            const userId = subscription.metadata.userId;
+            const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
+
+            // Validate required metadata
+            if (!userId) {
+                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata`);
+                return;
+            }
 
             logger.warn(`Invoice payment failed for user: ${userId}, amount: ${invoice.amount_due}, attempt: ${invoice.attempt_count}, next attempt: ${invoice.next_payment_attempt ? 'scheduled' : 'none'}`);
 
@@ -412,10 +559,10 @@ class StripeWebhookService {
 
                 logger.info(`User ${userId} downgraded to LITE after final payment failure`);
 
-                // Log the downgrade event
-                await PaymentLogs.logEvent({
+                // Log the downgrade event with webhookEventId for idempotency
+                await PaymentLogs.logWebhookEvent({
                     userId,
-                    eventType: 'STRIPE_PAYMENT_FAILED',
+                    eventType: 'STRIPE_INVOICE_PAYMENT_FAILED',
                     paymentGateway: 'STRIPE',
                     status: 'FAILED',
                     subscriptionId: subscriptionId,
@@ -430,6 +577,7 @@ class StripeWebhookService {
                     errorCode: invoice.last_finalization_error?.code || 'FINAL_FAILURE',
                     message: `Final payment failure. User downgraded to LITE after ${invoice.attempt_count} attempts.`,
                     source: 'WEBHOOK',
+                    webhookEventId,
                     metadata: {
                         attemptCount: invoice.attempt_count,
                         nextPaymentAttempt: null,
@@ -450,10 +598,10 @@ class StripeWebhookService {
 
                 logger.info(`User ${userId} marked as past_due. Payment retry scheduled.`);
 
-                // Log payment failure event
-                await PaymentLogs.logEvent({
+                // Log payment failure event with webhookEventId for idempotency
+                await PaymentLogs.logWebhookEvent({
                     userId,
-                    eventType: 'STRIPE_PAYMENT_FAILED',
+                    eventType: 'STRIPE_INVOICE_PAYMENT_FAILED',
                     paymentGateway: 'STRIPE',
                     status: 'FAILED',
                     subscriptionId: subscriptionId,
@@ -467,6 +615,7 @@ class StripeWebhookService {
                     errorCode: invoice.last_finalization_error?.code,
                     message: `Payment failed (attempt ${invoice.attempt_count}). Retry scheduled.`,
                     source: 'WEBHOOK',
+                    webhookEventId,
                     metadata: {
                         attemptCount: invoice.attempt_count,
                         nextPaymentAttempt: invoice.next_payment_attempt ? new Date(invoice.next_payment_attempt * 1000) : null
@@ -483,19 +632,193 @@ class StripeWebhookService {
     /**
      * Handle trial will end (sent 3 days before trial ends by Stripe)
      */
-    async handleTrialWillEnd(subscription) {
+    async handleTrialWillEnd(subscription, webhookEventId = null) {
         try {
-            const userId = subscription.metadata.userId;
-            const planType = subscription.metadata.planType;
+            const userId = subscription.metadata?.userId;
+            const planType = subscription.metadata?.planType;
+
+            // Validate required metadata
+            if (!userId) {
+                logger.warn(`Subscription ${subscription.id} missing userId in metadata for trial_will_end`);
+                return;
+            }
+
             const trialEndDate = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
 
             logger.info(`Trial will end for user: ${userId}, plan: ${planType}, trial ends on: ${trialEndDate}. Stripe will automatically charge the payment method on file.`);
+
+            // Log trial will end event with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
+                userId,
+                eventType: 'TRIAL_WILL_END',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: subscription.id,
+                planType: planType,
+                trialEndsAt: trialEndDate,
+                message: `Trial will end on ${trialEndDate?.toISOString() || 'unknown date'}`,
+                source: 'WEBHOOK',
+                webhookEventId
+            });
 
             // TODO: Send email notification about trial ending
             // Example: await emailService.sendTrialEndingEmail(userId, trialEndDate, planType);
 
         } catch (error) {
             logger.error('Error handling trial will end:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle checkout session expired
+     * This is called when a checkout session expires (user didn't complete checkout)
+     * We should clean up any subscriptions that were created but never completed
+     */
+    async handleCheckoutSessionExpired(session, webhookEventId = null) {
+        try {
+            const userId = session.metadata?.userId;
+            const planType = session.metadata?.planType;
+
+            logger.info(`Checkout session expired for user: ${userId}, plan: ${planType}, session: ${session.id}`);
+
+            if (!userId) {
+                logger.warn('Checkout session expired without userId in metadata');
+                return;
+            }
+
+            // Check if there's an incomplete subscription for this user
+            const dbSubscription = await Subscription.findOne({ 
+                userId,
+                stripeSessionId: session.id,
+                checkoutCompleted: { $ne: true }
+            });
+
+            if (dbSubscription) {
+                // If a subscription was created in Stripe, cancel it
+                if (dbSubscription.stripeSubscriptionId) {
+                    try {
+                        await this.stripe.subscriptions.cancel(dbSubscription.stripeSubscriptionId);
+                        logger.info(`Cancelled incomplete Stripe subscription ${dbSubscription.stripeSubscriptionId} for user ${userId}`);
+                    } catch (cancelError) {
+                        // Subscription might already be cancelled or not exist
+                        logger.warn(`Could not cancel subscription ${dbSubscription.stripeSubscriptionId}: ${cancelError.message}`);
+                    }
+                }
+
+                // Update subscription status to indicate checkout was cancelled
+                await Subscription.findOneAndUpdate(
+                    { userId, stripeSessionId: session.id },
+                    { 
+                        $set: { 
+                            status: 'cancelled',
+                            paymentStatus: 'unpaid',
+                            checkoutCompleted: false
+                        } 
+                    }
+                );
+
+                logger.info(`Marked subscription as cancelled for user ${userId} after checkout expiry`);
+
+                // Log checkout expired event with webhookEventId for idempotency
+                await PaymentLogs.logWebhookEvent({
+                    userId,
+                    eventType: 'STRIPE_CHECKOUT_EXPIRED',
+                    paymentGateway: 'STRIPE',
+                    status: 'CANCELLED',
+                    subscriptionId: dbSubscription.stripeSubscriptionId,
+                    planType: planType,
+                    message: 'Checkout session expired, subscription cancelled',
+                    source: 'WEBHOOK',
+                    webhookEventId
+                });
+            }
+
+        } catch (error) {
+            logger.error('Error handling checkout session expired:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle charge refunded
+     * This is called when a payment is refunded
+     * For full refunds on subscriptions, we may need to downgrade the user
+     */
+    async handleChargeRefunded(charge, webhookEventId = null) {
+        try {
+            const chargeId = charge.id;
+            const customerId = charge.customer;
+            const amountRefunded = charge.amount_refunded;
+            const amountTotal = charge.amount;
+            const isFullRefund = amountRefunded >= amountTotal;
+
+            logger.info(`Charge refunded: ${chargeId}, customer: ${customerId}, refunded: ${amountRefunded}, total: ${amountTotal}, fullRefund: ${isFullRefund}`);
+
+            // Find subscription by customer ID
+            const dbSubscription = await Subscription.findOne({ stripeCustomerId: customerId });
+            
+            if (!dbSubscription) {
+                logger.info(`No subscription found for Stripe customer: ${customerId}`);
+                return;
+            }
+
+            const userId = dbSubscription.userId;
+            const previousStatus = dbSubscription.status;
+            const previousPlanType = dbSubscription.planType;
+
+            // Log the refund event with webhookEventId for idempotency
+            await PaymentLogs.logWebhookEvent({
+                userId,
+                eventType: 'STRIPE_CHARGE_REFUNDED',
+                paymentGateway: 'STRIPE',
+                status: 'SUCCESS',
+                subscriptionId: dbSubscription.stripeSubscriptionId,
+                paymentId: chargeId,
+                amount: amountRefunded / 100, // Convert from cents
+                currency: (charge.currency || 'usd').toUpperCase(),
+                planType: previousPlanType,
+                previousStatus: previousStatus,
+                message: isFullRefund 
+                    ? `Full refund processed: ${(charge.currency || 'USD').toUpperCase()} ${amountRefunded / 100}`
+                    : `Partial refund processed: ${(charge.currency || 'USD').toUpperCase()} ${amountRefunded / 100}`,
+                source: 'WEBHOOK',
+                webhookEventId,
+                metadata: {
+                    chargeId,
+                    amountTotal: amountTotal / 100,
+                    amountRefunded: amountRefunded / 100,
+                    isFullRefund
+                }
+            });
+
+            // For full refunds, consider downgrading the user
+            // This depends on business logic - some may want to downgrade immediately,
+            // others may wait for subscription cancellation webhook
+            if (isFullRefund) {
+                logger.info(`Full refund processed for user ${userId}, charge ${chargeId}`);
+                
+                // Update subscription status to indicate refund
+                await Subscription.findOneAndUpdate(
+                    { userId, stripeCustomerId: customerId },
+                    { 
+                        $set: { 
+                            paymentStatus: 'refunded',
+                            // Don't change subscription status here - let the cancellation webhook handle it
+                            // or the admin can manually cancel
+                        } 
+                    }
+                );
+
+                // Note: We don't automatically downgrade on refund because:
+                // 1. Partial refunds shouldn't affect access
+                // 2. Full refunds may be accompanied by subscription cancellation
+                // 3. Business may want to handle this case-by-case
+                // The subscription.deleted webhook will handle actual cancellation
+            }
+
+        } catch (error) {
+            logger.error('Error handling charge refunded:', error);
             throw error;
         }
     }
@@ -559,16 +882,20 @@ class StripeWebhookService {
 
     /**
      * Downgrade user to LITE plan
+     * Resets all subscription-related fields including trial status
      */
     async downgradeUserToLite(userId) {
         try {
             await User.findByIdAndUpdate(userId, {
                 packageType: 'LITE',
                 subscriptionStatus: 'cancelled',
-                accessType: 'user' // Reset accessType to regular user when downgrading
+                accessType: 'user', // Reset accessType to regular user when downgrading
+                isInTrialPeriod: false, // Reset trial status
+                // Note: We keep servedTrial=true so user can't get another trial
+                // trialEndsDate is left as-is for historical reference
             });
 
-            logger.info(`Downgraded user ${userId} to LITE plan`);
+            logger.info(`Downgraded user ${userId} to LITE plan (trial status reset)`);
         } catch (error) {
             logger.error('Error downgrading user to LITE:', error);
             throw error;

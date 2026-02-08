@@ -576,28 +576,43 @@ const getAllPaymentLogs = asyncHandler(async (req, res) => {
 
     try {
         const skip = (parseInt(page) - 1) * parseInt(limit);
-        
-        // Get all payment logs with filters
-        const logs = await PaymentLogs.getAllLogs({
-            limit: parseInt(limit),
-            skip,
-            userId,
-            eventType,
-            status,
-            paymentGateway,
-            startDate,
-            endDate
-        });
+        const limitNum = parseInt(limit);
 
-        // Get failed payments summary for last 30 days
-        const failedPaymentsSummary = await PaymentLogs.getFailedPaymentsSummary(30);
+        // Build same query for count
+        const countQuery = {};
+        if (userId) countQuery.userId = userId;
+        if (eventType) countQuery.eventType = eventType.toUpperCase();
+        if (status) countQuery.status = status.toUpperCase();
+        if (paymentGateway) countQuery.paymentGateway = paymentGateway.toUpperCase();
+        if (startDate || endDate) {
+            countQuery.createdAt = {};
+            if (startDate) countQuery.createdAt.$gte = new Date(startDate);
+            if (endDate) countQuery.createdAt.$lte = new Date(endDate);
+        }
+
+        const [logs, totalCount, failedPaymentsSummary] = await Promise.all([
+            PaymentLogs.getAllLogs({
+                limit: limitNum,
+                skip,
+                userId,
+                eventType,
+                status,
+                paymentGateway,
+                startDate,
+                endDate
+            }),
+            PaymentLogs.countDocuments(countQuery),
+            PaymentLogs.getFailedPaymentsSummary(30)
+        ]);
 
         const responseData = {
             logs,
             pagination: {
                 currentPage: parseInt(page),
-                limit: parseInt(limit),
-                hasMore: logs.length === parseInt(limit)
+                limit: limitNum,
+                totalCount,
+                totalPages: Math.ceil(totalCount / limitNum),
+                hasMore: logs.length === limitNum
             },
             failedPaymentsSummary
         };

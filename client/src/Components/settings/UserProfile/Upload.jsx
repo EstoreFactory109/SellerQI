@@ -13,13 +13,13 @@ const Upload = ({handleFile}) => {
  
 
   return (
-    <div className='mb-5'>
-      <p className='mb-3'>Upload</p>
-      <div className="border border-dashed border-gray-300 rounded-lg bg-[#f9f9ff] w-full h-60 flex flex-col items-center justify-center text-center p-6">
-      <div className="text-gray-500 flex flex-col items-center space-y-2">
+    <div className='mb-4'>
+      <p className='mb-2 text-gray-100'>Upload</p>
+      <div className="border border-dashed border-[#30363d] rounded-lg bg-[#1a1a1a] w-full h-48 flex flex-col items-center justify-center text-center p-4">
+      <div className="text-gray-400 flex flex-col items-center space-y-2">
       <svg
           xmlns="http://www.w3.org/2000/svg"
-          className="h-10 w-10 text-gray-400"
+          className="h-10 w-10 text-gray-500"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -34,7 +34,7 @@ const Upload = ({handleFile}) => {
         <p className="text-sm">Drag & drop to upload or</p>
         <label className="mt-2">
           <input type="file" className="hidden"  onChange={handleFileChange}/>
-          <span className="inline-block px-4 py-2 border border-gray-300 rounded-md bg-white text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition">
+          <span className="inline-block px-4 py-2 border border-[#30363d] rounded-md bg-[#21262d] text-sm font-semibold text-gray-200 cursor-pointer hover:bg-[#30363d] transition">
             Choose File
           </span>
         </label>

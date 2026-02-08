@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Globe, ChevronLeft, ChevronRight, User, Check } from 'lucide-react';
+import { Search, Globe, ChevronLeft, ChevronRight, User, Check, Store } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import axios from 'axios';
@@ -527,7 +527,7 @@ const ProfileIDSelection = () => {
 
 
   return (
-    <div className="min-h-screen bg-[#eeeeee] w-full p-6 overflow-y-auto">
+    <div className="min-h-screen bg-[#1a1a1a] w-full p-6 overflow-y-auto">
       <div className="max-w-[1600px] mx-auto">
         {/* Show loader while data is being fetched */}
         {dataLoading ? (
@@ -537,10 +537,10 @@ const ProfileIDSelection = () => {
               animate={{ opacity: 1 }}
               className="flex flex-col items-center gap-4"
             >
-              <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
               <div className="text-center">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Loading Profile Data</h3>
-                <p className="text-sm text-gray-600">Please wait while we fetch your profile information...</p>
+                <h3 className="text-lg font-semibold text-gray-100 mb-2">Loading Profile Data</h3>
+                <p className="text-sm text-gray-400">Please wait while we fetch your profile information...</p>
               </div>
             </motion.div>
           </div>
@@ -554,14 +554,12 @@ const ProfileIDSelection = () => {
               className="mb-8"
             >
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                  <User className="w-5 h-5 text-white" />
-                </div>
+                <User className="w-5 h-5 text-blue-400" />
                 <div>
-                  <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
+                  <h1 className="text-2xl lg:text-3xl font-bold text-gray-100">
                     Profile ID Selection
                   </h1>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <p className="text-sm text-gray-400 mt-1">
                     Select your Amazon marketplace profile ID and country
                   </p>
                 </div>
@@ -574,21 +572,19 @@ const ProfileIDSelection = () => {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-xl p-4 shadow-sm"
+                className="mb-6 bg-yellow-500/10 border border-yellow-500/40 rounded-xl p-4 shadow-sm"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <motion.div
-                      className="w-5 h-5 border-2 border-yellow-600 border-t-transparent rounded-full"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    />
-                  </div>
+                  <motion.div
+                    className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full flex-shrink-0"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
                   <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-yellow-900 mb-1">
+                    <h3 className="text-sm font-semibold text-yellow-300 mb-1">
                       Starting Analysis...
                     </h3>
-                    <p className="text-xs text-yellow-700">
+                    <p className="text-xs text-yellow-400">
                       Please wait while we start your account analysis. You will be redirected to payment setup shortly.
                     </p>
                   </div>
@@ -602,21 +598,19 @@ const ProfileIDSelection = () => {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-4 shadow-sm"
+                className="mb-6 bg-blue-500/10 border border-blue-500/40 rounded-xl p-4 shadow-sm"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <motion.div
-                      className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    />
-                  </div>
+                  <motion.div
+                    className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full flex-shrink-0"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
                   <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-indigo-900 mb-1">
+                    <h3 className="text-sm font-semibold text-blue-300 mb-1">
                       Analysis Started
                     </h3>
-                    <p className="text-xs text-indigo-700">
+                    <p className="text-xs text-blue-400">
                       Your account analysis is running in the background. Redirecting to payment setup...
                     </p>
                   </div>
@@ -629,7 +623,7 @@ const ProfileIDSelection = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.05 }}
-              className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6"
+              className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm p-6 mb-6"
             >
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 {/* Search Input */}
@@ -638,7 +632,7 @@ const ProfileIDSelection = () => {
                   <input
                     type="text"
                     placeholder="Search by name, profile ID, or country..."
-                    className="pl-11 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full transition-all duration-200 shadow-sm hover:shadow-md"
+                    className="pl-11 pr-4 py-2.5 border border-[#30363d] bg-[#21262d] text-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full transition-all duration-200 shadow-sm hover:shadow-md placeholder-gray-500"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -647,13 +641,13 @@ const ProfileIDSelection = () => {
                 {/* Stats */}
                 <div className="flex items-center gap-6">
                   <div className="text-center">
-                    <div className="text-sm text-gray-600">Total Profiles</div>
-                    <div className="text-xl font-bold text-gray-900">{profileData.length}</div>
+                    <div className="text-sm text-gray-400">Total Profiles</div>
+                    <div className="text-xl font-bold text-gray-100">{profileData.length}</div>
                   </div>
-                  <div className="w-px h-12 bg-gray-200"></div>
+                  <div className="w-px h-12 bg-[#30363d]"></div>
                   <div className="text-center">
-                    <div className="text-sm text-gray-600">Filtered Results</div>
-                    <div className="text-xl font-bold text-indigo-600">{filteredProfiles.length}</div>
+                    <div className="text-sm text-gray-400">Filtered Results</div>
+                    <div className="text-xl font-bold text-blue-400">{filteredProfiles.length}</div>
                   </div>
                 </div>
               </div>
@@ -665,18 +659,16 @@ const ProfileIDSelection = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.1 }}
-                className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"
+                className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm p-8 text-center"
               >
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <User className="w-8 h-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Profiles Found</h3>
-                <p className="text-gray-600 mb-4">
+                <User className="w-8 h-8 text-gray-500 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-100 mb-2">No Profiles Found</h3>
+                <p className="text-gray-400 mb-4">
                   No profile data is available. This might be because your account setup is not complete or there was an error fetching data.
                 </p>
                 <button
                   onClick={() => window.location.reload()}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium shadow-lg shadow-blue-500/25"
                 >
                   Retry
                 </button>
@@ -688,27 +680,27 @@ const ProfileIDSelection = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.6, delay: 0.1 }}
-                  className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden"
+                  className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm overflow-hidden"
                 >
                   <div className="overflow-x-auto">
                     <table className="min-w-full">
                       <thead>
-                        <tr className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200">
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                            Name
+                        <tr className="bg-[#21262d] border-b border-[#30363d]">
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                            Brand Name
                           </th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
                             Profile ID
                           </th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
                             Country
                           </th>
-                          <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                          <th className="px-6 py-4 text-center text-xs font-semibold text-gray-300 uppercase tracking-wider">
                             Action
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="bg-white divide-y divide-gray-100">
+                      <tbody className="bg-[#161b22] divide-y divide-[#30363d]">
                         <AnimatePresence>
                           {paginatedProfiles.map((profile, index) => (
                             <motion.tr
@@ -717,17 +709,15 @@ const ProfileIDSelection = () => {
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
                               transition={{ duration: 0.3, delay: index * 0.05 }}
-                              className={`hover:bg-gray-50 transition-colors duration-200 cursor-pointer ${
-                                selectedProfile?.id === profile.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                              className={`hover:bg-[#21262d] transition-colors duration-200 cursor-pointer ${
+                                selectedProfile?.id === profile.id ? 'bg-blue-500/10 border-l-4 border-blue-500' : ''
                               }`}
                               onClick={() => handleProfileSelect(profile)}
                             >
                                                             <td className="px-6 py-4">
                                 <div className="flex items-center gap-2">
-                                  <div className="w-8 h-8 bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <User className="w-4 h-4 text-green-600" />
-                                  </div>
-                                  <span className="text-sm font-medium text-gray-900">
+                                  <Store className="w-4 h-4 text-green-400 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-gray-100">
                                     {String(profile.name || 'N/A')}
                                   </span>
                                 </div>
@@ -735,11 +725,9 @@ const ProfileIDSelection = () => {
                               
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <Globe className="w-4 h-4 text-blue-600" />
-                                  </div>
+                                  <Globe className="w-4 h-4 text-blue-400 flex-shrink-0" />
                                   <div>
-                                    <p className="text-sm font-medium text-gray-900 font-mono">
+                                    <p className="text-sm font-medium text-gray-100 font-mono">
                                       {String(profile.profileId || 'N/A')}
                                     </p>
                                     <p className="text-xs text-gray-500">
@@ -752,7 +740,7 @@ const ProfileIDSelection = () => {
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-2">
                                   <span className="text-lg">{getCountryFlag(String(profile.country || ''))}</span>
-                                  <span className="text-sm font-medium text-gray-900">
+                                  <span className="text-sm font-medium text-gray-100">
                                     {String(profile.country || 'N/A')}
                                   </span>
                                 </div>
@@ -766,8 +754,8 @@ const ProfileIDSelection = () => {
                                   }}
                                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                                     selectedProfile?.id === profile.id
-                                      ? 'bg-blue-600 text-white shadow-md'
-                                      : 'bg-gray-100 text-gray-700 hover:bg-blue-50 hover:text-blue-600'
+                                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                                      : 'bg-[#21262d] text-gray-300 hover:bg-blue-500/10 hover:text-blue-400 border border-[#30363d]'
                                   }`}
                                 >
                                   {selectedProfile?.id === profile.id ? (
@@ -789,9 +777,9 @@ const ProfileIDSelection = () => {
 
                   {/* Pagination */}
                   {totalPages > 1 && (
-                    <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                    <div className="px-6 py-4 border-t border-[#30363d] bg-[#21262d]">
                       <div className="flex items-center justify-between">
-                        <div className="text-sm text-gray-700">
+                        <div className="text-sm text-gray-400">
                           Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredProfiles.length)} of {filteredProfiles.length} results
                         </div>
                         
@@ -799,7 +787,7 @@ const ProfileIDSelection = () => {
                           <button
                             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                             disabled={currentPage === 1}
-                            className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#161b22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                           >
                             <ChevronLeft className="w-4 h-4" />
                           </button>
@@ -810,8 +798,8 @@ const ProfileIDSelection = () => {
                               onClick={() => setCurrentPage(page)}
                               className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
                                 currentPage === page
-                                  ? 'bg-blue-600 text-white'
-                                  : 'text-gray-700 hover:bg-gray-100'
+                                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                                  : 'text-gray-300 hover:bg-[#161b22]'
                               }`}
                             >
                               {page}
@@ -821,7 +809,7 @@ const ProfileIDSelection = () => {
                           <button
                             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                             disabled={currentPage === totalPages}
-                            className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#161b22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                           >
                             <ChevronRight className="w-4 h-4" />
                           </button>
@@ -837,23 +825,23 @@ const ProfileIDSelection = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4 }}
-                    className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-6"
+                    className="mt-6 bg-blue-500/10 rounded-2xl border border-blue-500/40 p-6"
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Selected Profile</h3>
+                        <h3 className="text-lg font-semibold text-gray-100 mb-2">Selected Profile</h3>
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
                           <div>
-                            <span className="text-gray-600">Name:</span>
-                            <p className="font-medium text-gray-900">{String(selectedProfile.name || 'N/A')}</p>
+                            <span className="text-gray-400">Brand Name:</span>
+                            <p className="font-medium text-gray-100">{String(selectedProfile.name || 'N/A')}</p>
                           </div>
                           <div>
-                            <span className="text-gray-600">Profile ID:</span>
-                            <p className="font-medium text-gray-900 font-mono">{String(selectedProfile.profileId || 'N/A')}</p>
+                            <span className="text-gray-400">Profile ID:</span>
+                            <p className="font-medium text-gray-100 font-mono">{String(selectedProfile.profileId || 'N/A')}</p>
                           </div>
                           <div>
-                            <span className="text-gray-600">Country:</span>
-                            <p className="font-medium text-gray-900">{getCountryFlag(String(selectedProfile.country || ''))} {String(selectedProfile.country || 'N/A')}</p>
+                            <span className="text-gray-400">Country:</span>
+                            <p className="font-medium text-gray-100">{getCountryFlag(String(selectedProfile.country || ''))} {String(selectedProfile.country || 'N/A')}</p>
                           </div>
                         </div>
                       </div>
@@ -862,7 +850,7 @@ const ProfileIDSelection = () => {
                         <button 
                           onClick={handleConfirm}
                           disabled={loading}
-                          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-500/25"
                         >
                           {loading ? (
                             <>
@@ -882,7 +870,7 @@ const ProfileIDSelection = () => {
                             setProfileId('');
                             setCurrencyCode('');
                           }}
-                          className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium"
+                          className="px-6 py-2 bg-[#21262d] text-gray-300 rounded-lg hover:bg-[#1c2128] transition-colors duration-200 font-medium border border-[#30363d]"
                         >
                           Clear
                         </button>

@@ -1,7 +1,7 @@
 import React,{useState, useEffect} from 'react'
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
-import issue from "../../assets/Icons/error.png";
+import { Info } from 'lucide-react';
 import TooltipBox from '../ToolTipBox/ToolTipBoxBottomLeft';
 
 const IssuesSummery = () => {
@@ -95,7 +95,7 @@ const IssuesSummery = () => {
             <div className='flex items-center gap-3 mb-4'>
               <h2 className='text-sm font-medium text-gray-700'>ALL ISSUES</h2>
               <div className='relative'>
-                <img src={issue} alt='' className='w-4 h-4 cursor-pointer' 
+                <Info className='w-4 h-4 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' 
                 onMouseEnter={() => setToolTipForProductChecker(true)}
                 onMouseLeave={() => setToolTipForProductChecker(false)}
                 />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Check, AlertTriangle, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Table, TrendingDown, DollarSign, Package, Target, Loader2, CheckCircle2, Calendar } from 'lucide-react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCogsValues } from '../../redux/slices/cogsSlice';
@@ -45,6 +45,13 @@ const ProfitTable = ({ setSuggestionsData }) => {
     const [isLoadingAsinData, setIsLoadingAsinData] = useState(false);
     const [asinDataError, setAsinDataError] = useState(null);
     
+    // Ref to track last processed economicsMetrics to prevent infinite loops
+    const lastProcessedMetricsRef = useRef(null);
+    // Ref to track last dispatched errors to prevent infinite loops
+    const lastDispatchedErrorsRef = useRef(null);
+    // Ref to track last processedProducts to prevent unnecessary effect runs
+    const lastProcessedProductsRef = useRef(null);
+    
     // Get profitability data from Redux store
     const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
     const totalProducts = useSelector((state) => state.Dashboard.DashBoardInfo?.TotalProduct) || [];
@@ -67,60 +74,79 @@ const ProfitTable = ({ setSuggestionsData }) => {
     // Also check if totalSales > 5000 and asinWiseSales is empty (for legacy data before isBig was added)
     useEffect(() => {
         const fetchAsinWiseSalesForBigAccount = async () => {
-            // Skip if economicsMetrics is not available yet
+            // If economicsMetrics is not available yet, try to fetch from endpoint anyway
             if (!economicsMetrics) {
-                console.log('ProfitTable: economicsMetrics not available yet');
+                // Try fetching directly - might be a big account or data might be available
+                try {
+                    const response = await axiosInstance.get('/api/pagewise/asin-wise-sales');
+                    // ApiResponse returns statusCode (not success) - check for 200 statusCode
+                    if (response.data?.statusCode === 200 && response.data?.data?.asinWiseSales) {
+                        setAsinWiseSalesData(response.data.data.asinWiseSales);
+                        return;
+                    }
+                } catch (error) {
+                    // Silently fail - will retry when economicsMetrics is available
+                }
                 return;
             }
             
-            const hasAsinData = economicsMetrics?.asinWiseSales && economicsMetrics.asinWiseSales.length > 0;
-            const isBigAccount = economicsMetrics?.isBig === true;
+            // Create a stable key to compare if we've already processed this data
+            const isBig = economicsMetrics?.isBig;
+            const asinLength = economicsMetrics?.asinWiseSales?.length || 0;
             const totalSales = economicsMetrics?.totalSales?.amount || 0;
+            const metricsKey = `${isBig}_${asinLength}_${totalSales}`;
             
-            // Check if this might be a big account that needs data fetched
-            // - Explicitly marked as big (isBig=true) with no asinWiseSales
-            // - OR has high totalSales (>5000) but empty asinWiseSales (legacy data issue)
-            const needsFetch = (!hasAsinData && isBigAccount) || 
-                              (!hasAsinData && totalSales > 5000);
+            // Skip if we've already processed this exact data
+            if (lastProcessedMetricsRef.current === metricsKey) {
+                return;
+            }
             
-            console.log('ProfitTable ASIN data check:', {
-                hasAsinData,
-                isBigAccount,
-                totalSales,
-                needsFetch,
-                asinWiseSalesLength: economicsMetrics?.asinWiseSales?.length || 0
-            });
+            const hasAsinData = asinLength > 0;
+            const isBigAccount = isBig === true;
+            
+            // Check if we need to fetch data from the API
+            // Fetch if:
+            // - No ASIN data in Redux (always try to fetch if empty)
+            // - Explicitly marked as big (isBig=true)
+            // - OR has high totalSales (>5000) but empty asinWiseSales
+            const needsFetch = !hasAsinData;  // Always fetch if no data in Redux
             
             if (needsFetch) {
                 setIsLoadingAsinData(true);
                 setAsinDataError(null);
                 
                 try {
-                    console.log('Fetching ASIN-wise sales data for big account...');
-                    const response = await axiosInstance.get('/page-data/asin-wise-sales');
+                    const response = await axiosInstance.get('/api/pagewise/asin-wise-sales');
                     
-                    if (response.data?.success && response.data?.data?.asinWiseSales) {
-                        console.log('Fetched ASIN-wise sales:', response.data.data.asinWiseSales.length, 'records');
-                        setAsinWiseSalesData(response.data.data.asinWiseSales);
+                    // ApiResponse returns statusCode (not success) - check for 200 statusCode
+                    if (response.data?.statusCode === 200 && response.data?.data?.asinWiseSales) {
+                        const fetchedData = response.data.data.asinWiseSales;
+                        setAsinWiseSalesData(fetchedData);
+                        lastProcessedMetricsRef.current = metricsKey;
                     } else {
-                        console.warn('No ASIN-wise sales data in response');
                         setAsinWiseSalesData([]);
+                        lastProcessedMetricsRef.current = metricsKey;
                     }
                 } catch (error) {
-                    console.error('Error fetching ASIN-wise sales data:', error);
                     setAsinDataError(error.message);
                     setAsinWiseSalesData([]);
+                    lastProcessedMetricsRef.current = metricsKey;
                 } finally {
                     setIsLoadingAsinData(false);
                 }
             } else if (hasAsinData) {
                 // Normal account with data - use data from Redux
+                // Set the data directly - the metricsKey check above already prevents redundant processing
                 setAsinWiseSalesData(economicsMetrics.asinWiseSales);
+                lastProcessedMetricsRef.current = metricsKey;
+            } else {
+                // No data case - mark as processed
+                lastProcessedMetricsRef.current = metricsKey;
             }
         };
         
         fetchAsinWiseSalesForBigAccount();
-    }, [economicsMetrics?.isBig, economicsMetrics?.asinWiseSales?.length, economicsMetrics?.totalSales?.amount]);
+    }, [economicsMetrics, economicsMetrics?.isBig, economicsMetrics?.asinWiseSales?.length, economicsMetrics?.totalSales?.amount]);
     
     // Calculate total active products
     const totalActiveProducts = totalProducts.filter(product => product.status === "Active").length;
@@ -202,22 +228,6 @@ const ProfitTable = ({ setSuggestionsData }) => {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     };
     
-    // Debug logging
-    useEffect(() => {
-        if (asinWiseSalesData?.length > 0) {
-            const sample = asinWiseSalesData.slice(0, 5);
-            console.log('=== ProfitTable Debug ===');
-            console.log('Total asinWiseSales records:', asinWiseSalesData.length);
-            console.log('Is big account:', economicsMetrics?.isBig);
-            console.log('Sample data:', sample);
-            console.log('Has date field:', sample.some(item => item.date));
-            console.log('Has parentAsin field:', sample.some(item => item.parentAsin));
-            console.log('Date filter active:', isDateRangeSelected);
-            if (isDateRangeSelected) {
-                console.log('Date range:', startDate, 'to', endDate);
-            }
-        }
-    }, [asinWiseSalesData, economicsMetrics?.isBig, isDateRangeSelected, startDate, endDate]);
     
     /**
      * MAIN DATA PROCESSING:
@@ -274,20 +284,18 @@ const ProfitTable = ({ setSuggestionsData }) => {
             
             // Step 1: Filter by date range if applicable
             let filteredData = asinWiseSales;
-            if (isDateRangeSelected && hasDateData) {
-                const start = parseLocalDate(startDate);
-                const end = parseLocalDate(endDate);
-                start.setHours(0, 0, 0, 0);
-                end.setHours(23, 59, 59, 999);
-                
-                filteredData = asinWiseSales.filter(item => {
-                    if (!item.date) return true;
-                    const itemDate = new Date(item.date);
-                    return itemDate >= start && itemDate <= end;
-                });
-                
-                console.log(`Date filter applied: ${asinWiseSales.length} -> ${filteredData.length} records`);
-            }
+                if (isDateRangeSelected && hasDateData) {
+                    const start = parseLocalDate(startDate);
+                    const end = parseLocalDate(endDate);
+                    start.setHours(0, 0, 0, 0);
+                    end.setHours(23, 59, 59, 999);
+                    
+                    filteredData = asinWiseSales.filter(item => {
+                        if (!item.date) return true;
+                        const itemDate = new Date(item.date);
+                        return itemDate >= start && itemDate <= end;
+                    });
+                }
             
             // Step 2: Aggregate by child ASIN first
             const asinAggregates = new Map();
@@ -382,15 +390,18 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 if (profitMargin < 10 && profitMargin >= 0) status = 'warn';
                 if (profitMargin < 0) status = 'bad';
                 
-                // Check if this parent has multiple children (variations)
-                const hasMultipleChildren = parent.children.length > 1;
+                // Count actual child ASINs (those different from the parent ASIN)
+                const actualChildren = parent.children.filter(child => child.asin !== parentAsin);
+                const actualChildCount = actualChildren.length;
+                
+                // Check if this parent has actual child variations
+                const hasMultipleChildren = actualChildCount > 0;
                 // Or if it's a single child that's different from parent
                 const hasDifferentChild = parent.children.length === 1 && parent.children[0].asin !== parentAsin;
                 const isExpandable = hasMultipleChildren || hasDifferentChild;
                 
-                // Build children array for expansion
-                const childrenForDisplay = parent.children
-                    .filter(child => child.asin !== parentAsin || parent.children.length === 1) // Show all if different, or single child
+                // Build children array for expansion - only show actual children (different from parent)
+                const childrenForDisplay = actualChildren
                     .map(child => createProductObject(child.asin, child, child.productDetails))
                     .sort((a, b) => b.sales - a.sales);
                 
@@ -415,20 +426,17 @@ const ProfitTable = ({ setSuggestionsData }) => {
                     isExpandable: isExpandable,
                     isParent: true,
                     children: childrenForDisplay,
-                    childrenCount: parent.children.length
+                    childrenCount: actualChildCount  // Only count actual child variations, not the parent itself
                 });
             });
             
             // Sort by sales descending
             products.sort((a, b) => b.sales - a.sales);
             
-            console.log(`Processed ${products.length} parent ASINs with ${asinAggregates.size} total child ASINs`);
-            
             return products;
         }
         
         // Fallback to profitabilityData if no economics data
-        console.log('Using fallback profitabilityData');
         return profitibilityData.map(item => {
             const productDetails = productDetailsMap.get(item.asin) || {};
             const cogsPerUnit = cogsValues[item.asin] || 0;
@@ -515,12 +523,30 @@ const ProfitTable = ({ setSuggestionsData }) => {
           cogsPerUnit: product.cogsPerUnit
         }));
       
-      dispatch(updateProfitabilityErrors({ totalErrors, errorDetails }));
+      // Create a stable key to compare if errors actually changed
+      const errorsKey = `${totalErrors}_${errorDetails.length}_${errorDetails[0]?.asin || ''}`;
+      
+      // Only dispatch if errors actually changed
+      if (lastDispatchedErrorsRef.current !== errorsKey) {
+        dispatch(updateProfitabilityErrors({ totalErrors, errorDetails }));
+        lastDispatchedErrorsRef.current = errorsKey;
+      }
     }, [processedProducts, dispatch]);
+    
+    // Ref to track last suggestions to prevent infinite loops
+    const lastSuggestionsRef = useRef(null);
+    // Ref to store the setSuggestionsData function to avoid dependency issues
+    const setSuggestionsDataRef = useRef(setSuggestionsData);
+    
+    // Update ref when function changes
+    useEffect(() => {
+      setSuggestionsDataRef.current = setSuggestionsData;
+    }, [setSuggestionsData]);
     
     // Send suggestions data to parent component
     useEffect(() => {
-      if (setSuggestionsData && typeof setSuggestionsData === 'function') {
+      const setSuggestions = setSuggestionsDataRef.current;
+      if (setSuggestions && typeof setSuggestions === 'function') {
         const allSuggestions = [];
         
         processedProducts.forEach(product => {
@@ -530,9 +556,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
           }
         });
         
-        setSuggestionsData(allSuggestions);
+        // Only update if suggestions actually changed (compare by length and first item)
+        const suggestionsKey = `${allSuggestions.length}_${allSuggestions[0]?.asin || ''}`;
+        if (lastSuggestionsRef.current !== suggestionsKey) {
+          setSuggestions(allSuggestions);
+          lastSuggestionsRef.current = suggestionsKey;
+        }
       }
-    }, [processedProducts, setSuggestionsData]);
+    }, [processedProducts]);
     
     // Calculate total pages
     const totalPages = Math.ceil(processedProducts.length / productsPerPage);
@@ -572,58 +603,47 @@ const ProfitTable = ({ setSuggestionsData }) => {
     // Show loading state when fetching ASIN data for big accounts
     if (isLoadingAsinData) {
       return (
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-6 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Table className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">Product Profitability Analysis</h3>
-                <p className="text-sm text-gray-600">Loading ASIN-wise sales data...</p>
-              </div>
+        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+          <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+            <div className="flex items-center gap-2">
+              <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
             </div>
           </div>
-          <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 text-purple-500 animate-spin mb-4" />
-            <p className="text-gray-600">Loading product data for analysis...</p>
-            <p className="text-sm text-gray-400 mt-2">This may take a moment for accounts with many products</p>
+          <div className="flex flex-col items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin mb-2" style={{ color: '#3b82f6' }} />
+            <p className="text-xs" style={{ color: '#9ca3af' }}>Loading product data...</p>
           </div>
         </div>
       );
     }
     
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
         {/* Enhanced Header */}
-        <div className="p-6 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Table className="w-5 h-5 text-white" />
-              </div>
+        <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
               <div>
-                <h3 className="text-xl font-bold text-gray-900">Product Profitability Analysis</h3>
-                <p className="text-sm text-gray-600">
-                  ASIN-wise breakdown with daily data
-                  {isDateRangeSelected && (
-                    <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                      <Calendar className="w-3 h-3 inline mr-1" />
-                      {parseLocalDate(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {parseLocalDate(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </span>
-                  )}
-                </p>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
+                {isDateRangeSelected && (
+                  <span className="ml-0 mt-0.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+                    <Calendar className="w-2.5 h-2.5 inline mr-1" />
+                    {parseLocalDate(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {parseLocalDate(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4">
               <div className="text-center">
-                <div className="text-sm text-gray-600">Parent ASINs</div>
-                <div className="text-2xl font-bold text-emerald-600">{processedProducts.length}</div>
+                <div className="text-[10px] uppercase tracking-wide" style={{ color: '#9ca3af' }}>Parent</div>
+                <div className="text-base font-bold" style={{ color: '#22c55e' }}>{processedProducts.length}</div>
               </div>
-              <div className="w-px h-12 bg-gray-300"></div>
+              <div className="w-px h-8" style={{ background: '#30363d' }}></div>
               <div className="text-center">
-                <div className="text-sm text-gray-600">Child ASINs</div>
-                <div className="text-2xl font-bold text-purple-600">{processedProducts.reduce((sum, p) => sum + (p.childrenCount || 0), 0)}</div>
+                <div className="text-[10px] uppercase tracking-wide" style={{ color: '#9ca3af' }}>Child</div>
+                <div className="text-base font-bold" style={{ color: '#3b82f6' }}>{processedProducts.reduce((sum, p) => sum + (p.childrenCount || 0), 0)}</div>
               </div>
             </div>
           </div>
@@ -631,9 +651,9 @@ const ProfitTable = ({ setSuggestionsData }) => {
 
         {/* Loading state */}
         {cogsLoading && (
-          <div className="flex items-center justify-center py-4 bg-blue-50 border-b border-blue-100">
-            <Loader2 className="w-5 h-5 text-blue-600 animate-spin mr-2" />
-            <span className="text-sm text-blue-700">Loading saved COGS data...</span>
+          <div className="flex items-center justify-center py-2 border-b" style={{ background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid rgba(59, 130, 246, 0.2)' }}>
+            <Loader2 className="w-4 h-4 animate-spin mr-2" style={{ color: '#60a5fa' }} />
+            <span className="text-xs" style={{ color: '#60a5fa' }}>Loading saved COGS data...</span>
           </div>
         )}
 
@@ -641,20 +661,20 @@ const ProfitTable = ({ setSuggestionsData }) => {
         <div className="w-full overflow-hidden">
           <table className="w-full table-fixed">
             <thead>
-              <tr className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200">
-                <th className="w-8 px-2 py-4 text-center text-xs font-semibold text-gray-500">#</th>
-                <th className="w-1/5 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">Product</th>
-                <th className="w-28 px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">ASIN</th>
-                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales</th>
-                <th className="w-16 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Units Sold</th>
-                <th className="w-32 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">COGS</th>
-                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Ad Spend</th>
-                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Amz Fees</th>
-                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Gross</th>
-                <th className="w-24 px-3 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">Net</th>
+              <tr style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+                <th className="w-8 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>#</th>
+                <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Product</th>
+                <th className="w-28 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales</th>
+                <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units</th>
+                <th className="w-32 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS</th>
+                <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Ad Spend</th>
+                <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Amz Fees</th>
+                <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gross</th>
+                <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Net</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody>
               <AnimatePresence>
                 {currentProducts.length > 0 ? (
                   currentProducts.map((product, index) => (
@@ -665,58 +685,54 @@ const ProfitTable = ({ setSuggestionsData }) => {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -20 }}
                         transition={{ duration: 0.3, delay: index * 0.05 }}
-                        className={`hover:bg-gray-50 transition-colors duration-200 ${
-                          product.isExpandable ? 'cursor-pointer' : ''
-                        } ${expandedRows.has(product.asin) ? 'bg-blue-50/50' : ''}`}
+                        className="transition-colors duration-200"
+                        style={{ borderBottom: '1px solid #30363d', background: 'transparent' }}
                       >
                         {/* Row number */}
-                        <td className="px-2 py-5 align-middle text-center">
-                          <span className="text-xs text-gray-400">#{indexOfFirstProduct + index + 1}</span>
+                        <td className="px-2 py-2 align-middle text-center">
+                          <span className="text-[11px]" style={{ color: '#6b7280' }}>#{indexOfFirstProduct + index + 1}</span>
                         </td>
-                        <td className="px-4 py-5 align-middle">
+                        <td className="px-3 py-2 align-middle">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-900 leading-relaxed break-words" title={product.name}>
+                            <div className="text-[11px] font-medium leading-relaxed break-words" style={{ color: '#f3f4f6' }} title={product.name}>
                               {product.name}
                             </div>
                             {product.isExpandable && (
-                              <div className="text-xs text-blue-600 mt-0.5">
+                              <div className="text-[10px] mt-0.5" style={{ color: '#60a5fa' }}>
                                 {product.childrenCount} variation{product.childrenCount > 1 ? 's' : ''}
                               </div>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-5 align-middle">
+                        <td className="px-3 py-2 align-middle">
                           <div className="flex flex-col">
                             <span className={`text-sm font-mono px-2 py-1 rounded whitespace-nowrap font-semibold ${
                               product.isExpandable 
-                                ? 'text-blue-700 bg-blue-100' 
-                                : 'text-gray-600 bg-gray-100'
-                            }`} title={product.isExpandable ? `Parent: ${product.asin}` : product.asin}>
+                                ? '' 
+                                : ''
+                            }`} style={product.isExpandable ? { color: '#60a5fa', background: 'rgba(59, 130, 246, 0.2)' } : { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)' }} title={product.isExpandable ? `Parent: ${product.asin}` : product.asin}>
                               {product.asin}
                             </span>
                             {product.isExpandable && (
-                              <span className="text-xs text-blue-600 mt-0.5 font-medium">Parent</span>
+                              <span className="text-xs mt-0.5 font-medium" style={{ color: '#60a5fa' }}>Parent</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
-                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.sales, currency)}>
+                        <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-[11px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(product.sales, currency)}>
                             {formatCurrencyWithLocale(product.sales, currency)}
                           </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
-                          <span className="text-sm font-semibold text-gray-900">{product.units.toLocaleString()}</span>
+                        <td className="px-2 py-2 text-center align-middle">
+                          <span className="text-[11px] font-semibold" style={{ color: '#f3f4f6' }}>{product.units.toLocaleString()}</span>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle">
+                        <td className="px-2 py-2 text-center align-middle">
                           {/* For parents with children: show expand button instead of COGS */}
                           {product.isExpandable ? (
                             <button
                               onClick={() => toggleExpanded(product.asin)}
-                              className={`flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg transition-all duration-200 ${
-                                expandedRows.has(product.asin)
-                                  ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                                  : 'bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 border border-gray-200 hover:border-blue-300'
-                              }`}
+                              className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg transition-all duration-200 cursor-pointer"
+                              style={expandedRows.has(product.asin) ? { background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', border: '1px solid #3b82f6' } : { background: '#1a1a1a', color: '#3b82f6', border: '1px solid #3b82f6' }}
                               title={expandedRows.has(product.asin) ? 'Collapse children' : 'Expand to add COGS per child'}
                             >
                               {expandedRows.has(product.asin) ? (
@@ -734,20 +750,17 @@ const ProfitTable = ({ setSuggestionsData }) => {
                           ) : (
                             /* For standalone products: show COGS input */
                             <div className="flex items-center justify-center gap-1">
-                              <span className="text-sm text-gray-500 font-medium min-w-[20px]">{cogsCurrencySymbol}</span>
+                              <span className="text-sm font-medium min-w-[20px]" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
                               <div className="relative">
                                 <input
                                   type="number"
                                   value={cogsValues[product.asin] || ''}
                                   onChange={(e) => handleCogsChange(product.asin, e.target.value)}
                                   placeholder="0"
-                                  className={`w-14 px-2 py-1.5 text-sm text-center border rounded focus:outline-none focus:ring-1 transition-all duration-200 ${
-                                    isSaved(product.asin) 
-                                      ? 'border-green-300 bg-green-50 focus:ring-green-500 focus:border-green-500' 
-                                      : needsSave(product.asin)
-                                        ? 'border-amber-300 bg-amber-50 focus:ring-amber-500 focus:border-amber-500'
-                                        : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
-                                  }`}
+                                  className="w-14 px-2 py-1.5 text-sm text-center border rounded focus:outline-none focus:ring-1 transition-all duration-200"
+                                  style={isSaved(product.asin) ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#f3f4f6' } : needsSave(product.asin) ? { background: 'rgba(251, 191, 36, 0.1)', borderColor: 'rgba(251, 191, 36, 0.3)', color: '#f3f4f6' } : { background: '#1a1a1a', borderColor: '#30363d', color: '#f3f4f6' }}
+                                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                                  onBlur={(e) => e.target.style.borderColor = isSaved(product.asin) ? 'rgba(34, 197, 94, 0.3)' : needsSave(product.asin) ? 'rgba(251, 191, 36, 0.3)' : '#30363d'}
                                   step="0.01"
                                   min="0"
                                 />
@@ -755,15 +768,10 @@ const ProfitTable = ({ setSuggestionsData }) => {
                               <button
                                 onClick={() => handleSaveCogs(product.asin, product.sku)}
                                 disabled={cogsSaving[product.asin] || !needsSave(product.asin)}
-                                className={`p-1 rounded transition-all duration-200 ${
-                                  cogsSaving[product.asin]
-                                    ? 'text-gray-400 cursor-wait'
-                                    : isSaved(product.asin)
-                                      ? 'text-green-600 cursor-default'
-                                      : needsSave(product.asin)
-                                        ? 'text-blue-600 hover:bg-blue-100 hover:text-blue-700 cursor-pointer'
-                                        : 'text-gray-300 cursor-not-allowed'
-                                }`}
+                                className="p-1 rounded transition-all duration-200"
+                                style={cogsSaving[product.asin] ? { color: '#6b7280', cursor: 'wait' } : isSaved(product.asin) ? { color: '#22c55e', cursor: 'default' } : needsSave(product.asin) ? { color: '#60a5fa', cursor: 'pointer' } : { color: '#6b7280', cursor: 'not-allowed' }}
+                                onMouseEnter={(e) => needsSave(product.asin) && !cogsSaving[product.asin] && (e.target.style.color = '#3b82f6')}
+                                onMouseLeave={(e) => needsSave(product.asin) && !cogsSaving[product.asin] && (e.target.style.color = '#60a5fa')}
                                 title={
                                   cogsSaving[product.asin] 
                                     ? 'Saving...' 
@@ -785,25 +793,25 @@ const ProfitTable = ({ setSuggestionsData }) => {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
-                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.adSpend, currency)}>
+                        <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-[11px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(product.adSpend, currency)}>
                             {formatCurrencyWithLocale(product.adSpend, currency)}
                           </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
-                          <div className="text-sm font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(product.amazonFees, currency)}>
+                        <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                          <div className="text-[11px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(product.amazonFees, currency)}>
                             {formatCurrencyWithLocale(product.amazonFees, currency)}
                           </div>
                         </td>
-                        <td className="px-3 py-5 text-center align-middle min-w-0 overflow-hidden">
-                          <div className={`text-sm font-bold whitespace-nowrap overflow-hidden text-ellipsis ${product.grossProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`} title={formatCurrencyWithLocale(product.grossProfit, currency)}>
+                        <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                          <div className={`text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis`} style={{ color: product.grossProfit < 0 ? '#f87171' : '#22c55e' }} title={formatCurrencyWithLocale(product.grossProfit, currency)}>
                             {formatCurrencyWithLocale(product.grossProfit, currency)}
                           </div>
                         </td>
-                        <td className="px-3 py-5 text-center relative align-middle min-w-0 overflow-hidden">
+                        <td className="px-2 py-2 text-center relative align-middle min-w-0 overflow-hidden">
                           {/* For parents: show hint to expand for Net Profit */}
                           {product.isExpandable ? (
-                            <span className="text-xs text-gray-400 italic">See children</span>
+                            <span className="text-[10px] italic" style={{ color: '#6b7280' }}>See children</span>
                           ) : (
                             /* For standalone: show Net Profit with COGS blur */
                             <>
@@ -812,17 +820,13 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                   ? 'filter blur-sm' 
                                   : ''
                               }`}>
-                                <div className={`text-sm font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
-                                  !cogsValues[product.asin] || cogsValues[product.asin] === 0 
-                                    ? 'text-gray-400' 
-                                    : product.netProfit < 0 ? 'text-red-600' : 'text-emerald-600'
-                                }`} title={formatCurrencyWithLocale(product.netProfit, currency)}>
+                                <div className={`text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis`} style={{ color: (!cogsValues[product.asin] || cogsValues[product.asin] === 0) ? '#6b7280' : (product.netProfit < 0 ? '#f87171' : '#22c55e') }} title={formatCurrencyWithLocale(product.netProfit, currency)}>
                                   {formatCurrencyWithLocale(product.netProfit, currency)}
                                 </div>
                               </div>
                               {(!cogsValues[product.asin] || cogsValues[product.asin] === 0) && (
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 shadow-sm">
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>
                                     +COGS
                                   </span>
                                 </div>
@@ -843,61 +847,57 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                 animate={{ opacity: 1, x: 0 }}
                                 exit={{ opacity: 0, x: -20 }}
                                 transition={{ duration: 0.2, delay: childIndex * 0.03 }}
-                                className="bg-gradient-to-r from-purple-50/60 to-indigo-50/40 hover:from-purple-100/60 hover:to-indigo-100/40 transition-colors"
+                                className="transition-colors"
+                                style={{ background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid #30363d' }}
                               >
-                                <td className="px-2 py-4 align-middle">
-                                  <div className="ml-2 w-0.5 h-6 bg-purple-300 rounded"></div>
+                                <td className="px-2 py-2 align-middle">
+                                  <div className="ml-2 w-0.5 h-4 rounded" style={{ background: '#3b82f6' }}></div>
                                 </td>
-                                <td className="px-4 py-4 align-middle">
+                                <td className="px-3 py-2 align-middle">
                                   <div className="min-w-0 pl-2">
-                                    <div className="text-sm text-gray-700 leading-relaxed break-words">
+                                    <div className="text-[11px] leading-relaxed break-words" style={{ color: '#f3f4f6' }}>
                                       {child.name}
                                     </div>
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 align-middle">
+                                <td className="px-3 py-2 align-middle">
                                   <div className="flex flex-col">
-                                    <span className="text-xs font-mono text-purple-700 bg-purple-100 px-2 py-1 rounded whitespace-nowrap" title={`Child: ${child.asin}`}>
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap" style={{ color: '#3b82f6', background: 'rgba(59, 130, 246, 0.2)' }} title={`Child: ${child.asin}`}>
                                       {child.asin}
                                     </span>
-                                    <span className="text-xs text-purple-600 mt-0.5">Child</span>
+                                    <span className="text-[10px] mt-0.5" style={{ color: '#3b82f6' }}>Child</span>
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
-                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.sales || 0, currency)}>
+                                <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-[11px] whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(child.sales || 0, currency)}>
                                     {formatCurrencyWithLocale(child.sales || 0, currency)}
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
-                                  <span className="text-sm text-gray-700">{child.units?.toLocaleString() || 0}</span>
+                                <td className="px-2 py-2 text-center align-middle">
+                                  <span className="text-[11px]" style={{ color: '#f3f4f6' }}>{child.units?.toLocaleString() || 0}</span>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle">
+                                <td className="px-2 py-2 text-center align-middle">
                                   <div className="flex items-center justify-center gap-1">
-                                    <span className="text-xs text-gray-500">{cogsCurrencySymbol}</span>
+                                    <span className="text-xs" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
                                     <input
                                       type="number"
                                       value={cogsValues[child.asin] || ''}
                                       onChange={(e) => handleCogsChange(child.asin, e.target.value)}
                                       placeholder="0"
-                                      className={`w-12 px-1.5 py-1 text-xs text-center border rounded focus:outline-none focus:ring-1 ${
-                                        isSaved(child.asin) 
-                                          ? 'border-green-300 bg-green-50' 
-                                          : needsSave(child.asin)
-                                            ? 'border-amber-300 bg-amber-50'
-                                            : 'border-gray-300'
-                                      }`}
+                                      className="w-12 px-1.5 py-1 text-xs text-center border rounded focus:outline-none focus:ring-1"
+                                      style={isSaved(child.asin) ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#f3f4f6' } : needsSave(child.asin) ? { background: 'rgba(251, 191, 36, 0.1)', borderColor: 'rgba(251, 191, 36, 0.3)', color: '#f3f4f6' } : { background: '#1a1a1a', borderColor: '#30363d', color: '#f3f4f6' }}
+                                      onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                                      onBlur={(e) => e.target.style.borderColor = isSaved(child.asin) ? 'rgba(34, 197, 94, 0.3)' : needsSave(child.asin) ? 'rgba(251, 191, 36, 0.3)' : '#30363d'}
                                       step="0.01"
                                       min="0"
                                     />
                                     <button
                                       onClick={() => handleSaveCogs(child.asin, child.sku)}
                                       disabled={cogsSaving[child.asin] || !needsSave(child.asin)}
-                                      className={`p-0.5 rounded ${
-                                        cogsSaving[child.asin] ? 'text-gray-400' :
-                                        isSaved(child.asin) ? 'text-green-600' :
-                                        needsSave(child.asin) ? 'text-blue-600 hover:bg-blue-100' :
-                                        'text-gray-300'
-                                      }`}
+                                      className="p-0.5 rounded"
+                                      style={cogsSaving[child.asin] ? { color: '#6b7280' } : isSaved(child.asin) ? { color: '#22c55e' } : needsSave(child.asin) ? { color: '#60a5fa' } : { color: '#6b7280' }}
+                                      onMouseEnter={(e) => needsSave(child.asin) && !cogsSaving[child.asin] && (e.target.style.color = '#3b82f6')}
+                                      onMouseLeave={(e) => needsSave(child.asin) && !cogsSaving[child.asin] && (e.target.style.color = '#60a5fa')}
                                     >
                                       {cogsSaving[child.asin] ? (
                                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -909,30 +909,28 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                     </button>
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
-                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.adSpend || 0, currency)}>
+                                <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-[11px] whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(child.adSpend || 0, currency)}>
                                     {formatCurrencyWithLocale(child.adSpend || 0, currency)}
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
-                                  <div className="text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis" title={formatCurrencyWithLocale(child.amazonFees || 0, currency)}>
+                                <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className="text-[11px] whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: '#f3f4f6' }} title={formatCurrencyWithLocale(child.amazonFees || 0, currency)}>
                                     {formatCurrencyWithLocale(child.amazonFees || 0, currency)}
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle min-w-0 overflow-hidden">
-                                  <div className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${(child.grossProfit || 0) < 0 ? 'text-red-600' : 'text-emerald-600'}`} title={formatCurrencyWithLocale(child.grossProfit || 0, currency)}>
+                                <td className="px-2 py-2 text-center align-middle min-w-0 overflow-hidden">
+                                  <div className={`text-[11px] font-medium whitespace-nowrap overflow-hidden text-ellipsis`} style={{ color: (child.grossProfit || 0) < 0 ? '#f87171' : '#22c55e' }} title={formatCurrencyWithLocale(child.grossProfit || 0, currency)}>
                                     {formatCurrencyWithLocale(child.grossProfit || 0, currency)}
                                   </div>
                                 </td>
-                                <td className="px-3 py-4 text-center align-middle relative min-w-0 overflow-hidden">
+                                <td className="px-2 py-2 text-center align-middle relative min-w-0 overflow-hidden">
                                   {cogsValues[child.asin] ? (
-                                    <div className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
-                                      (child.netProfit || 0) < 0 ? 'text-red-600' : 'text-emerald-600'
-                                    }`} title={formatCurrencyWithLocale(child.netProfit || 0, currency)}>
+                                    <div className={`text-[11px] font-medium whitespace-nowrap overflow-hidden text-ellipsis`} style={{ color: (child.netProfit || 0) < 0 ? '#f87171' : '#22c55e' }} title={formatCurrencyWithLocale(child.netProfit || 0, currency)}>
                                       {formatCurrencyWithLocale(child.netProfit || 0, currency)}
                                     </div>
                                   ) : (
-                                    <span className="text-xs text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', borderColor: 'rgba(59, 130, 246, 0.3)' }}>
                                       +COGS
                                     </span>
                                   )}
@@ -946,14 +944,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="10" className="px-3 py-12 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
-                          <Package className="w-8 h-8 text-gray-400" />
-                        </div>
+                    <td colSpan="10" className="px-3 py-8 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Package className="w-6 h-6" style={{ color: '#6b7280' }} />
                         <div>
-                          <h3 className="text-lg font-medium text-gray-900">No profitability data available</h3>
-                          <p className="text-sm text-gray-500 mt-1">
+                          <h3 className="text-sm font-medium" style={{ color: '#f3f4f6' }}>No profitability data available</h3>
+                          <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>
                             {isDateRangeSelected 
                               ? 'No data found for the selected date range. Try a different date range.' 
                               : 'Data will appear here once products are analyzed'}
@@ -970,12 +966,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
         
         {/* Pagination Controls */}
         {processedProducts.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-4 bg-gradient-to-r from-gray-50 to-slate-50 border-t border-gray-200">
+          <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700 font-medium">
+              <span className="text-xs font-medium" style={{ color: '#9ca3af' }}>
                 Showing {indexOfFirstProduct + 1} - {Math.min(indexOfLastProduct, processedProducts.length)} of {processedProducts.length}
               </span>
-              <span className="text-xs text-gray-500 hidden sm:inline">
+              <span className="text-[10px] hidden sm:inline" style={{ color: '#6b7280' }}>
                 ({productsPerPage} per page)
               </span>
             </div>
@@ -987,9 +983,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 disabled={currentPage === 1}
                 className={`p-2 rounded-lg transition-all duration-200 ${
                   currentPage === 1
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                    : 'bg-white text-gray-700 hover:bg-blue-50 hover:text-blue-600 border border-gray-300 shadow-sm'
+                    ? 'cursor-not-allowed' 
+                    : ''
                 }`}
+                style={currentPage === 1 ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                onMouseEnter={(e) => currentPage !== 1 && (e.target.style.borderColor = '#3b82f6')}
+                onMouseLeave={(e) => currentPage !== 1 && (e.target.style.borderColor = '#30363d')}
                 aria-label="Previous page"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -1013,14 +1012,17 @@ const ProfitTable = ({ setSuggestionsData }) => {
                       <button
                         key={1}
                         onClick={() => setCurrentPage(1)}
-                        className="w-8 h-8 text-sm font-medium rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                        className="w-8 h-8 text-sm font-medium rounded-lg transition-colors"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                       >
                         1
                       </button>
                     );
                     if (startPage > 2) {
                       pages.push(
-                        <span key="start-ellipsis" className="px-1 text-gray-400">...</span>
+                        <span key="start-ellipsis" className="px-1" style={{ color: '#6b7280' }}>...</span>
                       );
                     }
                   }
@@ -1033,9 +1035,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                         onClick={() => setCurrentPage(i)}
                         className={`w-8 h-8 text-sm font-medium rounded-lg transition-colors ${
                           currentPage === i
-                            ? 'bg-blue-600 text-white shadow-md'
-                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-blue-50 hover:text-blue-600'
+                            ? ''
+                            : ''
                         }`}
+                        style={currentPage === i ? { background: '#3b82f6', color: 'white' } : { background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onMouseEnter={(e) => currentPage !== i && (e.target.style.borderColor = '#3b82f6')}
+                        onMouseLeave={(e) => currentPage !== i && (e.target.style.borderColor = '#30363d')}
                       >
                         {i}
                       </button>
@@ -1046,14 +1051,17 @@ const ProfitTable = ({ setSuggestionsData }) => {
                   if (endPage < totalPages) {
                     if (endPage < totalPages - 1) {
                       pages.push(
-                        <span key="end-ellipsis" className="px-1 text-gray-400">...</span>
+                        <span key="end-ellipsis" className="px-1" style={{ color: '#6b7280' }}>...</span>
                       );
                     }
                     pages.push(
                       <button
                         key={totalPages}
                         onClick={() => setCurrentPage(totalPages)}
-                        className="w-8 h-8 text-sm font-medium rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                        className="w-8 h-8 text-sm font-medium rounded-lg transition-colors"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                       >
                         {totalPages}
                       </button>
@@ -1070,9 +1078,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 disabled={currentPage === totalPages}
                 className={`p-2 rounded-lg transition-all duration-200 ${
                   currentPage === totalPages
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                    : 'bg-white text-gray-700 hover:bg-blue-50 hover:text-blue-600 border border-gray-300 shadow-sm'
+                    ? 'cursor-not-allowed' 
+                    : ''
                 }`}
+                style={currentPage === totalPages ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                onMouseEnter={(e) => currentPage !== totalPages && (e.target.style.borderColor = '#3b82f6')}
+                onMouseLeave={(e) => currentPage !== totalPages && (e.target.style.borderColor = '#30363d')}
                 aria-label="Next page"
               >
                 <ChevronRight className="w-4 h-4" />

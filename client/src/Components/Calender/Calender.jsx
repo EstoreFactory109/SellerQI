@@ -355,30 +355,24 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
           transition={{ duration: 0.4, type: "spring", stiffness: 300, damping: 30 }}
-          className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
+          className="bg-[#161b22] rounded-2xl shadow-2xl border border-[#30363d] max-w-5xl w-full max-h-[90vh] overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-700 p-6 text-white relative overflow-hidden">
-            <div className="absolute inset-0 opacity-20">
-              <div className="absolute top-0 left-0 w-32 h-32 bg-white rounded-full -translate-x-16 -translate-y-16"></div>
-              <div className="absolute bottom-0 right-0 w-24 h-24 bg-white rounded-full translate-x-12 translate-y-12"></div>
-            </div>
+          <div className="bg-blue-600 p-6 text-white relative overflow-hidden">
             <div className="relative z-10 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                  <Calendar className="w-5 h-5" />
-                </div>
+                <Calendar className="w-5 h-5 text-white" />
                 <div>
-                  <h2 className="text-2xl font-bold">Select Date Range</h2>
-                  <p className="text-blue-100 text-sm">Choose your preferred time period for data analysis</p>
+                  <h2 className="text-2xl font-bold text-white">Select Date Range</h2>
+                  <p className="text-blue-200 text-sm">Choose your preferred time period for data analysis</p>
                 </div>
               </div>
               <button
                 onClick={closeCalendar}
                 className="w-10 h-10 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5 text-white" />
               </button>
             </div>
           </div>
@@ -386,11 +380,11 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
           {/* Main Content */}
           <div className="flex h-[600px]">
             {/* Left Panel - Options */}
-            <div className="w-80 bg-gradient-to-b from-gray-50 to-gray-100 p-6 border-r border-gray-200">
+            <div className="w-80 bg-[#1a1a1a] p-6 border-r border-[#30363d]">
               <div className="space-y-4">
                 <div className="flex items-center gap-2 mb-6">
-                  <Clock className="w-5 h-5 text-gray-600" />
-                  <h3 className="text-lg font-semibold text-gray-900">Time Periods</h3>
+                  <Clock className="w-5 h-5 text-gray-400" />
+                  <h3 className="text-lg font-semibold text-gray-100">Time Periods</h3>
                 </div>
 
                 {/* Last 30 Days Option */}
@@ -401,13 +395,10 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                   disabled={Loader}
                   className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
                     thirtyDaysActive
-                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
-                      : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 hover:shadow-md'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
                   } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {thirtyDaysActive && (
-                    <div className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-purple-500/20"></div>
-                  )}
                   <div className="relative z-10">
                     {Loader && thirtyDaysActive ? (
                       <div className="flex items-center justify-center">
@@ -416,16 +407,16 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                     ) : (
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-2 h-2 rounded-full ${thirtyDaysActive ? 'bg-white' : 'bg-blue-500'}`}></div>
+                          <div className={`w-2 h-2 rounded-full ${thirtyDaysActive ? 'bg-white' : 'bg-blue-400'}`}></div>
                           <div className="font-semibold">Last 30 Days</div>
                         </div>
-                        <div className={`text-sm ${thirtyDaysActive ? 'text-blue-100' : 'text-gray-500'}`}>
+                        <div className={`text-sm ${thirtyDaysActive ? 'text-blue-200' : 'text-gray-400'}`}>
                           {thirtyDaysActive ? 'Currently active period' : 'Most recent 30 days of data'}
                         </div>
                         {thirtyDaysActive && (
                           <div className="flex items-center gap-1 mt-2">
-                            <Sparkles className="w-3 h-3 text-yellow-300" />
-                            <span className="text-xs text-yellow-100">Recommended</span>
+                            <Sparkles className="w-3 h-3 text-yellow-400" />
+                            <span className="text-xs text-yellow-300">Recommended</span>
                           </div>
                         )}
                       </div>
@@ -441,13 +432,10 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                   disabled={Loader}
                   className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
                     sevenDaysActive
-                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
-                      : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 hover:shadow-md'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
                   } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {sevenDaysActive && (
-                    <div className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-purple-500/20"></div>
-                  )}
                   <div className="relative z-10">
                     {Loader && sevenDaysActive ? (
                       <div className="flex items-center justify-center">
@@ -456,16 +444,16 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                     ) : (
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-2 h-2 rounded-full ${sevenDaysActive ? 'bg-white' : 'bg-blue-500'}`}></div>
+                          <div className={`w-2 h-2 rounded-full ${sevenDaysActive ? 'bg-white' : 'bg-blue-400'}`}></div>
                           <div className="font-semibold">Last 7 Days</div>
                         </div>
-                        <div className={`text-sm ${sevenDaysActive ? 'text-blue-100' : 'text-gray-500'}`}>
+                        <div className={`text-sm ${sevenDaysActive ? 'text-blue-200' : 'text-gray-400'}`}>
                           {sevenDaysActive ? 'Currently active period' : 'Most recent 7 days of data'}
                         </div>
                         {sevenDaysActive && (
                           <div className="flex items-center gap-1 mt-2">
-                            <Sparkles className="w-3 h-3 text-yellow-300" />
-                            <span className="text-xs text-yellow-100">Quick view</span>
+                            <Sparkles className="w-3 h-3 text-yellow-400" />
+                            <span className="text-xs text-yellow-300">Quick view</span>
                           </div>
                         )}
                       </div>
@@ -481,25 +469,22 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                   disabled={Loader}
                   className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
                     customActive
-                      ? 'bg-gradient-to-r from-purple-500 to-pink-600 text-white shadow-lg shadow-purple-500/25'
-                      : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 hover:shadow-md'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
                   } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {customActive && (
-                    <div className="absolute inset-0 bg-gradient-to-r from-purple-400/20 to-pink-500/20"></div>
-                  )}
                   <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-2 h-2 rounded-full ${customActive ? 'bg-white' : 'bg-purple-500'}`}></div>
+                      <div className={`w-2 h-2 rounded-full ${customActive ? 'bg-white' : 'bg-blue-400'}`}></div>
                       <div className="font-semibold">Custom Range</div>
                     </div>
-                    <div className={`text-sm ${customActive ? 'text-purple-100' : 'text-gray-500'}`}>
+                    <div className={`text-sm ${customActive ? 'text-blue-200' : 'text-gray-400'}`}>
                       {customActive ? 'Select your specific date range' : 'Choose any date range you need'}
                     </div>
                     {customActive && (
                       <div className="flex items-center gap-1 mt-2">
-                        <Calendar className="w-3 h-3 text-pink-200" />
-                        <span className="text-xs text-pink-100">Active selection</span>
+                        <Calendar className="w-3 h-3 text-blue-300" />
+                        <span className="text-xs text-blue-200">Active selection</span>
                       </div>
                     )}
                   </div>
@@ -511,10 +496,10 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="mt-8 p-4 bg-white rounded-xl border border-gray-200 shadow-sm"
+                    className="mt-8 p-4 bg-[#21262d] rounded-xl border border-[#30363d] shadow-sm"
                   >
-                    <h4 className="font-medium text-gray-900 mb-2 text-sm">Account Information</h4>
-                    <div className="space-y-1 text-xs text-gray-600">
+                    <h4 className="font-medium text-gray-100 mb-2 text-sm">Account Information</h4>
+                    <div className="space-y-1 text-xs text-gray-400">
                       <div>Created: {new Date(createdAccountDate.createdAt).toLocaleDateString('en-US', { 
                         month: 'long', 
                         day: 'numeric', 
@@ -532,12 +517,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
             </div>
 
             {/* Right Panel - Calendar */}
-            <div className="flex-1 p-6 flex flex-col">
+            <div className="flex-1 p-6 flex flex-col bg-[#161b22]">
               <div className="text-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                <h3 className="text-lg font-semibold text-gray-100 mb-1">
                   {customActive ? 'Select Your Date Range' : 'Current Date Range'}
                 </h3>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-400">
                   {customActive 
                     ? 'Click and drag to select your preferred date range' 
                     : 'Showing the last 30 days of data'
@@ -562,8 +547,8 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                     onChange={handleRangeChange}
                     moveRangeOnFirstSelection={false}
                     editableDateInputs={customActive}
-                    rangeColors={customActive ? ['#8B5CF6'] : ['#6B7280']}
-                    color={customActive ? '#8B5CF6' : '#6B7280'}
+                    rangeColors={customActive ? ['#2563eb'] : ['#6B7280']}
+                    color={customActive ? '#2563eb' : '#6B7280'}
                     months={2}
                     direction="horizontal"
                     minDate={minimumDate}
@@ -587,7 +572,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
                     <button
                       onClick={submitdateRange}
                       disabled={Loader}
-                      className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105"
                     >
                       {Loader ? (
                         <div className="flex items-center gap-2">

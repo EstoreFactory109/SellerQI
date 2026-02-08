@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import calenderIcon from '../assets/Icons/Calender.png'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../utils/currencyUtils.js';
@@ -25,6 +24,8 @@ import {
 } from '../redux/slices/PPCUnitsSoldSlice.js';
 
 import { parseLocalDate } from '../utils/dateUtils.js';
+import { usePPCData } from '../hooks/usePageData.js';
+import { PageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -65,35 +66,35 @@ const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, it
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
   
   return (
-    <div className="flex items-center justify-between mt-4 px-4 py-3 bg-gray-50 rounded-lg">
-      <div className="text-sm text-gray-700">
+    <div className="flex items-center justify-between mt-2 px-2 py-1.5 bg-[#21262d] border border-[#30363d] rounded">
+      <div className="text-xs text-gray-400">
         Showing {startItem} to {endItem} of {totalItems} results
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className={`p-2 rounded-lg border transition-colors ${
+          className={`p-1 rounded border transition-colors ${
             currentPage === 1
-              ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-              : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+              ? 'border-[#30363d] text-gray-500 cursor-not-allowed'
+              : 'border-[#30363d] text-gray-300 hover:bg-[#161b22]'
           }`}
         >
-          <ChevronLeft className="w-4 h-4" />
+          <ChevronLeft className="w-3 h-3" />
         </button>
-        <span className="px-3 py-1 text-sm font-medium text-gray-700">
+        <span className="px-2 py-0.5 text-xs font-medium text-gray-300">
           Page {currentPage} of {totalPages}
         </span>
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
-          className={`p-2 rounded-lg border transition-colors ${
+          className={`p-1 rounded border transition-colors ${
             currentPage === totalPages
-              ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-              : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+              ? 'border-[#30363d] text-gray-500 cursor-not-allowed'
+              : 'border-[#30363d] text-gray-300 hover:bg-[#161b22]'
           }`}
         >
-          <ChevronRight className="w-4 h-4" />
+          <ChevronRight className="w-3 h-3" />
         </button>
       </div>
     </div>
@@ -103,16 +104,16 @@ const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, it
 // Optimization Tips Component
 const OptimizationTip = ({ tip, icon = "💡" }) => {
   return (
-    <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-          <span className="text-blue-600 text-lg">{icon}</span>
+    <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded p-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-shrink-0 w-6 h-6 bg-blue-500/20 rounded flex items-center justify-center border border-blue-500/30">
+          <span className="text-blue-400 text-sm">{icon}</span>
         </div>
         <div className="flex-1">
-          <h4 className="text-sm font-semibold text-blue-900 mb-1">
+          <h4 className="text-xs font-semibold text-blue-400 mb-0.5">
             Optimization Tip
           </h4>
-          <p className="text-sm text-blue-800 leading-relaxed">
+          <p className="text-xs text-blue-300 leading-relaxed">
             {tip}
           </p>
         </div>
@@ -163,9 +164,16 @@ const PPCDashboard = () => {
     };
   }, [])
   
-  // Get sponsoredAdsMetrics from Redux store (legacy fallback)
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
+  // Fetch PPC data using the hook (automatically fetches on mount)
+  const { data: ppcPageData, loading: ppcDataLoading, refetch: refetchPPCData } = usePPCData();
+  
+  // Use PPC page data if available, fall back to legacy DashboardSlice data
+  // Backend returns data directly (not nested) e.g. { sponsoredAdsMetrics, keywords, ... }
+  const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const info = ppcPageData || legacyInfo;
+  
+  // Get sponsoredAdsMetrics from page data or legacy
+  const sponsoredAdsMetrics = info?.sponsoredAdsMetrics || {};
   
   // Get PPC metrics from PPCMetrics model (NEW - primary source)
   const ppcSummary = useSelector(selectPPCSummary);
@@ -1196,27 +1204,39 @@ const PPCDashboard = () => {
     return [
       { 
         label: 'PPC Sales', 
-        value: formatCurrencyWithLocale(ppcSales, currency) 
+        value: formatCurrencyWithLocale(ppcSales, currency),
+        icon: TrendingUp,
+        color: 'blue'
       },
       { 
         label: 'Spend', 
-        value: formatCurrencyWithLocale(spend, currency) 
+        value: formatCurrencyWithLocale(spend, currency),
+        icon: DollarSign,
+        color: 'blue'
       },
       { 
         label: 'ACoS %', 
-        value: `${acos.toFixed(2)}%`
+        value: `${acos.toFixed(2)}%`,
+        icon: Gauge,
+        color: 'blue'
       },
       { 
         label: 'TACoS %', 
-        value: `${tacos.toFixed(2)}%`
+        value: `${tacos.toFixed(2)}%`,
+        icon: Gauge,
+        color: 'blue'
       },
       { 
         label: 'Units Sold', 
-        value: `${unitsSold}`
+        value: `${unitsSold}`,
+        icon: Package,
+        color: 'blue'
       },
       { 
         label: 'Total Issues', 
-        value: `${totalIssues}`
+        value: `${totalIssues}`,
+        icon: AlertTriangle,
+        color: 'blue'
       },
     ];
   }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, isDateRangeSelected, sponsoredAdsMetrics, filteredDateWiseTotalCosts, ppcSummary, filteredPPCMetricsForKPI, currency, ppcUnitsSoldTotal, filteredUnitsSoldTotal, hasFilteredUnitsSold, filteredUnitsSoldLoading, dashboardPPCUnitsSold, info?.totalSponsoredAdsErrors]);
@@ -1420,30 +1440,30 @@ const PPCDashboard = () => {
   };
 
   return (
-    <div className='min-h-screen w-full bg-gray-50/50 overflow-x-hidden'>
+    <div className='min-h-screen w-full bg-[#1a1a1a] overflow-x-hidden'>
       {/* Header Section */}
-      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
-        <div className='px-4 lg:px-6 py-4'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-            <div className='flex items-center gap-4'>
+      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+        <div className='px-2 lg:px-3 py-1.5'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
+            <div className='flex items-center gap-2'>
               <div>
-                <h1 className='text-2xl font-bold text-gray-900'>Campaign Audit</h1>
-                <p className='text-sm text-gray-600 mt-1'>Monitor your Amazon PPC performance and optimize campaigns</p>
+                <h1 className='text-lg font-bold text-gray-100'>Campaign Audit</h1>
+                <p className='text-xs text-gray-400 mt-0.5'>Monitor your Amazon PPC performance and optimize campaigns</p>
               </div>
-              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium'>
-                <div className='w-2 h-2 bg-blue-500 rounded-full'></div>
+              <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-medium border border-blue-500/30'>
+                <div className='w-1.5 h-1.5 bg-blue-400 rounded-full'></div>
                 PPC campaigns active
               </div>
             </div>
             
-            <div className='flex items-center gap-3'>
+            <div className='flex items-center gap-2'>
               <div className='relative' ref={CalenderRef}>
                 <button 
                   onClick={() => setOpenCalender(!openCalender)}
-                  className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+                  className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-[#30363d] rounded text-xs transition-all text-gray-300 hover:bg-[#161b22]'
                 >
-                  <img src={calenderIcon} alt='' className='w-4 h-4' />
-                  <span className='text-sm font-medium text-gray-700'>
+                  <Calendar className='w-3 h-3 text-gray-400' />
+                  <span className='text-xs font-medium'>
                     {info?.startDate && info?.endDate
                       ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
                       : 'Select Date Range'
@@ -1458,7 +1478,7 @@ const PPCDashboard = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 z-[9999] bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
+                      className="absolute top-full right-0 mt-1 z-[9999] bg-[#21262d] shadow-xl rounded border border-[#30363d] overflow-hidden max-h-[80vh] overflow-y-auto"
                     >
                       <Calender setOpenCalender={setOpenCalender} />
                     </motion.div>
@@ -1478,35 +1498,46 @@ const PPCDashboard = () => {
       </div>
 
       {/* Main Content - Scrollable */}
-      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
-        <div className='px-4 lg:px-6 py-6 pb-20'>
-          
+      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
+        <div className='px-2 lg:px-3 py-1.5 pb-1'>
+          {/* Lazy load: show containers with skeleton while data loads */}
+          {ppcDataLoading && !info ? (
+            <PageSkeleton statCards={6} sections={3} />
+          ) : (
+            <>
           {/* KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-            {kpiData.map((kpi, index) => (
-              <motion.div
-                key={kpi.label}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
-                className="bg-white rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg h-full flex flex-col"
-              >
-                <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
-                  <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
-                    </svg>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 mb-2">
+            {kpiData.map((kpi, index) => {
+              const Icon = kpi.icon;
+              const colorMap = {
+                green: 'text-green-400',
+                orange: 'text-orange-400',
+                purple: 'text-purple-400',
+                blue: 'text-blue-400',
+                red: 'text-red-400'
+              };
+              const iconColor = colorMap[kpi.color] || 'text-blue-400';
+              
+              return (
+                <motion.div
+                  key={kpi.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  className="bg-[#161b22] rounded border border-[#30363d] p-2 transition-all duration-300 h-full flex flex-col"
+                >
+                  <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
+                    {Icon && <Icon className={`w-4 h-4 ${iconColor} flex-shrink-0`} />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-gray-400 leading-tight whitespace-nowrap truncate">{kpi.label}</p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-600 leading-tight whitespace-nowrap truncate">{kpi.label}</p>
+                  <div className="mt-auto">
+                    <div className="text-sm font-bold text-gray-100 leading-tight whitespace-nowrap truncate">{kpi.value}</div>
                   </div>
-                </div>
-                <div className="mt-auto">
-                  <div className="text-lg font-bold text-gray-900 leading-tight whitespace-nowrap truncate">{kpi.value}</div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
         
           {/* Performance Chart */}
@@ -1514,16 +1545,28 @@ const PPCDashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8"
+            className="bg-[#161b22] rounded border border-[#30363d] transition-all duration-300 overflow-hidden mb-2"
           >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #30363d' }}>
+              <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">PPC Performance Over Time</h3>
-                  <p className="text-sm text-gray-600 mt-1">Track your advertising spend and sales trends</p>
+                  <h3 className="text-sm font-semibold text-gray-100">PPC Performance Over Time</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Track your advertising spend and sales trends</p>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
+                    <span style={{ color: '#9ca3af' }}>PPC Sales</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#f97316' }}></div>
+                    <span style={{ color: '#9ca3af' }}>PPC Spend</span>
+                  </div>
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={400}>
+            </div>
+            <div style={{ padding: '8px' }}>
+              <ResponsiveContainer width="100%" height={300}>
                 <AreaChart 
                   data={chartData} 
                   margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
@@ -1538,25 +1581,29 @@ const PPCDashboard = () => {
                       <stop offset="100%" stopColor="#F97316" stopOpacity={0.05}/>
                     </linearGradient>
                   </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
                   <XAxis 
                     dataKey="date" 
-                    tick={{ fontSize: 12, fill: '#6B7280' }}
-                    stroke="#E5E7EB"
+                    tick={{ fontSize: 12, fill: '#9ca3af' }}
+                    stroke="#30363d"
                     tickLine={false}
+                    axisLine={false}
                   />
                   <YAxis 
-                    tick={{ fontSize: 12, fill: '#6B7280' }}
-                    stroke="#E5E7EB"
+                    tick={{ fontSize: 12, fill: '#9ca3af' }}
+                    stroke="#30363d"
                     tickLine={false}
+                    axisLine={false}
                     tickFormatter={formatYAxis}
                   />
                   <Tooltip 
                     contentStyle={{ 
-                      backgroundColor: 'white', 
-                      border: 'none',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                      padding: '12px'
+                      backgroundColor: '#21262d', 
+                      border: '1px solid #30363d',
+                      borderRadius: '6px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
+                      padding: '8px',
+                      color: '#F3F4F6'
                     }}
                     formatter={(value, name) => {
                       if (name === 'PPC Sales' || name === 'PPC Spend') {
@@ -1564,13 +1611,6 @@ const PPCDashboard = () => {
                       }
                       return [parseFloat(value).toFixed(2), name];
                     }}
-                  />
-                  <Legend 
-                    wrapperStyle={{ 
-                      fontSize: '12px', 
-                      paddingTop: '20px' 
-                    }}
-                    iconType="line"
                   />
                   <Area 
                     type="monotone" 
@@ -1598,12 +1638,12 @@ const PPCDashboard = () => {
           </motion.div>
         
           {/* Campaign Analysis Tabs */}
-          <div className="bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden mb-8">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-4">
+          <div className="bg-[#161b22] rounded border border-[#30363d] transition-all duration-300 overflow-hidden mb-2">
+            <div className="p-2 border-b border-[#30363d]">
+              <div className="flex items-center justify-between mb-2">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Campaign Analysis</h3>
-                  <p className="text-sm text-gray-600 mt-1">Detailed insights across different campaign aspects</p>
+                  <h3 className="text-sm font-semibold text-gray-100">Campaign Analysis</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Detailed insights across different campaign aspects</p>
                 </div>
               </div>
               
@@ -1615,10 +1655,10 @@ const PPCDashboard = () => {
                     {showLeftArrow && (
                       <button
                         onClick={scrollTabsLeft}
-                        className="bg-white hover:bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 flex items-center justify-center transition-all duration-200 shadow-sm"
+                        className="bg-[#21262d] hover:bg-[#161b22] border border-[#30363d] rounded px-2 py-1 flex items-center justify-center transition-all text-gray-300"
                         aria-label="Scroll tabs left"
                       >
-                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                         </svg>
                       </button>
@@ -1626,10 +1666,10 @@ const PPCDashboard = () => {
                     {showRightArrow && (
                       <button
                         onClick={scrollTabsRight}
-                        className="bg-white hover:bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 flex items-center justify-center transition-all duration-200 shadow-sm"
+                        className="bg-[#21262d] hover:bg-[#161b22] border border-[#30363d] rounded px-2 py-1 flex items-center justify-center transition-all text-gray-300"
                         aria-label="Scroll tabs right"
                       >
-                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
@@ -1658,10 +1698,10 @@ const PPCDashboard = () => {
                         onClick={() => handleTabClick(tab.id)}
                       >
                         <p
-                          className={`text-sm font-medium transition-colors ${
+                          className={`text-xs font-medium transition-colors ${
                             selectedTab === tab.id 
-                              ? 'text-blue-600 font-semibold' 
-                              : 'text-gray-500 hover:text-gray-700'
+                              ? 'text-blue-400 font-semibold' 
+                              : 'text-gray-400 hover:text-gray-300'
                           }`}
                         >
                           {tab.label}
@@ -1671,7 +1711,7 @@ const PPCDashboard = () => {
                         {selectedTab === tab.id && (
                           <motion.div
                             layoutId="ppcUnderline"
-                            className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-full"
+                            className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full"
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
@@ -1680,14 +1720,14 @@ const PPCDashboard = () => {
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-gray-500 py-2">
+                <div className="text-xs text-gray-400 py-1">
                   No data available for any tabs
                 </div>
               )}
             </div>
             
             {/* Tab Content */}
-            <div className="p-6 relative overflow-hidden" style={{ minHeight: '400px' }}>
+            <div className="p-2 relative overflow-hidden" style={{ minHeight: '300px' }}>
               {tabs.length > 0 && selectedTabIndex >= 0 ? (
                 <AnimatePresence custom={direction} mode="sync">
                   <motion.div
@@ -1702,28 +1742,28 @@ const PPCDashboard = () => {
                   {/* High ACOS Campaigns Tab */}
                   {selectedTab === 0 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">High ACOS Campaigns</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">High ACOS Campaigns</h2>
                       <OptimizationTip 
                         tip="Reduce bids or add negatives to lower ACoS."
                         icon="📉"
                       />
-                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                      <div className="mb-2 mt-1 text-xs text-gray-400">
                         Campaigns with high advertising cost of sales
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
-                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
                             </tr>
                           </thead>
                           <tbody>
                             {highAcosCampaigns.length === 0 ? (
                               <tr>
-                                <td colSpan={4} className="text-center py-12 text-gray-400">
+                                <td colSpan={4} className="text-center py-6 text-gray-400 text-xs">
                                   No data available
                                 </td>
                               </tr>
@@ -1732,13 +1772,13 @@ const PPCDashboard = () => {
                                 const startIndex = (highAcosPage - 1) * itemsPerPage;
                                 const endIndex = startIndex + itemsPerPage;
                                 return highAcosCampaigns.slice(startIndex, endIndex).map((campaign, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-900 break-words">
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
                                       {campaign.campaignName}
                                     </td>
-                                    <td className="w-1/5 py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(campaign.totalSpend, currency)}</td>
-                                    <td className="w-1/5 py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(campaign.totalSales, currency)}</td>
-                                    <td className="w-1/5 py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.totalSpend, currency)}</td>
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.totalSales, currency)}</td>
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
                                       {campaign.acos.toFixed(2)}%
                                     </td>
                                   </tr>
@@ -1761,29 +1801,29 @@ const PPCDashboard = () => {
                   {/* Wasted Spend Keywords Tab */}
                   {selectedTab === 1 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Wasted Spend Keywords</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Wasted Spend Keywords</h2>
                       <OptimizationTip 
                         tip="Consider pausing or lowering bids for unprofitable keywords."
                         icon="⚠️"
                       />
-                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                      <div className="mb-2 mt-1 text-xs text-gray-400">
                         Keywords with high spend but low returns
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
-                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
-                              <th className="w-[15%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-[15%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
+                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[15%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[15%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
                             </tr>
                           </thead>
                           <tbody>
                             {wastedSpendKeywords.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="text-center py-12 text-gray-400">
+                                <td colSpan={5} className="text-center py-6 text-gray-400 text-xs">
                                   {adsKeywordsPerformanceData.length === 0 ? (
                                     <div className="flex flex-col items-center space-y-2">
                                       <div>No keyword performance data available</div>
@@ -1810,18 +1850,18 @@ const PPCDashboard = () => {
                                 const startIndex = (wastedSpendPage - 1) * itemsPerPage;
                                 const endIndex = startIndex + itemsPerPage;
                                 return wastedSpendKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-900 break-words">
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-[20%] py-2 px-2 text-xs text-gray-100 break-words">
                                       {keyword.keyword}
                                     </td>
-                                    <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {keyword.campaignName}
                                     </td>
-                                    <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {keyword.adGroupName || 'N/A'}
                                     </td>
-                                    <td className="w-[15%] py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
-                                    <td className="w-[15%] py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
+                                    <td className="w-[15%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
+                                    <td className="w-[15%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
                                       {formatCurrencyWithLocale(keyword.spend, currency)}
                                     </td>
                                   </tr>
@@ -1844,27 +1884,27 @@ const PPCDashboard = () => {
                   {/* Campaigns Without Negative Keywords Tab */}
                   {selectedTab === 2 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Campaigns Without Negative Keywords</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Campaigns Without Negative Keywords</h2>
                       <OptimizationTip 
                         tip="Add negative keywords to these campaigns to prevent irrelevant traffic and improve ad performance."
                         icon="⚠️"
                       />
-                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                      <div className="mb-2 mt-1 text-xs text-gray-400">
                         Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-2/5 text-left py-3 px-3 text-sm font-medium text-gray-700">AdGroup</th>
-                              <th className="w-1/5 text-center py-3 px-3 text-sm font-medium text-gray-700">Negatives</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">AdGroup</th>
+                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Negatives</th>
                             </tr>
                           </thead>
                           <tbody>
                             {campaignsWithoutNegativeKeywords.length === 0 ? (
                               <tr>
-                                <td colSpan={3} className="text-center py-12 text-gray-400">
+                                <td colSpan={3} className="text-center py-6 text-gray-400 text-xs">
                                   All campaigns have negative keywords configured ✅
                                 </td>
                               </tr>
@@ -1873,15 +1913,15 @@ const PPCDashboard = () => {
                                 const startIndex = (campaignsWithoutNegativePage - 1) * itemsPerPage;
                                 const endIndex = startIndex + itemsPerPage;
                                 return campaignsWithoutNegativeKeywords.slice(startIndex, endIndex).map((row, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-900 break-words">
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
                                       {row.campaignName}
                                     </td>
-                                    <td className="w-2/5 py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-2/5 py-2 px-2 text-xs text-gray-300 break-words">
                                       {row.adGroupName}
                                     </td>
-                                    <td className="w-1/5 py-4 px-3 text-sm text-center">
-                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 whitespace-nowrap">
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center">
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
                                         {row.negatives}
                                       </span>
                                     </td>
@@ -1905,7 +1945,7 @@ const PPCDashboard = () => {
                   {/* Top Performing Keywords Tab */}
                   {selectedTab === 3 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Top Performing Keywords</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Top Performing Keywords</h2>
                       <OptimizationTip 
                         tip="This keyword performs well — consider raising bid by 15–20%."
                         icon="📈"
@@ -1913,20 +1953,20 @@ const PPCDashboard = () => {
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-[18%] text-left py-3 px-3 text-sm font-medium text-gray-700">Keyword</th>
-                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign</th>
-                              <th className="w-[20%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
-                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
-                              <th className="w-[9%] text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
-                              <th className="w-[9%] text-center py-3 px-3 text-sm font-medium text-gray-700">Impressions</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
+                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                              <th className="w-[9%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
+                              <th className="w-[9%] text-center py-2 px-2 text-xs font-medium text-gray-400">Impressions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {topPerformingKeywords.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="text-center py-12 text-gray-400">
+                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
                                   {adsKeywordsPerformanceData.length === 0 ? (
                                     <div className="flex flex-col items-center space-y-2">
                                       <div>No keyword performance data available</div>
@@ -1953,26 +1993,26 @@ const PPCDashboard = () => {
                                 const startIndex = (topPerformingPage - 1) * itemsPerPage;
                                 const endIndex = startIndex + itemsPerPage;
                                 return topPerformingKeywords.slice(startIndex, endIndex).map((keyword, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-[18%] py-4 px-3 text-sm text-gray-900 break-words">
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
                                       {keyword.keyword}
                                     </td>
-                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[20%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {keyword.campaignName}
                                     </td>
-                                    <td className="w-[20%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[20%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {keyword.adGroupName || 'N/A'}
                                     </td>
-                                    <td className="w-[12%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
                                       {formatCurrencyWithLocale(keyword.sales, currency)}
                                     </td>
-                                    <td className="w-[12%] py-4 px-3 text-sm text-center whitespace-nowrap">
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">
                                       {formatCurrencyWithLocale(keyword.spend, currency)}
                                     </td>
-                                    <td className="w-[9%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                    <td className="w-[9%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
                                       {keyword.acos.toFixed(2)}%
                                     </td>
-                                    <td className="w-[9%] py-4 px-3 text-sm text-center whitespace-nowrap">
+                                    <td className="w-[9%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">
                                       {keyword.impressions.toLocaleString()}
                                     </td>
                                   </tr>
@@ -1995,30 +2035,30 @@ const PPCDashboard = () => {
                   {/* Search Terms Tab */}
                   {selectedTab === 4 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Search Terms with Zero Sales</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Search Terms with Zero Sales</h2>
                       <OptimizationTip 
                         tip="Consider adding a negative keyword or revising listing content."
                         icon="📝"
                       />
-                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                      <div className="mb-2 mt-1 text-xs text-gray-400">
                         Search terms that generated clicks but no conversions
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>
-                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Matched Keyword</th>
-                              <th className="w-[22%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
-                              <th className="w-[11%] text-center py-3 px-3 text-sm font-medium text-gray-700">Clicks</th>
-                              <th className="w-[11%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-[12%] text-center py-3 px-3 text-sm font-medium text-gray-700">Spend</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Matched Keyword</th>
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[11%] text-center py-2 px-2 text-xs font-medium text-gray-400">Clicks</th>
+                              <th className="w-[11%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
                             </tr>
                           </thead>
                           <tbody>
                             {filteredSearchTerms.length === 0 ? (
                               <tr>
-                                <td colSpan={6} className="text-center py-12 text-gray-400">
+                                <td colSpan={6} className="text-center py-6 text-gray-400 text-xs">
                                   No data available
                                 </td>
                               </tr>
@@ -2027,19 +2067,19 @@ const PPCDashboard = () => {
                                 const startIndex = (searchTermsPage - 1) * itemsPerPage;
                                 const endIndex = startIndex + itemsPerPage;
                                 return filteredSearchTerms.slice(startIndex, endIndex).map((term, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200">
-                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-900 break-words">
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-[22%] py-2 px-2 text-xs text-gray-100 break-words">
                                       {term.searchTerm}
                                     </td>
-                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {term.keyword || 'N/A'}
                                     </td>
-                                    <td className="w-[22%] py-4 px-3 text-sm text-gray-600 break-words">
+                                    <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
                                       {term.adGroupName || 'N/A'}
                                     </td>
-                                    <td className="w-[11%] py-4 px-3 text-sm text-center whitespace-nowrap">{term.clicks}</td>
-                                    <td className="w-[11%] py-4 px-3 text-sm text-center whitespace-nowrap">{formatCurrencyWithLocale(term.sales, currency)}</td>
-                                    <td className="w-[12%] py-4 px-3 text-sm text-center font-medium text-red-600 whitespace-nowrap">
+                                    <td className="w-[11%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{term.clicks}</td>
+                                    <td className="w-[11%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(term.sales, currency)}</td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
                                       {formatCurrencyWithLocale(term.spend, currency)}
                                     </td>
                                   </tr>
@@ -2062,29 +2102,29 @@ const PPCDashboard = () => {
                   {/* Auto Campaign Insights Tab */}
                   {selectedTab === 5 && (
                     <>
-                      <h2 className="text-xl font-semibold text-gray-900 mb-2">Auto Campaign Insights</h2>
+                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Auto Campaign Insights</h2>
                       <OptimizationTip 
                         tip="Promote high performing search terms to manual campaigns for better control."
                         icon="🎯"
                       />
-                      <div className="mb-4 mt-4 text-sm text-gray-600">
+                      <div className="mb-2 mt-1 text-xs text-gray-400">
                         Performance insights from automatic targeting campaigns
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Search Term</th>
-                              <th className="w-[30%] text-left py-3 px-3 text-sm font-medium text-gray-700">Campaign Name</th>
-                              <th className="w-[25%] text-left py-3 px-3 text-sm font-medium text-gray-700">Ad Group</th>
-                              <th className="w-[10%] text-center py-3 px-3 text-sm font-medium text-gray-700">Sales</th>
-                              <th className="w-[10%] text-center py-3 px-3 text-sm font-medium text-gray-700">ACoS %</th>
+                            <tr className="border-b border-[#30363d]">
+                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
+                              <th className="w-[30%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign Name</th>
+                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
                             </tr>
                           </thead>
                           <tbody>
                             {autoCampaignInsights.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="text-center py-12 text-gray-400">
+                                <td colSpan={5} className="text-center py-6 text-gray-400 text-xs">
                                   No data available
                                 </td>
                               </tr>
@@ -2094,20 +2134,20 @@ const PPCDashboard = () => {
                                 const endIndex = startIndex + itemsPerPage;
                                 return autoCampaignInsights.slice(startIndex, endIndex).map((insight, idx) => {
                                   return (
-                                    <tr key={idx} className="border-b border-gray-200">
-                                      <td className="w-[25%] py-4 px-3 text-sm text-gray-900 break-words">
+                                    <tr key={idx} className="border-b border-[#30363d]">
+                                      <td className="w-[25%] py-2 px-2 text-xs text-gray-100 break-words">
                                         {insight.searchTerm}
                                       </td>
-                                      <td className="w-[30%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      <td className="w-[30%] py-2 px-2 text-xs text-gray-300 break-words">
                                         {insight.campaignName}
                                       </td>
-                                      <td className="w-[25%] py-4 px-3 text-sm text-gray-600 break-words">
+                                      <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
                                         {insight.adGroupName || 'N/A'}
                                       </td>
-                                      <td className="w-[10%] py-4 px-3 text-sm text-center font-medium text-green-600 whitespace-nowrap">
+                                      <td className="w-[10%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
                                         {formatCurrencyWithLocale(insight.sales, currency)}
                                       </td>
-                                      <td className="w-[10%] py-4 px-3 text-sm text-center font-medium whitespace-nowrap">
+                                      <td className="w-[10%] py-2 px-2 text-xs text-center font-medium whitespace-nowrap text-gray-300">
                                         {insight.acos.toFixed(2)}%
                                       </td>
                                     </tr>
@@ -2130,15 +2170,17 @@ const PPCDashboard = () => {
                 </motion.div>
               </AnimatePresence>
               ) : (
-                <div className="flex items-center justify-center py-12 text-gray-400">
+                <div className="flex items-center justify-center py-6 text-gray-400">
                   <div className="text-center">
-                    <p className="text-lg font-medium mb-2">No data available</p>
-                    <p className="text-sm">Please sync your data to view campaign analysis</p>
+                    <p className="text-sm font-medium mb-1">No data available</p>
+                    <p className="text-xs">Please sync your data to view campaign analysis</p>
                   </div>
                 </div>
               )}
             </div>
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -808,22 +808,17 @@ const ConnectAccounts = () => {
   // Show loading state while checking subscription
   if (checkingSubscription) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
-          <p className="text-gray-600">Verifying subscription...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+          <p className="text-gray-400">Verifying subscription...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
-      {/* Background Elements */}
-      <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:bg-grid-slate-700/25 dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))]"></div>
-      <div className="absolute top-10 right-10 w-72 h-72 bg-gray-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-      <div className="absolute top-40 left-10 w-72 h-72 bg-emerald-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
-      
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">
@@ -831,7 +826,7 @@ const ConnectAccounts = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6"
+            className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-xl p-6"
           >
             {/* Logo and Header */}
             <div className="text-center mb-6">
@@ -847,10 +842,10 @@ const ConnectAccounts = () => {
                   className="h-10 w-auto"
                 />
               </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-gray-900 mb-2">
+              <h1 className="text-xl lg:text-2xl font-bold text-gray-100 mb-2">
                 Connect Your Accounts
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-gray-400 text-sm">
                 Connect your Amazon accounts to start optimizing your business
               </p>
               {/* Display current marketplace if available */}
@@ -868,15 +863,15 @@ const ConnectAccounts = () => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.2 }}
-                className="border border-gray-200 rounded-xl p-6 hover:border-gray-300 hover:shadow-md transition-all duration-300"
+                className="border border-[#30363d] rounded-xl p-6 hover:border-gray-500 hover:shadow-md transition-all duration-300"
               >
                 <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-gradient-to-r from-[#3B4A6B] to-[#333651] rounded-lg flex items-center justify-center">
+                  <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
                     <Store className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900">Amazon Seller Central</h3>
-                    <p className="text-sm text-gray-600">Connect your seller account to access sales data, inventory, and performance metrics</p>
+                    <h3 className="text-lg font-semibold text-gray-100">Amazon Seller Central</h3>
+                    <p className="text-sm text-gray-400">Connect your seller account to access sales data, inventory, and performance metrics</p>
                   </div>
                 </div>
                 <button
@@ -886,8 +881,8 @@ const ConnectAccounts = () => {
                     isSellerCentralConnected
                       ? 'bg-green-600 text-white cursor-not-allowed'
                       : sellerCentralLoading || !marketplaceConfig
-                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30'
                   }`}
                 >
                   {isSellerCentralConnected ? (
@@ -911,17 +906,17 @@ const ConnectAccounts = () => {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.3 }}
-                className="border border-gray-200 rounded-xl p-6 hover:border-gray-300 hover:shadow-md transition-all duration-300"
+                className="border border-[#30363d] rounded-xl p-6 hover:border-gray-500 hover:shadow-md transition-all duration-300"
               >
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-12 h-12 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
                     <TrendingUp className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900">Amazon Ads</h3>
-                    <p className="text-sm text-gray-600">Connect your advertising account to optimize campaigns and track ad performance</p>
+                    <h3 className="text-lg font-semibold text-gray-100">Amazon Ads</h3>
+                    <p className="text-sm text-gray-400">Connect your advertising account to optimize campaigns and track ad performance</p>
                     {!isSpApiConnectedState && !checkingSpApi && (
-                      <p className="text-xs text-orange-600 mt-1 font-medium">
+                      <p className="text-xs text-orange-400 mt-1 font-medium">
                         ⚠️ Please connect Amazon Seller Central first
                       </p>
                     )}
@@ -932,8 +927,8 @@ const ConnectAccounts = () => {
                   disabled={amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi}
                   className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
                     amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi
-                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-lg hover:shadow-xl'
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30'
                   }`}
                 >
                   {amazonAdsLoading ? (
@@ -962,13 +957,13 @@ const ConnectAccounts = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.4 }}
-              className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-200"
+              className="mt-6 p-4 bg-blue-500/10 rounded-xl border border-blue-500/40"
             >
               <div className="flex items-start gap-3">
-                <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-blue-800">
+                <CheckCircle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-blue-300">
                   <p className="font-medium mb-1">Secure Connection</p>
-                  <p className="text-blue-700">Your data is encrypted and securely stored. We connect directly to Amazon's secure systems and never store your login credentials.</p>
+                  <p className="text-blue-400">Your data is encrypted and securely stored. We connect directly to Amazon's secure systems and never store your login credentials.</p>
                 </div>
               </div>
             </motion.div>
@@ -978,11 +973,11 @@ const ConnectAccounts = () => {
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center mt-4"
+                className="bg-blue-500/10 border border-blue-500/40 rounded-xl p-4 text-center mt-4"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                  <p className="text-blue-600 text-sm font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                  <p className="text-blue-300 text-sm font-medium">
                     Starting analysis... Please wait
                   </p>
                 </div>
@@ -990,11 +985,11 @@ const ConnectAccounts = () => {
             )}
 
             {/* Navigation Links */}
-            <div className="flex items-center justify-start mt-6 pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-start mt-6 pt-4 border-t border-[#30363d]">
               <button
                 type="button"
                 onClick={navigateToLogin}
-                className="text-sm text-gray-600 hover:text-gray-800 font-medium hover:underline transition-colors"
+                className="text-sm text-gray-400 hover:text-gray-300 font-medium hover:underline transition-colors"
               >
                 Back to Login
               </button>
@@ -1007,9 +1002,9 @@ const ConnectAccounts = () => {
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="bg-green-50 border border-green-200 rounded-xl p-4 text-center mt-4"
+                  className="bg-green-500/10 border border-green-500/40 rounded-xl p-4 text-center mt-4"
                 >
-                  <p className="text-green-600 text-sm">{successMessage}</p>
+                  <p className="text-green-300 text-sm">{successMessage}</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1021,9 +1016,9 @@ const ConnectAccounts = () => {
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="bg-red-50 border border-red-200 rounded-xl p-4 text-center mt-4"
+                  className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-center mt-4"
                 >
-                  <p className="text-red-600 text-sm">{errorMessage}</p>
+                  <p className="text-red-300 text-sm">{errorMessage}</p>
                 </motion.div>
               )}
             </AnimatePresence>

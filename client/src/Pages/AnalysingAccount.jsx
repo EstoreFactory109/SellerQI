@@ -1,300 +1,592 @@
-import React, { useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useSelector, useDispatch } from "react-redux";
+import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import {
+  Lock,
+  LayoutDashboard,
+  Mail,
+  CheckCircle2,
+  ArrowRight,
+  BookOpen,
+  FileText,
+  BarChart3,
+  AlertCircle,
+  TrendingUp,
+  DollarSign,
+  Receipt,
+  Search,
+  Unlock,
+  Loader2,
+  LogOut,
+} from "lucide-react";
+import sellerQILogo from "../assets/Logo/sellerQILogo.png";
+import axiosInstance from "../config/axios.config.js";
+import { coordinatedAuthCheck, clearAuthCache } from "../utils/authCoordinator.js";
+import { loginSuccess, logout } from "../redux/slices/authSlice.js";
 
-// Animated DNA Helix Loader
-const HelixLoader = () => {
-    const dots = Array.from({ length: 12 }, (_, i) => i);
-    return (
-        <div className="relative w-24 h-24">
-            {dots.map((i) => (
-            <motion.div
-                    key={i}
-                    className="absolute w-3 h-3 rounded-full shadow-md"
-                    style={{
-                        left: '50%',
-                        top: '50%',
-                        background: i % 2 === 0 ? '#6366f1' : '#a5b4fc',
-                    }}
-                    animate={{
-                        x: [
-                            Math.cos((i / 12) * Math.PI * 2) * 30,
-                            Math.cos((i / 12) * Math.PI * 2 + Math.PI) * 30,
-                            Math.cos((i / 12) * Math.PI * 2) * 30,
-                        ],
-                        y: [
-                            Math.sin((i / 12) * Math.PI * 2) * 15 - 4,
-                            Math.sin((i / 12) * Math.PI * 2 + Math.PI) * 15 - 4,
-                            Math.sin((i / 12) * Math.PI * 2) * 15 - 4,
-                        ],
-                    scale: [1, 1.2, 1],
-                        opacity: [0.7, 1, 0.7],
-                }}
-                transition={{ 
-                        duration: 2,
-                    repeat: Infinity,
-                        ease: "easeInOut",
-                        delay: i * 0.1,
-                }}
-            />
-            ))}
-            {/* Center glow */}
-            <motion.div
-                className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-gradient-to-br from-indigo-300/40 to-purple-300/40 blur-xl"
-                animate={{ 
-                    scale: [1, 1.3, 1],
-                    opacity: [0.4, 0.7, 0.4],
-                }}
-                transition={{ 
-                    duration: 3,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                }}
-            />
-        </div>
-    );
+// Vibrant palette
+const COLORS = {
+  cyan: "#22d3ee",
+  blue: "#60a5fa",
+  violet: "#a78bfa",
+  emerald: "#34d399",
+  amber: "#fbbf24",
+  rose: "#fb7185",
+  sky: "#38bdf8",
 };
 
-// Floating particles background
-const FloatingParticles = () => {
-    const particles = Array.from({ length: 20 }, (_, i) => ({
-        id: i,
-        size: Math.random() * 6 + 3,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        duration: Math.random() * 20 + 15,
-        delay: Math.random() * 5,
-    }));
+// Mini demo chart components (deco only) — solid colors
+const MiniBarChart = ({ accent = COLORS.blue }) => (
+  <div className="flex items-end gap-0.5 h-8">
+    {[40, 65, 45, 80, 55, 70].map((h, i) => (
+      <motion.div
+        key={i}
+        className="w-1.5 rounded-t opacity-90"
+        style={{ backgroundColor: accent }}
+        initial={{ height: 0 }}
+        animate={{ height: `${h}%` }}
+        transition={{ duration: 0.5, delay: 0.2 + i * 0.05 }}
+      />
+    ))}
+  </div>
+);
+const MiniLineChart = () => (
+  <svg viewBox="0 0 60 24" className="w-full h-8 text-[#34d399]" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <motion.path
+      d="M 0 18 L 10 14 L 20 16 L 30 8 L 40 12 L 50 6 L 60 10"
+      stroke="currentColor"
+      initial={{ pathLength: 0 }}
+      animate={{ pathLength: 1 }}
+      transition={{ duration: 0.8, delay: 0.3 }}
+    />
+  </svg>
+);
+const MiniPieSlice = () => (
+  <svg viewBox="0 0 32 32" className="w-8 h-8">
+    <motion.circle cx="16" cy="16" r="14" fill="none" stroke={COLORS.violet} strokeWidth="3" strokeDasharray="44 88"
+      initial={{ strokeDasharray: "0 88" }} animate={{ strokeDasharray: "44 88" }} transition={{ duration: 0.6, delay: 0.3 }} />
+    <motion.circle cx="16" cy="16" r="14" fill="none" stroke={COLORS.emerald} strokeWidth="3" strokeDasharray="22 88" strokeDashoffset="-44"
+      initial={{ strokeDasharray: "0 88" }} animate={{ strokeDasharray: "22 88" }} transition={{ duration: 0.5, delay: 0.5 }} />
+  </svg>
+);
+const MiniAreaBars = ({ accent = COLORS.cyan }) => (
+  <div className="flex items-end gap-1 h-8">
+    {[70, 50, 85, 60, 90].map((h, i) => (
+      <motion.div
+        key={i}
+        className="w-2 rounded-sm"
+        style={{ backgroundColor: accent }}
+        initial={{ height: 0 }}
+        animate={{ height: `${h}%` }}
+        transition={{ duration: 0.4, delay: 0.4 + i * 0.06 }}
+      />
+    ))}
+  </div>
+);
 
-    return (
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            {particles.map((p) => (
-            <motion.div
-                    key={p.id}
-                    className="absolute rounded-full bg-indigo-500/10"
-                    style={{
-                        width: p.size,
-                        height: p.size,
-                        left: `${p.x}%`,
-                        top: `${p.y}%`,
-                    }}
-                animate={{ 
-                        y: [0, -80, 0],
-                        x: [0, Math.random() * 30 - 15, 0],
-                        opacity: [0, 0.4, 0],
-                }}
-                transition={{ 
-                        duration: p.duration,
-                    repeat: Infinity,
-                        delay: p.delay,
-                    ease: "easeInOut",
-                }}
-            />
-            ))}
-        </div>
-    );
-};
+const ANALYZING_ITEMS = [
+  { icon: "📊", label: "Sales", color: COLORS.emerald },
+  { icon: "📈", label: "PPC", color: COLORS.blue },
+  { icon: "💰", label: "Profit", color: COLORS.amber },
+  { icon: "📦", label: "Inventory", color: COLORS.violet },
+  { icon: "🏆", label: "Rankings", color: COLORS.rose },
+  { icon: "🛡️", label: "Health", color: COLORS.cyan },
+];
+
+const INNER_PAGES = [
+  { title: "Dashboard", desc: "Sales, trends & account health at a glance", icon: LayoutDashboard, chart: MiniBarChart, chartProps: { accent: COLORS.blue }, accent: COLORS.blue },
+  { title: "Issues", desc: "Catalog, listing & policy issues", icon: AlertCircle, chart: MiniPieSlice, chartProps: {}, accent: COLORS.violet },
+  { title: "Keywords", desc: "Keyword research and recommendations for listings & PPC", icon: Search, chart: MiniLineChart, chartProps: {}, accent: COLORS.emerald },
+  { title: "PPC Dashboard", desc: "Sponsored ads performance", icon: TrendingUp, chart: MiniAreaBars, chartProps: { accent: COLORS.cyan }, accent: COLORS.cyan },
+  { title: "Profitability", desc: "Margins, COGS & suggestions", icon: DollarSign, chart: MiniBarChart, chartProps: { accent: COLORS.amber }, accent: COLORS.amber },
+  { title: "Reimbursement", desc: "FBA claims & recovery", icon: Receipt, chart: MiniAreaBars, chartProps: { accent: COLORS.rose }, accent: COLORS.rose },
+];
+
+const FOOTER_LINKS = [
+  { href: "https://www.sellerqi.com/use-cases", label: "Use Cases", icon: BarChart3 },
+  { href: "https://www.sellerqi.com/case-study/", label: "Case Studies", icon: FileText },
+  { href: "https://www.sellerqi.com/blog/", label: "Blog", icon: BookOpen },
+];
+
+const WHATS_NEXT = [
+  "Switch accounts or profiles from the top nav bar.",
+  "Connect more marketplaces from Settings.",
+  "Your dashboard shows sales, issues, keywords, and profitability.",
+  "Use Reports and Reimbursement when data is available.",
+];
+
+const KEY_FEATURES = [
+  { title: "Multi-marketplace", desc: "Connect US, UK, EU, and more from one account.", icon: "🌍" },
+  { title: "Issue alerts", desc: "Catalog, listing, and policy issues in one place.", icon: "🔔" },
+  { title: "Keyword analysis", desc: "Discover high-value keywords for listings and Sponsored Ads.", icon: "🔑" },
+  { title: "Profitability", desc: "Margins, COGS, and FBA fees in one dashboard.", icon: "📊" },
+];
+
+const QUICK_TIPS = [
+  "Use date range filters on the Dashboard to compare periods.",
+  "Issues are grouped by category so you can fix the most impactful first.",
+  "Reimbursement claims can be tracked from the Reimbursement page.",
+];
+
+const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.08 } } };
+const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
+
+// Polling interval in milliseconds (15 minutes)
+const POLLING_INTERVAL = 15 * 60 * 1000;
 
 const AnalysingAccount = () => {
-    const [jobStatus] = useState('processing'); // Static status - always 'processing'
-    const [progress] = useState(50); // Static progress - always 50%
+  const user = useSelector((state) => state.Auth?.user);
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  
+  // State for authentication
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
+  // State for analysis status
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const pollingIntervalRef = useRef(null);
+  const hasCheckedAuthRef = useRef(false);
 
-    // Get status message (static)
-    const getStatusMessage = () => {
-        return 'Deep analysis in progress...';
+  // Check authentication on mount
+  useEffect(() => {
+    // Prevent multiple auth checks
+    if (hasCheckedAuthRef.current) return;
+    hasCheckedAuthRef.current = true;
+
+    const checkAuth = async () => {
+      try {
+        const result = await coordinatedAuthCheck();
+        
+        if (result.isAuthenticated && result.user) {
+          setIsAuthenticated(true);
+          // Update Redux state with user data
+          dispatch(loginSuccess(result.user));
+          localStorage.setItem('isAuth', 'true');
+        } else {
+          // Not authenticated, redirect to login
+          localStorage.removeItem('isAuth');
+          navigate('/', { replace: true });
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        localStorage.removeItem('isAuth');
+        navigate('/', { replace: true });
+      } finally {
+        setIsAuthChecking(false);
+      }
     };
 
+    checkAuth();
+  }, [dispatch, navigate]);
+
+  const firstName = user?.firstName || "there";
+  const welcomeName = firstName !== "there" ? firstName : "there";
+
+  // Dashboard is unlocked only when analysis is complete (no package check)
+  const canAccessDashboard = analysisComplete;
+
+  // Function to check analysis status
+  const checkAnalysisStatus = useCallback(async () => {
+    try {
+      const response = await axiosInstance.get('/app/check-first-analysis-status');
+      if (response.data?.data?.firstAnalysisDone) {
+        setAnalysisComplete(true);
+        // Clear the polling interval once analysis is complete
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking analysis status:', error);
+      // Don't stop polling on error, just log it
+    } finally {
+      setIsChecking(false);
+    }
+  }, []);
+
+  // Check analysis status on mount and set up polling (only after authentication is confirmed)
+  useEffect(() => {
+    if (!isAuthenticated || isAuthChecking) return;
+
+    // Initial check
+    checkAnalysisStatus();
+
+    // Set up polling every 15 minutes
+    pollingIntervalRef.current = setInterval(() => {
+      checkAnalysisStatus();
+    }, POLLING_INTERVAL);
+
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [checkAnalysisStatus, isAuthenticated, isAuthChecking]);
+
+  // Handle dashboard navigation when analysis is complete
+  const handleGoToDashboard = () => {
+    navigate('/seller-central-checker/dashboard');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await axiosInstance.get('/app/logout', { withCredentials: true });
+    } catch (error) {
+      console.warn('Logout API:', error?.response?.status || error?.message);
+    }
+    clearAuthCache();
+    localStorage.removeItem('isAuth');
+    dispatch(logout());
+    navigate('/', { replace: true });
+  };
+
+  // Show loading state while checking authentication
+  if (isAuthChecking) {
     return (
-        <div className="h-screen w-full bg-gray-50 flex flex-col overflow-hidden relative">
-            {/* Floating particles background */}
-            <FloatingParticles />
-            
-            {/* Gradient mesh background - light theme */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-                <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
-                <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-100/50 rounded-full blur-3xl" />
-                <div className="absolute top-1/2 left-1/2 w-72 h-72 bg-blue-100/40 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
-            </div>
-
-            {/* Main content - scrollable area */}
-            <div className="flex-1 flex flex-col items-center justify-center px-6 py-4 relative z-10 overflow-y-auto">
-                <div className="w-full max-w-4xl flex flex-col items-center gap-4">
-                    {/* Loader */}
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.8, ease: "easeOut" }}
-                        className="mb-2"
-                    >
-                        <HelixLoader />
-                    </motion.div>
-
-                    {/* Main Title */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.6, delay: 0.2 }}
-                        className="text-center mb-2"
-                    >
-                        <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-1 tracking-tight">
-                            Analysis in Progress
-                        </h1>
-                        <p className="text-gray-600 text-base md:text-lg max-w-xl mx-auto">
-                            We're performing a deep analysis of your Amazon account
-                        </p>
-                    </motion.div>
-                            
-                    {/* Status Badge */}
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.5, delay: 0.4 }}
-                        className="mb-2"
-                    >
-                        <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
-                            <motion.span
-                                className="w-1.5 h-1.5 rounded-full bg-indigo-500"
-                                animate={{ opacity: [1, 0.4, 1] }}
-                                transition={{ duration: 1.5, repeat: Infinity }}
-                            />
-                            {getStatusMessage()}
-                        </span>
-                    </motion.div>
-
-                    {/* Safe to close card - highlighted so users know they can leave */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.6, delay: 0.5 }}
-                        className="w-full bg-white rounded-xl border-2 border-emerald-300 shadow-lg shadow-emerald-200/50 p-5 mb-4 ring-2 ring-emerald-100"
-                    >
-                        <div className="flex items-start gap-4">
-                            <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-lg flex items-center justify-center shadow-md shadow-emerald-200">
-                                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                            </div>
-                            <div className="flex-1">
-                                <h3 className="text-lg font-semibold text-gray-900 mb-1.5">
-                                    You can safely close this tab
-                                </h3>
-                                <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                                    Your analysis is running in the background and will continue even if you close this page.
-                                </p>
-                                <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border-2 border-emerald-200 px-4 py-3">
-                                    <div className="flex-shrink-0 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center">
-                                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-semibold text-emerald-900">We'll email you when it's ready</p>
-                                        <p className="text-xs text-emerald-700 mt-0.5">Feel free to close this page — you'll get a notification at your registered email.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    {/* What's being analyzed */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.6, delay: 0.7 }}
-                        className="w-full mb-4"
-                    >
-                        <h4 className="text-center text-gray-400 text-xs font-medium uppercase tracking-wider mb-3">
-                            Currently Analyzing
-                        </h4>
-                        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                            {[
-                                { icon: "📊", label: "Sales Data" },
-                                { icon: "📈", label: "PPC Campaigns" },
-                                { icon: "💰", label: "Profitability" },
-                                { icon: "📦", label: "Inventory" },
-                                { icon: "🏆", label: "Rankings" },
-                                { icon: "🛡️", label: "Account Health" },
-                            ].map((item, index) => (
-                                <motion.div
-                                    key={item.label}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.4, delay: 0.8 + index * 0.1 }}
-                                    className="bg-white rounded-lg p-2.5 text-center border border-gray-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all"
-                                >
-                                    <motion.span 
-                                        className="text-xl block mb-1"
-                                        animate={{ scale: [1, 1.1, 1] }}
-                                        transition={{ duration: 2, repeat: Infinity, delay: index * 0.3 }}
-                                    >
-                                        {item.icon}
-                                    </motion.span>
-                                    <span className="text-[10px] text-gray-600 font-medium leading-tight">{item.label}</span>
-                                </motion.div>
-                            ))}
-                        </div>
-                    </motion.div>
-                </div>
-            </div>
-                            
-            {/* Bottom section with resources - fixed at bottom */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 1 }}
-                className="relative z-10 border-t border-gray-200 bg-white flex-shrink-0"
-            >
-                <div className="max-w-5xl mx-auto px-6 py-4">
-                    <p className="text-center text-gray-600 text-xs font-medium mb-3">
-                        While you wait, explore how SellerQI helps Amazon sellers succeed
-                    </p>
-                    <div className="flex flex-wrap items-center justify-center gap-3">
-                        <a
-                            href="https://www.sellerqi.com/use-cases"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center gap-2 px-4 py-2 bg-white hover:bg-indigo-50 rounded-full border-2 border-gray-200 hover:border-indigo-400 transition-all shadow-sm hover:shadow-md"
-                        >
-                            <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span className="text-xs font-medium text-gray-700 group-hover:text-indigo-700 transition-colors">Use Cases</span>
-                            <svg className="w-3 h-3 text-gray-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                        </a>
-                        <a
-                            href="https://www.sellerqi.com/case-study/"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center gap-2 px-4 py-2 bg-white hover:bg-indigo-50 rounded-full border-2 border-gray-200 hover:border-indigo-400 transition-all shadow-sm hover:shadow-md"
-                        >
-                            <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
-                            <span className="text-xs font-medium text-gray-700 group-hover:text-indigo-700 transition-colors">Case Studies</span>
-                            <svg className="w-3 h-3 text-gray-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                        </a>
-                        <a
-                            href="https://www.sellerqi.com/blog/"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center gap-2 px-4 py-2 bg-white hover:bg-indigo-50 rounded-full border-2 border-gray-200 hover:border-indigo-400 transition-all shadow-sm hover:shadow-md"
-                        >
-                            <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                            </svg>
-                            <span className="text-xs font-medium text-gray-700 group-hover:text-indigo-700 transition-colors">Blog</span>
-                            <svg className="w-3 h-3 text-gray-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                        </a>
-                    </div>
-                </div>
-            </motion.div>
+      <div className="min-h-screen w-full bg-[#111827] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-[#22d3ee] animate-spin" />
+          <p className="text-[#9ca3af] text-sm">Verifying authentication...</p>
         </div>
+      </div>
     );
+  }
+
+  // Don't render anything if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-[#111827] text-[#e6edf3] flex flex-col relative overflow-hidden">
+      {/* Subtle background orbs — solid colors */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] rounded-full bg-[#a78bfa]/10 blur-[140px]" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] rounded-full bg-[#22d3ee]/8 blur-[120px]" />
+      </div>
+
+      <div className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 relative z-10">
+        {/* Logo + Logout */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+          className="mb-1 flex items-center justify-between"
+        >
+          <img src={sellerQILogo} alt="SellerQI" className="h-8 w-auto" />
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-[#e6edf3] border border-[#30363d] bg-[#1f2937]/80 hover:bg-[#374151] hover:border-[#4b5563] transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Log out
+          </button>
+        </motion.div>
+
+        {/* Hero */}
+        <motion.div
+          className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 mb-4"
+          initial="hidden"
+          animate="show"
+          variants={container}
+        >
+          <div className="lg:col-span-7 flex flex-col justify-center w-full">
+            <motion.p variants={item} className="text-[#9ca3af] text-xs font-medium uppercase tracking-wider mb-0.5">
+              You're in
+            </motion.p>
+            <motion.h1
+              variants={item}
+              className="text-3xl sm:text-4xl font-bold mb-2 text-[#e6edf3]"
+            >
+              Welcome, {welcomeName}
+            </motion.h1>
+            <motion.p variants={item} className="text-[#8b949e] text-sm mb-4">
+              Your SellerQI command center. Use the dashboard when it's ready.
+            </motion.p>
+            {!analysisComplete && (
+              <motion.div
+                variants={item}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl mb-4 border border-[#fbbf24]/50 bg-[#fbbf24]/15 text-[#fbbf24] text-sm font-medium"
+              >
+                <span className="font-semibold">Account Analysis may take up to 24 hours. Thank you for your patience.</span>
+              </motion.div>
+            )}
+            <motion.div variants={item} className="flex flex-wrap items-center gap-3 mb-4">
+              {canAccessDashboard ? (
+                <>
+                  <button
+                    onClick={handleGoToDashboard}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#22d3ee] text-[#111827] border border-[#22d3ee] text-sm font-medium cursor-pointer select-none relative overflow-hidden hover:bg-[#06b6d4] transition-colors duration-200"
+                    title="Go to your dashboard"
+                  >
+                    <Unlock className="w-4 h-4" />
+                    <span>Go to Dashboard</span>
+                    <LayoutDashboard className="w-4 h-4 opacity-80" />
+                  </button>
+                  <span className="text-[#34d399] text-xs font-medium">Analysis complete!</span>
+                </>
+              ) : (
+                <>
+                  <span
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#21262d] text-[#6e7681] border border-[#30363d] text-sm font-medium cursor-not-allowed select-none relative overflow-hidden"
+                    title="Unlocks when your analysis is ready"
+                  >
+                    <span className="absolute inset-0 bg-[#22d3ee]/10 -translate-x-full animate-shimmer" style={{ animation: "shimmer 2.5s ease-in-out infinite" }} />
+                    <Lock className="w-4 h-4 relative z-10" />
+                    <span className="relative z-10">Go to Dashboard</span>
+                    <LayoutDashboard className="w-4 h-4 opacity-60 relative z-10" />
+                  </span>
+                  <span className="text-[#6e7681] text-xs">
+                    Unlocks when your analysis is ready
+                  </span>
+                </>
+              )}
+            </motion.div>
+            <motion.div variants={item} className="flex flex-wrap items-center gap-2">
+              <span className="text-[#6e7681] text-xs uppercase tracking-wider mr-1">Data we use:</span>
+              {ANALYZING_ITEMS.map(({ label, icon, color }) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border"
+                  style={{ backgroundColor: `${color}12`, borderColor: `${color}40`, color }}
+                >
+                  {icon} {label}
+                </span>
+              ))}
+            </motion.div>
+          </div>
+          <motion.div
+            variants={item}
+            className="lg:col-span-5 flex flex-col justify-center"
+          >
+            <div className="rounded-2xl border-2 border-[#374151] bg-[#1f2937]/80 p-4 lg:p-5 w-full max-w-md">
+              <h3 className="text-[#e6edf3] text-sm font-semibold mb-3 flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-[#60a5fa]" />
+                Your workspace
+              </h3>
+              <ul className="space-y-2 text-[#9ca3af] text-sm">
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Dashboard, Issues, Keywords, PPC, Profitability, and Reimbursement in one place.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Switch accounts or profiles from the top nav bar.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Connect more marketplaces from Settings.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Use date filters on the Dashboard to compare periods.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Issues are grouped by category and by product for quick fixes.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#34d399] mt-0.5 flex-shrink-0">•</span>
+                  <span>Keyword analysis and PPC dashboards are in the left menu.</span>
+                </li>
+              </ul>
+            </div>
+          </motion.div>
+        </motion.div>
+
+        {/* Email card */}
+        <motion.div
+          className="mb-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+        >
+          {canAccessDashboard ? (
+            <div className="rounded-xl border border-[#34d399]/50 bg-[#064e3b]/30 p-4 flex items-center gap-4 border-l-4 border-l-[#34d399]">
+              <CheckCircle2 className="w-6 h-6 text-[#34d399] flex-shrink-0" />
+              <div>
+                <p className="text-[#e6edf3] font-medium">Your analysis is ready!</p>
+                <p className="text-[#8b949e] text-sm mt-0.5">Your dashboard is now unlocked. Click the button above to explore your data.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[#34d399]/30 bg-[#064e3b]/20 p-4 flex items-center gap-4 border-l-4 border-l-[#34d399]">
+              <Mail className="w-6 h-6 text-[#34d399] flex-shrink-0" />
+              <div>
+                <p className="text-[#e6edf3] font-medium">You can close this tab</p>
+                <p className="text-[#8b949e] text-sm mt-0.5">We'll email you when everything's ready. Your dashboard will unlock once the analysis is complete.</p>
+              </div>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Key features — 4 cards */}
+        <motion.section
+          className="mb-4"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <h2 className="text-[#e6edf3] text-sm font-semibold mb-3 flex items-center gap-2">
+            <span className="w-1 h-4 rounded-full bg-[#a78bfa]" />
+            What you get with SellerQI
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {KEY_FEATURES.map((f, i) => (
+              <div
+                key={f.title}
+                className="rounded-xl border border-[#374151] bg-[#1f2937]/80 p-3"
+              >
+                <span className="text-xl leading-none block mb-1.5">{f.icon}</span>
+                <p className="text-[#e6edf3] text-sm font-medium mb-0.5">{f.title}</p>
+                <p className="text-[#9ca3af] text-xs leading-snug">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+
+        {/* Inside your command center */}
+        <motion.section
+          className="mb-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+        >
+          <h2 className="text-[#e6edf3] text-base font-semibold mb-3 flex items-center gap-2">
+            <span className="w-1 h-5 rounded-full bg-[#60a5fa]" />
+            <span className="text-[#e6edf3]">Inside your command center</span>
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {INNER_PAGES.map((page, i) => (
+              <motion.div
+                key={page.title}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.4 + i * 0.05 }}
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
+                className="rounded-xl border-2 p-4 transition-all duration-300 group"
+                style={{
+                  borderColor: `${page.accent}30`,
+                  backgroundColor: `${page.accent}08`,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = `${page.accent}60`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = `${page.accent}30`;
+                }}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2.5">
+                    <page.icon className="w-5 h-5 flex-shrink-0" style={{ color: page.accent }} />
+                    <span className="text-[#e6edf3] font-medium text-sm">{page.title}</span>
+                  </div>
+                  <div className="opacity-80 group-hover:opacity-100 transition-opacity">
+                    {(() => {
+                      const Chart = page.chart;
+                      return <Chart {...(page.chartProps || {})} />;
+                    })()}
+                  </div>
+                </div>
+                <p className="text-[#9ca3af] text-xs leading-snug">{page.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </motion.section>
+
+        {/* Quick tips */}
+        <motion.section
+          className="mb-4"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+        >
+          <h2 className="text-[#e6edf3] text-sm font-semibold mb-3 flex items-center gap-2">
+            <span className="w-1 h-4 rounded-full bg-[#fbbf24]" />
+            Quick tips
+          </h2>
+          <div className="rounded-xl border border-[#374151] bg-[#1f2937]/80 p-4">
+            <ul className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[#9ca3af] text-sm">
+              {QUICK_TIPS.map((tip, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-[#fbbf24] flex-shrink-0 mt-0.5">•</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </motion.section>
+
+        {/* What happens next + Explore */}
+        <motion.div
+          className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+        >
+          <div className="rounded-xl border-2 border-[#34d399]/30 bg-[#064e3b]/15 p-4">
+            <h3 className="text-[#34d399] text-xs uppercase tracking-wider mb-3 flex items-center gap-2 font-semibold">
+              <CheckCircle2 className="w-4 h-4" />
+              Getting started
+            </h3>
+            <ul className="space-y-2">
+              {WHATS_NEXT.map((line, i) => (
+                <li key={i} className="flex items-center gap-2.5 text-[#d1d5db] text-sm">
+                  <span className="w-2 h-2 rounded-full bg-[#34d399] flex-shrink-0" />
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-xl border-2 border-[#60a5fa]/30 bg-[#1e3a5f]/20 p-4">
+            <h3 className="text-[#60a5fa] text-xs uppercase tracking-wider mb-3 font-semibold">Explore</h3>
+            <div className="flex flex-wrap gap-2">
+              {FOOTER_LINKS.map(({ href, label, icon: Icon }) => (
+                <a
+                  key={label}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1e3a5f]/40 border-2 border-[#60a5fa]/40 text-[#93c5fd] hover:text-white hover:border-[#60a5fa] hover:bg-[#60a5fa]/20 text-sm font-medium transition-all duration-200"
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Help row */}
+        <motion.div
+          className="rounded-xl border border-[#374151] bg-[#1f2937]/60 px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-3"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.55 }}
+        >
+          <p className="text-[#9ca3af] text-sm">
+            Need help? Visit our <a href="https://www.sellerqi.com" target="_blank" rel="noopener noreferrer" className="text-[#60a5fa] hover:underline font-medium">help center</a> or reach out to support from Settings.
+          </p>
+        </motion.div>
+
+      </div>
+
+      {/* Shimmer keyframes for locked button — ensure it exists in global CSS or inline */}
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%) skewX(-12deg); }
+          100% { transform: translateX(200%) skewX(-12deg); }
+        }
+      `}</style>
+    </div>
+  );
 };
 
 export default AnalysingAccount;

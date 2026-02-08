@@ -867,6 +867,12 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
     
     const data = lines.map(line => JSON.parse(line));
     logger.info(`Parsed ${data.length} records from JSONL for ASIN-wise daily`);
+    
+    // Debug: Check parent-child relationships in raw data
+    const recordsWithChildAsin = data.filter(item => item.childAsin);
+    const recordsWithParentAsin = data.filter(item => item.parentAsin);
+    const recordsWithBoth = data.filter(item => item.childAsin && item.parentAsin && item.childAsin !== item.parentAsin);
+    logger.info(`Parent-child analysis: ${recordsWithChildAsin.length} with childAsin, ${recordsWithParentAsin.length} with parentAsin, ${recordsWithBoth.length} with different parent-child pairs`);
 
     // Data structure for ASIN-wise daily data
     // Key: "date|asin" for uniqueness
@@ -1063,10 +1069,16 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
             return b.sales.amount - a.sales.amount;
         });
 
+    // Count records with parent-child relationships in final output
+    const outputRecordsWithParent = asinWiseSalesArray.filter(r => r.parentAsin && r.parentAsin !== r.asin);
+    const uniqueParentAsins = new Set(outputRecordsWithParent.map(r => r.parentAsin));
+    
     logger.info(`Finished processing ASIN-wise daily records`, {
         totalRecords: asinWiseSalesArray.length,
         uniqueAsins: new Set(asinWiseSalesArray.map(r => r.asin)).size,
         uniqueDates: new Set(asinWiseSalesArray.map(r => r.date)).size,
+        recordsWithDifferentParent: outputRecordsWithParent.length,
+        uniqueParentAsins: uniqueParentAsins.size,
         dateRange: asinWiseSalesArray.length > 0 ? 
             `${asinWiseSalesArray[0].date} to ${asinWiseSalesArray[asinWiseSalesArray.length - 1].date}` : 
             'no dates'

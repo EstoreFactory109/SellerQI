@@ -104,7 +104,8 @@ const SellerSchema = new mongoose.Schema(
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );
 
-// **🛡️ Hash Refresh Token Before Storing**
+// Index for efficient queries by User
+SellerSchema.index({ User: 1 });
 
 // Create the model
 const Seller = mongoose.model("Seller", SellerSchema);

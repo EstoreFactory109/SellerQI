@@ -4,10 +4,19 @@
  * Manages page-wise data with Redux caching.
  * Data is fetched from backend endpoints and cached in Redux.
  * Each page has its own data slice to avoid unnecessary re-fetches.
+ * 
+ * Cache TTL: 1 hour (aligned with backend Redis cache)
+ * 
+ * NOTE: Data is also synced to DashboardSlice for backward compatibility
+ * with child components that still access state.Dashboard.DashBoardInfo
  */
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axiosInstance from '../../config/axios.config';
+import { setDashboardInfo } from './DashboardSlice';
+
+// Cache TTL: 1 hour (aligned with backend cache)
+const CACHE_TTL_MS = 60 * 60 * 1000;
 
 // Initial state for each page's data
 const initialState = {
@@ -81,23 +90,37 @@ const initialState = {
         loading: false,
         error: null,
         lastFetched: null
+    },
+    // Account History Data
+    accountHistory: {
+        data: null,
+        loading: false,
+        error: null,
+        lastFetched: null
     }
 };
 
 // Async thunks for fetching page data
 export const fetchDashboardData = createAsyncThunk(
     'pageData/fetchDashboard',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
-            // Check if data already exists and is less than 5 minutes old
+            // Check if data already exists and is within cache TTL (1 hour)
             const lastFetched = state.pageData?.dashboard?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.dashboard.data;
             }
             
             const response = await axiosInstance.get('/api/pagewise/dashboard');
-            return response.data.data;
+            const data = response.data.data;
+            
+            // Also sync to DashboardSlice for backward compatibility with child components
+            if (data?.dashboardData) {
+                dispatch(setDashboardInfo(data.dashboardData));
+            }
+            
+            return data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch dashboard data');
         }
@@ -106,16 +129,27 @@ export const fetchDashboardData = createAsyncThunk(
 
 export const fetchProfitabilityData = createAsyncThunk(
     'pageData/fetchProfitability',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
             const lastFetched = state.pageData?.profitability?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.profitability.data;
             }
             
             const response = await axiosInstance.get('/api/pagewise/profitability');
-            return response.data.data;
+            const data = response.data.data;
+            
+            // Sync to DashboardSlice for backward compatibility with child components
+            if (data) {
+                const existingDashboard = state.Dashboard?.DashBoardInfo || {};
+                dispatch(setDashboardInfo({
+                    ...existingDashboard,
+                    ...data
+                }));
+            }
+            
+            return data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch profitability data');
         }
@@ -124,16 +158,27 @@ export const fetchProfitabilityData = createAsyncThunk(
 
 export const fetchPPCData = createAsyncThunk(
     'pageData/fetchPPC',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
             const lastFetched = state.pageData?.ppc?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.ppc.data;
             }
             
             const response = await axiosInstance.get('/api/pagewise/ppc');
-            return response.data.data;
+            const data = response.data.data;
+            
+            // Sync to DashboardSlice for backward compatibility with child components
+            if (data) {
+                const existingDashboard = state.Dashboard?.DashBoardInfo || {};
+                dispatch(setDashboardInfo({
+                    ...existingDashboard,
+                    ...data
+                }));
+            }
+            
+            return data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch PPC data');
         }
@@ -142,16 +187,28 @@ export const fetchPPCData = createAsyncThunk(
 
 export const fetchIssuesData = createAsyncThunk(
     'pageData/fetchIssues',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
             const lastFetched = state.pageData?.issues?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.issues.data;
             }
             
             const response = await axiosInstance.get('/api/pagewise/issues');
-            return response.data.data;
+            const data = response.data.data;
+            
+            // Sync to DashboardSlice for backward compatibility with child components (Category.jsx, Account.jsx)
+            if (data) {
+                // Merge issues data with existing DashboardSlice data
+                const existingDashboard = state.Dashboard?.DashBoardInfo || {};
+                dispatch(setDashboardInfo({
+                    ...existingDashboard,
+                    ...data
+                }));
+            }
+            
+            return data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch issues data');
         }
@@ -164,7 +221,7 @@ export const fetchIssuesByProductData = createAsyncThunk(
         try {
             const state = getState();
             const lastFetched = state.pageData?.issuesByProduct?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.issuesByProduct.data;
             }
             
@@ -178,16 +235,27 @@ export const fetchIssuesByProductData = createAsyncThunk(
 
 export const fetchKeywordAnalysisData = createAsyncThunk(
     'pageData/fetchKeywordAnalysis',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
             const lastFetched = state.pageData?.keywordAnalysis?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.keywordAnalysis.data;
             }
             
             const response = await axiosInstance.get('/api/pagewise/keyword-analysis');
-            return response.data.data;
+            const data = response.data.data;
+            
+            // Sync to DashboardSlice for backward compatibility with child components
+            if (data) {
+                const existingDashboard = state.Dashboard?.DashBoardInfo || {};
+                dispatch(setDashboardInfo({
+                    ...existingDashboard,
+                    ...data
+                }));
+            }
+            
+            return data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch keyword analysis data');
         }
@@ -200,23 +268,21 @@ export const fetchReimbursementData = createAsyncThunk(
         try {
             const state = getState();
             const lastFetched = state.pageData?.reimbursement?.lastFetched;
-            // Check if data exists and is less than 5 minutes old
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            // Check if data exists and is within cache TTL (1 hour)
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return {
                     summary: state.pageData.reimbursement.summary,
                     reimbursements: state.pageData.reimbursement.reimbursements
                 };
             }
             
-            // Fetch both summary and reimbursements in parallel
-            const [summaryRes, reimbursementsRes] = await Promise.all([
-                axiosInstance.get('/app/reimbursements/summary'),
-                axiosInstance.get('/app/reimbursements')
-            ]);
+            // Single endpoint call - summary includes all reimbursement data
+            const summaryRes = await axiosInstance.get('/app/reimbursements/summary');
+            const summaryData = summaryRes.data?.data || summaryRes.data;
             
             return {
-                summary: summaryRes.data?.data || summaryRes.data,
-                reimbursements: reimbursementsRes.data?.data || reimbursementsRes.data || []
+                summary: summaryData,
+                reimbursements: [] // Reimbursements table data - empty for now (claims tracking not implemented)
             };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch reimbursement data');
@@ -230,7 +296,7 @@ export const fetchTasksData = createAsyncThunk(
         try {
             const state = getState();
             const lastFetched = state.pageData?.tasks?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.tasks.data;
             }
             
@@ -263,7 +329,7 @@ export const fetchInventoryData = createAsyncThunk(
         try {
             const state = getState();
             const lastFetched = state.pageData?.inventory?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000) {
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                 return state.pageData.inventory.data;
             }
             
@@ -271,6 +337,24 @@ export const fetchInventoryData = createAsyncThunk(
             return response.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch inventory data');
+        }
+    }
+);
+
+export const fetchAccountHistoryData = createAsyncThunk(
+    'pageData/fetchAccountHistory',
+    async (_, { getState, rejectWithValue }) => {
+        try {
+            const state = getState();
+            const lastFetched = state.pageData?.accountHistory?.lastFetched;
+            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
+                return state.pageData.accountHistory.data;
+            }
+            
+            const response = await axiosInstance.get('/api/pagewise/account-history');
+            return response.data.data;
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch account history data');
         }
     }
 );
@@ -302,7 +386,7 @@ export const fetchYourProductsData = createAsyncThunk(
                                     existingData.products.length > 0;
                 
                 const statusMatches = existingData?.currentStatus === status;
-                const isRecent = lastFetched && (Date.now() - lastFetched) < 5 * 60 * 1000;
+                const isRecent = lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS;
                 
                 // If we have cached data for this exact status and it's recent, return it
                 if (hasCachedData && statusMatches && isRecent && existingData.issuesData !== undefined) {
@@ -619,6 +703,21 @@ const pageDataSlice = createSlice({
             .addCase(fetchYourProductsData.rejected, (state, action) => {
                 state.yourProducts.loading = false;
                 state.yourProducts.error = action.payload;
+            })
+        
+        // Account History
+            .addCase(fetchAccountHistoryData.pending, (state) => {
+                state.accountHistory.loading = true;
+                state.accountHistory.error = null;
+            })
+            .addCase(fetchAccountHistoryData.fulfilled, (state, action) => {
+                state.accountHistory.loading = false;
+                state.accountHistory.data = action.payload;
+                state.accountHistory.lastFetched = Date.now();
+            })
+            .addCase(fetchAccountHistoryData.rejected, (state, action) => {
+                state.accountHistory.loading = false;
+                state.accountHistory.error = action.payload;
             });
     }
 });

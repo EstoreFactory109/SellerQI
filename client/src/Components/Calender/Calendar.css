@@ -1,44 +1,88 @@
-/* Custom Calendar Styles */
+/* Custom Calendar Styles - dark theme */
 .calendar-container .rdrCalendarWrapper {
   border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  border: 1px solid #30363d;
+  background: #161b22;
   overflow: hidden;
+  color: #e6edf3;
 }
 
 .calendar-container .rdrMonth {
   padding: 1rem;
+  background: #161b22;
 }
 
 .calendar-container .rdrWeekDays {
   padding: 0 1rem;
+  color: #8b949e;
+}
+
+.calendar-container .rdrWeekDay {
+  color: #8b949e !important;
 }
 
 .calendar-container .rdrMonthAndYearWrapper {
   padding: 1rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: #21262d;
+  color: #e6edf3;
+  border-bottom: 1px solid #30363d;
 }
 
 .calendar-container .rdrMonthAndYearPickers select {
-  background: white;
-  color: #374151;
+  background: #161b22;
+  color: #e6edf3;
   border-radius: 8px;
-  border: none;
+  border: 1px solid #30363d;
   padding: 4px 8px;
 }
 
+/* All date numbers - dark mode */
+.calendar-container .rdrDay .rdrDayNumber {
+  color: #e6edf3 !important;
+}
+
+.calendar-container .rdrDay .rdrDayNumber span {
+  color: #e6edf3 !important;
+}
+
 .calendar-container .rdrDay:not(.rdrDayPassive) .rdrDayNumber span {
-  color: #374151;
+  color: #e6edf3 !important;
+}
+
+.calendar-container .rdrDayPassive .rdrDayNumber span {
+  color: #6e7681 !important;
+}
+
+.calendar-container .rdrDay:hover .rdrDayNumber span {
+  color: #ffffff !important;
+}
+
+.calendar-container .rdrDay.rdrDayHovered .rdrDayNumber span {
+  color: #ffffff !important;
+}
+
+.calendar-container .rdrDayToday .rdrDayNumber span {
+  color: #e6edf3 !important;
 }
 
 .calendar-container .rdrDayToday .rdrDayNumber span:after {
-  background: #8B5CF6;
+  background: #2563eb;
+}
+
+/* Selected dates */
+.calendar-container .rdrStartEdge .rdrDayNumber span,
+.calendar-container .rdrEndEdge .rdrDayNumber span {
+  color: #ffffff !important;
+}
+
+.calendar-container .rdrInRange .rdrDayNumber span {
+  color: #e6edf3 !important;
 }
 
 /* Additional modern styling */
 .calendar-container .rdrDateRangeWrapper {
   border-radius: 16px;
+  background: #161b22;
 }
 
 .calendar-container .rdrDefinedRangesWrapper {
@@ -52,28 +96,48 @@
 .calendar-container .rdrMonthPicker select,
 .calendar-container .rdrYearPicker select {
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(4px);
+  background: #161b22;
+  color: #e6edf3;
 }
 
 .calendar-container .rdrNextPrevButton {
-  background: rgba(255, 255, 255, 0.2);
+  background: #30363d;
   border-radius: 8px;
   transition: all 0.2s ease;
+  color: #e6edf3;
 }
 
 .calendar-container .rdrNextPrevButton:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: #21262d;
   transform: scale(1.05);
 }
 
-.calendar-container .rdrStartEdge,
-.calendar-container .rdrEndEdge,
+/* Selected date range colors - consistent blue theme */
+.calendar-container .rdrStartEdge {
+  background: #2563eb !important;
+  border-radius: 8px;
+}
+
+.calendar-container .rdrEndEdge {
+  background: #2563eb !important;
+  border-radius: 8px;
+}
+
 .calendar-container .rdrInRange {
+  background: #1e40af !important;
   border-radius: 8px;
 }
 
 .calendar-container .rdrDayStartOfMonth .rdrDayNumber span,
 .calendar-container .rdrDayEndOfMonth .rdrDayNumber span {
   border-radius: 8px;
+}
+
+/* Ensure all day cells have dark background */
+.calendar-container .rdrDay {
+  background: #161b22;
+}
+
+.calendar-container .rdrDay:hover {
+  background: #21262d;
 } 

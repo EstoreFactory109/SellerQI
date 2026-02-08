@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from "react-redux";
 import { useParams } from 'react-router-dom';
-import DropDown from '../assets/Icons/drop-down.png';
 import noImage from '../assets/Icons/no-image.png';
+import DropDown from '../assets/Icons/drop-down.png';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from "framer-motion";
 import * as ExcelJS from 'exceljs';
@@ -10,7 +10,7 @@ import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
-import { Package, AlertTriangle, TrendingUp, BarChart3, Calendar, Download, ChevronDown, Search, Filter, HelpCircle, FileText, FileSpreadsheet } from 'lucide-react';
+import { Box, AlertTriangle, TrendingUp, LineChart, Calendar, Download, ChevronDown, Search, Filter, HelpCircle, FileText, FileSpreadsheet, ImageOff } from 'lucide-react';
 import './IssuesPerProduct.css';
 
 // Helper function to format messages with important details highlighted on separate line
@@ -71,7 +71,7 @@ const FormattedMessageComponent = ({ message }) => {
             {highlightedText && (
                 <>
                     <br />
-                    <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+                    <strong className="text-gray-100 mt-1 block">{highlightedText}</strong>
                 </>
             )}
         </>
@@ -88,20 +88,20 @@ const IssueItem = ({ label, message, solutionKey, solutionContent, stateValue, t
                 {recommendedQty !== null && recommendedQty !== undefined && recommendedQty > 0 && (
                     <>
                         <br />
-                        <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {recommendedQty} units</strong>
+                        <strong className="text-gray-100 mt-1 block">Recommended Restock Quantity: {recommendedQty} units</strong>
                     </>
                 )}
             </p>
             <button
-                className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2"
+                className="px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-1 text-gray-300 hover:bg-[#161b22] transition-all"
                 onClick={() => toggleFunc(solutionKey)}
             >
                 How to solve
-                <img src={DropDown} className="w-[7px] h-[7px]" />
+                <ChevronDown className="w-[7px] h-[7px] text-gray-400" />
             </button>
         </div>
         <div
-            className="bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out"
+            className="bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center transition-all duration-700 ease-in-out"
             style={
                 stateValue === solutionKey
                     ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
@@ -155,6 +155,29 @@ const Dashboard = () => {
         // Add ranking data from rankingProductWiseErrors array
         rankingErrors: rankingProduct || undefined
     } : null;
+
+    // All state and refs (must be declared before useEffects and early returns)
+    const [TitleSolution, setTitleSolution] = useState("");
+    const [BulletSoltion, setBulletSolution] = useState("");
+    const [DescriptionSolution, setDescriptionSolution] = useState("");
+    const [BackendKeyWords, setBackendKeyWords] = useState("");
+    const [imageSolution, setImageSolution] = useState("");
+    const [videoSolution, setVideoSolution] = useState("");
+    const [productReviewSolution, setProductReviewSolution] = useState("");
+    const [productStarRatingSolution, setProductStarRatingSolution] = useState("");
+    const [productsWithOutBuyboxSolution, setProductsWithOutBuyboxSolution] = useState("");
+    const [aplusSolution, setAplusSolution] = useState("");
+    const [brandStorySolution, setBrandStorySolution] = useState("");
+    const [inventoryPlanningSolution, setInventoryPlanningSolution] = useState("");
+    const [strandedInventorySolution, setStrandedInventorySolution] = useState("");
+    const [inboundNonComplianceSolution, setInboundNonComplianceSolution] = useState("");
+    const [replenishmentSolution, setReplenishmentSolution] = useState("");
+    const [openSelector, setOpenSelector] = useState(false);
+    const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+    const contentRef = useRef(null);
+    const downloadRef = useRef(null);
+    const navigate = useNavigate();
     
     // Debug: Log product data
     console.log('IssuesPerProduct - Product found:', !!product);
@@ -207,7 +230,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-center h-screen">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Loading product data...</p>
+                    <p className="text-gray-300">Loading product data...</p>
                 </div>
             </div>
         );
@@ -217,8 +240,8 @@ const Dashboard = () => {
         return (
             <div className="flex items-center justify-center h-screen">
                 <div className="text-center p-6">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">No Product Data Available</h2>
-                    <p className="text-gray-600">No product analysis data has been loaded yet.</p>
+                    <h2 className="text-lg font-semibold text-gray-100 mb-1">No Product Data Available</h2>
+                    <p className="text-xs text-gray-400">No product analysis data has been loaded yet.</p>
                 </div>
             </div>
         );
@@ -228,9 +251,9 @@ const Dashboard = () => {
         return (
             <div className="flex items-center justify-center h-screen">
                 <div className="text-center p-6">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Product Not Found</h2>
-                    <p className="text-gray-600">No product data found for ASIN: {asin}</p>
-                    <p className="text-sm text-gray-500 mt-2">Please check the ASIN and try again.</p>
+                    <h2 className="text-lg font-semibold text-gray-100 mb-1">Product Not Found</h2>
+                    <p className="text-xs text-gray-400">No product data found for ASIN: {asin}</p>
+                    <p className="text-xs text-gray-500 mt-1">Please check the ASIN and try again.</p>
                 </div>
             </div>
         );
@@ -251,12 +274,6 @@ const Dashboard = () => {
         updatedProduct.inventoryErrors.replenishmentErrorData
     );
 
-    // Ranking issue states
-    const [TitleSolution, setTitleSolution] = useState("");
-    const [BulletSoltion, setBulletSolution] = useState("");
-    const [DescriptionSolution, setDescriptionSolution] = useState("");
-    const [BackendKeyWords, setBackendKeyWords] = useState("");
-
     const openCloseSol = (val, component) => {
         if (component === "Title") {
             setTitleSolution(prev => prev === val ? "" : val);
@@ -271,21 +288,6 @@ const Dashboard = () => {
             setBackendKeyWords(prev => prev === val ? "" : val);
         }
     };
-
-    // Conversion issue states (independent toggles)
-    const [imageSolution, setImageSolution] = useState("");
-    const [videoSolution, setVideoSolution] = useState("");
-    const [productReviewSolution, setProductReviewSolution] = useState("");
-    const [productStarRatingSolution, setProductStarRatingSolution] = useState("");
-    const [productsWithOutBuyboxSolution, setProductsWithOutBuyboxSolution] = useState("");
-    const [aplusSolution, setAplusSolution] = useState("");
-    const [brandStorySolution, setBrandStorySolution] = useState("");
-
-    // Inventory issue states (independent toggles)
-    const [inventoryPlanningSolution, setInventoryPlanningSolution] = useState("");
-    const [strandedInventorySolution, setStrandedInventorySolution] = useState("");
-    const [inboundNonComplianceSolution, setInboundNonComplianceSolution] = useState("");
-    const [replenishmentSolution, setReplenishmentSolution] = useState("");
 
     const openCloseSolutionConversion = (val, component) => {
         if (component === "Image") {
@@ -325,8 +327,6 @@ const Dashboard = () => {
             setReplenishmentSolution(prev => prev === val ? "" : val);
         }
     };
-    const [openSelector, setOpenSelector] = useState(false)
-    const navigate = useNavigate();
 
     // Prepare data for export
     const prepareExportData = () => {
@@ -647,11 +647,7 @@ const Dashboard = () => {
         saveAs(blob, fileName);
     };
 
-    // Download handler with format selection
-    const [showDownloadOptions, setShowDownloadOptions] = useState(false);
-    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-    const downloadRef = useRef(null);
-    const contentRef = useRef(null);
+    // Download handler - showDownloadOptions, isGeneratingPDF, downloadRef, contentRef declared at top
 
     useEffect(() => {
         function handleClickOutsideDownload(e) {
@@ -668,62 +664,62 @@ const Dashboard = () => {
 
 
     return (
-        <div className="bg-gray-50/50 lg:mt-0 mt-[10vh] h-screen overflow-y-auto">
-            <div className="p-6">
+        <div className="bg-[#1a1a1a] lg:mt-0 mt-[10vh] h-screen overflow-y-auto">
+            <div className="p-2">
                 {/* Header Section */}
-                <div className="bg-gradient-to-r from-slate-800 via-gray-900 to-slate-900 rounded-2xl shadow-lg mb-8">
-                    <div className="px-6 py-8">
-                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                            <div className="text-white">
-                                <div className="flex items-center gap-3 mb-2">
-                                    <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
-                                    <div className="flex items-center gap-3">
-                                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                <div className="bg-[#161b22] border border-[#30363d] rounded mb-2">
+                    <div className="px-2 py-2">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                            <div className="text-gray-100">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Box className="w-4 h-4 text-blue-400" />
+                                    <div className="flex items-center gap-2">
+                                        <h1 className="text-lg font-bold text-gray-100">
                                             Product Issues
                                         </h1>
-                                        <HelpCircle className='w-5 h-5 text-gray-300 hover:text-white cursor-pointer transition-colors' />
+                                        <HelpCircle className='w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors' />
                                     </div>
                                 </div>
-                                <p className="text-gray-300 text-lg mb-4">Detailed analysis of product optimization opportunities</p>
-                                <div className="flex items-center gap-4">
-                                    <div className="flex items-center gap-2 text-sm text-gray-400">
-                                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                                <p className="text-xs text-gray-400 mb-2">Detailed analysis of product optimization opportunities</p>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1 text-xs text-gray-400">
+                                        <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
                                         <span>Live analysis active</span>
                                     </div>
-                                    <div className="flex items-center gap-2 text-sm text-orange-300">
-                                        <AlertTriangle className="w-4 h-4" />
+                                    <div className="flex items-center gap-1 text-xs text-orange-400">
+                                        <AlertTriangle className="w-3 h-3" />
                                         <span>Issues detected</span>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div className="flex items-center gap-6 text-white">
-                                <div className="text-center lg:text-right">
-                                    <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent mb-1">
+                            <div className="flex items-center gap-3 text-gray-100">
+                                <div className="text-right">
+                                    <div className="text-xl font-bold text-orange-400 mb-0.5">
                                         {updatedProduct.asin}
                                     </div>
-                                    <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Product ASIN</div>
-                                    <div className="text-xs text-orange-300 mt-1">Requires optimization</div>
+                                    <div className="text-xs text-gray-400 font-medium uppercase">Product ASIN</div>
+                                    <div className="text-xs text-orange-400 mt-0.5">Requires optimization</div>
                                 </div>
-                                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                                    <Package className="w-8 h-8 text-white" />
+                                <div className="w-10 h-10 bg-blue-500/20 rounded flex items-center justify-center border border-blue-500/30">
+                                    <Box className="w-5 h-5 text-blue-400" />
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="space-y-8 pb-8" ref={contentRef}>
+                <div className="space-y-2 pb-1" ref={contentRef}>
                 {/* Product Information Card */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="bg-white rounded-2xl shadow-lg border-0 p-6 mb-8 hover:shadow-xl transition-all duration-300"
+                    className="bg-[#161b22] border border-[#30363d] rounded p-2 mb-2 transition-all duration-300"
                 >
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                        <div className="flex items-center space-x-6">
-                                                    <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl overflow-hidden shadow-md">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <div className="flex items-center space-x-2">
+                                                    <div className="w-12 h-12 bg-[#21262d] border border-[#30363d] rounded overflow-hidden">
                             <LazyLoadImage
                                 src={updatedProduct.MainImage || noImage}
                                 alt="Product"
@@ -734,35 +730,35 @@ const Dashboard = () => {
                                 wrapperClassName="w-full h-full"
                             />
                         </div>
-                        <div className="space-y-3">
-                            <h2 className="text-xl font-bold text-gray-900 leading-tight">{updatedProduct.name}</h2>
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-gray-500 font-medium">ASIN:</span>
-                                    <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{updatedProduct.asin}</span>
+                        <div className="space-y-1">
+                            <h2 className="text-sm font-bold text-gray-100 leading-tight">{updatedProduct.name}</h2>
+                            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                                <div className="flex items-center gap-1">
+                                    <span className="text-gray-400 font-medium">ASIN:</span>
+                                    <span className="font-mono bg-[#21262d] border border-[#30363d] px-1 py-0.5 rounded text-xs text-gray-300">{updatedProduct.asin}</span>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-gray-500 font-medium">SKU:</span>
-                                    <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{updatedProduct.sku}</span>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-gray-400 font-medium">SKU:</span>
+                                    <span className="font-mono bg-[#21262d] border border-[#30363d] px-1 py-0.5 rounded text-xs text-gray-300">{updatedProduct.sku}</span>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-gray-500 font-medium">Price:</span>
-                                    <span className="font-semibold text-green-600">${updatedProduct.price}</span>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-gray-400 font-medium">Price:</span>
+                                    <span className="font-semibold text-green-400">${updatedProduct.price}</span>
                                 </div>
                             </div>
                         </div>
                         </div>
 
-                        <div className='flex items-center gap-3 relative'>
+                        <div className='flex items-center gap-2 relative'>
                             {/* Download Report Button */}
                             <div className="relative" ref={downloadRef}>
                                 <button 
-                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium"
+                                    className="flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs transition-all font-medium"
                                     onClick={() => setShowDownloadOptions(!showDownloadOptions)}
                                 >
-                                    <Download className="w-4 h-4" />
+                                    <Download className="w-3 h-3" />
                                     Export
-                                    <ChevronDown className="w-4 h-4" />
+                                    <ChevronDown className="w-3 h-3" />
                                 </button>
                                 <AnimatePresence>
                                     {showDownloadOptions && (
@@ -771,28 +767,28 @@ const Dashboard = () => {
                                             animate={{ opacity: 1, y: 0, scale: 1 }}
                                             exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                             transition={{ duration: 0.2 }}
-                                            className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
+                                            className="absolute top-full right-0 mt-1 z-50 bg-[#21262d] shadow-xl rounded border border-[#30363d] overflow-hidden min-w-[160px]"
                                         >
                                             <div className="py-1">
                                                 <button
-                                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-gray-300 hover:bg-[#161b22] transition-colors duration-200 text-xs"
                                                     onClick={() => {
                                                         downloadCSV();
                                                         setShowDownloadOptions(false);
                                                     }}
                                                 >
-                                                    <FileText className="w-4 h-4 text-green-600" />
-                                                    <span className="text-sm font-medium">Download as CSV</span>
+                                                    <FileText className="w-3 h-3 text-green-400" />
+                                                    <span className="font-medium">Download as CSV</span>
                                                 </button>
                                                 <button
-                                                    className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-gray-300 hover:bg-[#161b22] transition-colors duration-200 text-xs"
                                                     onClick={() => {
                                                         downloadExcel();
                                                         setShowDownloadOptions(false);
                                                     }}
                                                 >
-                                                    <FileSpreadsheet className="w-4 h-4 text-blue-600" />
-                                                    <span className="text-sm font-medium">Download as Excel</span>
+                                                    <FileSpreadsheet className="w-3 h-3 text-blue-400" />
+                                                    <span className="font-medium">Download as Excel</span>
                                                 </button>
                                             </div>
                                         </motion.div>
@@ -803,11 +799,11 @@ const Dashboard = () => {
                             {/* Switch Product Button */}
                             <div className="relative" ref={dropdownRef}>
                                 <button
-                                    className="flex items-center justify-between gap-3 px-4 py-2 bg-white border border-gray-300 rounded-xl hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700 min-w-[160px]"
+                                    className="flex items-center justify-between gap-2 px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs hover:border-[#30363d] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-0 transition-all text-gray-300 hover:bg-[#161b22] min-w-[120px]"
                                     onClick={() => setOpenSelector(!openSelector)}
                                 >
                                     <span>Switch Product</span>
-                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSelector ? 'rotate-180' : ''}`} />
+                                    <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${openSelector ? 'rotate-180' : ''}`} />
                                 </button>
                                 <AnimatePresence>
                                     {openSelector && (
@@ -816,13 +812,13 @@ const Dashboard = () => {
                                             animate={{ opacity: 1, y: 0, scale: 1 }}
                                             exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                             transition={{ duration: 0.2 }}
-                                            className="absolute top-full right-0 mt-2 w-96 max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-50"
+                                            className="absolute top-full right-0 mt-1 w-80 max-h-64 overflow-y-auto bg-[#21262d] border border-[#30363d] rounded shadow-xl z-50"
                                         >
-                                            <div className="py-2">
+                                            <div className="py-1">
                                                 {(info?.productWiseError || []).map((item, index) => (
                                                     <button
                                                         key={index}
-                                                        className="w-full px-4 py-3 text-left text-sm hover:bg-blue-50 transition-all duration-150 text-gray-700 hover:text-blue-600 border-b border-gray-100 last:border-b-0"
+                                                        className="w-full px-2 py-1.5 text-left text-xs hover:bg-[#161b22] transition-all duration-150 text-gray-300 hover:text-blue-400 border-b border-[#30363d] last:border-b-0"
                                                         onMouseDown={(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
@@ -836,7 +832,7 @@ const Dashboard = () => {
                                                             setOpenSelector(false);
                                                         }}
                                                     >
-                                                        <div className="font-mono text-xs text-blue-600 mb-1">{item.asin}</div>
+                                                        <div className="font-mono text-xs text-blue-400 mb-0.5">{item.asin}</div>
                                                         <div className="truncate">{item.name}</div>
                                                     </button>
                                                 ))}
@@ -850,17 +846,17 @@ const Dashboard = () => {
                 </motion.div>
 
                 {/* Key Metrics */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
                     {[
-                        { label: 'Units Sold', value: updatedProduct.quantity, icon: BarChart3, color: 'blue' },
+                        { label: 'Units Sold', value: updatedProduct.quantity, icon: LineChart, color: 'blue' },
                         { label: 'Revenue', value: `$${(updatedProduct.sales || 0).toFixed(2)}`, icon: TrendingUp, color: 'green' },
                         { label: 'Analysis Period', value: `${info?.startDate} - ${info?.endDate}`, icon: Calendar, color: 'purple' },
                     ].map((metric, idx) => {
                         const Icon = metric.icon;
                         const colorMap = {
-                            blue: 'from-blue-500 to-blue-600',
-                            green: 'from-green-500 to-green-600',
-                            purple: 'from-purple-500 to-purple-600'
+                            blue: 'bg-blue-500/20 border-blue-500/30 text-blue-400',
+                            green: 'bg-green-500/20 border-green-500/30 text-green-400',
+                            purple: 'bg-purple-500/20 border-purple-500/30 text-purple-400'
                         };
                         
                         return (
@@ -869,15 +865,15 @@ const Dashboard = () => {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.5, delay: 0.1 + idx * 0.1 }}
-                                className="bg-white rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg"
+                                className="bg-[#161b22] rounded border border-[#30363d] p-2 transition-all duration-300"
                             >
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-sm font-medium text-gray-600 mb-1">{metric.label}</p>
-                                        <p className="text-2xl font-bold text-gray-900">{metric.value}</p>
+                                        <p className="text-xs font-medium text-gray-400 mb-0.5">{metric.label}</p>
+                                        <p className="text-lg font-bold text-gray-100">{metric.value}</p>
                                     </div>
-                                    <div className={`w-12 h-12 bg-gradient-to-br ${colorMap[metric.color]} rounded-lg flex items-center justify-center shadow-lg`}>
-                                        <Icon className="w-6 h-6 text-white" />
+                                    <div className={`w-8 h-8 ${colorMap[metric.color]} rounded flex items-center justify-center border`}>
+                                        <Icon className="w-4 h-4" />
                                     </div>
                                 </div>
                             </motion.div>
@@ -890,35 +886,35 @@ const Dashboard = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6, delay: 0.4 }}
-                    className="mb-8"
+                    className="mb-2"
                 >
-                    <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-                        <div className="bg-gradient-to-r from-red-50 via-red-50 to-orange-50 px-6 py-4 border-b border-red-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-md">
-                                    <TrendingUp className="w-5 h-5 text-white" />
+                    <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden transition-all duration-300">
+                        <div className="bg-[#21262d] border-b border-[#30363d] px-2 py-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-red-500/20 rounded flex items-center justify-center border border-red-500/30">
+                                    <TrendingUp className="w-4 h-4 text-red-400" />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-bold text-gray-900">Ranking Issues</h2>
-                                    <p className="text-sm text-gray-600">Optimization opportunities for better search rankings</p>
+                                    <h2 className="text-sm font-bold text-gray-100">Ranking Issues</h2>
+                                    <p className="text-xs text-gray-400">Optimization opportunities for better search rankings</p>
                                 </div>
                             </div>
                         </div>
-                        <div className="p-6 space-y-6">
+                        <div className="p-2 space-y-2">
                         {(updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error") && (<div>
-                            <p className="font-semibold">Titles</p>
-                            <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
+                            <p className="font-semibold text-xs text-gray-300">Titles</p>
+                            <ul className=" ml-2 text-xs text-gray-300 space-y-1 mt-1">
                                 {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Title")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message} /></p>
+                                                <button className="px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-1 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center' style={TitleSolution === "charLim"
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300' style={TitleSolution === "charLim"
                                                 ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                                 : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
                                             }>{updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.HowTOSolve}</div>
@@ -929,14 +925,14 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestrictedWords", "Title")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestrictedWords", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
                                             <div
-                                                className='bg-gray-200 mt-2 justify-center items-center transition-all duration-700 ease-in-out'
+                                                className='bg-[#21262d] border border-[#30363d] mt-2 justify-center items-center transition-all duration-700 ease-in-out text-xs text-gray-300'
                                                 style={TitleSolution === "RestrictedWords"
                                                     ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
                                                     : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
@@ -952,13 +948,13 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Title")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "Title")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center  transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve}</div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
@@ -967,19 +963,19 @@ const Dashboard = () => {
                         </div>)}
 
                         {(updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error") && (<div >
-                            <p className="font-semibold">Bullet Points</p>
-                            <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
+                            <p className="font-semibold text-gray-300">Bullet Points</p>
+                            <ul className=" ml-5 text-sm text-gray-300 space-y-1 mt-2">
                                 {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center mb-4'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BulletPoints")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.HowTOSolve}</div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
@@ -987,13 +983,13 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4' >
                                             <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("RestictedWords", "BulletPoints")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestictedWords", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.HowTOSolve}</div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
@@ -1001,13 +997,13 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "BulletPoints")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "BulletPoints")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex justify-center items-center transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.HowTOSolve}</div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.HowTOSolve}</div>
                                         </li>
                                     )
                                 }
@@ -1015,19 +1011,19 @@ const Dashboard = () => {
                         </div>)}
 
                         {(updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error") && (<div >
-                            <p className="font-semibold">Description</p>
-                            <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
+                            <p className="font-semibold text-gray-300">Description</p>
+                            <ul className=" ml-5 text-sm text-gray-300 space-y-1 mt-2">
                                 {
                                     updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "Description")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.charLim?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.charLim?.HowTOSolve}</p></div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.charLim?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -1035,13 +1031,13 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2 " onClick={() => openCloseSol("RestictedWords", "Description")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestictedWords", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.HowTOSolve}</p></div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -1049,13 +1045,13 @@ const Dashboard = () => {
                                     updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("checkSpecialCharacters", "Description")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "Description")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.HowTOSolve}</p></div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -1064,19 +1060,19 @@ const Dashboard = () => {
                         </div>)}
 
                         {(updatedProduct.rankingErrors?.data?.charLim?.status === "Error") && (<div>
-                            <p className="font-semibold">Backend Keywords</p>
-                            <ul className=" ml-5 text-sm text-gray-600 space-y-1 mt-2">
+                            <p className="font-semibold text-gray-300">Backend Keywords</p>
+                            <ul className=" ml-5 text-sm text-gray-300 space-y-1 mt-2">
                                 {
                                     updatedProduct.rankingErrors?.data?.charLim?.status === "Error" && (
                                         <li className='mb-4'>
                                             <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw]'><b>Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-white border rounded-md shadow-sm flex items-center justify-center gap-2" onClick={() => openCloseSol("charLim", "BackendKeyWords")}>
+                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.charLim?.Message} /></p>
+                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "BackendKeyWords")}>
                                                     How to solve
                                                     <img src={DropDown} className='w-[7px] h-[7px]' />
                                                 </button>
                                             </div>
-                                            <div className=' bg-gray-200 mt-2 flex items-center justify-center transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%]'>{updatedProduct.rankingErrors?.data?.charLim?.HowTOSolve}</p></div>
+                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.charLim?.HowTOSolve}</p></div>
                                         </li>
                                     )
                                 }
@@ -1095,22 +1091,22 @@ const Dashboard = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.6, delay: 0.5 }}
-                        className="mb-8"
+                        className="mb-2"
                     >
-                        <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-                            <div className="bg-gradient-to-r from-blue-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-blue-100">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-md">
-                                        <BarChart3 className="w-5 h-5 text-white" />
+                        <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden transition-all duration-300">
+                            <div className="bg-[#21262d] border-b border-[#30363d] px-2 py-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-blue-500/20 rounded flex items-center justify-center border border-blue-500/30">
+                                        <LineChart className="w-4 h-4 text-blue-400" />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-gray-900">Conversion Issues</h2>
-                                        <p className="text-sm text-gray-600">Enhance product appeal and customer conversion rates</p>
+                                        <h2 className="text-sm font-bold text-gray-100">Conversion Issues</h2>
+                                        <p className="text-xs text-gray-400">Enhance product appeal and customer conversion rates</p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-6">
-                            <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
+                            <div className="p-2">
+                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1 flex flex-col gap-2">
                                 {product.conversionErrors?.imageResultErrorData?.status === "Error" && (
                                     <IssueItem
                                         label="Images Issue"
@@ -1183,22 +1179,22 @@ const Dashboard = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.6, delay: 0.6 }}
-                        className="mb-8"
+                        className="mb-2"
                     >
-                        <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-                            <div className="bg-gradient-to-r from-green-50 via-green-50 to-emerald-50 px-6 py-4 border-b border-green-100">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-md">
-                                        <Package className="w-5 h-5 text-white" />
+                        <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden transition-all duration-300">
+                            <div className="bg-[#21262d] border-b border-[#30363d] px-2 py-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-green-500/20 rounded flex items-center justify-center border border-green-500/30">
+                                        <Box className="w-4 h-4 text-green-400" />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-gray-900">Inventory Issues</h2>
-                                        <p className="text-sm text-gray-600">Manage inventory levels and warehouse operations</p>
+                                        <h2 className="text-sm font-bold text-gray-100">Inventory Issues</h2>
+                                        <p className="text-xs text-gray-400">Manage inventory levels and warehouse operations</p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-6">
-                            <ul className="ml-5 text-sm text-gray-600 space-y-1 mt-2 flex flex-col gap-4">
+                            <div className="p-2">
+                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1 flex flex-col gap-2">
                                 {/* Inventory Planning Issues */}
                                 {product.inventoryErrors?.inventoryPlanningErrorData && (
                                     <>
@@ -1304,10 +1300,10 @@ const Dashboard = () => {
             {/* Loading overlay for PDF generation */}
             {isGeneratingPDF && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
-                    <div className="bg-white rounded-lg p-6 flex flex-col items-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-                        <p className="text-gray-700">Generating PDF...</p>
-                        <p className="text-sm text-gray-500 mt-2">Please wait, this may take a moment</p>
+                    <div className="bg-[#161b22] border border-[#30363d] rounded p-4 flex flex-col items-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
+                        <p className="text-xs text-gray-300">Generating PDF...</p>
+                        <p className="text-xs text-gray-400 mt-1">Please wait, this may take a moment</p>
                     </div>
                 </div>
             )}

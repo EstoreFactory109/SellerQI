@@ -105,13 +105,7 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
-      {/* Background Elements - Enhanced for Admin */}
-      <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:bg-grid-slate-700/25 dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))]"></div>
-      <div className="absolute top-10 right-10 w-72 h-72 bg-purple-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-      <div className="absolute top-40 left-10 w-72 h-72 bg-indigo-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
-      <div className="absolute bottom-20 right-20 w-40 h-40 bg-violet-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-pulse animation-delay-4000"></div>
-      
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">
@@ -119,39 +113,34 @@ export default function AdminLogin() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6 relative overflow-hidden"
+            className="bg-[#161b22] rounded-lg border border-[#30363d] shadow-lg p-8 relative"
           >
             {/* Admin Badge Overlay */}
-            <div className="absolute top-0 right-0 bg-gradient-to-l from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-bl-xl rounded-tr-2xl">
+            <div className="absolute top-0 right-0 bg-[#21262d] border-b border-l border-[#30363d] text-gray-300 px-4 py-2 rounded-bl-lg rounded-tr-lg">
               <div className="flex items-center gap-1.5">
-                <Crown className="w-4 h-4" />
+                <Crown className="w-4 h-4 text-purple-400" />
                 <span className="text-xs font-semibold">ADMIN</span>
               </div>
             </div>
 
             {/* Logo and Header */}
-            <div className="text-center mb-6">
+            <div className="text-center mb-8">
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.5, delay: 0.1 }}
-                className="flex justify-center mb-4"
+                className="flex justify-center mb-6"
               >
-                <div className="relative">
-                  <img 
-                    src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
-                    alt="SellerQI Logo" 
-                    className="h-10 w-auto"
-                  />
-                  <div className="absolute -top-1 -right-1 bg-purple-600 rounded-full p-1">
-                    <Shield className="w-3 h-3 text-white" />
-                  </div>
-                </div>
+                <img 
+                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
+                  alt="SellerQI Logo" 
+                  className="h-10 w-auto"
+                />
               </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-gray-900 mb-2">
+              <h1 className="text-2xl font-semibold text-gray-100 mb-2">
                 Admin Portal
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-gray-400 text-sm">
                 Secure access for system administrators
               </p>
             </div>
@@ -161,7 +150,7 @@ export default function AdminLogin() {
               
               {/* Email Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Admin Email Address
                 </label>
                 <div className="relative">
@@ -172,8 +161,8 @@ export default function AdminLogin() {
                     value={formData.email}
                     onChange={handleChange}
                     onFocus={handleFocus}
-                    className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent transition-all duration-300 ${
-                      errors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                    className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-100 ${
+                      errors.email ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-[#40464e]'
                     }`}
                     placeholder="Enter your admin email"
                   />
@@ -191,7 +180,7 @@ export default function AdminLogin() {
 
               {/* Password Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Password
                 </label>
                 <div className="relative">
@@ -202,15 +191,15 @@ export default function AdminLogin() {
                     value={formData.password}
                     onChange={handleChange}
                     onFocus={handleFocus}
-                    className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent transition-all duration-300 ${
-                      errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                    className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-100 ${
+                      errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-[#40464e]'
                     }`}
                     placeholder="Enter your password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -230,10 +219,10 @@ export default function AdminLogin() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
+                className={`w-full py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
                   isLoading
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform hover:scale-[1.02]'
+                    ? 'bg-[#21262d] text-gray-500 cursor-not-allowed border border-[#30363d]'
+                    : 'bg-blue-600 text-white hover:bg-blue-500 border border-blue-600 hover:border-blue-500'
                 }`}
               >
                 {isLoading ? (
@@ -249,12 +238,12 @@ export default function AdminLogin() {
 
               {/* User Login Link */}
               <div className="text-center pt-2">
-                <p className="text-gray-600 text-sm">
+                <p className="text-gray-400 text-sm">
                   Not an admin?{' '}
                   <button
                     type="button"
                     onClick={navigateToUserLogin}
-                    className="text-purple-600 hover:text-purple-800 font-semibold hover:underline transition-colors"
+                    className="text-blue-400 hover:text-blue-300 font-medium hover:underline transition-colors"
                   >
                     User Login
                   </button>
@@ -262,12 +251,12 @@ export default function AdminLogin() {
               </div>
 
               {/* Security Notice */}
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
+              <div className="bg-[#21262d] border border-[#30363d] rounded-lg p-4 text-center">
                 <div className="flex items-center justify-center gap-2 mb-2">
-                  <Shield className="w-4 h-4 text-purple-600" />
-                  <span className="text-purple-800 font-medium text-sm">Secure Access</span>
+                  <Shield className="w-4 h-4 text-gray-400" />
+                  <span className="text-gray-300 font-medium text-sm">Secure Access</span>
                 </div>
-                <p className="text-purple-700 text-xs">
+                <p className="text-gray-400 text-xs">
                   This portal requires administrator credentials. All access attempts are logged for security purposes.
                 </p>
               </div>
@@ -279,9 +268,9 @@ export default function AdminLogin() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 rounded-xl p-4 text-center"
+                    className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-center"
                   >
-                    <p className="text-red-700 text-sm font-medium">{errorMessage}</p>
+                    <p className="text-red-400 text-sm font-medium">{errorMessage}</p>
                   </motion.div>
                 )}
               </AnimatePresence>

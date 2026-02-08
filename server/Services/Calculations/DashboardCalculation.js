@@ -541,7 +541,8 @@ const calculateSponsoredAdsErrors = (
  * @returns {Object} Calculated dashboard data
  */
 const analyseData = async (data, userId = null) => {
-    logger.info("=== DashboardCalculation: Processing data ===");
+    const calcStartTime = Date.now();
+    logger.info("[PERF] === DashboardCalculation: Processing data ===");
 
     // Check if we have any meaningful data
     const hasValidData = data && (
@@ -570,7 +571,9 @@ const analyseData = async (data, userId = null) => {
     
     // Get PPC and sales data from EconomicsMetrics for ACOS/TACOS calculations
     // Note: This is now async to handle big accounts fetching from separate collection
+    let stepStart = Date.now();
     const economicsData = await getPpcSalesFromEconomics(data.EconomicsMetrics);
+    logger.info(`[PERF] getPpcSalesFromEconomics completed in ${Date.now() - stepStart}ms`);
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
         totalSales: economicsData.totalSales,
@@ -1389,6 +1392,8 @@ const analyseData = async (data, userId = null) => {
         }
     }
     
+    const totalCalcTime = Date.now() - calcStartTime;
+    logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
     return { dashboardData };
 };

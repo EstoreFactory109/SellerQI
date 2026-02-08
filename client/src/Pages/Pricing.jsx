@@ -9,6 +9,7 @@ import razorpayService from '../services/razorpayService.js';
 import { detectCountry } from '../utils/countryDetection.js';
 import IndiaPricing from '../Components/Pricing/IndiaPricing.jsx';
 import { updateTrialStatus } from '../redux/slices/authSlice.js';
+import sellerQILogo from '../assets/Logo/sellerQILogo.png';
 
 export default function PricingPage() {
   const navigate = useNavigate();
@@ -219,7 +220,7 @@ export default function PricingPage() {
   // Render India pricing with full-page layout
   if (country === 'IN' && !isDetectingCountry) {
     return (
-      <div className="min-h-screen w-full bg-white">
+      <div className="min-h-screen w-full bg-[#1a1a1a]">
         {/* Cancelled Payment Notification */}
         <AnimatePresence>
           {showCancelledMessage && (
@@ -227,11 +228,11 @@ export default function PricingPage() {
               initial={{ opacity: 0, y: -50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -50 }}
-              className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+              className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500/20 border border-amber-500/40 text-amber-200 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
             >
               <X className="w-5 h-5" />
               <span className="text-sm font-medium">Payment was cancelled. You can try again anytime!</span>
-              <button onClick={() => setShowCancelledMessage(false)} className="ml-2 hover:bg-amber-100 rounded-full p-1">
+              <button onClick={() => setShowCancelledMessage(false)} className="ml-2 hover:bg-amber-500/30 rounded-full p-1">
                 <X className="w-4 h-4" />
               </button>
             </motion.div>
@@ -250,12 +251,12 @@ export default function PricingPage() {
 
   // Default pricing page for other countries
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col overflow-y-auto">
+    <div className="min-h-screen w-full bg-[#1a1a1a] flex flex-col overflow-y-auto">
       {/* Decorative Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-[#3B4A6B]/10 to-emerald-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-to-br from-emerald-500/10 to-purple-500/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-br from-[#3B4A6B]/5 to-transparent rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-3xl" />
       </div>
 
       {/* Cancelled Payment Notification */}
@@ -265,11 +266,11 @@ export default function PricingPage() {
             initial={{ opacity: 0, y: -50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -50 }}
-            className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500/20 border border-amber-500/40 text-amber-200 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
           >
             <X className="w-5 h-5" />
             <span className="text-sm font-medium">Payment was cancelled. You can try again anytime!</span>
-            <button onClick={() => setShowCancelledMessage(false)} className="ml-2 hover:bg-amber-100 rounded-full p-1">
+            <button onClick={() => setShowCancelledMessage(false)} className="ml-2 hover:bg-amber-500/30 rounded-full p-1">
               <X className="w-4 h-4" />
             </button>
           </motion.div>
@@ -287,15 +288,15 @@ export default function PricingPage() {
         >
           {/* Logo */}
           <img 
-            src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png" 
+            src={sellerQILogo} 
             alt="SellerQI Logo" 
             className="h-10 mx-auto mb-6"
           />
           
-          <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-3">
+          <h1 className="text-3xl lg:text-4xl font-bold text-gray-100 mb-3">
             Choose Your Plan
           </h1>
-          <p className="text-gray-600 text-base max-w-lg mx-auto">
+          <p className="text-gray-400 text-base max-w-lg mx-auto">
             Select the plan that best fits your business needs
           </p>
         </motion.div>
@@ -303,44 +304,44 @@ export default function PricingPage() {
         {/* Pricing Cards */}
         {isDetectingCountry ? (
           <div className="w-full max-w-5xl mx-auto flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
+            <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
           </div>
         ) : (
-        <div className="w-full max-w-5xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-5 items-stretch justify-center">
+        <div className="w-full max-w-6xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
             
             {/* Free Trial Card - Now with PRO content */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="relative bg-gradient-to-br from-[#3B4A6B] to-[#2d3a52] rounded-2xl p-6 shadow-2xl flex flex-col lg:scale-105 z-10"
+              className="relative bg-[#161b22] border border-[#30363d] rounded-2xl p-6 shadow-2xl flex flex-col"
             >
               {/* Popular Badge */}
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
+                <div className="bg-amber-500 text-gray-900 px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3" />
                   MOST POPULAR
                 </div>
               </div>
 
               {/* Icon */}
-              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center mb-4 mt-2">
+              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mb-4 mt-2">
                 <Crown className="w-6 h-6 text-white" />
               </div>
 
-              <h3 className="text-xl font-bold text-white mb-1">7-Day Free Trial</h3>
+              <h3 className="text-xl font-bold text-gray-100 mb-1">7-Day Free Trial</h3>
               <div className="mb-4">
                 <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-white">$0</span>
-                  <span className="text-white/70 text-sm">for 7 days</span>
+                <span className="text-3xl font-bold text-gray-100">$0</span>
+                  <span className="text-gray-400 text-sm">for 7 days</span>
                 </div>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-white">$99</span>
-                  <span className="text-white/70 text-sm">/month after trial</span>
+                  <span className="text-xl font-bold text-gray-100">$99</span>
+                  <span className="text-gray-400 text-sm">/month after trial</span>
                 </div>
               </div>
-              <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business. Card required, charged after trial ends.</p>
+              <p className="text-gray-400 text-sm mb-5">Everything you need to scale your Amazon business. Card required, charged after trial ends.</p>
               
               <ul className="space-y-2.5 mb-6 flex-1">
                 {[
@@ -353,7 +354,7 @@ export default function PricingPage() {
                 ].map((feature, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-white/90 text-sm">{feature}</span>
+                    <span className="text-gray-300 text-sm">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -363,8 +364,8 @@ export default function PricingPage() {
                 disabled={loading.freeTrial}
                 className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
                   loading.freeTrial
-                    ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                    : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg'
+                    ? 'bg-[#21262d] text-gray-500 cursor-not-allowed border border-[#30363d]'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
                 }`}
               >
                 {loading.freeTrial ? (
@@ -380,27 +381,27 @@ export default function PricingPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
-              className="relative bg-gradient-to-br from-[#3B4A6B] to-[#2d3a52] rounded-2xl p-6 shadow-2xl flex flex-col lg:scale-105 z-10"
+              className="relative bg-[#161b22] border border-[#30363d] rounded-2xl p-6 shadow-2xl flex flex-col"
             >
               {/* Popular Badge */}
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
+                <div className="bg-amber-500 text-gray-900 px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3" />
                   MOST POPULAR
                 </div>
               </div>
 
               {/* Icon */}
-              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center mb-4 mt-2">
+              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mb-4 mt-2">
                 <Crown className="w-6 h-6 text-white" />
               </div>
 
-              <h3 className="text-xl font-bold text-white mb-1">Pro Plan</h3>
+              <h3 className="text-xl font-bold text-gray-100 mb-1">Pro Plan</h3>
               <div className="mb-4">
-                <span className="text-3xl font-bold text-white">$99</span>
-                <span className="text-white/70 text-sm ml-1">/month</span>
+                <span className="text-3xl font-bold text-gray-100">$99</span>
+                <span className="text-gray-400 text-sm ml-1">/month</span>
               </div>
-              <p className="text-white/80 text-sm mb-5">Everything you need to scale your Amazon business.</p>
+              <p className="text-gray-400 text-sm mb-5">Everything you need to scale your Amazon business.</p>
               
               <ul className="space-y-2.5 mb-6 flex-1">
                 {[
@@ -413,7 +414,7 @@ export default function PricingPage() {
                 ].map((feature, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-white/90 text-sm">{feature}</span>
+                    <span className="text-gray-300 text-sm">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -423,8 +424,8 @@ export default function PricingPage() {
                 disabled={loading.PRO}
                 className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 ${
                   loading.PRO
-                    ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                    : 'bg-white text-[#3B4A6B] hover:bg-gray-100 shadow-lg'
+                    ? 'bg-[#21262d] text-gray-500 cursor-not-allowed border border-[#30363d]'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
                 }`}
               >
                 {loading.PRO ? (
@@ -440,19 +441,19 @@ export default function PricingPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 }}
-              className="relative bg-white rounded-2xl border border-gray-200 p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
+              className="relative bg-[#161b22] rounded-2xl border border-[#30363d] p-6 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col"
             >
               {/* Icon */}
-              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-purple-500/20">
+              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mb-4">
                 <Users className="w-6 h-6 text-white" />
               </div>
 
-              <h3 className="text-xl font-bold text-gray-900 mb-1">Agency</h3>
+              <h3 className="text-xl font-bold text-gray-100 mb-1">Agency</h3>
               <div className="mb-4">
-                <span className="text-3xl font-bold text-gray-900">$49</span>
-                <span className="text-gray-500 text-sm ml-1">/user/month</span>
+                <span className="text-3xl font-bold text-gray-100">$49</span>
+                <span className="text-gray-400 text-sm ml-1">/user/month</span>
               </div>
-              <p className="text-gray-600 text-sm mb-5">For agencies and consultants managing multiple clients.</p>
+              <p className="text-gray-400 text-sm mb-5">For agencies and consultants managing multiple clients.</p>
               
               <ul className="space-y-2.5 mb-6 flex-1">
                 {[
@@ -464,15 +465,15 @@ export default function PricingPage() {
                   'Custom integrations'
                 ].map((feature, i) => (
                   <li key={i} className="flex items-start gap-2">
-                    <Check className="w-4 h-4 text-purple-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-700 text-sm">{feature}</span>
+                    <Check className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-gray-300 text-sm">{feature}</span>
                   </li>
                 ))}
               </ul>
               
               <button 
                 onClick={() => handleContactUs('AGENCY')}
-                className="w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
+                className="w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 bg-blue-600 text-white hover:bg-blue-700 shadow-lg"
               >
                 Contact Us
               </button>
@@ -486,22 +487,22 @@ export default function PricingPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.5 }}
-          className="mt-8 flex flex-wrap justify-center gap-6 text-sm text-gray-500"
+          className="mt-8 flex flex-wrap justify-center gap-6 text-sm text-gray-400"
         >
           <span className="flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-500" />
+            <Check className="w-4 h-4 text-emerald-400" />
             No setup fees
           </span>
           <span className="flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-500" />
+            <Check className="w-4 h-4 text-emerald-400" />
             Cancel anytime
           </span>
           <span className="flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-500" />
+            <Check className="w-4 h-4 text-emerald-400" />
             Secure payment
           </span>
           <span className="flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-500" />
+            <Check className="w-4 h-4 text-emerald-400" />
             30-day money back
           </span>
         </motion.div>
@@ -511,9 +512,9 @@ export default function PricingPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.6 }}
-          className="mt-4 text-sm text-gray-500"
+          className="mt-4 text-sm text-gray-400"
         >
-          Questions? <a href="/contact-us" className="text-[#3B4A6B] hover:underline font-medium">Contact our sales team</a>
+          Questions? <a href="/contact-us" className="text-blue-400 hover:underline font-medium">Contact our sales team</a>
         </motion.p>
       </div>
     </div>

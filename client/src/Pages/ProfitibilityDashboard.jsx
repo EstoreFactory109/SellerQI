@@ -3,7 +3,6 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import MetricCard from '../Components/ProfitibilityDashboard/MetricCard';
 import ProfitTable from '../Components/ProfitibilityDashboard/ProfitTable';
 import SuggestionList from '../Components/ProfitibilityDashboard/SuggestionList';
-import calenderIcon from '../assets/Icons/Calender.png'
 import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle } from 'lucide-react';
@@ -13,6 +12,8 @@ import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import { parseLocalDate } from '../utils/dateUtils.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js';
+import { useProfitabilityData } from '../hooks/usePageData.js';
+import { PageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -104,10 +105,18 @@ const ProfitabilityDashboard = () => {
     sessionStorage.setItem('profitability_cogs_popup_shown', 'true');
   };
 
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
-  const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
-  const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
+  // Fetch profitability data using the hook (automatically fetches on mount)
+  const { data: profitabilityPageData, loading: profitabilityLoading, refetch: refetchProfitability } = useProfitabilityData();
+  
+  // Use profitability page data if available, fall back to legacy DashboardSlice data
+  // Backend returns data directly (not nested) e.g. { profitibilityData, TotalProduct, ... }
+  const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const info = profitabilityPageData || legacyInfo;
+  
+  // Get calendar mode and dates from the page data or legacy
+  const calendarMode = info?.calendarMode || 'default';
+  const startDate = info?.startDate;
+  const endDate = info?.endDate;
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -1213,7 +1222,7 @@ const ProfitabilityDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100">
+    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       {/* COGS Information Popup */}
       <AnimatePresence>
         {showCogsPopup && (
@@ -1229,7 +1238,7 @@ const ProfitabilityDashboard = () => {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ duration: 0.3 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4"
+              style={{ background: '#161b22', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)', maxWidth: '500px', width: '100%', margin: '0 16px', border: '1px solid #30363d' }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-6">
@@ -1239,24 +1248,27 @@ const ProfitabilityDashboard = () => {
                       <TrendingUp className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-gray-900">Improve Profit Accuracy</h3>
-                      <p className="text-sm text-gray-600">Get precise profitability insights</p>
+                      <h3 className="text-lg font-bold" style={{ color: '#f3f4f6' }}>Improve Profit Accuracy</h3>
+                      <p className="text-sm" style={{ color: '#9ca3af' }}>Get precise profitability insights</p>
                     </div>
                   </div>
                   <button
                     onClick={handleCloseCogsPopup}
-                    className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                    className="transition-colors p-1"
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#f3f4f6'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 
                 <div className="mb-6">
-                  <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg mb-4">
-                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex items-start gap-3 p-4 rounded-lg mb-4" style={{ background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
+                    <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: '#fbbf24' }} />
                     <div>
-                      <h4 className="font-semibold text-amber-900 mb-1">Important Notice</h4>
-                      <p className="text-sm text-amber-800 leading-relaxed">
+                      <h4 className="font-semibold mb-1" style={{ color: '#fbbf24' }}>Important Notice</h4>
+                      <p className="text-sm leading-relaxed" style={{ color: '#fde68a' }}>
                         To get accurate gross profit calculations, please add <strong>COGS (Cost of Goods Sold) values per unit</strong> for your products.
                       </p>
                     </div>
@@ -1264,26 +1276,26 @@ const ProfitabilityDashboard = () => {
                   
                   <div className="space-y-3">
                     <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-blue-600 text-sm font-bold">1</span>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>1</span>
                       </div>
-                      <p className="text-sm text-gray-700">
+                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
                         Navigate to the product table below
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-blue-600 text-sm font-bold">2</span>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>2</span>
                       </div>
-                      <p className="text-sm text-gray-700">
+                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
                         Click the "Add COGS" button for each product
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-blue-600 text-sm font-bold">3</span>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>3</span>
                       </div>
-                      <p className="text-sm text-gray-700">
+                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
                         Enter your actual cost per unit for accurate profit margins
                       </p>
                     </div>
@@ -1293,7 +1305,10 @@ const ProfitabilityDashboard = () => {
                 <div className="flex gap-3">
                   <button
                     onClick={handleCloseCogsPopup}
-                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                    className="flex-1 px-4 py-2.5 font-medium rounded-lg transition-all duration-200"
+                    style={{ background: 'linear-gradient(to right, #3b82f6, #2563eb)', color: 'white' }}
+                    onMouseEnter={(e) => e.target.style.background = 'linear-gradient(to right, #2563eb, #1d4ed8)'}
+                    onMouseLeave={(e) => e.target.style.background = 'linear-gradient(to right, #3b82f6, #2563eb)'}
                   >
                     Got it, thanks!
                   </button>
@@ -1305,109 +1320,64 @@ const ProfitabilityDashboard = () => {
       </AnimatePresence>
 
       {/* Main Dashboard Container */}
-      <div className="h-[90vh] overflow-y-auto">
-        <div className="p-6 lg:p-8">
-          <div className="w-full">
-                      
-            {/* Modern Header Section */}
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="mb-8"
-            >
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                {/* Header Title and Description */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
-                      <TrendingUp className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                          Profitability Dashboard
-                        </h1>
-                        <div className="relative group">
-                          <HelpCircle className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help transition-colors" />
-                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
-                            <div className="bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ width: '256px' }}>
-                              Advanced profitability analysis dashboard that tracks gross and net profit margins by product. Add COGS (Cost of Goods Sold) values to get accurate net profit calculations and identify underperforming products that need optimization.
-                            </div>
-                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
-                          </div>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        <div className="w-full">
+          {/* Header always visible */}
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} style={{ marginBottom: '10px' }}>
+            <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" style={{ color: '#34d399' }} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>Profitability Dashboard</h1>
+                    <div className="relative group">
+                      <HelpCircle className="w-4 h-4 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
+                      <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
+                        <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: '#21262d', color: '#f3f4f6', width: '256px', border: '1px solid #30363d' }}>
+                          Advanced profitability analysis dashboard that tracks gross and net profit margins by product. Add COGS (Cost of Goods Sold) values to get accurate net profit calculations and identify underperforming products that need optimization.
                         </div>
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent" style={{ borderTopColor: '#21262d' }}></div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Monitor your profit margins and optimize your business performance
-                      </p>
                     </div>
                   </div>
-                </div>
-
-                {/* Controls Section */}
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Date Picker */}
-                  <div className='relative' ref={CalenderRef}>
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className='flex items-center gap-3 px-4 py-2.5 bg-white border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all duration-200 min-w-[140px]'
-                      onClick={() => setOpenCalender(!openCalender)}
-                    >
-                      <Calendar className="w-4 h-4 text-gray-600" />
-                      <span className='text-sm font-medium text-gray-700'>
-                        {info?.startDate && info?.endDate
-                          ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                          : 'Select Date Range'
-                        }
-                      </span>
-                    </motion.button>
-                    <AnimatePresence>
-                      {openCalender && (
-                        <motion.div
-                          initial={{ opacity: 0, scaleY: 0 }}
-                          animate={{ opacity: 1, scaleY: 1 }}
-                          exit={{ opacity: 0, scaleY: 0 }}
-                          transition={{ duration: 0.3 }}
-                          className="absolute top-full right-0 z-[9999] mt-2 bg-white shadow-xl rounded-xl border border-gray-200 origin-top"
-                        >
-                          <Calender setOpenCalender={setOpenCalender} />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* Download Report Button */}
-                  <DownloadReport
-                    prepareDataFunc={prepareProfitabilityData}
-                    filename="Profitability_Dashboard_Report"
-                    buttonText="Export"
-                    showIcon={true}
-                  />
                 </div>
               </div>
-            </motion.div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className='relative' ref={CalenderRef}>
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className='flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200' onClick={() => setOpenCalender(!openCalender)} style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6', fontSize: '12px' }} onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'} onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}>
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span className='font-medium'>
+                      {info?.startDate && info?.endDate ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Select Date'}
+                    </span>
+                  </motion.button>
+                  <AnimatePresence>
+                    {openCalender && (
+                      <motion.div initial={{ opacity: 0, scaleY: 0 }} animate={{ opacity: 1, scaleY: 1 }} exit={{ opacity: 0, scaleY: 0 }} transition={{ duration: 0.3 }} className="absolute top-full right-0 z-[9999] mt-2 rounded-xl origin-top" style={{ background: '#161b22', border: '1px solid #30363d', boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)' }}>
+                        <Calender setOpenCalender={setOpenCalender} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <DownloadReport prepareDataFunc={prepareProfitabilityData} filename="Profitability_Dashboard_Report" buttonText="Export" showIcon={true} />
+              </div>
+            </div>
+          </motion.div>
 
+            {/* Skeleton lazy load: show while profitability data is loading */}
+            {profitabilityLoading ? (
+              <PageSkeleton statCards={6} sections={2} />
+            ) : (
+              <>
                       {/* Enhanced Metrics Cards */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
-              className="mb-8"
+              style={{ marginBottom: '10px' }}
             >
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
                 {metrics.map((metric, index) => (
-                  <motion.div
-                    key={metric.label}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.1 * index }}
-                    whileHover={{ scale: 1.02, y: -2 }}
-                    className="group"
-                  >
-                    <MetricCard label={metric.label} value={metric.value} icon={metric.icon} />
-                  </motion.div>
+                  <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
                 ))}
               </div>
             </motion.div>
@@ -1417,45 +1387,42 @@ const ProfitabilityDashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="mb-8"
+              style={{ marginBottom: '10px' }}
             >
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="p-6 pb-0">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-                        <BarChart3 className="w-4 h-4 text-white" />
-                      </div>
+              <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', overflow: 'hidden' }}>
+                <div style={{ padding: '8px 12px', borderBottom: '1px solid #30363d' }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4" style={{ color: '#60a5fa' }} />
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-lg font-semibold text-gray-900">Gross Profit vs Total Sales Analysis</h3>
+                          <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Gross Profit vs Total Sales</h3>
                           <div className="relative group">
-                            <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help transition-colors" />
+                            <HelpCircle className="w-3.5 h-3.5 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
                             <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
-                              <div className="bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ width: '256px' }}>
+                              <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: '#21262d', color: '#f3f4f6', width: '256px', border: '1px solid #30363d' }}>
                                 Visual comparison of your gross profit (sales minus Amazon fees and ad spend) versus total sales over time. The green area shows your gross profit, while the blue area represents total sales revenue. Use this to identify profitability trends and seasonal patterns.
                               </div>
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent" style={{ borderTopColor: '#21262d' }}></div>
                             </div>
                           </div>
                         </div>
-                        <p className="text-sm text-gray-600">Track your daily gross profit performance against total sales</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-gradient-to-r from-green-400 to-green-500 rounded-full"></div>
-                        <span className="text-gray-600">Gross Profit</span>
+                    <div className="flex items-center gap-3 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#22c55e' }}></div>
+                        <span style={{ color: '#9ca3af' }}>Gross Profit</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-blue-500 rounded-full"></div>
-                        <span className="text-gray-600">Total Sales</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
+                        <span style={{ color: '#9ca3af' }}>Total Sales</span>
                       </div>
                     </div>
                   </div>
                 </div>
-                <div className="px-6 pb-6">
-                  <ResponsiveContainer width="100%" height={320}>
+                <div style={{ padding: '8px' }}>
+                  <ResponsiveContainer width="100%" height={280}>
                     <AreaChart
                       data={chartData}
                       margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
@@ -1470,32 +1437,34 @@ const ProfitabilityDashboard = () => {
                           <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.02}/>
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
                       <XAxis
                         dataKey="date"
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        stroke="#e2e8f0"
+                        tick={{ fontSize: 12, fill: '#9ca3af' }}
+                        stroke="#30363d"
                         tickLine={false}
                         axisLine={false}
                       />
                       <YAxis
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        stroke="#e2e8f0"
+                        tick={{ fontSize: 12, fill: '#9ca3af' }}
+                        stroke="#30363d"
                         tickLine={false}
                         axisLine={false}
                         tickFormatter={(value) => `${currency}${value}`}
                       />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                          border: '1px solid #e2e8f0',
+                          backgroundColor: '#21262d',
+                          border: '1px solid #30363d',
                           borderRadius: '12px',
                           padding: '12px',
-                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
-                          fontSize: '14px'
+                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+                          fontSize: '14px',
+                          color: '#f3f4f6'
                         }}
                         formatter={(value, name) => [`${currency}${value}`, name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
                         labelFormatter={(label) => `Date: ${label}`}
+                        labelStyle={{ color: '#f3f4f6' }}
                       />
                       <Area
                         type="monotone"
@@ -1526,7 +1495,7 @@ const ProfitabilityDashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
-              className="mb-8"
+              style={{ marginBottom: '10px' }}
             >
               <ProfitTable setSuggestionsData={setSuggestionsData} />
             </motion.div>
@@ -1536,16 +1505,17 @@ const ProfitabilityDashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.4 }}
-              className="mb-8"
+              style={{ marginBottom: '10px' }}
             >
               <SuggestionList suggestionsData={suggestionsData} />
             </motion.div>
 
             {/* Bottom Spacer */}
-            <div className='w-full h-8'></div>
+            <div style={{ width: '100%', height: '20px' }}></div>
+              </>
+            )}
           </div>
         </div>
-      </div>
     </div>
   );
 };

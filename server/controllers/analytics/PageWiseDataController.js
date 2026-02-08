@@ -21,6 +21,9 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
+const AccountHistory = require('../../models/user-auth/AccountHistory.js');
+const User = require('../../models/user-auth/UserModel.js');
+const { getProductWiseSponsoredAdsData } = require('../../Services/amazon-ads/ProductWiseSponsoredAdsService.js');
 
 /**
  * Get full dashboard data - calculates all data in backend
@@ -30,6 +33,7 @@ const APlusContent = require('../../models/seller-performance/APlusContentModel.
  * 3. Frontend displaying data
  */
 const getDashboardData = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
@@ -51,13 +55,15 @@ const getDashboardData = asyncHandler(async (req, res) => {
     }
 
     try {
-        logger.info(`Getting dashboard data for user ${userId}, region ${Region}, country ${Country}`);
+        logger.info(`[PERF] Getting dashboard data for user ${userId}, region ${Region}, country ${Country}`);
 
         // Step 1: Get raw data from Analyse service
         let analyseResult;
+        const analyseStartTime = Date.now();
         try {
             analyseResult = await AnalyseService.Analyse(userId, Country, Region, adminId);
-            logger.info(`Analyse service returned status: ${analyseResult?.status}`);
+            const analyseEndTime = Date.now();
+            logger.info(`[PERF] Analyse service completed in ${analyseEndTime - analyseStartTime}ms, status: ${analyseResult?.status}`);
         } catch (analyseError) {
             logger.error('Error calling AnalyseService.Analyse:', {
                 message: analyseError.message,
@@ -89,11 +95,13 @@ const getDashboardData = asyncHandler(async (req, res) => {
 
         // Step 2: Calculate dashboard data using the calculation service
         let calculatedData;
+        const calcStartTime = Date.now();
         try {
-            logger.info('Starting dashboard calculation...');
+            logger.info('[PERF] Starting dashboard calculation...');
             logger.info(`analyseResult.message type: ${typeof analyseResult.message}, keys: ${Object.keys(analyseResult.message || {}).join(', ')}`);
             calculatedData = await analyseData(analyseResult.message, userId);
-            logger.info('Dashboard calculation completed successfully');
+            const calcEndTime = Date.now();
+            logger.info(`[PERF] Dashboard calculation completed in ${calcEndTime - calcStartTime}ms`);
             
             if (!calculatedData || !calculatedData.dashboardData) {
                 throw new Error('Calculated data is missing dashboardData property');
@@ -113,6 +121,9 @@ const getDashboardData = asyncHandler(async (req, res) => {
         // History is now recorded only:
         // 1. After first integration completes (Integration.js)
         // 2. Weekly via WeeklyHistoryWorker (runs on Sundays)
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Dashboard data total processing time: ${totalTime}ms`);
 
         // Return calculated dashboard data
         return res.status(200).json(
@@ -157,15 +168,31 @@ const getProfitabilityData = asyncHandler(async (req, res) => {
         const calculatedData = await analyseData(analyseResult.message, userId);
         const dashboardData = calculatedData.dashboardData;
 
-        // Extract profitability-specific data
+        // Extract profitability-specific data - all data needed by ProfitabilityDashboard.jsx
         const profitabilityData = {
+            // Core profitability data
             profitibilityData: dashboardData.profitibilityData || [],
             totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
             profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
+            
+            // Product data
             TotalProduct: dashboardData.TotalProduct || [],
             ActiveProducts: dashboardData.ActiveProducts || [],
+            SalesByProducts: dashboardData.SalesByProducts || [],
+            
+            // Finance and sales data
             accountFinance: dashboardData.accountFinance || {},
             TotalWeeklySale: dashboardData.TotalWeeklySale || 0,
+            TotalSales: dashboardData.TotalSales || [],
+            economicsMetrics: dashboardData.economicsMetrics || {},
+            
+            // PPC/Ads data for profit calculation
+            ProductWiseSponsoredAdsGraphData: dashboardData.ProductWiseSponsoredAdsGraphData || {},
+            sponsoredAdsMetrics: dashboardData.sponsoredAdsMetrics || {},
+            dateWiseTotalCosts: dashboardData.dateWiseTotalCosts || [],
+            
+            // Date range
+            calendarMode: dashboardData.calendarMode || 'default',
             Country: dashboardData.Country,
             startDate: dashboardData.startDate,
             endDate: dashboardData.endDate
@@ -207,23 +234,40 @@ const getPPCData = asyncHandler(async (req, res) => {
         const calculatedData = await analyseData(analyseResult.message, userId);
         const dashboardData = calculatedData.dashboardData;
 
-        // Extract PPC-specific data
+        // Extract PPC-specific data - all data needed by PPCDashboard.jsx
         const ppcData = {
+            // Core PPC metrics
             sponsoredAdsMetrics: dashboardData.sponsoredAdsMetrics || {},
             negativeKeywordsMetrics: dashboardData.negativeKeywordsMetrics || [],
             ProductWiseSponsoredAds: dashboardData.ProductWiseSponsoredAds || [],
             ProductWiseSponsoredAdsGraphData: dashboardData.ProductWiseSponsoredAdsGraphData || [],
             totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
             sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
+            
+            // Cost and sales data
             dateWiseTotalCosts: dashboardData.dateWiseTotalCosts || [],
             campaignWiseTotalSalesAndCost: dashboardData.campaignWiseTotalSalesAndCost || [],
+            
+            // Keywords and search terms
             keywords: dashboardData.keywords || [],
             searchTerms: dashboardData.searchTerms || [],
-            campaignData: dashboardData.campaignData || [],
             adsKeywordsPerformanceData: dashboardData.adsKeywordsPerformanceData || [],
             negetiveKeywords: dashboardData.negetiveKeywords || [],
+            
+            // Campaign and ad group data
+            campaignData: dashboardData.campaignData || [],
             AdsGroupData: dashboardData.AdsGroupData || [],
+            
+            // PPCUnitsSold data
+            PPCUnitsSold: dashboardData.PPCUnitsSold || { totalUnits: 0, dateWiseUnits: [] },
+            
+            // Sales data for TACOS calculation
+            TotalSales: dashboardData.TotalSales || [],
+            TotalWeeklySale: dashboardData.TotalWeeklySale || 0,
             accountFinance: dashboardData.accountFinance || {},
+            
+            // Date range
+            calendarMode: dashboardData.calendarMode || 'default',
             Country: dashboardData.Country,
             startDate: dashboardData.startDate,
             endDate: dashboardData.endDate
@@ -265,25 +309,40 @@ const getIssuesData = asyncHandler(async (req, res) => {
         const calculatedData = await analyseData(analyseResult.message, userId);
         const dashboardData = calculatedData.dashboardData;
 
-        // Extract issues-specific data
+        // Extract issues-specific data - all data needed by Issues page (Category.jsx + Account.jsx)
         const issuesData = {
+            // Product-wise error data for Category.jsx
             productWiseError: dashboardData.productWiseError || [],
             rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
             conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
             inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || [],
+            
+            // Error counts
             totalErrorInAccount: dashboardData.totalErrorInAccount || 0,
             totalErrorInConversion: dashboardData.totalErrorInConversion || 0,
             TotalRankingerrors: dashboardData.TotalRankingerrors || 0,
             totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
             totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
             totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
+            
+            // Error details
             profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
             sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
+            
+            // Account errors for Account.jsx
             AccountErrors: dashboardData.AccountErrors || {},
+            accountHealthPercentage: dashboardData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
+            
+            // Buy Box data for Category.jsx
+            buyBoxData: dashboardData.buyBoxData || { asinBuyBoxData: [] },
+            
+            // Top error products
             first: dashboardData.first,
             second: dashboardData.second,
             third: dashboardData.third,
             fourth: dashboardData.fourth,
+            
+            // Product data for lookups
             TotalProduct: dashboardData.TotalProduct || [],
             ActiveProducts: dashboardData.ActiveProducts || [],
             Country: dashboardData.Country
@@ -373,16 +432,24 @@ const getKeywordAnalysisData = asyncHandler(async (req, res) => {
         const calculatedData = await analyseData(analyseResult.message, userId);
         const dashboardData = calculatedData.dashboardData;
 
-        // Extract keyword analysis specific data
+        // Extract keyword analysis specific data - all data needed by KeywordAnalysisDashboard.jsx
         const keywordData = {
+            // Keywords and search terms
             keywords: dashboardData.keywords || [],
             searchTerms: dashboardData.searchTerms || [],
             negativeKeywordsMetrics: dashboardData.negativeKeywordsMetrics || [],
             negetiveKeywords: dashboardData.negetiveKeywords || [],
             adsKeywordsPerformanceData: dashboardData.adsKeywordsPerformanceData || [],
             keywordTrackingData: dashboardData.keywordTrackingData || {},
+            
+            // Campaign and ad group data
             campaignData: dashboardData.campaignData || [],
             AdsGroupData: dashboardData.AdsGroupData || [],
+            
+            // Product data for ASIN/SKU lookups
+            TotalProduct: dashboardData.TotalProduct || [],
+            productWiseError: dashboardData.productWiseError || [],
+            
             Country: dashboardData.Country
         };
 
@@ -590,13 +657,23 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
         let asinWiseSales = [];
         const totalSalesAmount = economicsMetrics.totalSales?.amount || 0;
 
+        // Debug: Check parentAsin in stored data
+        const storedAsinData = economicsMetrics.asinWiseSales || [];
+        const recordsWithParentAsin = storedAsinData.filter(item => item.parentAsin && item.parentAsin !== item.asin);
+        
         logger.info('ASIN-wise sales endpoint - checking data source', {
             userId,
             country,
             region,
             isBig: economicsMetrics.isBig,
             totalSales: totalSalesAmount,
-            asinWiseSalesInDoc: economicsMetrics.asinWiseSales?.length || 0
+            asinWiseSalesInDoc: storedAsinData.length,
+            recordsWithDifferentParentAsin: recordsWithParentAsin.length,
+            sampleRecord: storedAsinData[0] ? {
+                asin: storedAsinData[0].asin,
+                parentAsin: storedAsinData[0].parentAsin,
+                date: storedAsinData[0].date
+            } : null
         });
 
         // Try to fetch from separate collection if:
@@ -635,12 +712,21 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
                         }
                     });
                     
+                    // Debug: Check parentAsin in fetched data
+                    const fetchedRecordsWithParentAsin = asinWiseSales.filter(item => item.parentAsin && item.parentAsin !== item.asin);
+                    
                     logger.info('Fetched ASIN-wise sales from separate collection for big account', {
                         userId,
                         country,
                         region,
                         totalRecords: asinWiseSales.length,
-                        totalDates: bigAccountAsinDocs.length
+                        totalDates: bigAccountAsinDocs.length,
+                        recordsWithDifferentParentAsin: fetchedRecordsWithParentAsin.length,
+                        sampleRecord: asinWiseSales[0] ? {
+                            asin: asinWiseSales[0].asin,
+                            parentAsin: asinWiseSales[0].parentAsin,
+                            date: asinWiseSales[0].date
+                        } : null
                     });
                 } else {
                     // No data in separate collection - fall back to main document (legacy data)
@@ -871,7 +957,7 @@ const getYourProductsData = asyncHandler(async (req, res) => {
         });
 
         // Get product reviews data - OPTIMIZATION: Run both queries in parallel with fallback
-        const [productReviewsWithRegion, productReviewsWithoutRegion, aPlusContentWithRegion, aPlusContentWithoutRegion] = await Promise.all([
+        const [productReviewsWithRegion, productReviewsWithoutRegion, aPlusContentWithRegion, aPlusContentWithoutRegion, sponsoredAdsData] = await Promise.all([
             NumberOfProductReviews.findOne({
                 User: userId,
                 region: Region,
@@ -887,7 +973,12 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             }).sort({ createdAt: -1 }).lean(),
             APlusContent.findOne({
                 User: userId
-            }).sort({ createdAt: -1 }).lean()
+            }).sort({ createdAt: -1 }).lean(),
+            // Get ProductWiseSponsoredAds to determine which ASINs are targeted in ads
+            getProductWiseSponsoredAdsData(userId, Country, Region).catch(err => {
+                logger.warn('Could not fetch sponsored ads data for YourProducts:', err.message);
+                return null;
+            })
         ]);
 
         // Use the one with region/country if available, otherwise fallback
@@ -950,6 +1041,19 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             });
         }
 
+        // Create a Set of ASINs that are targeted in ads (have any ad spend or activity)
+        const asinsTargetedInAds = new Set();
+        if (sponsoredAdsData && sponsoredAdsData.sponsoredAds && Array.isArray(sponsoredAdsData.sponsoredAds)) {
+            sponsoredAdsData.sponsoredAds.forEach(adItem => {
+                const asin = adItem.asin || adItem.ASIN;
+                if (asin) {
+                    // Add ASIN to Set (uppercase for consistent comparison)
+                    asinsTargetedInAds.add(asin.toUpperCase());
+                }
+            });
+            logger.info(`[getYourProductsData] Found ${asinsTargetedInAds.size} ASINs targeted in ads`);
+        }
+
         // Enrich only paginated products
         const enrichedProducts = paginatedProducts.map(product => {
             const asinKey = product.asin?.toUpperCase() || '';
@@ -960,6 +1064,9 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                                     aPlusStatus === 'PUBLISHED' || 
                                     aPlusStatus === 'true' ||
                                     aPlusStatus === true;
+            
+            // Check if this ASIN is targeted in ads
+            const isTargetedInAds = asinsTargetedInAds.has(asinKey);
             
             return {
                 asin: product.asin,
@@ -976,7 +1083,8 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 image: reviewData.photos && reviewData.photos.length > 0 ? reviewData.photos[0] : null,
                 updatedAt: product.updatedAt || null,
                 issues: product.issues || [], // Include issues from seller model for inactive/incomplete products
-                has_b2b_pricing: product.has_b2b_pricing || false // Include B2B pricing status
+                has_b2b_pricing: product.has_b2b_pricing || false, // Include B2B pricing status
+                isTargetedInAds: isTargetedInAds // Whether this product has ads targeting
             };
         });
 
@@ -1055,6 +1163,139 @@ const getYourProductsData = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get navbar data - minimal data for top navigation bar
+ * This endpoint is called on initial app load instead of full dashboard data
+ * Returns only: user info, all seller accounts, brand name, account health
+ */
+const getNavbarData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        logger.info(`Getting navbar data for user ${userId}, region ${Region}, country ${Country}`);
+
+        // Get user data
+        const user = await User.findById(userId).select('name email profilePic selectedPlan accessType isSuperAdminSession').lean();
+        
+        if (!user) {
+            return res.status(404).json(
+                new ApiError(404, 'User not found')
+            );
+        }
+
+        // Get seller data with all accounts
+        const seller = await Seller.findOne({ User: userId }).lean();
+        
+        let allSellerAccounts = [];
+        let brandName = '';
+        let accountHealthPercentage = 0;
+
+        if (seller) {
+            // Brand is stored at root level of seller document
+            brandName = seller.brand || '';
+            
+            if (seller.sellerAccount) {
+                // Get all seller accounts for account switcher
+                allSellerAccounts = seller.sellerAccount.map(acc => ({
+                    sellerId: acc.sellerId,
+                    region: acc.region,
+                    country: acc.country || acc.region,
+                    marketplaceId: acc.marketplaceId,
+                    isConnected: acc.isConnected || false,
+                    brand: seller.brand || '' // Include brand in each account for display
+                }));
+            }
+        }
+
+        // Get account health percentage (lightweight query)
+        // This is a simplified calculation - just checking if we have health data
+        try {
+            const economicsMetrics = await EconomicsMetrics.findOne({
+                User: userId,
+                country: Country,
+                region: Region
+            }).sort({ createdAt: -1 }).select('accountHealthPercentage').lean();
+
+            if (economicsMetrics && economicsMetrics.accountHealthPercentage) {
+                accountHealthPercentage = economicsMetrics.accountHealthPercentage;
+            }
+        } catch (healthError) {
+            logger.warn('Could not fetch account health for navbar:', healthError.message);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    profilePic: user.profilePic,
+                    selectedPlan: user.selectedPlan,
+                    accessType: user.accessType,
+                    isSuperAdminSession: user.isSuperAdminSession
+                },
+                AllSellerAccounts: allSellerAccounts,
+                Brand: brandName,
+                accountHealthPercentage,
+                Country,
+                Region
+            }, "Navbar data retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getNavbarData:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting navbar data: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get Account History data
+ * Returns historical account metrics over time
+ */
+const getAccountHistoryData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Country = req.country;
+    const Region = req.region;
+
+    try {
+        logger.info(`Getting account history data for user ${userId}, country ${Country}, region ${Region}`);
+
+        if (!userId || !Country || !Region) {
+            return res.status(400).json(
+                new ApiError(400, 'User ID, country and region are required')
+            );
+        }
+
+        const accountHistory = await AccountHistory.findOne({
+            User: userId,
+            country: Country,
+            region: Region
+        }).lean();
+
+        if (!accountHistory) {
+            return res.status(200).json(
+                new ApiResponse(200, { accountHistory: [] }, "No account history found")
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                accountHistory: accountHistory.accountHistory || []
+            }, "Account history data retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getAccountHistoryData:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting account history data: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     getDashboardData,
     getProfitabilityData,
@@ -1067,6 +1308,8 @@ module.exports = {
     updateTaskStatus,
     getInventoryData,
     getAsinWiseSalesData,
-    getYourProductsData
+    getYourProductsData,
+    getNavbarData,
+    getAccountHistoryData
 };
 

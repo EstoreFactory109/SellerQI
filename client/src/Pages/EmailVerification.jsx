@@ -283,21 +283,21 @@ const OtpVerification = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="w-full max-w-md"
       >
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 p-8">
+        <div className="bg-[#161b22] rounded-2xl shadow-xl border border-[#30363d] p-8">
           {/* Header */}
           <div className="text-center mb-8">
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4"
+              className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4"
             >
               <Mail className="w-8 h-8 text-white" />
             </motion.div>
@@ -306,7 +306,7 @@ const OtpVerification = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="text-2xl font-bold text-gray-900 mb-2"
+              className="text-2xl font-bold text-gray-100 mb-2"
             >
               Verify Your Email
             </motion.h1>
@@ -315,11 +315,11 @@ const OtpVerification = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
-              className="text-gray-600 text-sm"
+              className="text-gray-500 text-sm"
             >
               OTP has been sent to your registered email:
               <br />
-              <span className="font-semibold text-gray-900">{email || 'your email'}</span>
+              <span className="font-semibold text-gray-200">{email || 'your email'}</span>
             </motion.p>
           </div>
 
@@ -330,24 +330,24 @@ const OtpVerification = () => {
             transition={{ delay: 0.5 }}
             className={`text-center mb-6 p-3 rounded-lg ${
               isExpired 
-                ? 'bg-red-50 border border-red-200' 
+                ? 'bg-red-500/10 border border-red-500/40' 
                 : timeRemaining <= 60 
-                ? 'bg-yellow-50 border border-yellow-200' 
-                : 'bg-blue-50 border border-blue-200'
+                ? 'bg-yellow-500/10 border border-yellow-500/40' 
+                : 'bg-blue-500/10 border border-blue-500/40'
             }`}
           >
             <div className="flex items-center justify-center gap-2 mb-1">
               <Clock className={`w-4 h-4 ${
-                isExpired ? 'text-red-500' : timeRemaining <= 60 ? 'text-yellow-500' : 'text-blue-500'
+                isExpired ? 'text-red-400' : timeRemaining <= 60 ? 'text-yellow-400' : 'text-blue-400'
               }`} />
               <span className={`text-sm font-medium ${
-                isExpired ? 'text-red-700' : timeRemaining <= 60 ? 'text-yellow-700' : 'text-blue-700'
+                isExpired ? 'text-red-300' : timeRemaining <= 60 ? 'text-yellow-300' : 'text-blue-300'
               }`}>
                 {isExpired ? 'OTP Expired' : `Time Remaining: ${formatTime(timeRemaining)}`}
               </span>
             </div>
             {isExpired && (
-              <p className="text-xs text-red-600">Please request a new OTP to continue</p>
+              <p className="text-xs text-red-400">Please request a new OTP to continue</p>
             )}
           </motion.div>
 
@@ -374,12 +374,12 @@ const OtpVerification = () => {
                   transition={{ delay: 0.7 + index * 0.1 }}
                   className={`w-12 h-12 text-center text-xl font-semibold border-2 rounded-lg outline-none transition-all duration-200 ${
                     isExpired
-                      ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                      ? 'border-[#30363d] bg-[#21262d] text-gray-500 cursor-not-allowed'
                       : error && otp[index] === ""
-                      ? 'border-red-400 bg-red-50 text-red-900 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                      ? 'border-red-500 bg-red-500/10 text-red-300 focus:border-red-400 focus:ring-2 focus:ring-red-500/20'
                       : otp[index]
-                      ? 'border-green-400 bg-green-50 text-green-900 focus:border-green-500 focus:ring-2 focus:ring-green-200'
-                      : 'border-gray-300 bg-white text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
+                      ? 'border-green-500 bg-green-500/10 text-green-300 focus:border-green-400 focus:ring-2 focus:ring-green-500/20'
+                      : 'border-[#30363d] bg-[#21262d] text-gray-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
                   }`}
                 />
               ))}
@@ -392,9 +392,9 @@ const OtpVerification = () => {
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="text-center p-3 bg-red-50 border border-red-200 rounded-lg"
+                  className="text-center p-3 bg-red-500/10 border border-red-500/40 rounded-lg"
                 >
-                  <p className="text-sm text-red-600">{errorMessage}</p>
+                  <p className="text-sm text-red-400">{errorMessage}</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -408,8 +408,8 @@ const OtpVerification = () => {
               disabled={loading || isExpired}
               className={`w-full py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
                 loading || isExpired
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 transform hover:scale-[1.02] active:scale-[0.98]'
+                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 shadow-lg shadow-blue-500/25 transform hover:scale-[1.02] active:scale-[0.98]'
               }`}
             >
               {loading ? (
@@ -435,8 +435,8 @@ const OtpVerification = () => {
                 disabled={!canResend || loading}
                 className={`text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 mx-auto ${
                   canResend && !loading
-                    ? 'text-indigo-600 hover:text-indigo-700 cursor-pointer'
-                    : 'text-gray-400 cursor-not-allowed'
+                    ? 'text-blue-400 hover:text-blue-300 cursor-pointer'
+                    : 'text-gray-500 cursor-not-allowed'
                 }`}
               >
                 <RotateCcw className="w-4 h-4" />

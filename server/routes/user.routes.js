@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
@@ -34,6 +34,7 @@ router.post('/get-ip-tracking', getIPTracking);
 router.put('/update-subscription-plan', auth, validateUpdateSubscriptionPlan, updateSubscriptionPlan); // New route
 router.post('/activate-free-trial', auth, activateFreeTrial); // New route for free trial (no body params needed)
 router.get('/check-trial-status', auth, checkTrialStatus); // New route for checking trial status
+router.get('/check-first-analysis-status', auth, checkFirstAnalysisStatus); // Route to check if first analysis is complete
 
 
 router.post('/google-login', authRateLimiter, validateGoogleIdToken, googleLoginUser);

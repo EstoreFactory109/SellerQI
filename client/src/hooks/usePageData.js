@@ -8,7 +8,7 @@
  * const { data, loading, error, refetch } = usePageData('dashboard');
  */
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
     fetchDashboardData,
@@ -20,8 +20,12 @@ import {
     fetchReimbursementData,
     fetchTasksData,
     fetchInventoryData,
+    fetchAccountHistoryData,
     forceRefresh
 } from '../redux/slices/PageDataSlice';
+
+// Cache TTL: 1 hour (aligned with backend cache)
+const CACHE_TTL_MS = 60 * 60 * 1000;
 
 // Map page names to their fetch actions
 const fetchActions = {
@@ -33,7 +37,8 @@ const fetchActions = {
     keywordAnalysis: fetchKeywordAnalysisData,
     reimbursement: fetchReimbursementData,
     tasks: fetchTasksData,
-    inventory: fetchInventoryData
+    inventory: fetchInventoryData,
+    accountHistory: fetchAccountHistoryData
 };
 
 /**
@@ -57,6 +62,9 @@ const usePageData = (pageName, autoFetch = true) => {
 
     // Get the appropriate fetch action
     const fetchAction = fetchActions[pageName];
+    
+    // Use ref to track if we've already initiated a fetch to prevent infinite loops
+    const hasFetchedRef = useRef(false);
 
     // Fetch data function
     const fetchData = useCallback(() => {
@@ -70,15 +78,24 @@ const usePageData = (pageName, autoFetch = true) => {
     // Force refresh function - clears cache and refetches
     const forceRefreshData = useCallback(() => {
         dispatch(forceRefresh(pageName));
+        hasFetchedRef.current = false; // Reset the ref when forcing refresh
         fetchData();
     }, [dispatch, pageName, fetchData]);
 
     // Auto fetch on mount if enabled and data is not cached
+    // Remove fetchData from dependencies to prevent infinite loops
     useEffect(() => {
-        if (autoFetch && !data && !loading) {
-            fetchData();
+        if (autoFetch && !data && !loading && !hasFetchedRef.current) {
+            hasFetchedRef.current = true;
+            if (fetchAction) {
+                dispatch(fetchAction());
+            }
         }
-    }, [autoFetch, data, loading, fetchData]);
+        // Reset ref when data is loaded or when component unmounts
+        if (data) {
+            hasFetchedRef.current = false;
+        }
+    }, [autoFetch, data, loading, dispatch, fetchAction]);
 
     return {
         data,
@@ -87,8 +104,8 @@ const usePageData = (pageName, autoFetch = true) => {
         lastFetched,
         refetch: fetchData,
         forceRefresh: forceRefreshData,
-        // Additional helper - check if data is stale (older than 5 minutes)
-        isStale: lastFetched ? (Date.now() - lastFetched) > 5 * 60 * 1000 : true
+        // Additional helper - check if data is stale (older than cache TTL)
+        isStale: lastFetched ? (Date.now() - lastFetched) > CACHE_TTL_MS : true
     };
 };
 
@@ -178,6 +195,9 @@ export const useReimbursementData = (autoFetch = true) => {
     
     // Check if data exists (summary is the primary indicator)
     const hasData = summary !== null || (reimbursements && reimbursements.length > 0);
+    
+    // Use ref to track if we've already initiated a fetch to prevent infinite loops
+    const hasFetchedRef = useRef(false);
 
     // Fetch data function
     const fetchData = useCallback(() => {
@@ -187,15 +207,22 @@ export const useReimbursementData = (autoFetch = true) => {
     // Force refresh function
     const forceRefreshData = useCallback(() => {
         dispatch(forceRefresh('reimbursement'));
+        hasFetchedRef.current = false; // Reset the ref when forcing refresh
         fetchData();
     }, [dispatch, fetchData]);
 
     // Auto fetch on mount if enabled and data is not cached
+    // Remove fetchData from dependencies to prevent infinite loops
     useEffect(() => {
-        if (autoFetch && !hasData && !loading) {
-            fetchData();
+        if (autoFetch && !hasData && !loading && !hasFetchedRef.current) {
+            hasFetchedRef.current = true;
+            dispatch(fetchReimbursementData());
         }
-    }, [autoFetch, hasData, loading, fetchData]);
+        // Reset ref when data is loaded
+        if (hasData) {
+            hasFetchedRef.current = false;
+        }
+    }, [autoFetch, hasData, loading, dispatch]);
 
     return {
         data: { summary, reimbursements },
@@ -204,7 +231,7 @@ export const useReimbursementData = (autoFetch = true) => {
         lastFetched,
         refetch: fetchData,
         forceRefresh: forceRefreshData,
-        isStale: lastFetched ? (Date.now() - lastFetched) > 5 * 60 * 1000 : true
+        isStale: lastFetched ? (Date.now() - lastFetched) > CACHE_TTL_MS : true
     };
 };
 
@@ -220,6 +247,10 @@ export const useTasksData = (autoFetch = true) => {
  */
 export const useInventoryData = (autoFetch = true) => {
     return usePageData('inventory', autoFetch);
+};
+
+export const useAccountHistoryData = (autoFetch = true) => {
+    return usePageData('accountHistory', autoFetch);
 };
 
 export default usePageData;

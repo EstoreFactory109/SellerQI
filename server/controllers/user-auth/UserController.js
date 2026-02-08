@@ -1,4 +1,4 @@
-const { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassword } = require('../../Services/User/userServices.js');
+const { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassword, getFirstAnalysisStatus } = require('../../Services/User/userServices.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
@@ -1786,6 +1786,36 @@ const resendOtp = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { otp }, "OTP sent successfully"));
 });
 
+/**
+ * Check if the first analysis is done for the authenticated user
+ * This endpoint is polled by the AnalysingAccount page to check when analysis completes
+ */
+const checkFirstAnalysisStatus = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+
+    if (!userId) {
+        logger.error(new ApiError(401, "User ID not found"));
+        return res.status(401).json(new ApiResponse(401, "", "User ID not found"));
+    }
+
+    try {
+        const status = await getFirstAnalysisStatus(userId);
+
+        if (status === null) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, {
+            firstAnalysisDone: status
+        }, status ? "Analysis complete" : "Analysis in progress"));
+
+    } catch (error) {
+        logger.error('Error checking first analysis status:', error);
+        return res.status(500).json(new ApiResponse(500, "", "Error checking analysis status"));
+    }
+});
+
 module.exports = {
     registerUser,
     registerAgencyClient,
@@ -1814,5 +1844,7 @@ module.exports = {
     getAdminBillingInfo,
     resendOtp,
     // Super Admin endpoints
-    superAdminUpdateUserPassword
+    superAdminUpdateUserPassword,
+    // Analysis status
+    checkFirstAnalysisStatus
 };

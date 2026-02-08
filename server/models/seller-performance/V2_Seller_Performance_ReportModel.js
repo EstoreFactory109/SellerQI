@@ -59,7 +59,8 @@ const GET_V2_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );
 
-// **🛡️ Hash Refresh Token Before Storing**
+// Compound index for efficient queries by User, country, region and sorted by createdAt
+GET_V2_SELLER_PERFORMANCE_REPORT_Schema.index({ User: 1, country: 1, region: 1, createdAt: -1 });
 
 // Create the model
 const Seller = mongoose.model("GET_V2_SELLER_PERFORMANCE_REPORT", GET_V2_SELLER_PERFORMANCE_REPORT_Schema);

@@ -1,5 +1,33 @@
 const mongoose = require("mongoose");
 
+/**
+ * SUBSCRIPTION MODEL
+ * 
+ * Stores subscription information for users including Stripe and Razorpay subscriptions.
+ * 
+ * IMPORTANT: Abandoned Subscription Cleanup (TODO - Requires Cron Job)
+ * =====================================================================
+ * Subscriptions with status='incomplete' that are older than 24 hours should be cleaned up.
+ * These are created when a user starts checkout but doesn't complete it.
+ * 
+ * A background job should be scheduled to:
+ * 1. Find subscriptions with status='incomplete' and updatedAt < (now - 24 hours)
+ * 2. Cancel any corresponding Stripe/Razorpay subscriptions if they exist
+ * 3. Delete or mark these subscription records as 'abandoned'
+ * 
+ * Example cron job query:
+ * const abandonedThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+ * const abandoned = await Subscription.find({
+ *   status: 'incomplete',
+ *   updatedAt: { $lt: abandonedThreshold }
+ * });
+ * 
+ * This cleanup prevents:
+ * - Database bloat from incomplete checkouts
+ * - Confusion about subscription status
+ * - Potential billing issues with orphaned subscriptions in payment gateways
+ */
+
 const subscriptionSchema = new mongoose.Schema(
   {
     userId: {
@@ -58,6 +86,12 @@ const subscriptionSchema = new mongoose.Schema(
       type: Date,
       required: false,
     },
+    // Flag to track if checkout was completed (used to prevent trial activation on cancelled checkouts)
+    // This is set to true only when checkout.session.completed fires (Stripe) or payment is verified (Razorpay)
+    checkoutCompleted: {
+      type: Boolean,
+      default: false,
+    },
     // Common fields
     planType: {
       type: String,
@@ -107,15 +141,27 @@ const subscriptionSchema = new mongoose.Schema(
         sessionId: String,
         orderId: String, // For Razorpay
         paymentId: String, // For Razorpay
-        amount: Number,
+        amount: {
+          type: Number,
+          min: 0
+        },
         currency: String,
-        status: String,
+        status: {
+          type: String,
+          enum: ["paid", "unpaid", "pending", "refunded", "failed"],
+          default: "paid"
+        },
         paymentDate: {
           type: Date,
           default: Date.now,
         },
         stripePaymentIntentId: String,
+        stripeInvoiceId: String, // For Stripe invoices
         razorpayPaymentId: String,
+        // Invoice-related fields
+        invoiceUrl: String,
+        invoicePdf: String,
+        invoiceNumber: String,
         paymentGateway: {
           type: String,
           enum: ["stripe", "razorpay"],
@@ -138,6 +184,13 @@ subscriptionSchema.index({ stripeCustomerId: 1 });
 subscriptionSchema.index({ stripeSubscriptionId: 1 });
 subscriptionSchema.index({ razorpayOrderId: 1 });
 subscriptionSchema.index({ razorpayPaymentId: 1 });
+// Add missing razorpaySubscriptionId index - frequently queried in webhook handlers
+subscriptionSchema.index({ razorpaySubscriptionId: 1 });
+// Add status index for filtering subscriptions by status
+subscriptionSchema.index({ status: 1 });
+// Add compound index for common queries
+subscriptionSchema.index({ userId: 1, status: 1 });
+subscriptionSchema.index({ userId: 1, paymentGateway: 1 });
 
 const Subscription = mongoose.model("Subscription", subscriptionSchema);
 module.exports = Subscription; 

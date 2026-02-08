@@ -16,6 +16,7 @@ const { sendAnalysisReadyEmail } = require('../Email/SendAnalysisReadyEmail.js')
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const axios = require('axios');
 const userModel = require('../../models/user-auth/userModel.js');
+const { markFirstAnalysisDone } = require('../User/userServices.js');
 
 // Helper function to add timeout to promises
 const withTimeout = (promise, timeoutMs, operationName) => {
@@ -1851,6 +1852,11 @@ class Integration {
                     if (emailSent) {
                         userInfo.analyseAccountSuccess = 0;
                         await userInfo.save();
+                        
+                        // Mark first analysis as done when email is successfully sent
+                        // This flag indicates the analysis is complete and dashboard is ready
+                        await markFirstAnalysisDone(userId);
+                        logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
                     }
                 }
             }

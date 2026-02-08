@@ -147,25 +147,17 @@ const AmazonConnect = () => {
   // Show loading state while checking subscription
   if (checkingSubscription) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-[#3B4A6B]" />
-          <p className="text-gray-600">Verifying subscription...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+          <p className="text-gray-400">Verifying subscription...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50 flex items-center justify-center font-roboto relative overflow-hidden">
-      
-       {/* Background brand-themed elements */}
-       <div className="absolute inset-0 overflow-hidden">
-         <div className="absolute -top-32 -right-32 w-64 h-64 bg-gradient-to-br from-blue-200/30 to-violet-300/20 rounded-full blur-3xl"></div>
-         <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-gradient-to-br from-violet-200/30 to-pink-300/20 rounded-full blur-3xl"></div>
-         <div className="absolute top-1/2 left-1/4 w-32 h-32 bg-gradient-to-br from-pink-200/20 to-blue-200/20 rounded-full blur-2xl"></div>
-       </div>
-
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center font-roboto relative overflow-hidden">
       {/* Main Content */}
       <div className="relative z-10 w-full max-w-6xl mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -179,7 +171,7 @@ const AmazonConnect = () => {
           >
             {/* Brand Logo/Identity */}
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-lg border border-gray-200">
+              <div className="w-12 h-12 bg-[#161b22] rounded-xl flex items-center justify-center shadow-lg border border-[#30363d]">
                 <img 
                   src="/Logo.png"
                   alt="SellerQI Logo"
@@ -187,7 +179,7 @@ const AmazonConnect = () => {
                 />
               </div>
               <div>
-                <h2 className="text-xl font-bold bg-gradient-to-r from-[#3B4A6B] to-violet-600 bg-clip-text text-transparent">
+                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                   SellerQI
                 </h2>
                 <p className="text-sm text-gray-500">Amazon Analytics Platform</p>
@@ -195,12 +187,12 @@ const AmazonConnect = () => {
             </div>
 
             <div className="space-y-6">
-              <h1 className="text-4xl lg:text-5xl font-bold text-gray-900 leading-tight">
+              <h1 className="text-4xl lg:text-5xl font-bold text-gray-100 leading-tight">
                 Connect to 
-                <span className="bg-gradient-to-r from-[#3B4A6B] to-pink-600 bg-clip-text text-transparent"> Amazon</span>
+                <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent"> Amazon</span>
               </h1>
               
-              <p className="text-lg text-gray-600 leading-relaxed">
+              <p className="text-lg text-gray-400 leading-relaxed">
                 Unlock powerful insights from your Amazon seller account. Get comprehensive analytics, 
                 track performance, and optimize your business within 24 hours.
               </p>
@@ -217,14 +209,14 @@ const AmazonConnect = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 + index * 0.1 }}
-                    className="flex items-center space-x-4 p-4 bg-white/50 backdrop-blur-sm rounded-xl border border-white/30"
+                    className="flex items-center space-x-4 p-4 bg-[#161b22] backdrop-blur-sm rounded-xl border border-[#30363d]"
                   >
-                    <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-violet-100 rounded-lg flex items-center justify-center">
-                      <feature.icon className="w-5 h-5 text-[#3B4A6B]" />
+                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
+                      <feature.icon className="w-5 h-5 text-blue-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-gray-900">{feature.title}</h3>
-                      <p className="text-sm text-gray-600">{feature.desc}</p>
+                      <h3 className="font-semibold text-gray-100">{feature.title}</h3>
+                      <p className="text-sm text-gray-400">{feature.desc}</p>
                     </div>
                   </motion.div>
                 ))}
@@ -239,7 +231,7 @@ const AmazonConnect = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="w-full"
           >
-            <div className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl border border-white/50 p-8 lg:p-10">
+            <div className="bg-[#161b22] rounded-3xl shadow-2xl border border-[#30363d] p-8 lg:p-10">
               <form onSubmit={handleSubmit} className="space-y-8">
                 {/* Header */}
                 <div className="text-center space-y-4">
@@ -247,7 +239,7 @@ const AmazonConnect = () => {
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-                    className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto shadow-lg border border-gray-200"
+                    className="w-20 h-20 bg-[#21262d] rounded-2xl flex items-center justify-center mx-auto shadow-lg border border-[#30363d]"
                   >
                     <img 
                       src="/Logo.png"
@@ -256,8 +248,8 @@ const AmazonConnect = () => {
                     />
                   </motion.div>
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Start Your Journey</h2>
-                    <p className="text-gray-600">Select your Amazon marketplace to begin</p>
+                    <h2 className="text-2xl font-bold text-gray-100">Start Your Journey</h2>
+                    <p className="text-gray-500">Select your Amazon marketplace to begin</p>
                   </div>
                 </div>
 
@@ -268,9 +260,9 @@ const AmazonConnect = () => {
                   transition={{ delay: 0.6 }}
                   className="space-y-3"
                 >
-                  <label className="flex items-center gap-3 text-base font-semibold text-gray-800">
-                    <div className="w-8 h-8 bg-gradient-to-br from-blue-100 to-violet-100 rounded-lg flex items-center justify-center">
-                      <Globe className="w-4 h-4 text-[#3B4A6B]" />
+                  <label className="flex items-center gap-3 text-base font-semibold text-gray-300">
+                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
+                      <Globe className="w-4 h-4 text-blue-400" />
                     </div>
                     Select Your Country
                   </label>
@@ -280,18 +272,18 @@ const AmazonConnect = () => {
                     <button
                       type="button"
                       onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className="w-full px-5 py-4 bg-white border-2 border-gray-200 rounded-xl outline-none transition-all duration-300 focus:border-[#3B4A6B] focus:ring-4 focus:ring-blue-100 text-base shadow-sm hover:shadow-md text-left flex items-center justify-between"
+                      className="w-full px-5 py-4 bg-[#21262d] border-2 border-[#30363d] rounded-xl outline-none transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 text-base shadow-sm hover:shadow-md text-left flex items-center justify-between text-gray-100"
                     >
                       {selectedCountry ? (
                         <span className="flex items-center gap-2">
                           <span className="text-xl">{selectedCountry.flag}</span>
                           <span>{selectedCountry.name}</span>
-                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full ml-2">
+                          <span className="text-xs text-gray-400 bg-[#161b22] px-2 py-0.5 rounded-full ml-2 border border-[#30363d]">
                             {REGION_NAMES[selectedCountry.region]}
                           </span>
                         </span>
                       ) : (
-                        <span className="text-gray-400">-- Select your country --</span>
+                        <span className="text-gray-500">-- Select your country --</span>
                       )}
                       <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
                     </button>
@@ -302,10 +294,10 @@ const AmazonConnect = () => {
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
-                        className="absolute z-50 w-full mt-2 bg-white border-2 border-gray-200 rounded-xl shadow-xl overflow-hidden"
+                        className="absolute z-50 w-full mt-2 bg-[#161b22] border-2 border-[#30363d] rounded-xl shadow-xl overflow-hidden"
                       >
                         {/* Search Input */}
-                        <div className="p-3 border-b border-gray-100">
+                        <div className="p-3 border-b border-[#30363d]">
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input
@@ -313,7 +305,7 @@ const AmazonConnect = () => {
                               placeholder="Search country..."
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
-                              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#3B4A6B] focus:ring-2 focus:ring-blue-100 text-sm"
+                              className="w-full pl-10 pr-4 py-2.5 bg-[#21262d] border border-[#30363d] text-gray-100 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm placeholder-gray-500"
                               autoFocus
                             />
                           </div>
@@ -334,7 +326,7 @@ const AmazonConnect = () => {
                                 
                                 return (
                                   <div key={regionCode}>
-                                    <div className="px-4 py-2 bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0">
+                                    <div className="px-4 py-2 bg-[#21262d] text-xs font-semibold text-gray-400 uppercase tracking-wider sticky top-0 border-b border-[#30363d]">
                                       {REGION_NAMES[regionCode]}
                                     </div>
                                     {regionCountries.map(country => (
@@ -342,13 +334,13 @@ const AmazonConnect = () => {
                                         key={country.code}
                                         type="button"
                                         onClick={() => handleCountrySelect(country.code)}
-                                        className={`w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors flex items-center gap-3 ${
-                                          marketPlace === country.code ? 'bg-blue-50 border-l-4 border-[#3B4A6B]' : ''
+                                        className={`w-full px-4 py-3 text-left hover:bg-[#21262d] transition-colors flex items-center gap-3 text-gray-300 ${
+                                          marketPlace === country.code ? 'bg-blue-500/10 border-l-4 border-blue-500' : ''
                                         }`}
                                       >
                                         <span className="text-xl">{country.flag}</span>
                                         <span className="flex-1">{country.name}</span>
-                                        <span className="text-xs text-gray-400">{country.code}</span>
+                                        <span className="text-xs text-gray-500">{country.code}</span>
                                       </button>
                                     ))}
                                   </div>
@@ -382,19 +374,18 @@ const AmazonConnect = () => {
                   disabled={loading || !region || !marketPlace}
                   className={`group relative w-full py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-lg ${
                     loading || !region || !marketPlace
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                       : 'bg-[#3B4A6B] text-white hover:bg-[#2d3a52] transform hover:scale-[1.02] active:scale-[0.98] shadow-violet-200 hover:shadow-xl hover:shadow-violet-300'
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                       : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 transform hover:scale-[1.02] active:scale-[0.98] shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30'
                    }`}
                  >
-                   <div className="absolute inset-0 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                   <div className="relative flex items-center gap-3 group-hover:text-white transition-colors duration-300">
+                   <div className="relative flex items-center gap-3">
                      {loading ? (
                        <Loader2 className="w-6 h-6 animate-spin" />
                      ) : (
                        <>
-                         <Package className="w-6 h-6 group-hover:text-white transition-colors duration-300" />
+                         <Package className="w-6 h-6" />
                          <span>Connect to Amazon</span>
-                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 group-hover:text-white transition-all duration-300" />
+                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-all duration-300" />
                        </>
                      )}
                    </div>
@@ -409,15 +400,15 @@ const AmazonConnect = () => {
                 >
                   <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
                      <div className="flex items-center gap-1">
-                       <div className="w-2 h-2 bg-violet-500 rounded-full animate-pulse"></div>
+                       <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
                        <span>Secure Connection</span>
                      </div>
                     <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
                       <span>24hr Setup</span>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     Your Amazon data is processed securely and never stored permanently
                   </p>
                 </motion.div>

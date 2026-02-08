@@ -4,10 +4,15 @@ import Products from "../Components/Issues_pages/Products.jsx";
 import Account from "../Components/Issues_pages/Account.jsx";
 import { AlertTriangle } from 'lucide-react';
 import { useSearchParams } from "react-router-dom";
+import { useIssuesData } from '../hooks/usePageData.js';
+import { SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx';
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'category';
+  
+  // Fetch issues data using the hook (automatically fetches on mount)
+  const { data: issuesData, loading: issuesLoading, error: issuesError, refetch: refetchIssues } = useIssuesData();
 
   const renderComponent = () => {
     switch (currentTab) {
@@ -21,24 +26,24 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50/50">
+    <div className="min-h-screen bg-[#1a1a1a]">
       {/* Modern Header Section */}
-      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
-        <div className='px-4 lg:px-6 py-4'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-            <div className='flex items-center gap-4'>
+      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+        <div className='px-2 lg:px-3 py-1.5'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
+            <div className='flex items-center gap-2'>
               <div>
-                <h1 className='text-2xl font-bold text-gray-900'>
+                <h1 className='text-lg font-bold text-gray-100'>
                   {currentTab === 'account' ? 'Account Issues' : 'Issues'}
                 </h1>
-                <p className='text-sm text-gray-600 mt-1'>
+                <p className='text-xs text-gray-400 mt-0.5'>
                   {currentTab === 'account' 
                     ? 'Monitor and resolve account health issues and policy violations' 
                     : 'Monitor and resolve product issues across your Amazon catalog'}
                 </p>
               </div>
-              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-full text-xs font-medium'>
-                <AlertTriangle className='w-2 h-2' />
+              <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded text-xs font-medium border border-orange-500/30'>
+                <AlertTriangle className='w-3 h-3' />
                 Issues detected
               </div>
             </div>
@@ -47,9 +52,19 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content - Scrollable */}
-      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
-        <div className='px-4 lg:px-6 py-6 pb-20'>
-          {renderComponent()}
+      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
+        <div className='px-2 lg:px-3 py-1.5 pb-1'>
+          {issuesLoading ? (
+            <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+              <div className="p-2 border-b border-[#30363d]">
+                <h3 className="text-sm font-semibold text-gray-100">Issues</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Loading issues data…</p>
+              </div>
+              <div className="p-2">
+                <SkeletonTableBody rows={8} />
+              </div>
+            </div>
+          ) : renderComponent()}
         </div>
       </div>
     </div>

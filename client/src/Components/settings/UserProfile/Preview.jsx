@@ -51,10 +51,10 @@ const [loading, setLoading] = useState(false);
   };
 
   return (
-    <div className='w-full h-full flex items-center justify-center z-[99] fixed top-0 left-0 right-0'>
+    <div className='w-full h-full flex items-center justify-center z-[99] fixed top-0 left-0 right-0 bg-black/50'>
 
-      <div className="text-center bg-white w-[40rem] h-[27rem] flex flex-col justify-center items-center rounded-lg border-gray-300 border-4">
-        <div className="w-[50%] h-[72%] rounded-full bg-white mx-auto  overflow-hidden border-4 border-gray-300 shadow-md relative">
+      <div className="text-center bg-[#161b22] w-[40rem] h-[27rem] flex flex-col justify-center items-center rounded-lg border-[#30363d] border-2">
+        <div className="w-[50%] h-[72%] rounded-full bg-[#1a1a1a] mx-auto overflow-hidden border-2 border-[#30363d] shadow-md relative">
           <Cropper
             image={imageSrc}
             crop={crop}
@@ -81,20 +81,20 @@ const [loading, setLoading] = useState(false);
             }}
             className="custom-range w-[25rem] h-1 "
           />
-          <p>{parseInt((zoom / 3) * 100)}%</p>
+          <p className="text-gray-200">{parseInt((zoom / 3) * 100)}%</p>
         </div>
 
 
         <div className='flex gap-4'>
         <button
           onClick={handleConfirm}
-          className="w-[8rem] mt-4 px-5 py-2 bg-[#333651] text-white font-medium rounded transition"
+          className="w-[8rem] mt-4 px-5 py-2 bg-blue-600 text-white font-medium rounded transition hover:bg-blue-700"
         >
          {!loading?<p>Save Image</p>:<BeatLoader color="white" size={8}/>}
         </button>
         <button
           onClick={close}
-          className=" w-[8rem] mt-4 px-5 py-2 bg-[#333651] text-white font-medium rounded transition"
+          className="w-[8rem] mt-4 px-5 py-2 bg-[#30363d] text-gray-200 font-medium rounded transition hover:bg-[#21262d]"
         >
           Cancel
         </button>

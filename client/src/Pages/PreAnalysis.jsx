@@ -451,280 +451,309 @@ export default function PreAnalysis() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full">
-      {/* Header Section */}
-      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
-        <div className='px-4 lg:px-6 py-4'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-            <div className='flex items-center gap-4'>
-              <div>
-                <h1 className='text-2xl font-bold text-gray-900'>Listing Analyzer</h1>
-                <p className='text-sm text-gray-600 mt-1'>Analyze your product listing for ranking errors before adding to Amazon</p>
+    <div className="min-h-screen overflow-x-hidden w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        {/* Header Section */}
+        <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '10px' }}>
+          <div className='flex items-center gap-2'>
+            <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <div>
+              <h1 className='text-base font-bold' style={{ color: '#f3f4f6' }}>Listing Analyzer</h1>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div>
+          <div className="max-w-6xl mx-auto">
+          {/* Info Banner */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            style={{ background: '#161b22', borderLeft: '3px solid #3b82f6', borderRadius: '6px', padding: '10px 12px', marginBottom: '10px', border: '1px solid #30363d' }}
+          >
+            <div className="flex items-start gap-2">
+              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#60a5fa' }} />
+              <div className="flex-1">
+                <h3 className="font-semibold text-xs mb-1" style={{ color: '#f3f4f6' }}>What is Listing Analyzer?</h3>
+                <p className="text-[11px] leading-relaxed mb-2" style={{ color: '#9ca3af' }}>
+                  Listing Analyzer helps you identify potential ranking issues before listing your product on Amazon. 
+                  Fill in any product details below, and we'll instantly analyze them for common ranking errors and optimization opportunities.
+                </p>
+                <div className="flex items-center gap-1.5 text-[10px] font-medium" style={{ color: '#60a5fa' }}>
+                  <div className="w-1 h-1 rounded-full" style={{ background: '#3b82f6' }}></div>
+                  <span>Fill at least one field to get started</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Form Section */}
+          <motion.form
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            onSubmit={handleSubmit}
+            style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '12px', marginBottom: '10px' }}
+            className="space-y-4"
+          >
+        {/* Product Title */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Title</h2>
+          </div>
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              name="product_title"
+              value={form.product_title}
+              onChange={handleChange}
+              className="w-full rounded-lg px-3 py-2 text-xs transition-all duration-300"
+              style={{ 
+                background: '#1a1a1a', 
+                border: `1px solid ${errors.product_title ? '#60a5fa' : '#30363d'}`, 
+                color: '#f3f4f6',
+                placeholder: '#6b7280'
+              }}
+              placeholder="Enter your product title here..."
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = errors.product_title ? '#60a5fa' : '#30363d'}
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+                {form.product_title.length} characters
+              </p>
+              {errors.product_title && (
+                <p className="text-[10px] font-medium flex items-center gap-1" style={{ color: '#60a5fa' }}>
+                  <AlertCircle className="w-3 h-3" />
+                  {errors.product_title}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Backend Keywords Section */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Tag className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Backend Keywords</h2>
+          </div>
+          <div className="space-y-1.5">
+            <textarea
+              name="backendKeywords"
+              value={form.backendKeywords}
+              onChange={handleChange}
+              rows={4}
+              className="w-full rounded-lg px-3 py-2 text-xs transition-all duration-300 resize-none"
+              style={{ 
+                background: '#1a1a1a', 
+                border: `1px solid ${errors.backendKeywords ? '#60a5fa' : '#30363d'}`, 
+                color: '#f3f4f6'
+              }}
+              placeholder="Enter backend keywords/search terms separated by commas or spaces..."
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = errors.backendKeywords ? '#60a5fa' : '#30363d'}
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+                {form.backendKeywords.length} characters
+              </p>
+              {errors.backendKeywords && (
+                <p className="text-[10px] font-medium flex items-center gap-1" style={{ color: '#60a5fa' }}>
+                  <AlertCircle className="w-3 h-3" />
+                  {errors.backendKeywords}
+                </p>
+              )}
+            </div>
+            <div className="rounded-lg p-2" style={{ background: '#21262d', border: '1px solid #30363d' }}>
+              <div className="flex items-start gap-1.5">
+                <Info className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: '#60a5fa' }} />
+                <div>
+                  <p className="text-[10px] font-semibold mb-0.5" style={{ color: '#f3f4f6' }}>Pro Tip</p>
+                  <p className="text-[10px] leading-relaxed" style={{ color: '#9ca3af' }}>
+                    Include synonyms, alternate terms, and relevant keywords. Each word should be unique (no duplicates) for maximum effectiveness.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
-        <div className='px-4 lg:px-6 py-6 pb-20'>
-          <div className="max-w-6xl mx-auto">
-            {/* Info Banner */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 rounded-xl p-5 shadow-sm mb-8"
-            >
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Info className="w-5 h-5 text-white" />
+        {/* Bullet Points Section */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Bullet Points</h2>
+          </div>
+          <div className="space-y-2">
+            {form.about_product.map((bullet, index) => (
+              <div key={index} className="relative group">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-semibold" style={{ color: '#f3f4f6' }}>
+                    Bullet Point {index + 1}
+                  </label>
+                  {form.about_product.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeBulletPoint(index)}
+                      className="text-[10px] font-medium px-2 py-1 rounded transition-colors"
+                      style={{ color: '#60a5fa' }}
+                      onMouseEnter={(e) => e.target.style.background = 'rgba(96, 165, 250, 0.2)'}
+                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-900 mb-2">What is Listing Analyzer?</h3>
-                  <p className="text-gray-700 text-sm leading-relaxed mb-3">
-                    Listing Analyzer helps you identify potential ranking issues before listing your product on Amazon. 
-                    Fill in any product details below, and we'll instantly analyze them for common ranking errors and optimization opportunities.
-                  </p>
-                  <div className="flex items-center gap-2 text-xs text-blue-700 font-medium">
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                    <span>Fill at least one field to get started</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Form Section */}
-            <motion.form
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              onSubmit={handleSubmit}
-              className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6 lg:p-8 space-y-8"
-            >
-          {/* Product Title */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
-                <FileText className="w-5 h-5 text-blue-600" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Product Title</h2>
-            </div>
-            <div className="space-y-2">
-              <input
-                type="text"
-                name="product_title"
-                value={form.product_title}
-                onChange={handleChange}
-                className={`w-full border-2 rounded-xl px-5 py-3.5 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300 bg-gray-50/50 hover:bg-white ${
-                  errors.product_title ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200'
-                }`}
-                placeholder="Enter your product title here..."
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500 font-medium">
-                  {form.product_title.length} characters
+                <textarea
+                  value={bullet}
+                  onChange={(e) => handleBulletPointChange(index, e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg px-3 py-2 text-xs transition-all duration-300 resize-none"
+                  style={{ 
+                    background: '#1a1a1a', 
+                    border: '1px solid #30363d', 
+                    color: '#f3f4f6'
+                  }}
+                  placeholder={`Enter key feature ${index + 1}...`}
+                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onBlur={(e) => e.target.style.borderColor = '#30363d'}
+                />
+                <p className="text-[10px] font-medium mt-1" style={{ color: '#9ca3af' }}>
+                  {bullet.length} characters
                 </p>
-                {errors.product_title && (
-                  <p className="text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {errors.product_title}
-                  </p>
-                )}
               </div>
-            </div>
-          </div>
-
-          {/* Backend Keywords Section */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl flex items-center justify-center">
-                <Tag className="w-5 h-5 text-purple-600" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Backend Keywords</h2>
-            </div>
-            <div className="space-y-3">
-              <textarea
-                name="backendKeywords"
-                value={form.backendKeywords}
-                onChange={handleChange}
-                rows={6}
-                className={`w-full border-2 rounded-xl px-5 py-3.5 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 resize-none bg-gray-50/50 hover:bg-white ${
-                  errors.backendKeywords ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200'
-                }`}
-                placeholder="Enter backend keywords/search terms separated by commas or spaces..."
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500 font-medium">
-                  {form.backendKeywords.length} characters
-                </p>
-                {errors.backendKeywords && (
-                  <p className="text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {errors.backendKeywords}
-                  </p>
-                )}
-              </div>
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-4">
-                <div className="flex items-start gap-2">
-                  <div className="w-5 h-5 bg-purple-500 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Info className="w-3 h-3 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-purple-900 mb-1">Pro Tip</p>
-                    <p className="text-xs text-purple-800 leading-relaxed">
-                      Include synonyms, alternate terms, and relevant keywords. Each word should be unique (no duplicates) for maximum effectiveness.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bullet Points Section */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center">
-                <FileText className="w-5 h-5 text-emerald-600" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Bullet Points</h2>
-            </div>
-            <div className="space-y-4">
-              {form.about_product.map((bullet, index) => (
-                <div key={index} className="relative group">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-gray-700 font-semibold text-sm">
-                      Bullet Point {index + 1}
-                    </label>
-                    {form.about_product.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeBulletPoint(index)}
-                        className="text-red-500 hover:text-red-600 text-sm font-medium px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={bullet}
-                    onChange={(e) => handleBulletPointChange(index, e.target.value)}
-                    rows={3}
-                    className="w-full border-2 border-gray-200 rounded-xl px-5 py-3.5 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-300 resize-none bg-gray-50/50 hover:bg-white"
-                    placeholder={`Enter key feature ${index + 1}...`}
-                  />
-                  <p className="text-xs text-gray-500 font-medium mt-1.5">
-                    {bullet.length} characters
-                  </p>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addBulletPoint}
-                className="w-full py-3 px-4 border-2 border-dashed border-gray-300 rounded-xl text-gray-600 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50/50 transition-all duration-300 font-medium flex items-center justify-center gap-2 group"
-              >
-                <div className="w-5 h-5 border-2 border-current rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <span className="text-sm">+</span>
-                </div>
-                Add More Bullet Point
-              </button>
-            </div>
-          </div>
-
-          {/* Product Description */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-amber-100 to-orange-100 rounded-xl flex items-center justify-center">
-                <FileText className="w-5 h-5 text-amber-600" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Product Description</h2>
-            </div>
-            <div className="space-y-2">
-              <textarea
-                name="product_description"
-                value={form.product_description}
-                onChange={handleChange}
-                rows={10}
-                className={`w-full border-2 rounded-xl px-5 py-3.5 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all duration-300 resize-none bg-gray-50/50 hover:bg-white ${
-                  errors.product_description ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200'
-                }`}
-                placeholder="Enter your product description. Include features, benefits, specifications, and usage instructions..."
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500 font-medium">
-                  {form.product_description.length} characters
-                </p>
-                {errors.product_description && (
-                  <p className="text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {errors.product_description}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Error Messages */}
-          {errors.general && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gradient-to-r from-red-50 to-pink-50 border-l-4 border-red-500 rounded-xl p-5 shadow-sm"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <AlertCircle className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-red-900 font-semibold mb-1">Validation Error</h4>
-                  <p className="text-red-700 text-sm">{errors.general}</p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Submit Button */}
-          <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-200">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className={`flex-1 py-4 px-8 rounded-xl font-semibold text-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-lg ${
-                isSubmitting
-                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed shadow-none'
-                  : 'bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 text-white hover:from-blue-700 hover:via-blue-600 hover:to-indigo-700 hover:shadow-xl hover:shadow-blue-500/30 transform hover:scale-[1.02]'
-              }`}
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Analyzing...</span>
-                </>
-              ) : (
-                <>
-                  <BarChart3 className="w-5 h-5" />
-                  <span>Analyze Product</span>
-                </>
-              )}
-            </button>
+            ))}
             <button
               type="button"
-              onClick={() => {
-                setForm({
-                  product_title: '',
-                  about_product: [''],
-                  product_description: '',
-                  backendKeywords: ''
-                });
-                setErrors({});
-                setAnalysisResults(null);
+              onClick={addBulletPoint}
+              className="w-full py-2 px-3 border border-dashed rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all duration-300"
+              style={{ 
+                borderColor: '#30363d', 
+                color: '#9ca3af',
+                background: '#1a1a1a'
               }}
-              className="px-8 py-4 rounded-xl font-semibold text-lg border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-all duration-300"
+              onMouseEnter={(e) => {
+                e.target.style.borderColor = '#60a5fa';
+                e.target.style.color = '#60a5fa';
+                e.target.style.background = 'rgba(96, 165, 250, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.borderColor = '#30363d';
+                e.target.style.color = '#9ca3af';
+                e.target.style.background = '#1a1a1a';
+              }}
             >
-              Clear Form
+              <span className="text-sm">+</span>
+              Add More Bullet Point
             </button>
           </div>
-            </motion.form>
+        </div>
+
+        {/* Product Description */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Description</h2>
+          </div>
+          <div className="space-y-1.5">
+            <textarea
+              name="product_description"
+              value={form.product_description}
+              onChange={handleChange}
+              rows={6}
+              className="w-full rounded-lg px-3 py-2 text-xs transition-all duration-300 resize-none"
+              style={{ 
+                background: '#1a1a1a', 
+                border: `1px solid ${errors.product_description ? '#60a5fa' : '#30363d'}`, 
+                color: '#f3f4f6'
+              }}
+              placeholder="Enter your product description. Include features, benefits, specifications, and usage instructions..."
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = errors.product_description ? '#60a5fa' : '#30363d'}
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+                {form.product_description.length} characters
+              </p>
+              {errors.product_description && (
+                <p className="text-[10px] font-medium flex items-center gap-1" style={{ color: '#60a5fa' }}>
+                  <AlertCircle className="w-3 h-3" />
+                  {errors.product_description}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Error Messages */}
+        {errors.general && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-lg p-2"
+            style={{ background: 'rgba(96, 165, 250, 0.2)', borderLeft: '3px solid #60a5fa', border: '1px solid rgba(96, 165, 250, 0.3)' }}
+          >
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#60a5fa' }} />
+              <div>
+                <h4 className="font-semibold text-xs mb-0.5" style={{ color: '#60a5fa' }}>Validation Error</h4>
+                <p className="text-[11px]" style={{ color: '#60a5fa' }}>{errors.general}</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Submit Button */}
+        <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t" style={{ borderColor: '#30363d' }}>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="flex-1 py-2 px-4 rounded-lg font-medium text-xs transition-all duration-300 flex items-center justify-center gap-2"
+            style={{ 
+              background: isSubmitting ? '#6b7280' : '#3b82f6', 
+              color: 'white',
+              cursor: isSubmitting ? 'not-allowed' : 'pointer'
+            }}
+            onMouseEnter={(e) => !isSubmitting && (e.target.style.background = '#2563eb')}
+            onMouseLeave={(e) => !isSubmitting && (e.target.style.background = '#3b82f6')}
+          >
+            {isSubmitting ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Analyzing...</span>
+              </>
+            ) : (
+              <>
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Analyze Product</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setForm({
+                product_title: '',
+                about_product: [''],
+                product_description: '',
+                backendKeywords: ''
+              });
+              setErrors({});
+              setAnalysisResults(null);
+            }}
+            className="px-4 py-2 rounded-lg font-medium text-xs transition-all duration-300"
+            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+            onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+            onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
+          >
+            Clear Form
+          </button>
+        </div>
+          </motion.form>
 
             {/* Analysis Results */}
             {analysisResults && <AnalysisReport analysisResults={analysisResults} />}

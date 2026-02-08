@@ -69,6 +69,9 @@ class AnalyseService {
      * @returns {Object} Analysis result
      */
     static async Analyse(userId, country, region, adminId = null) {
+        const analyseStartTime = Date.now();
+        logger.info(`[PERF] Starting Analyse service for user ${userId}, country ${country}, region ${region}`);
+        
         console.log("userId in the start: ", userId);
         if (!userId) {
             logger.error(new ApiError(400, "User id is missing"));
@@ -87,7 +90,10 @@ class AnalyseService {
             }
         }
 
+        let stepStart = Date.now();
         const createdAccountDate = await userModel.findOne({ _id: userId }).select('createdAt').sort({ createdAt: -1 });
+        logger.info(`[PERF] Fetched createdAccountDate in ${Date.now() - stepStart}ms`);
+        
         if (!createdAccountDate) {
             logger.error(new ApiError(404, "User not found"));
             return {
@@ -97,7 +103,10 @@ class AnalyseService {
         }
 
         // Get seller account data
+        stepStart = Date.now();
         const sellerAccountData = await this.getSellerAccountData(userId, country, region, adminId);
+        logger.info(`[PERF] getSellerAccountData completed in ${Date.now() - stepStart}ms`);
+        
         if (!sellerAccountData.success) {
             return {
                 status: sellerAccountData.status,
@@ -108,15 +117,22 @@ class AnalyseService {
         const { allSellerAccounts, SellerAccount, sellerCentral } = sellerAccountData;
 
         // Fetch all data models in parallel
+        stepStart = Date.now();
         const allData = await this.fetchAllDataModels(userId, country, region);
+        logger.info(`[PERF] fetchAllDataModels total time: ${Date.now() - stepStart}ms`);
 
         // Process sponsored ads data
+        stepStart = Date.now();
         const sponsoredAdsData = this.processSponsoredAdsData(allData.ProductWiseSponsoredAds);
+        logger.info(`[PERF] processSponsoredAdsData completed in ${Date.now() - stepStart}ms`);
 
         // Get difference calculation data
+        stepStart = Date.now();
         const differenceData = await differenceCalculation(userId, country, region);
+        logger.info(`[PERF] differenceCalculation completed in ${Date.now() - stepStart}ms`);
 
         // Create base result object
+        stepStart = Date.now();
         const result = await this.createBaseResult({
             userId,
             region,
@@ -129,16 +145,21 @@ class AnalyseService {
             sponsoredAdsData,
             differenceData
         });
+        logger.info(`[PERF] createBaseResult completed in ${Date.now() - stepStart}ms`);
 
         // Process conversion and ranking data
+        stepStart = Date.now();
         const conversionData = this.processConversionData(SellerAccount, allData);
         result.RankingsData = conversionData.rankingsData;
         result.ConversionData = conversionData.conversionData;
         result.Defaulters = conversionData.defaulters;
+        logger.info(`[PERF] processConversionData completed in ${Date.now() - stepStart}ms`);
 
         // Process inventory analysis
+        stepStart = Date.now();
         const inventoryAnalysis = this.processInventoryAnalysis(allData);
         result.InventoryAnalysis = inventoryAnalysis.analysis;
+        logger.info(`[PERF] processInventoryAnalysis completed in ${Date.now() - stepStart}ms`);
         
         // Update Amazon ready products based on inventory errors
         this.updateAmazonReadyProducts(
@@ -159,6 +180,9 @@ class AnalyseService {
         // Debug final result
         console.log('[DEBUG] Final result keywordTrackingData:', result.keywordTrackingData?.length || 0, 'keywords');
         console.log('[DEBUG] Final result sample keywordTrackingData:', JSON.stringify(result.keywordTrackingData?.[0] || {}, null, 2));
+
+        const totalAnalyseTime = Date.now() - analyseStartTime;
+        logger.info(`[PERF] Analyse service TOTAL time: ${totalAnalyseTime}ms`);
 
         return {
             status: 200,
@@ -300,9 +324,28 @@ class AnalyseService {
      * Note: financeData and TotalSales are now fetched from EconomicsMetrics model
      */
     static async fetchAllDataModels(userId, country, region) {
+        const fetchStartTime = Date.now();
+        logger.info(`[PERF] Starting fetchAllDataModels for user ${userId}, country ${country}, region ${region}`);
+        
         const createdDate = new Date();
         const ThirtyDaysAgo = new Date(createdDate);
         ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
+
+        // Create individual timed queries for performance measurement
+        const timedQuery = async (name, queryFn) => {
+            const start = Date.now();
+            try {
+                const result = await queryFn();
+                const duration = Date.now() - start;
+                if (duration > 100) { // Only log queries taking more than 100ms
+                    logger.info(`[PERF] Query ${name}: ${duration}ms`);
+                }
+                return result;
+            } catch (error) {
+                logger.error(`[PERF] Query ${name} failed after ${Date.now() - start}ms: ${error.message}`);
+                throw error;
+            }
+        };
 
         // Use .lean() for all queries to return plain JavaScript objects instead of Mongoose documents
         // This significantly reduces memory usage and improves query performance
@@ -333,38 +376,41 @@ class AnalyseService {
             keywordTrackingData,
             ppcUnitsSoldData
         ] = await Promise.all([
-            V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use EconomicsMetrics instead of financeModel and TotalSalesModel
-            EconomicsMetrics.findLatest(userId, region, country),
+            timedQuery('economicsMetrics', () => EconomicsMetrics.findLatest(userId, region, country)),
             // Fetch BuyBox data
-            BuyBoxData.findLatest(userId, region, country),
-            restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            timedQuery('buyBoxData', () => BuyBoxData.findLatest(userId, region, country)),
+            timedQuery('restockInventory', () => restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('productReviews', () => numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for ListingItems (handles both old and new formats)
-            getListingItemsData(userId, country, region),
-            APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            timedQuery('listingItems', () => getListingItemsData(userId, country, region)),
+            timedQuery('aplusContent', () => APlusContentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('shipmentData', () => ShipmentModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('productWiseSales', () => ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for ProductWiseSponsoredAds (handles both old and new formats)
-            getProductWiseSponsoredAdsData(userId, country, region),
-            NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            timedQuery('sponsoredAds', () => getProductWiseSponsoredAdsData(userId, country, region)),
+            timedQuery('negativeKeywords', () => NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('keywords', () => KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('searchTerms', () => SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('campaignData', () => Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('inventoryPlanning', () => GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for StrandedInventoryUIData (handles both old and new formats)
-            getStrandedInventoryUIData(userId, country, region),
-            GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+            timedQuery('strandedInventory', () => getStrandedInventoryUIData(userId, country, region)),
+            timedQuery('nonCompliance', () => GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ userId: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
             Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead
-            adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-            GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
-            PPCUnitsSold.findLatestForUser(userId, country, region)
+            timedQuery('adsKeywords', () => adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('orderData', () => GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('ppcSpend', () => GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('adsGroup', () => AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('keywordTracking', () => KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region))
         ]);
+        
+        const fetchEndTime = Date.now();
+        logger.info(`[PERF] fetchAllDataModels completed in ${fetchEndTime - fetchStartTime}ms`);
         
         // Convert single ProductWiseSponsoredAds result to array format for backward compatibility
         const ProductWiseSponsoredAdsArray = ProductWiseSponsoredAds ? [ProductWiseSponsoredAds] : [];

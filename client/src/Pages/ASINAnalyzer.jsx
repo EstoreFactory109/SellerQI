@@ -536,167 +536,111 @@ const ASINAnalyzer = () => {
 
   // Search Component
   const SearchComponent = () => (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-cyan-50 w-full relative overflow-hidden">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full opacity-10 animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-blue-400 to-cyan-400 rounded-full opacity-10 animate-pulse" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br from-green-400 to-emerald-400 rounded-full opacity-5 animate-pulse" style={{ animationDelay: '2s' }}></div>
-      </div>
-
+    <div className="min-h-screen w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header Section */}
-      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-40 shadow-sm">
-        <div className="px-4 lg:px-6 py-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                  ASIN Analyzer
-                </h1>
-                <p className="text-sm text-gray-600 mt-1">Analyze any Amazon product for comprehensive insights</p>
-              </div>
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 rounded-full text-xs font-medium border border-green-200 shadow-sm">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                Ready to analyze
-              </div>
+      <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '10px' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <div>
+              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+                ASIN Analyzer
+              </h1>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="overflow-y-auto" style={{ height: 'calc(100vh - 120px)' }}>
-        <div className="px-4 lg:px-6 py-6 pb-20">
-          {/* Search Section */}
-          <motion.div
-            initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
-            className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/20 shadow-xl p-8 mb-8 relative overflow-hidden"
-          >
-            {/* Card Background Gradient */}
-            <div className="absolute inset-0 bg-gradient-to-br from-white via-purple-50/30 to-blue-50/30 opacity-50"></div>
-            
-            <div className="max-w-4xl mx-auto relative z-10">
-              <div className="text-center mb-8">
-                <motion.div 
-                  initial={hasAnimated ? false : { scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ duration: 0.8, delay: hasAnimated ? 0 : 0.3, ease: "backOut" }}
-                  className="relative inline-block mb-6"
-                >
-                  <div className="w-20 h-20 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-3xl flex items-center justify-center mx-auto shadow-2xl transform rotate-3 hover:rotate-6 transition-transform duration-300">
-                    <Search className="w-10 h-10 text-white" />
-                  </div>
-                  <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-br from-yellow-400 to-orange-400 rounded-full animate-bounce"></div>
-                  <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-gradient-to-br from-pink-400 to-red-400 rounded-full animate-pulse"></div>
-                </motion.div>
-                
-                <motion.h2 
-                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.4, ease: "easeOut" }}
-                  className="text-4xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent mb-4"
-                >
-                  Get Comprehensive Product Analysis
-                </motion.h2>
-                
-                <motion.p 
-                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
-                  className="text-lg text-gray-700 mb-2"
-                >
-                  Enter an ASIN to get detailed analysis, optimization recommendations, and actionable insights
-                </motion.p>
-                
-                <motion.div 
-                  initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.6, ease: "easeOut" }}
-                  className="flex flex-wrap justify-center gap-4 text-sm"
-                >
-                  <span className="px-3 py-1 bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 rounded-full border border-purple-300">✨ Instant analysis</span>
-                  <span className="px-3 py-1 bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 rounded-full border border-blue-300">🎯 Detailed insights</span>
-                  <span className="px-3 py-1 bg-gradient-to-r from-green-100 to-green-200 text-green-700 rounded-full border border-green-300">📊 Professional reports</span>
-                </motion.div>
-              </div>
-
-              <motion.div 
-                initial={hasAnimated ? false : { opacity: 0, y: 30 }}
+      <div>
+        {/* Search Section */}
+        <motion.div
+          initial={hasAnimated ? false : { opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '15px', marginBottom: '10px' }}
+        >
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-4">
+              <motion.p 
+                initial={hasAnimated ? false : { opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.7, ease: "easeOut" }}
-                className="max-w-2xl mx-auto mb-6"
+                transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
+                className="text-xs mb-3" style={{ color: '#9ca3af' }}
               >
-                <form 
-                  onSubmit={(e) => { 
-                    e.preventDefault(); 
-                    e.stopPropagation(); 
-                    handleAnalyze(); 
-                  }} 
-                  className="relative flex gap-0 shadow-2xl rounded-xl"
-                >
-                  <div className="relative flex-1">
-                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-purple-400 w-5 h-5" />
-                    <input
-                      type="text"
-                      value={asin}
-                      onChange={(e) => setAsin(e.target.value)}
-                      onPaste={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAnalyze();
-                        }
-                      }}
-                      placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW"
-                      className="w-full pl-12 pr-4 py-4 border-2 border-purple-200 rounded-l-xl focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/20 text-lg bg-white/90 backdrop-blur-sm transition-all duration-300"
-                    />
-                  </div>
-                  <div className="relative" ref={marketDropdownRef}>
-                    <button
-                      type="button"
-                      className={`
-                        relative flex items-center justify-between gap-2 px-6 py-4 border-2 border-l-0 border-purple-200 rounded-r-xl 
-                        font-medium text-center min-w-[180px] text-lg h-[60px] transition-all duration-300 group overflow-hidden
-                        ${showMarketDropdown 
-                          ? 'bg-gradient-to-r from-purple-100 to-blue-100 border-purple-300 shadow-lg' 
-                          : 'bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 hover:border-purple-300'
-                        }
-                        focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400
-                      `}
-                      onClick={(e) => { 
-                        e.preventDefault(); 
-                        e.stopPropagation(); 
-                        setShowMarketDropdown(!showMarketDropdown); 
-                      }}
-                    >
-                      {/* Background shimmer effect */}
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-500"></div>
-                      
+                Enter an ASIN to get detailed analysis and optimization recommendations
+              </motion.p>
+            </div>
+
+            <motion.div 
+              initial={hasAnimated ? false : { opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.7, ease: "easeOut" }}
+              className="max-w-2xl mx-auto mb-4"
+            >
+              <form 
+                onSubmit={(e) => { 
+                  e.preventDefault(); 
+                  e.stopPropagation(); 
+                  handleAnalyze(); 
+                }} 
+                className="relative flex gap-0 rounded-lg"
+                style={{ border: '1px solid #30363d' }}
+              >
+                <div className="relative flex-1">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#6b7280' }} />
+                  <input
+                    type="text"
+                    value={asin}
+                    onChange={(e) => setAsin(e.target.value)}
+                    onPaste={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAnalyze();
+                      }
+                    }}
+                    placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW"
+                    className="w-full pl-8 pr-3 py-2 rounded-l-lg text-xs transition-all duration-300"
+                    style={{ background: '#1a1a1a', border: 'none', color: '#f3f4f6' }}
+                    onFocus={(e) => e.target.style.outline = 'none'}
+                    onBlur={(e) => e.target.style.outline = 'none'}
+                  />
+                </div>
+                <div className="relative" ref={marketDropdownRef}>
+                  <button
+                    type="button"
+                    className="relative flex items-center justify-between gap-2 px-3 py-2 border-l font-medium text-center min-w-[140px] text-xs transition-all duration-300"
+                    style={{ 
+                      background: showMarketDropdown ? '#21262d' : '#1a1a1a',
+                      borderColor: '#30363d',
+                      color: '#f3f4f6',
+                      borderRadius: '0 6px 6px 0'
+                    }}
+                    onMouseEnter={(e) => !showMarketDropdown && (e.target.style.background = '#161b22')}
+                    onMouseLeave={(e) => !showMarketDropdown && (e.target.style.background = '#1a1a1a')}
+                    onClick={(e) => { 
+                      e.preventDefault(); 
+                      e.stopPropagation(); 
+                      setShowMarketDropdown(!showMarketDropdown); 
+                    }}
+                  >
                       {/* Selected market display */}
-                      <div className="relative flex items-center gap-3 flex-1">
+                      <div className="relative flex items-center gap-2 flex-1">
                         {/* Market flag circle */}
-                        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-400 to-blue-400 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                        <div className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
                           {market}
                         </div>
                         
                         {/* Market name */}
-                        <span className="text-gray-700 group-hover:text-gray-800 transition-colors duration-200 truncate">
+                        <span className="truncate text-xs">
                           {marketOptions.find(option => option.value === market)?.label || 'Select Market'}
                         </span>
                       </div>
                       
                       {/* Dropdown arrow with animation */}
-                      <ChevronDown className={`
-                        w-4 h-4 text-purple-500 transition-all duration-300 
-                        ${showMarketDropdown ? 'rotate-180 text-purple-600' : 'group-hover:text-purple-600'}
-                      `} />
-                      
-                      {/* Active indicator */}
-                      {showMarketDropdown && (
-                        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gradient-to-r from-purple-500 to-blue-500 rounded-t-full"></div>
-                      )}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-all duration-300 ${showMarketDropdown ? 'rotate-180' : ''}`} style={{ color: '#9ca3af' }} />
                     </button>
                     
                     <AnimatePresence>
@@ -706,26 +650,35 @@ const ASINAnalyzer = () => {
                           animate={{ opacity: 1, height: "auto" }}
                           exit={{ opacity: 0, height: 0 }}
                           transition={{ duration: 0.2, ease: "easeInOut" }}
-                          className="absolute top-full left-0 right-0 bg-gradient-to-b from-white via-purple-50/30 to-blue-50/50 backdrop-blur-xl border-2 border-purple-200 border-t-0 rounded-b-xl shadow-2xl z-[9999] max-h-60 overflow-y-auto overflow-hidden"
+                          className="absolute top-full left-0 right-0 rounded-b-lg z-[9999] max-h-60 overflow-y-auto overflow-hidden"
+                          style={{ background: '#161b22', border: '1px solid #30363d', borderTop: 'none' }}
                         >
                         {/* Dropdown Header */}
-                        <div className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white px-4 py-2 text-xs font-semibold tracking-wide">
+                        <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ background: '#21262d', color: '#9ca3af' }}>
                           SELECT MARKETPLACE
                         </div>
                         
                         {/* Options List */}
-                        <ul className="py-2">
+                        <ul className="py-1">
                           {marketOptions.map((option, index) => (
                             <li
                               key={option.value}
-                              className={`
-                                relative px-4 py-3 cursor-pointer transition-all duration-300 group
-                                ${market === option.value 
-                                  ? 'bg-gradient-to-r from-purple-100 via-blue-100 to-cyan-100 text-purple-800 border-l-4 border-purple-500 font-semibold' 
-                                  : 'hover:bg-gradient-to-r hover:from-purple-50 hover:via-blue-50 hover:to-cyan-50 hover:text-purple-700 border-l-4 border-transparent hover:border-purple-400'
+                              className="relative px-3 py-2 cursor-pointer transition-all duration-300 text-xs"
+                              style={{ 
+                                background: market === option.value ? '#21262d' : 'transparent',
+                                color: market === option.value ? '#60a5fa' : '#f3f4f6',
+                                borderLeft: market === option.value ? '2px solid #3b82f6' : '2px solid transparent'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (market !== option.value) {
+                                  e.currentTarget.style.background = '#21262d';
                                 }
-                                transform hover:translate-x-1 hover:scale-[1.02]
-                              `}
+                              }}
+                              onMouseLeave={(e) => {
+                                if (market !== option.value) {
+                                  e.currentTarget.style.background = 'transparent';
+                                }
+                              }}
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -733,46 +686,28 @@ const ASINAnalyzer = () => {
                                 setShowMarketDropdown(false);
                               }}
                             >
-                              {/* Subtle background gradient on hover */}
-                              <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-blue-500/5 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-r-lg"></div>
-                              
                               {/* Flag and Country Info */}
                               <div className="relative flex items-center justify-between">
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
                                   {/* Country Flag Circle */}
-                                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-blue-400 flex items-center justify-center text-white text-xs font-bold shadow-md">
+                                  <div className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
                                     {option.value}
                                   </div>
                                   
                                   {/* Country Name */}
-                                  <span className="text-sm font-medium group-hover:font-semibold transition-all duration-200">
+                                  <span className="text-xs">
                                     {option.label}
                                   </span>
                                 </div>
                                 
                                 {/* Selected Indicator */}
                                 {market === option.value && (
-                                  <div className="w-2 h-2 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full shadow-lg animate-pulse"></div>
+                                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }}></div>
                                 )}
-                                
-                                {/* Hover Arrow */}
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                  <ChevronRight className="w-4 h-4 text-purple-500" />
-                                </div>
                               </div>
-                              
-                              {/* Bottom border on hover */}
-                              <div className="absolute bottom-0 left-4 right-4 h-px bg-gradient-to-r from-purple-300 via-blue-300 to-cyan-300 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                             </li>
                           ))}
                         </ul>
-                        
-                        {/* Dropdown Footer */}
-                        <div className="bg-gradient-to-r from-gray-50 to-purple-50 px-4 py-2 border-t border-purple-200/50">
-                          <div className="text-xs text-gray-500 text-center">
-                            {marketOptions.length} marketplaces available
-                          </div>
-                                                 </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -780,110 +715,53 @@ const ASINAnalyzer = () => {
                 </form>
               </motion.div>
 
-              {error && (
-                <motion.div 
-                  initial={hasAnimated ? false : { opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.5, ease: "easeOut" }}
-                  className="max-w-2xl mx-auto mb-6"
-                >
-                  <div className="bg-gradient-to-r from-red-50 to-pink-50 border-2 border-red-200 rounded-xl p-4 text-red-700 shadow-lg">
-                    {error}
-                  </div>
-                </motion.div>
-              )}
-
+            {error && (
               <motion.div 
-                initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.8, ease: "easeOut" }}
-                className="text-center mb-8"
+                initial={hasAnimated ? false : { opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="max-w-2xl mx-auto mb-3"
               >
-                <button
-                  type="button"
-                  className="relative bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 hover:from-purple-700 hover:via-blue-700 hover:to-cyan-700 text-white px-10 py-4 rounded-xl flex items-center gap-3 mx-auto transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-lg font-bold shadow-2xl group overflow-hidden"
-                  onClick={(e) => { 
-                    e.preventDefault(); 
-                    e.stopPropagation(); 
-                    handleAnalyze(); 
-                  }}
-                  disabled={loading}
-                >
-                  {/* Button Shimmer Effect */}
-                  <div className="absolute inset-0 -skew-x-12 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-500"></div>
-                  
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                      <span className="bg-gradient-to-r from-white to-cyan-100 bg-clip-text text-transparent">Analyzing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="bg-gradient-to-r from-white to-cyan-100 bg-clip-text text-transparent">Analyze Product</span>
-                      <ChevronRight className="w-6 h-6 group-hover:translate-x-1 transition-transform duration-300" />
-                    </>
-                  )}
-                </button>
-              </motion.div>
-            </div>
-          </motion.div>
-
-          {/* Features Section */}
-          <motion.div
-            initial={hasAnimated ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.2, ease: "easeOut" }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto"
-          >
-            <motion.div 
-              initial={hasAnimated ? false : { opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.4, ease: "easeOut" }}
-              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              <div className="relative z-10">
-                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
-                  <Search className="w-7 h-7 text-white" />
+                <div className="rounded-lg p-2 text-xs" style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171' }}>
+                  {error}
                 </div>
-                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-purple-700 transition-colors duration-300">Comprehensive Analysis</h3>
-                <p className="text-sm text-gray-600 leading-relaxed">Analyze 13+ data points including rankings, conversion, fulfillment, and more with AI-powered insights</p>
-              </div>
-            </motion.div>
+              </motion.div>
+            )}
 
             <motion.div 
               initial={hasAnimated ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
-              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
+              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.8, ease: "easeOut" }}
+              className="text-center"
             >
-              <div className="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              <div className="relative z-10">
-                <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
-                  <Info className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-green-700 transition-colors duration-300">Actionable Insights</h3>
-                <p className="text-sm text-gray-600 leading-relaxed">Get specific recommendations on how to fix issues and optimize performance with step-by-step guidance</p>
-              </div>
+              <button
+                type="button"
+                className="relative px-6 py-2 rounded-lg flex items-center gap-2 mx-auto transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium"
+                style={{ background: '#3b82f6', color: 'white' }}
+                onMouseEnter={(e) => !loading && (e.target.style.background = '#2563eb')}
+                onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
+                onClick={(e) => { 
+                  e.preventDefault(); 
+                  e.stopPropagation(); 
+                  handleAnalyze(); 
+                }}
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Analyze Product</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
             </motion.div>
-
-            <motion.div 
-              initial={hasAnimated ? false : { opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.6, ease: "easeOut" }}
-              className="group bg-white/90 backdrop-blur-sm border border-white/20 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              <div className="relative z-10">
-                <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-red-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300">
-                  <Download className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="font-bold text-gray-900 mb-3 text-lg group-hover:text-orange-700 transition-colors duration-300">Detailed Reports</h3>
-                <p className="text-sm text-gray-600 leading-relaxed">Download comprehensive PDF reports with all findings and recommendations for easy sharing</p>
-              </div>
-            </motion.div>
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
       </div>
     </div>
   );
@@ -997,12 +875,16 @@ const ASINAnalyzer = () => {
     const conversionScore = calculateConversionScore(analysisResult);
 
          return (
-      <div className="p-2 md:p-6 w-full max-h-screen overflow-y-auto">
+      <div className="w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* Header with New Search Button */}
-        <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-4 md:p-6 mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-[#222b45] mb-2">Product Analysis Results</h1>
-            <p className="text-sm text-[#6b7280]">ASIN: {asin} | Market: {market}</p>
+        <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '10px 15px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <div>
+              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>Product Analysis Results</h1>
+              <p className="text-xs" style={{ color: '#f3f4f6' }}>ASIN: {asin} | Market: {market}</p>
+            </div>
           </div>
           <button
             type="button"
@@ -1011,9 +893,12 @@ const ASINAnalyzer = () => {
               e.stopPropagation(); 
               handleNewSearch(); 
             }}
-            className="flex items-center gap-2 bg-[#3B4A6B] hover:bg-[#2d3a52] text-white px-6 py-2 rounded-lg font-semibold shadow transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+            onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+            onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
           >
-            <Search size={18} />
+            <Search size={14} />
             New Search
           </button>
         </div>
@@ -1021,32 +906,33 @@ const ASINAnalyzer = () => {
 
 
         {/* Product Summary Card */}
-        <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-4 md:p-6 flex flex-col gap-4">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '12px', marginBottom: '10px' }}>
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
             {/* Product Image */}
             <div className="flex-shrink-0">
               <img
                 src={analysisResult?.image || "https://m.media-amazon.com/images/I/61pQK4pYQwL._AC_SL1500_.jpg"}
                 alt="product"
-                className="w-32 h-32 object-cover rounded-lg border border-[#e5e7eb] bg-white"
+                className="w-20 h-20 object-cover rounded-lg"
+                style={{ border: '1px solid #30363d' }}
               />
             </div>
             {/* Product Details & Health Score */}
-            <div className="flex-1 flex flex-col gap-2 md:ml-6">
+            <div className="flex-1 flex flex-col gap-2 md:ml-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                 <div>
-                  <div className="font-semibold text-lg text-[#222b45]">{analysisResult?.Title || 'Product Title'}</div>
-                  <div className="text-xs text-[#6b7280] mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>ASIN : {asin}</span>
-                    <span>Category : {analysisResult?.category || 'N/A'}</span>
+                  <div className="font-semibold text-sm" style={{ color: '#f3f4f6' }}>{analysisResult?.Title || 'Product Title'}</div>
+                  <div className="text-[10px] mt-1 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                    <span>ASIN: {asin}</span>
+                    <span>Category: {analysisResult?.category || 'N/A'}</span>
                   </div>
-                  <div className="text-xs text-[#6b7280] mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>Brand : {analysisResult?.Brand || 'N/A'}</span>
-                    <span>List Price : ${analysisResult?.price || 0}</span>
+                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                    <span>Brand: {analysisResult?.Brand || 'N/A'}</span>
+                    <span>Price: ${analysisResult?.price || 0}</span>
                   </div>
-                  <div className="text-xs text-[#6b7280] mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>Star Ratings : {analysisResult?.starRatting ?? 0}/5</span>
-                    <span>Reviews Count : {analysisResult?.ReviewsCount ?? 0}</span>
+                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                    <span>Rating: {analysisResult?.starRatting ?? 0}/5</span>
+                    <span>Reviews: {analysisResult?.ReviewsCount ?? 0}</span>
                   </div>
                 </div>
                 {/* Download Button */}
@@ -1057,40 +943,44 @@ const ASINAnalyzer = () => {
                     e.stopPropagation(); 
                     downloadCSV(); 
                   }}
-                  className="flex items-center justify-center gap-2 bg-[#2a2d42] hover:bg-[#23253a] text-white px-6 py-2 rounded-md font-semibold shadow transition-all mt-2 md:mt-0 whitespace-nowrap"
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
+                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                 >
                   <span>Download CSV</span>
-                  <Download size={18} />
+                  <Download size={14} />
                 </button>
               </div>
               {/* Health Score */}
-              <div className="mt-3 md:mt-4">
-                <div className="inline-block bg-[#f8fafc] border border-[#e5e7eb] rounded-lg px-4 py-2">
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs text-[#6b7280]">Health Score</span>
-                    <span className="text-[#222b45] font-bold text-sm bg-[#f8fafc] px-3 py-1 rounded">{Math.round(analysisResult?.score || 0)}/100</span>
+              <div className="mt-2">
+                <div className="inline-block rounded-lg px-3 py-1.5" style={{ background: '#21262d', border: '1px solid #30363d' }}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Health Score</span>
+                    <span className="font-bold text-sm px-2 py-0.5 rounded" style={{ background: '#1a1a1a', color: '#f3f4f6' }}>{Math.round(analysisResult?.score || 0)}/100</span>
                   </div>
-                  <div className="w-40 h-2 bg-[#e5e7eb] rounded mt-2">
-                    <div className="h-2 bg-[#3ec28f] rounded" style={{ width: `${analysisResult?.score || 0}%` }}></div>
+                  <div className="w-32 h-1.5 rounded mt-1.5" style={{ background: '#21262d' }}>
+                    <div className="h-1.5 rounded" style={{ width: `${analysisResult?.score || 0}%`, background: '#22c55e' }}></div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
           {/* Key Metrics */}
-          <div className="mt-4">
-            <div className="font-semibold text-[#222b45] mb-2 text-base">KEY METRICS</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="mt-3">
+            <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>KEY METRICS</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
               {keyMetrics.map((metric, idx) => (
                 <div
                   key={idx}
-                  className="bg-[#f8fafc] border border-[#e5e7eb] rounded-lg p-4 flex flex-col items-center gap-1 min-w-[120px]"
+                  className="rounded-lg p-2 flex flex-col items-center gap-1"
+                  style={{ background: '#21262d', border: '1px solid #30363d' }}
                 >
-                  <div className="flex items-center gap-1 text-xs text-[#6b7280] mb-1">
+                  <div className="flex items-center gap-1 text-[10px] mb-0.5" style={{ color: '#f3f4f6' }}>
                     {metric.label}
-                    <Info size={14} className="ml-1 text-[#bdbdbd]" />
+                    <Info size={12} style={{ color: '#6b7280' }} />
                   </div>
-                  <div className="text-xl font-bold text-[#222b45]">
+                  <div className="text-base font-bold" style={{ color: '#f3f4f6' }}>
                     {metric.value}
                   </div>
                 </div>
@@ -1100,42 +990,42 @@ const ASINAnalyzer = () => {
         </div>
         
         {/* Product Analysis */}
-        <div className="mb-6">
-          <div className="font-semibold text-[#2a2d42] mb-2">Product Analysis</div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div style={{ marginBottom: '10px' }}>
+          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Product Analysis</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {productAnalysis.map((item, idx) => (
-              <div key={idx} className="bg-white border rounded-lg p-4 shadow-sm flex flex-col gap-2">
+              <div key={idx} className="rounded-lg p-2 flex flex-col gap-1.5" style={{ background: '#161b22', border: '1px solid #30363d' }}>
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-[#2a2d42]">{item.label}</span>
-                  <span className="text-xs font-bold text-[#2a2d42]">{item.score}/{item.max}</span>
+                  <span className="font-medium text-xs" style={{ color: '#f3f4f6' }}>{item.label}</span>
+                  <span className="text-[10px] font-bold" style={{ color: '#f3f4f6' }}>{item.score}/{item.max}</span>
                 </div>
-                <div className="w-full h-2 bg-gray-200 rounded">
-                  <div className="h-2 bg-[#05724e] rounded" style={{ width: `${item.score}%` }}></div>
+                <div className="w-full h-1.5 rounded" style={{ background: '#21262d' }}>
+                  <div className="h-1.5 rounded" style={{ width: `${item.score}%`, background: '#22c55e' }}></div>
                 </div>
-                <div className="text-xs text-gray-500">Current: {item.current}</div>
-                <div className="text-xs text-gray-400">Recommended: {item.recommended}</div>
+                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>Current: {item.current}</div>
+                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>Recommended: {item.recommended}</div>
               </div>
             ))}
           </div>
         </div>
         
         {/* ISSUES SECTION */}
-        <div className="mt-8">
-          <div className="font-semibold text-[#222b45] mb-3 text-base">ISSUES</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div style={{ marginTop: '10px' }}>
+          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>ISSUES</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {/* Donut Chart Card */}
-            <div className="bg-white border border-[#e5e7eb] rounded-xl p-6 flex flex-col gap-4 min-h-[260px]">
-              <div className="text-sm text-[#222b45] mb-2">{totalErrors} Issues found with the product</div>
-              <div className="flex items-center gap-6">
+            <div className="rounded-lg p-3 flex flex-col gap-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="text-xs" style={{ color: '#f3f4f6' }}>{totalErrors} Issues found with the product</div>
+              <div className="flex items-center gap-4">
                 {/* Donut Chart */}
-                <div className="relative w-32 h-32">
-                  <ResponsiveContainer width={128} height={128}>
+                <div className="relative w-24 h-24">
+                  <ResponsiveContainer width={96} height={96}>
                     <PieChart>
                       <Pie
                         data={issueData}
                         dataKey="value"
-                        innerRadius={44}
-                        outerRadius={64}
+                        innerRadius={32}
+                        outerRadius={48}
                         startAngle={90}
                         endAngle={-270}
                         paddingAngle={2}
@@ -1147,48 +1037,48 @@ const ASINAnalyzer = () => {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-2xl font-bold text-[#222b45]">{totalErrors.toString().padStart(2, '0')}</span>
-                    <span className="text-xs text-[#D7263D] font-semibold mt-1">ERRORS</span>
+                    <span className="text-lg font-bold" style={{ color: '#f3f4f6' }}>{totalErrors.toString().padStart(2, '0')}</span>
+                    <span className="text-[10px] font-semibold mt-0.5" style={{ color: '#f87171' }}>ERRORS</span>
                   </div>
                 </div>
                 {/* Legend */}
-                <div className="flex flex-col flex-wrap gap-2 text-xs">
+                <div className="flex flex-col flex-wrap gap-1.5 text-[10px]">
                   {issueData.map((item, idx) => (
-                    <div key={item.name} className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full" style={{ background: item.color }}></span>
-                      <span className="text-[#222b45] w-20">{item.name}</span>
-                      <span className="text-[#222b45] font-semibold">{item.value.toString().padStart(2, '0')}</span>
+                    <div key={item.name} className="flex items-center gap-1.5">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: item.color }}></span>
+                      <span className="w-16" style={{ color: '#f3f4f6' }}>{item.name}</span>
+                      <span className="font-semibold" style={{ color: '#f3f4f6' }}>{item.value.toString().padStart(2, '0')}</span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
             {/* Ranking and Conversion Scores */}
-            <div className="bg-white border border-[#e5e7eb] rounded-xl p-6 flex flex-col gap-6 min-h-[260px]">
-              <div className="text-sm text-[#222b45] mb-2 font-semibold">Performance Scores</div>
+            <div className="rounded-lg p-3 flex flex-col gap-4" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="text-xs font-semibold" style={{ color: '#f3f4f6' }}>Performance Scores</div>
               
               {/* Ranking Score */}
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-[#6b7280]">Ranking Score</span>
-                  <span className="text-lg font-bold text-[#222b45]">{rankingScore.score}/{rankingScore.maxScore}</span>
+                  <span className="text-xs" style={{ color: '#f3f4f6' }}>Ranking Score</span>
+                  <span className="text-sm font-bold" style={{ color: '#f3f4f6' }}>{rankingScore.score}/{rankingScore.maxScore}</span>
                 </div>
-                <div className="w-full h-3 bg-[#f3f4f6] rounded">
-                  <div className="h-3 bg-[#FFD600] rounded" style={{ width: `${rankingScore.percentage}%` }}></div>
+                <div className="w-full h-2 rounded" style={{ background: '#21262d' }}>
+                  <div className="h-2 rounded" style={{ width: `${rankingScore.percentage}%`, background: '#fbbf24' }}></div>
                 </div>
-                <div className="text-xs text-[#6b7280]">{rankingScore.percentage}% optimized</div>
+                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>{rankingScore.percentage}% optimized</div>
               </div>
               
               {/* Conversion Score */}
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-[#6b7280]">Conversion Score</span>
-                  <span className="text-lg font-bold text-[#222b45]">{conversionScore.score}/{conversionScore.maxScore}</span>
+                  <span className="text-xs" style={{ color: '#f3f4f6' }}>Conversion Score</span>
+                  <span className="text-sm font-bold" style={{ color: '#f3f4f6' }}>{conversionScore.score}/{conversionScore.maxScore}</span>
                 </div>
-                <div className="w-full h-3 bg-[#f3f4f6] rounded">
-                  <div className="h-3 bg-[#3B82F6] rounded" style={{ width: `${conversionScore.percentage}%` }}></div>
+                <div className="w-full h-2 rounded" style={{ background: '#21262d' }}>
+                  <div className="h-2 rounded" style={{ width: `${conversionScore.percentage}%`, background: '#3b82f6' }}></div>
                 </div>
-                <div className="text-xs text-[#6b7280]">{conversionScore.percentage}% optimized</div>
+                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>{conversionScore.percentage}% optimized</div>
               </div>
             </div>
           </div>
@@ -1196,30 +1086,29 @@ const ASINAnalyzer = () => {
         
         {/* ISSUES LIST SECTION */}
         {issueCategories.length > 0 && (
-          <div className="mt-8">
-            <div className="bg-white border border-[#e5e7eb] rounded-xl p-4">
+          <div style={{ marginTop: '10px' }}>
+            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               {/* Header Row */}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
-                <div className="flex items-center gap-2 text-sm text-[#222b45] font-medium">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#f3f4f6' }}>
                   TOTAL : {totalErrors} Issues found
-                  <Info size={16} className="text-[#bdbdbd]" />
+                  <Info size={12} style={{ color: '#6b7280' }} />
                 </div>
-
               </div>
               {/* Issue Categories */}
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-2">
                 {issueCategories.map((cat, idx) => (
                   <div key={cat.title}>
                     {/* Category Header */}
-                    <div className="bg-[#2a2d42] text-white rounded-t-md px-4 py-2 font-semibold text-sm flex items-center">
+                    <div className="rounded-t px-2 py-1.5 font-semibold text-xs flex items-center" style={{ background: '#21262d', color: '#f3f4f6' }}>
                       {cat.title}
                     </div>
                     {/* Issue Rows */}
                     <div className="flex flex-col">
                       {cat.issues.map((issue, i) => (
-                        <div key={i} className="border-b last:border-b-0 border-[#e5e7eb] bg-white px-4 py-3 text-sm text-[#222b45]">
-                          <div className="font-medium text-[#222b45] mb-1">{issue.label}</div>
-                          <div className="text-gray-600">{issue.message}</div>
+                        <div key={i} className="border-b last:border-b-0 px-2 py-2 text-xs" style={{ borderColor: '#30363d', background: '#161b22', color: '#f3f4f6' }}>
+                          <div className="font-medium mb-0.5" style={{ color: '#f3f4f6' }}>{issue.label}</div>
+                          <div style={{ color: '#f3f4f6' }}>{issue.message}</div>
                         </div>
                       ))}
                     </div>
@@ -1229,14 +1118,14 @@ const ASINAnalyzer = () => {
             </div>
           </div>
         )}
-        <div className='w-full h-[5rem]'></div>
+        </div>
       </div>
     );
   };
 
   // Main render logic
   return (
-    <div className="min-h-screen overflow-y-auto">
+    <div className="min-h-screen overflow-y-auto" style={{ background: '#1a1a1a' }}>
       {analysisResult ? <ResultsComponent /> : <SearchComponent />}
     </div>
   );

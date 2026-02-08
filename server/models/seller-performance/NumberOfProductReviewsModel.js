@@ -59,4 +59,7 @@ const NumberOfProductReviewsSchema = new mongoose.Schema(
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );
 
+// Compound index for efficient queries by User, country, region and sorted by createdAt
+NumberOfProductReviewsSchema.index({ User: 1, country: 1, region: 1, createdAt: -1 });
+
 module.exports = mongoose.model("NumberOfProductReviews", NumberOfProductReviewsSchema);

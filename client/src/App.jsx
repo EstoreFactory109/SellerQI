@@ -47,7 +47,14 @@ import PaymentCancel from './Pages/PaymentCancel.jsx';
 import PaymentFailed from './Pages/PaymentFailed.jsx';
 import AgencyClientRegistration from './Pages/AgencyClientRegistration.jsx';
 import AdminLogin from './Pages/AdminLogin.jsx';
+import ManageAccountsLayout from './Layout/ManageAccountsLayout.jsx';
 import ManageAccounts from './Pages/ManageAccounts.jsx';
+import AdminSubscription from './Pages/Admin/Subscription.jsx';
+import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
+import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
+import AdminTicketMessages from './Pages/Admin/TicketMessages.jsx';
+import AdminUserLogs from './Pages/Admin/UserLogs.jsx';
+import AdminUserLogDetails from './Pages/Admin/UserLogDetails.jsx';
 import UserLogging from './Pages/UserLogging.jsx';
 import CalendlyWidget from './Pages/consultation.jsx';
 import Tasks from './Pages/Tasks.jsx';
@@ -78,7 +85,15 @@ const App = () => {
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/admin-login' element={<AdminLogin />} />
-          <Route path='/manage-accounts' element={<ManageAccounts />} />
+        <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
+          <Route index element={<ManageAccounts />} />
+          <Route path='subscription' element={<AdminSubscription />} />
+          <Route path='logs/email' element={<AdminEmailLogs />} />
+          <Route path='logs/payment' element={<AdminPaymentLogs />} />
+          <Route path='logs/user' element={<AdminUserLogs />} />
+          <Route path='logs/user/:userId' element={<AdminUserLogDetails />} />
+          <Route path='ticket-messages' element={<AdminTicketMessages />} />
+        </Route>
         <Route path='/verify-email' element={<EmailVerification />} />
         <Route path='/unsubscribe-alerts' element={<UnsubscribeAlerts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />

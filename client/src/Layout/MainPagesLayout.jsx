@@ -48,7 +48,7 @@ const MainPagesLayout = () => {
   }, [location.pathname])
 
   return (
-    <div className='flex min-h-screen w-full overflow-x-hidden'>
+    <div className='flex min-h-screen w-full overflow-x-hidden bg-[#1a1a1a]'>
         <LeftNavSection  />
         <LeftNavSectionForTablet/>
         <section className='flex-1 min-w-0 h-[100vh] flex flex-col overflow-x-hidden'>
@@ -57,9 +57,9 @@ const MainPagesLayout = () => {
             <div 
               ref={scrollContainerRef}
               className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide" 
-              style={{ overscrollBehaviorY: 'auto', overscrollBehaviorX: 'contain' }}
+              style={{ overscrollBehaviorY: 'auto', overscrollBehaviorX: 'contain', scrollBehavior: 'smooth' }}
             >
-                <div className="lg:pt-0 pt-[8vh]">
+                <div className="lg:pt-0 pt-[8vh] pb-0">
                     <Outlet/>
                 </div>
             </div>

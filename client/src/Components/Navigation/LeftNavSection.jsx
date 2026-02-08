@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, Activity, Calendar, Target, DollarSign, Search, Lock, Package, BarChart3} from 'lucide-react'
-import LogoutIcon from '../../assets/Icons/Logout.png';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, Settings, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -9,6 +8,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import BeatLoader from "react-spinners/BeatLoader";
 import { AnimatePresence, motion } from "framer-motion";
+import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 
 const LeftNavSection = () => {
 
@@ -149,30 +149,29 @@ const LeftNavSection = () => {
         }
     }
 
-    // Responsive classes for menu items - compact sizing
-    const menuItemClass = "group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm transition-all duration-300";
+    // Responsive classes for menu items - compact sizing, dark theme
+    const menuItemClass = "group flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm transition-all duration-300";
     const activeMenuItemClass = "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]";
-    const inactiveMenuItemClass = "text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]";
-    const iconWrapperClass = "p-1 rounded-lg transition-colors duration-300";
-    const iconClass = "w-4 h-4 transition-colors duration-300";
+    const inactiveMenuItemClass = "text-gray-300 hover:bg-[#21262d] hover:text-blue-400 hover:scale-[1.01]";
+    const iconClass = "w-4 h-4 flex-shrink-0 transition-colors duration-300";
+    const iconInactiveClass = "text-gray-400 group-hover:text-blue-400";
+    const iconActiveClass = "text-white";
     const dropdownItemClass = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-300";
 
     return (
-        <aside className="h-screen w-[240px] xl:w-[280px] flex-shrink-0 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 hidden lg:flex lg:flex-col backdrop-blur-sm overflow-hidden">
+        <aside className="h-screen w-[240px] xl:w-[280px] flex-shrink-0 border-r border-[#30363d] font-roboto bg-[#161b22] hidden lg:flex lg:flex-col overflow-hidden">
             {/* Main Container - Top and Bottom Sections */}
             <div className="flex flex-col justify-between h-full min-h-0">
                 {/* Top Section - Logo and Navigation */}
                 <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     {/* Logo Section */}
-                    <div className="w-full px-3 py-6 border-b border-gray-200/50 flex-shrink-0">
+                    <div className="w-full px-3 py-4 border-b border-[#30363d] flex-shrink-0">
                         <div className="flex items-center justify-center">
                             <img 
-                                src="https://res.cloudinary.com/ddoa960le/image/upload/v1752478546/Seller_QI_Logo___V1_1_t9s3kh.png"
+                                src={sellerQILogo}
                                 alt="Seller QI Logo"
                                 loading="lazy"
-                                className="h-6 w-auto object-contain transition-transform duration-300 hover:scale-105"
-                                width="120"
-                                height="32"
+                                className="h-6 w-auto max-w-full object-contain transition-transform duration-300 hover:scale-105"
                             />
                         </div>
                     </div>
@@ -193,9 +192,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-blue-50 group-hover:bg-blue-100'}`}>
-                                            <LayoutDashboard className={`${iconClass} ${isActive ? 'text-white' : 'text-blue-600'}`}/>
-                                        </div>
+                                        <LayoutDashboard className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Dashboard</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
@@ -215,9 +212,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-cyan-50 group-hover:bg-cyan-100'}`}>
-                                            <Package className={`${iconClass} ${isActive ? 'text-white' : 'text-cyan-600'}`}/>
-                                        </div>
+                                        <Package className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Your Products</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
@@ -236,9 +231,7 @@ const LeftNavSection = () => {
                         >
                             {({ isActive }) => (
                                 <>
-                                    <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-violet-50 group-hover:bg-violet-100'}`}>
-                                        <BarChart3 className={`${iconClass} ${isActive ? 'text-white' : 'text-violet-600'}`}/>
-                                    </div>
+                                    <BarChart3 className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                     <span className="font-medium flex-1">Listing Analyzer</span>
                                 </>
                             )}
@@ -255,17 +248,11 @@ const LeftNavSection = () => {
                                 }`}
                                 onClick={handleIssuesClick}
                             >
-                                <div className={`${iconWrapperClass} ${
+                                <BadgeAlert className={`${iconClass} ${
                                     isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product' 
-                                        ? 'bg-white/20' 
-                                        : 'bg-orange-50 group-hover:bg-orange-100'
-                                }`}>
-                                    <BadgeAlert className={`${iconClass} ${
-                                        isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product' 
-                                            ? 'text-white' 
-                                            : 'text-orange-600'
-                                    }`}/>
-                                </div>
+                                        ? iconActiveClass 
+                                        : iconInactiveClass
+                                }`} />
                                 <span className="font-medium flex-1">Issues</span>
                                 {isPremiumLocked && (
                                     <Lock className="w-3.5 h-3.5 text-amber-500 mr-1" />
@@ -304,7 +291,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isIssuesPage && currentTab === 'category'
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -324,7 +311,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isActive
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -344,7 +331,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isIssuesPage && currentTab === 'account'
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -369,17 +356,11 @@ const LeftNavSection = () => {
                                 }`}
                                 onClick={handleSponsoredAdsClick}
                             >
-                                <div className={`${iconWrapperClass} ${
+                                <LaptopMinimalCheck className={`${iconClass} ${
                                     isSponsoredAdsPage 
-                                        ? 'bg-white/20' 
-                                        : 'bg-green-50 group-hover:bg-green-100'
-                                }`}>
-                                    <LaptopMinimalCheck className={`${iconClass} ${
-                                        isSponsoredAdsPage 
-                                            ? 'text-white' 
-                                            : 'text-green-600'
-                                    }`}/>
-                                </div>
+                                        ? iconActiveClass 
+                                        : iconInactiveClass
+                                }`} />
                                 <span className="font-medium flex-1">Sponsored Ads</span>
                                 {isPremiumLocked && (
                                     <Lock className="w-3.5 h-3.5 text-amber-500 mr-1" />
@@ -418,7 +399,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isActive
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -438,7 +419,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isActive
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -462,9 +443,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'}`}>
-                                            <ChartLine className={`${iconClass} ${isActive ? 'text-white' : 'text-purple-600'}`}/>
-                                        </div>
+                                        <ChartLine className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Profitibility</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
@@ -484,9 +463,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-emerald-50 group-hover:bg-emerald-100'}`}>
-                                            <DollarSign className={`${iconClass} ${isActive ? 'text-white' : 'text-emerald-600'}`}/>
-                                        </div>
+                                        <DollarSign className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Reimbursement</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
@@ -505,9 +482,7 @@ const LeftNavSection = () => {
                         >
                             {({ isActive }) => (
                                 <>
-                                    <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-indigo-50 group-hover:bg-indigo-100'}`}>
-                                        <ClipboardPlus className={`${iconClass} ${isActive ? 'text-white' : 'text-indigo-600'}`}/>
-                                    </div>
+                                    <ClipboardPlus className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                     <span className="font-medium">Tasks</span>
                                 </>
                             )}
@@ -523,9 +498,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-pink-50 group-hover:bg-pink-100'}`}>
-                                            <Calendar className={`${iconClass} ${isActive ? 'text-white' : 'text-pink-600'}`}/>
-                                        </div>
+                                        <Calendar className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium">Ecommerce Calendar</span>
                                     </>
                                 )}
@@ -542,9 +515,7 @@ const LeftNavSection = () => {
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-amber-50 group-hover:bg-amber-100'}`}>
-                                            <Clock8 className={`${iconClass} ${isActive ? 'text-white' : 'text-amber-600'}`}/>
-                                        </div>
+                                        <Clock8 className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Accounts History</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
@@ -559,17 +530,15 @@ const LeftNavSection = () => {
                             <NavLink
                                 to="/seller-central-checker/user-logging"
                                 className={({ isActive }) =>
-                                    `${menuItemClass} ${isActive ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg shadow-red-500/25 transform scale-[1.02]' : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-red-600 hover:scale-[1.01]'}`
+                                    `${menuItemClass} ${isActive ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg shadow-red-500/25 transform scale-[1.02]' : 'text-gray-300 hover:bg-[#21262d] hover:text-red-400 hover:scale-[1.01]'}`
                                 }
                             >
                                 {({ isActive }) => (
                                     <>
-                                        <div className={`${iconWrapperClass} ${isActive ? 'bg-white/20' : 'bg-red-50 group-hover:bg-red-100'}`}>
-                                            <Activity className={`${iconClass} ${isActive ? 'text-white' : 'text-red-600'}`}/>
-                                        </div>
+                                        <Activity className={`${iconClass} ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-red-400'}`} />
                                         <span className="font-medium">User Logging</span>
                                         <div className="ml-auto">
-                                            <span className="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                                            <span className="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/40">
                                                 ADMIN
                                             </span>
                                         </div>
@@ -584,7 +553,7 @@ const LeftNavSection = () => {
                 </div>
 
                 {/* Bottom Section - Book a Call, Settings, and Logout */}
-                <div className="flex-shrink-0 border-t border-gray-200/50 bg-gradient-to-r from-gray-50/50 to-white/50">
+                <div className="flex-shrink-0 border-t border-[#30363d] bg-[#1a1a1a]">
                 <div className="px-2 py-2">
                     {/* Settings Section */}
                     <div className="mb-2">
@@ -600,13 +569,9 @@ const LeftNavSection = () => {
                                 }`}
                                 onClick={handleSettingsClick}
                             >
-                                <div className={`${iconWrapperClass} ${
-                                    isSettingsPage ? 'bg-white/20' : 'bg-gray-50 group-hover:bg-gray-100'
-                                }`}>
-                                    <Settings className={`${iconClass} ${
-                                        isSettingsPage ? 'text-white' : 'text-gray-600'
-                                    }`}/>
-                                </div>
+                                <Settings className={`${iconClass} ${
+                                    isSettingsPage ? iconActiveClass : iconInactiveClass
+                                }`} />
                                 <span className="font-medium flex-1">Settings</span>
                                 <motion.div
                                     animate={{ rotate: settingsDropdownOpen ? 90 : 0 }}
@@ -642,7 +607,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isSettingsPage && currentSettingsTab === 'profile'
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -665,7 +630,7 @@ const LeftNavSection = () => {
                                                         `${dropdownItemClass} ${
                                                             isSettingsPage && currentSettingsTab === 'account-integration'
                                                                 ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                                : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                         }`
                                                     }
                                                 >
@@ -689,7 +654,7 @@ const LeftNavSection = () => {
                                                         `${dropdownItemClass} ${
                                                             isSettingsPage && currentSettingsTab === 'support'
                                                                 ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                                : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                         }`
                                                     }
                                                 >
@@ -712,7 +677,7 @@ const LeftNavSection = () => {
                                                     `${dropdownItemClass} ${
                                                         isSettingsPage && currentSettingsTab === 'plans-billing'
                                                             ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
                                                     }`
                                                 }
                                             >
@@ -733,9 +698,9 @@ const LeftNavSection = () => {
                                                     className="my-1.5"
                                                 >
                                                     <div className="flex items-center gap-2 px-2.5 py-1">
-                                                        <div className="h-px bg-gradient-to-r from-purple-200 to-purple-300 flex-1"></div>
-                                                        <span className="text-xs font-semibold text-purple-600 uppercase tracking-wider">Admin</span>
-                                                        <div className="h-px bg-gradient-to-r from-purple-300 to-purple-200 flex-1"></div>
+                                                        <div className="h-px bg-gradient-to-r from-purple-500/30 to-purple-400/30 flex-1"></div>
+                                                        <span className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Admin</span>
+                                                        <div className="h-px bg-gradient-to-r from-purple-400/30 to-purple-500/30 flex-1"></div>
                                                     </div>
                                                 </motion.div>
 
@@ -752,7 +717,7 @@ const LeftNavSection = () => {
                                                             `${dropdownItemClass} ${
                                                                 isSettingsPage && currentSettingsTab === 'admin-user-profile'
                                                                     ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                                    : 'text-gray-400 hover:bg-[#21262d] hover:text-purple-400'
                                                             }`
                                                         }
                                                     >
@@ -774,7 +739,7 @@ const LeftNavSection = () => {
                                                             `${dropdownItemClass} ${
                                                                 isSettingsPage && currentSettingsTab === 'admin-account-integration'
                                                                     ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                                    : 'text-gray-400 hover:bg-[#21262d] hover:text-purple-400'
                                                             }`
                                                         }
                                                     >
@@ -796,7 +761,7 @@ const LeftNavSection = () => {
                                                             `${dropdownItemClass} ${
                                                                 isSettingsPage && currentSettingsTab === 'admin-plans-billing'
                                                                     ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                                    : 'text-gray-400 hover:bg-[#21262d] hover:text-purple-400'
                                                             }`
                                                         }
                                                     >
@@ -818,7 +783,7 @@ const LeftNavSection = () => {
                                                             `${dropdownItemClass} ${
                                                                 isSettingsPage && currentSettingsTab === 'admin-support'
                                                                     ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
+                                                                    : 'text-gray-400 hover:bg-[#21262d] hover:text-purple-400'
                                                             }`
                                                         }
                                                     >
@@ -838,25 +803,21 @@ const LeftNavSection = () => {
                     <div className="mb-2">
                         <NavLink
                             to="/seller-central-checker/consultation"
-                            className="group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 bg-gradient-to-r from-orange-400 to-amber-500 text-white shadow-lg shadow-orange-500/25 hover:shadow-xl hover:shadow-orange-500/40 hover:scale-[1.02] hover:from-orange-500 hover:to-amber-600 transform"
+                            className="group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black hover:shadow-lg hover:shadow-orange-500/25 hover:scale-[1.02] transform"
                         >
-                            <div className="p-1 rounded-lg transition-colors duration-300 bg-white/20 group-hover:bg-white/30">
-                                <Calendar className="w-4 h-4 text-white"/>
-                            </div>
+                            <Calendar className="w-4 h-4 flex-shrink-0 text-orange-400 group-hover:text-black transition-colors duration-300" />
                             <span className="font-semibold flex-1">Need Help?</span>
-                            <div className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse"></div>
+                            <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
                         </NavLink>
                     </div>
 
                     {/* Logout Section */}
-                    <div className="mt-2 pt-2 border-t border-gray-200/50">
+                    <div className="mt-2 pt-2 border-t border-[#30363d]">
                         <button 
-                            className='group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm transition-all duration-300 text-red-600 hover:bg-red-50 hover:shadow-md hover:shadow-red-200/50 hover:scale-[1.01] w-full'
+                            className='group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm transition-all duration-300 text-red-400 hover:bg-red-500/20 hover:scale-[1.01] w-full'
                             onClick={(e)=>logoutUser(e)}
                         >
-                            <div className="p-1 rounded-lg bg-red-50 group-hover:bg-red-100 transition-colors duration-300">
-                                <img src={LogoutIcon} alt="Logout" className="w-4 h-4 opacity-80" />
-                            </div>
+                            <LogOut className="w-4 h-4 flex-shrink-0 text-red-400 group-hover:text-red-300" />
                             <span className="font-medium">Log Out</span>
                             {loader && <BeatLoader color="#dc2626" size={6} />}
                         </button>

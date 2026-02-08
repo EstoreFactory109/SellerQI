@@ -85,6 +85,31 @@ class StripeService {
                 throw new Error('User not found');
             }
 
+            // CONCURRENT CHECKOUT PREVENTION: Check for existing active/incomplete subscriptions
+            // to prevent multiple simultaneous checkout sessions
+            const existingSubscription = await Subscription.findOne({
+                userId,
+                paymentGateway: 'stripe',
+                status: { $in: ['active', 'trialing', 'incomplete'] }
+            });
+
+            if (existingSubscription) {
+                // If there's an active subscription, don't allow creating a new one
+                if (existingSubscription.status === 'active' || existingSubscription.status === 'trialing') {
+                    throw new Error('You already have an active subscription. Please cancel it first to subscribe to a different plan.');
+                }
+                
+                // If there's an incomplete subscription (checkout in progress), check if it's recent
+                if (existingSubscription.status === 'incomplete') {
+                    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+                    if (existingSubscription.updatedAt > fiveMinutesAgo) {
+                        // Recent incomplete subscription exists - could be another tab/browser
+                        logger.warn(`User ${userId} already has a recent incomplete subscription ${existingSubscription.stripeSubscriptionId}, proceeding with new checkout (old one will be superseded)`);
+                        // We allow creating a new one, but log this as it might indicate a user issue
+                    }
+                }
+            }
+
             // Get price ID based on plan type
             let priceId;
             switch (planType) {
@@ -773,6 +798,53 @@ class StripeService {
         } catch (error) {
             logger.error('Error reactivating subscription:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Validate that a checkout session belongs to the authenticated user
+     * SECURITY: This prevents users from processing other users' sessions
+     * @param {string} sessionId - Stripe checkout session ID
+     * @param {string} authenticatedUserId - The authenticated user's ID
+     * @returns {Object} - { isValid: boolean, reason?: string }
+     */
+    async validateSessionOwnership(sessionId, authenticatedUserId) {
+        try {
+            if (!sessionId) {
+                return { isValid: false, reason: 'No session ID provided' };
+            }
+
+            if (!authenticatedUserId) {
+                return { isValid: false, reason: 'No authenticated user' };
+            }
+
+            // Retrieve the session from Stripe
+            const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+
+            if (!session) {
+                return { isValid: false, reason: 'Session not found' };
+            }
+
+            // Check if session has userId in metadata
+            const sessionUserId = session.metadata?.userId;
+
+            if (!sessionUserId) {
+                logger.warn(`Session ${sessionId} has no userId in metadata`);
+                return { isValid: false, reason: 'Session has no associated user' };
+            }
+
+            // Compare session userId with authenticated user
+            if (sessionUserId !== authenticatedUserId.toString()) {
+                logger.warn(`Session ownership mismatch: session user ${sessionUserId} vs authenticated user ${authenticatedUserId}`);
+                return { isValid: false, reason: 'Session belongs to different user' };
+            }
+
+            return { isValid: true };
+
+        } catch (error) {
+            logger.error('Error validating session ownership:', error);
+            // On error, deny access to be safe
+            return { isValid: false, reason: 'Unable to validate session' };
         }
     }
 }

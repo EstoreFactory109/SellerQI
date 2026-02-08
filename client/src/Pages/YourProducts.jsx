@@ -2,23 +2,26 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Package, 
+  Box, 
   Search, 
   Download, 
   CheckCircle, 
   XCircle, 
-  AlertCircle, 
+  Info, 
   Star, 
   ChevronDown,
   Filter,
-  Sparkles,
-  Info,
+  Award,
   AlertTriangle,
+  AlertCircle,
   Check,
-  X
+  X,
+  FileText,
+  BookOpen
 } from 'lucide-react';
 import { fetchYourProductsData } from '../redux/slices/PageDataSlice.js';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
+import { SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to format text with numbered points on separate lines
 // Handles both formats: "1) " and "(1) "
@@ -76,11 +79,11 @@ const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
     if (formattedPoints.length > 1) {
       // Multiple points - render each on separate line
       return (
-        <div className="space-y-1 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium">
+        <div className="space-y-1.5 issues-content [&_a]:text-blue-400 [&_a]:hover:text-blue-300 [&_a]:underline [&_a]:font-medium [&_strong]:text-gray-100 [&_strong]:font-semibold">
           {formattedPoints.map((point, index) => (
             <div 
               key={index}
-              className="text-sm text-gray-800 leading-relaxed break-words whitespace-normal"
+              className="text-sm text-gray-200 leading-relaxed break-words whitespace-normal"
               dangerouslySetInnerHTML={{ __html: point }}
             />
           ))}
@@ -91,7 +94,7 @@ const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
     // Single item or no numbered points - render as before
     return (
       <div 
-        className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_a]:text-blue-600 [&_a]:hover:text-blue-800 [&_a]:underline [&_a]:font-medium"
+        className="text-sm text-gray-200 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_a]:text-blue-400 [&_a]:hover:text-blue-300 [&_a]:underline [&_a]:font-medium [&_strong]:text-gray-100 [&_strong]:font-semibold"
         dangerouslySetInnerHTML={{ __html: processedHTML }}
       />
     );
@@ -105,9 +108,9 @@ const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
     return (
       <div className="space-y-1">
         {formattedPoints.map((point, index) => (
-          <p key={index} className="text-sm text-gray-800 leading-relaxed break-words whitespace-normal">
-            {point}
-          </p>
+            <p key={index} className="text-sm text-gray-200 leading-relaxed break-words whitespace-normal">
+              {point}
+            </p>
         ))}
       </div>
     );
@@ -115,9 +118,9 @@ const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
   
   // Single item or no numbered points - render as before
   return (
-    <p className="text-sm text-gray-800 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content">
-      {processedHTML}
-    </p>
+            <p className="text-sm text-gray-200 leading-relaxed flex-1 break-words whitespace-normal min-w-0 issues-content [&_strong]:text-gray-100 [&_strong]:font-semibold">
+              {processedHTML}
+            </p>
   );
 };
 
@@ -421,13 +424,17 @@ const YourProducts = () => {
   };
 
   // Filter products based on search and sort (client-side filtering)
-  // Note: Status filtering is now done on backend, but we keep client-side for 'withoutAPlus' tab
+  // Note: Status filtering is now done on backend, but we keep client-side for 'withoutAPlus' and 'notTargetedInAds' tabs
   const filteredProducts = useMemo(() => {
     let filtered = [...products];
 
     // Only apply client-side status filter for 'withoutAPlus' tab (backend doesn't filter by hasAPlus)
     if (activeTab === 'withoutAPlus') {
       filtered = filtered.filter(p => !p.hasAPlus);
+    }
+    // Filter for 'notTargetedInAds' tab (products not targeted in ads)
+    if (activeTab === 'notTargetedInAds') {
+      filtered = filtered.filter(p => !p.isTargetedInAds);
     }
     // For other tabs (all, active, inactive, incomplete), backend already filters by status
 
@@ -524,21 +531,21 @@ const YourProducts = () => {
     }
   };
 
-  // Get issues badge color based on count
+  // Get issues badge color based on count - using only green, red, blue, yellow
   const getIssuesBadge = (totalIssues) => {
     if (totalIssues === null || totalIssues === undefined) {
       return { bg: '#f1f5f9', color: '#94a3b8', text: '—' };
     }
     if (totalIssues === 0) {
-      return { bg: '#d1fae5', color: '#065f46', text: '0' };
+      return { bg: '#d1fae5', color: '#065f46', text: '0' }; // green
     }
     if (totalIssues >= 5) {
-      return { bg: '#fee2e2', color: '#991b1b', text: totalIssues.toString() };
+      return { bg: '#fee2e2', color: '#991b1b', text: totalIssues.toString() }; // red
     }
     if (totalIssues >= 2) {
-      return { bg: '#fef3c7', color: '#92400e', text: totalIssues.toString() };
+      return { bg: '#fef3c7', color: '#92400e', text: totalIssues.toString() }; // yellow
     }
-    return { bg: '#dbeafe', color: '#1e40af', text: totalIssues.toString() };
+    return { bg: '#dbeafe', color: '#1e40af', text: totalIssues.toString() }; // blue
   };
 
   // Pre-compute issue counts by ASIN from Dashboard info (same data structure as IssuesByProduct)
@@ -721,6 +728,7 @@ const YourProducts = () => {
       'Has A+ Content',
       'A+ Status',
       'Has Videos',
+      'Targeted In Ads',
       'Ranking Issues',
       'Conversion Issues',
       'Inventory Issues',
@@ -745,6 +753,7 @@ const YourProducts = () => {
           product.hasAPlus ? 'Yes' : 'No',
           product.aPlusStatus,
           product.hasVideo ? 'Yes' : 'No',
+          product.isTargetedInAds ? 'Yes' : 'No',
           rankingIssues,
           conversionIssues,
           inventoryIssues,
@@ -767,125 +776,20 @@ const YourProducts = () => {
     document.body.removeChild(link);
   };
 
-  // Show full page loader only on initial load (when no data exists yet)
-  // Once we have any data, tab switches will show table loader instead
-  if (loading && isInitialLoad && !yourProductsData) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your products...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
         <div className="text-center">
-          <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
-          <p className="text-red-600">{error}</p>
+          <AlertCircle size={48} className="text-red-400 mx-auto mb-4" />
+          <p className="text-red-400">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans overflow-x-hidden" style={{ overflowY: 'visible' }}>
+    <div className="min-h-screen bg-[#1a1a1a] p-2 md:p-3 font-sans overflow-x-hidden" style={{ overflowY: 'visible' }}>
       <style>{`
-        .tooltip-container {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
-          margin-left: 6px;
-        }
-        
-        .tooltip-icon {
-          width: 14px;
-          height: 14px;
-          color: #94a3b8;
-          cursor: help;
-          transition: color 0.2s;
-        }
-        
-        .tooltip-icon:hover {
-          color: #3b82f6;
-        }
-        
-        .tooltip-content {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          transform: translateY(4px);
-          margin-top: 8px;
-          padding: 12px 16px;
-          background: #1e293b;
-          color: white;
-          border-radius: 8px;
-          font-size: 13px;
-          font-weight: 400;
-          line-height: 1.5;
-          white-space: normal;
-          width: 250px;
-          max-width: calc(100vw - 40px);
-          z-index: 10000;
-          opacity: 0;
-          pointer-events: none;
-          transition: opacity 0.2s, transform 0.2s;
-          text-align: left;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        
-        .tooltip-container:hover .tooltip-content {
-          opacity: 1;
-          pointer-events: auto;
-          transform: translateY(0);
-        }
-        
-        .tooltip-content::before {
-          content: '';
-          position: absolute;
-          bottom: 100%;
-          left: 20px;
-          transform: translateX(0);
-          border: 6px solid transparent;
-          border-bottom-color: #1e293b;
-        }
-        
-        .th-with-tooltip {
-          display: flex;
-          align-items: center;
-          justify-content: flex-start;
-          gap: 4px;
-        }
-        
-        .th-with-tooltip.center {
-          justify-content: center;
-        }
-        
-        .tooltip-container.tooltip-last {
-          position: relative;
-        }
-        
-        .tooltip-container.tooltip-last .tooltip-content {
-          left: auto;
-          right: 0;
-          transform: translateY(4px);
-          text-align: left;
-          max-width: min(250px, calc(100vw - 40px));
-        }
-        
-        .tooltip-container.tooltip-last:hover .tooltip-content {
-          transform: translateY(0);
-        }
-        
-        .tooltip-container.tooltip-last .tooltip-content::before {
-          left: auto;
-          right: 20px;
-          transform: translateX(0);
-        }
-        
         /* Fix overflow for issues column */
         .issues-cell {
           max-width: 0;
@@ -915,16 +819,6 @@ const YourProducts = () => {
           overflow: visible;
         }
         
-        /* Allow tooltips to overflow their containers */
-        .tooltip-container {
-          overflow: visible !important;
-        }
-        
-        table th .tooltip-container,
-        table td .tooltip-container {
-          overflow: visible !important;
-        }
-        
         /* Ensure table container doesn't exceed viewport */
         .max-w-7xl {
           max-width: 100%;
@@ -932,7 +826,6 @@ const YourProducts = () => {
           overflow-y: visible;
         }
         
-        /* Ensure header tooltips are not clipped - keep them below but allow overflow */
         table thead {
           position: relative;
         }
@@ -941,92 +834,110 @@ const YourProducts = () => {
           overflow: visible !important;
           position: relative;
         }
-        
-        /* Ensure table wrapper allows tooltip overflow */
-        .bg-white.rounded-b-xl {
-          overflow: visible !important;
-          position: relative;
-        }
-        
-        /* Ensure tooltips can render outside table boundaries */
-        table {
-          position: relative;
-        }
-        
-        /* Add minimum height to table container to prevent clipping */
-        .bg-white.rounded-b-xl > div {
-          min-height: 200px;
-        }
       `}</style>
 
-      <div className="max-w-7xl mx-auto" style={{ maxWidth: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
+      <div className="max-w-7xl mx-auto px-2 lg:px-3 py-1.5" style={{ maxWidth: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-100 rounded-xl">
-                <Package className="w-6 h-6 text-blue-600" />
-              </div>
+        <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Box className="w-4 h-4 text-blue-400" />
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Your Products</h1>
-                <p className="text-gray-500 text-sm">
+                <h1 className="text-lg font-bold text-gray-100">Your Products</h1>
+                <p className="text-gray-400 text-xs">
                   {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'All Products'}
                 </p>
               </div>
             </div>
             <button
               onClick={exportToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors"
             >
-              <Download size={18} />
+              <Download size={16} />
               Export CSV
             </button>
           </div>
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Total Products</div>
-            <div className="text-2xl font-bold text-gray-900">{summary.totalProducts || 0}</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Active</div>
-            <div className="text-2xl font-bold text-green-600">{summary.activeProducts || 0}</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Inactive</div>
-            <div className="text-2xl font-bold text-red-600">{summary.inactiveProducts || 0}</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Incomplete</div>
-            <div className="text-2xl font-bold text-amber-600">{summary.incompleteProducts || 0}</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Without A+</div>
-            <div className="text-2xl font-bold text-purple-600">{summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0)}</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="text-sm text-gray-500 mb-1">Brand Story</div>
-            <div className="flex items-center">
-              {summary.hasBrandStory ? (
-                <Check size={28} className="text-green-600" strokeWidth={3} />
-              ) : (
-                <X size={28} className="text-red-600" strokeWidth={3} />
-              )}
-            </div>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1.5 mb-2">
+          {loading && !yourProductsData ? (
+            <>
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div key={idx} className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                  <div className="mb-1 h-3 w-20 rounded bg-[#30363d] animate-pulse" />
+                  <div className="h-6 w-12 rounded bg-[#21262d] animate-pulse" />
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <Box className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Total Products</span>
+                </div>
+                <div className="text-lg font-bold text-white">{summary.totalProducts || 0}</div>
+              </div>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Active</span>
+                </div>
+                <div className="text-lg font-bold text-white">{summary.activeProducts || 0}</div>
+              </div>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <XCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Inactive</span>
+                </div>
+                <div className="text-lg font-bold text-white">{summary.inactiveProducts || 0}</div>
+              </div>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Incomplete</span>
+                </div>
+                <div className="text-lg font-bold text-white">{summary.incompleteProducts || 0}</div>
+              </div>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <FileText className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Without A+</span>
+                </div>
+                <div className="text-lg font-bold text-white">
+                  {summary.productsWithoutAPlus ??
+                    (summary.totalProducts != null
+                      ? summary.totalProducts - (summary.productsWithAPlus || 0)
+                      : 0)}
+                </div>
+              </div>
+              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+                  <BookOpen className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
+                  <span>Brand Story</span>
+                </div>
+                <div className="flex items-center">
+                  {summary.hasBrandStory ? (
+                    <Check size={20} className="text-green-400" strokeWidth={3} />
+                  ) : (
+                    <X size={20} className="text-red-400" strokeWidth={3} />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* General Info Message about Inactive/Incomplete Products */}
-        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6 rounded-r-lg">
-          <div className="flex items-start gap-3">
-            <Info className="text-blue-600 flex-shrink-0 mt-0.5" size={20} />
+        <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r">
+          <div className="flex items-start gap-2">
+            <Info className="text-blue-400 flex-shrink-0 mt-0.5" size={16} />
             <div>
-              <h3 className="text-sm font-semibold text-blue-800 mb-1">
+              <h3 className="text-xs font-semibold text-blue-300 mb-0.5">
                 Check Product Issues
               </h3>
-              <p className="text-sm text-blue-700">
+              <p className="text-xs text-blue-400">
                 To view and resolve issues for inactive or incomplete products, navigate to the <strong>Inactive</strong> or <strong>Incomplete</strong> tabs above. Each product in these tabs displays the specific issues that need to be addressed.
               </p>
             </div>
@@ -1034,37 +945,38 @@ const YourProducts = () => {
         </div>
 
         {/* Search and Filters */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-4">
+        <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
+          <div className="flex flex-col md:flex-row gap-2">
             {/* Search */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
               <input
                 type="text"
                 placeholder="Search by ASIN, SKU, or Title..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-8 pr-3 py-1.5 bg-[#21262d] border border-[#30363d] rounded text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
               />
             </div>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="bg-white rounded-t-xl shadow-sm px-4 flex gap-2 overflow-x-auto border-b border-gray-200">
+        <div className="bg-[#161b22] rounded-t border border-b-0 border-[#30363d] px-2 flex gap-1 overflow-x-auto">
           {[
             { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
             { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
             { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 },
-            { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0) }
+            { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0) },
+            { key: 'notTargetedInAds', label: 'Not Targeted to Ads', count: products.filter(p => !p.isTargetedInAds).length }
           ].map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+              className={`px-2 py-1.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
                 activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-400 text-blue-400'
+                  : 'border-transparent text-gray-400 hover:text-gray-300'
               }`}
             >
               {tab.label} ({tab.count})
@@ -1073,84 +985,62 @@ const YourProducts = () => {
         </div>
 
         {/* Products Table */}
-        <div className="bg-white rounded-b-xl shadow-sm relative" style={{ overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
-          {/* Table loader overlay - shown when loading but not initial load (tab switch) */}
-          {/* Don't show overlay when loadingMore (Load More has its own loader row) */}
-          {loading && !isInitialLoad && !loadingMore && (
-            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
-              <div className="text-center">
-                <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
-                <p className="text-sm text-gray-600">Loading products...</p>
-              </div>
+        <div className="bg-[#161b22] rounded-b border border-[#30363d] relative" style={{ overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
+          {/* When loading with no data yet, show skeleton rows instead of full-page or overlay spinner */}
+          {loading && !yourProductsData ? (
+            <div className="p-2">
+              <SkeletonTableBody rows={10} />
             </div>
-          )}
+          ) : (
           <div className="w-full" style={{ overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
             <table className="w-full" style={{ tableLayout: 'fixed', width: '100%', maxWidth: '100%' }}>
-              <thead className="bg-gray-50">
+              <thead className="bg-[#21262d]">
                 <tr>
                   {/* Show different columns based on tab */}
                   {(activeTab === 'inactive' || activeTab === 'incomplete') ? (
                     <>
                       {/* Simplified columns for inactive/incomplete tabs: ASIN/SKU, Title, B2B Pricing, Issues */}
                       <th 
-                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
-                        style={{ width: '14%' }}
+                        className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]"
+                        style={{ width: '10%' }}
                         onClick={() => handleSort('asin')}
                       >
                         ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
-                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 border-b border-gray-200"
-                        style={{ width: '25%' }}
+                        className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]"
+                        style={{ width: '29%' }}
                         onClick={() => handleSort('title')}
                       >
                         Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '8%' }}>
-                        <div className="th-with-tooltip center">
-                          <span>B2B Pricing</span>
-                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>B2B Pricing</strong><br />
-                              Indicates whether the product has Business-to-Business (B2B) pricing enabled.
-                            </div>
-                          </div>
-                        </div>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '8%' }}>
+                        B2B Pricing
                       </th>
-                      <th className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200" style={{ width: '53%' }}>
-                        <div className="th-with-tooltip">
-                          <span>Issues</span>
-                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>Listing Issues</strong><br />
-                              Issues preventing this product from being active on Amazon.
-                            </div>
-                          </div>
-                        </div>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '53%' }}>
+                        Issues
                       </th>
                     </>
                   ) : (
                     <>
                       {/* Full columns for other tabs */}
                       <th 
-                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '14%' : '12%' }}
+                        className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '10%' : '9%' }}
                         onClick={() => handleSort('asin')}
                       >
                         ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
-                        className="px-2 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '20%' : '18%' }}
+                        className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '24%' : '22%' }}
                         onClick={() => handleSort('title')}
                       >
                         Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
                         onClick={() => handleSort('price')}
                       >
                         Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
@@ -1158,133 +1048,76 @@ const YourProducts = () => {
                       {/* Total Issues column - shown for all tabs except inactive/incomplete */}
                       {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
                         <th 
-                          className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                          style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                          style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
                           onClick={() => handleSort('totalIssues')}
                         >
-                          <div className="th-with-tooltip">
-                            <span>Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                            <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                              <Info className="tooltip-icon" />
-                              <div className="tooltip-content">
-                                <strong>Total Issues</strong><br />
-                                Combined count of ranking, conversion, and inventory issues. Only shown for active products.
-                              </div>
-                            </div>
-                          </div>
+                          Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                         </th>
                       )}
-                      {/* Quantity column - shown for all, active, and withoutAPlus tabs */}
+                      {/* Quantity column - shown for all, active, withoutAPlus, and notTargetedInAds tabs */}
                       {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
                         <th 
-                          className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                          style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                          style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
                           onClick={() => handleSort('quantity')}
                         >
                           Available Stocks {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                         </th>
                       )}
-                      {/* Status column - hidden in 'active' and 'withoutAPlus' tabs */}
-                      {activeTab !== 'active' && activeTab !== 'withoutAPlus' && (
+                      {/* Status column - hidden in 'active', 'withoutAPlus', and 'notTargetedInAds' tabs */}
+                      {activeTab !== 'active' && activeTab !== 'withoutAPlus' && activeTab !== 'notTargetedInAds' && (
                         <th 
-                          className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
                           style={{ width: '7%' }}
                           onClick={() => handleSort('status')}
                         >
                           Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                         </th>
                       )}
-                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip center">
-                          <span>A+</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>A+ Content</strong><br />
-                              Enhanced product descriptions with rich media that can increase conversions by up to 10%.
-                            </div>
-                          </div>
-                        </div>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}>
+                        A+
                       </th>
-                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip center">
-                          <span>Videos</span>
-                          <div className="tooltip-container" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>Has Videos</strong><br />
-                              Indicates whether the product listing has video content available.
-                            </div>
-                          </div>
-                        </div>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}>
+                        Videos
                       </th>
-                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{ width: activeTab === 'active' ? '8%' : '7%' }}>
-                        <div className="th-with-tooltip center">
-                          <span>B2B</span>
-                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>B2B Pricing</strong><br />
-                              Indicates whether the product has Business-to-Business (B2B) pricing enabled.
-                            </div>
-                          </div>
-                        </div>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '7%' : '6%' }}>
+                        B2B
                       </th>
+                      {/* Targeted In Ads column - shown for active, withoutAPlus, and notTargetedInAds tabs */}
+                      {(activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') && (
+                        <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
+                          Ads
+                        </th>
+                      )}
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '7%' : '6%' }}
                         onClick={() => handleSort('numRatings')}
                       >
-                        <div className="th-with-tooltip">
-                          <span>Reviews {sortConfig.key === 'numRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>Reviews</strong><br />
-                              Total number of customer reviews received for this product.
-                            </div>
-                          </div>
-                        </div>
+                        Reviews {sortConfig.key === 'numRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       <th 
-                        className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
-                        style={{ width: activeTab === 'active' ? '8%' : '7%' }}
+                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
+                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
                         onClick={() => handleSort('starRatings')}
                       >
-                        <div className="th-with-tooltip">
-                          <span>Ratings {sortConfig.key === 'starRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                          <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                            <Info className="tooltip-icon" />
-                            <div className="tooltip-content">
-                              <strong>Ratings</strong><br />
-                              Average star rating out of 5 based on customer reviews.
-                            </div>
-                          </div>
-                        </div>
+                        Ratings {sortConfig.key === 'starRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                       </th>
                       {/* Issues column - shown only for inactive/incomplete tabs */}
                       {(activeTab === 'inactive' || activeTab === 'incomplete') && (
                         <th 
-                          className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
                           onClick={() => handleSort('totalIssues')}
                         >
-                          <div className="th-with-tooltip">
-                            <span>Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</span>
-                            <div className="tooltip-container tooltip-last" onClick={(e) => e.stopPropagation()}>
-                              <Info className="tooltip-icon" />
-                              <div className="tooltip-content">
-                                <strong>Total Issues</strong><br />
-                                Combined count of ranking, conversion, and inventory issues. Only shown for active products.
-                              </div>
-                            </div>
-                          </div>
+                          Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                         </th>
                       )}
                     </>
                   )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-[#30363d]">
                 {displayedProducts.length > 0 ? (
                   displayedProducts.map((product, index) => {
                     const statusBadge = getStatusBadge(product.status);
@@ -1293,41 +1126,39 @@ const YourProducts = () => {
                     if (activeTab === 'inactive' || activeTab === 'incomplete') {
                       const issueCount = product.issues?.length || 0;
                       return (
-                        <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50/50 transition-colors border-b border-gray-100">
-                          <td className="px-2 py-4 text-left align-top">
+                        <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
+                          <td className="px-1.5 py-2 text-left align-top">
                             <div className="flex flex-col gap-1 items-start">
-                            <code className="text-xs font-mono text-gray-900 bg-gray-50 px-1.5 py-0.5 rounded break-all">
+                            <code className="text-xs font-mono text-gray-100 bg-[#21262d] px-1.5 py-0.5 rounded break-all">
                                 {product.asin || '—'}
                             </code>
-                              <span className="text-xs font-medium text-gray-600 break-words">
+                              <span className="text-xs font-medium text-gray-400 break-words">
                                 {product.sku || '—'}
                               </span>
                             </div>
                           </td>
-                          <td className="px-2 py-4 text-left align-top">
-                            <span className="text-sm text-gray-900 font-medium leading-relaxed block break-words">
+                          <td className="pl-1 pr-2 py-2 text-left align-top">
+                            <span className="text-sm text-gray-100 font-medium leading-relaxed block break-words">
                               {product.title || '—'}
                             </span>
                           </td>
-                          <td className="px-2 py-4 text-center align-top">
+                          <td className="px-2 py-2 text-center align-top">
                             {product.has_b2b_pricing ? (
-                              <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                              <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
                             ) : (
-                              <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                              <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
                             )}
                           </td>
-                          <td className="px-2 py-4 text-left align-top issues-cell">
+                          <td className="px-2 py-2 text-left align-top issues-cell">
                             {issueCount > 0 ? (
                               <div className="space-y-2 issues-content">
                                 {product.issues.map((issue, issueIndex) => (
                                   <div 
                                     key={issueIndex} 
-                                    className="flex items-start gap-2 p-2.5 bg-amber-50 border-l-3 border-amber-400 rounded-r-md hover:bg-amber-100/70 transition-colors min-w-0"
+                                    className="flex items-start gap-2.5 p-2.5 bg-[#21262d] border border-[#30363d] rounded hover:border-yellow-500/40 hover:bg-[#1c2128] transition-all min-w-0"
                                   >
                                     <div className="flex-shrink-0 mt-0.5">
-                                      <div className="w-4 h-4 rounded-full bg-amber-200 flex items-center justify-center">
-                                        <AlertTriangle size={10} className="text-amber-700" />
-                                      </div>
+                                      <AlertTriangle size={14} className="text-yellow-400" />
                                     </div>
                                     {(() => {
                                       const { hasHTML, processedHTML } = processIssueHTML(issue);
@@ -1371,9 +1202,9 @@ const YourProducts = () => {
                                 ))}
                               </div>
                             ) : (
-                              <div className="flex items-center gap-2 px-2.5 py-2 bg-gray-50 rounded-md border border-gray-200">
-                                <CheckCircle size={12} className="text-gray-400 flex-shrink-0" />
-                                <span className="text-xs text-gray-500 italic">No issues recorded</span>
+                              <div className="flex items-center gap-2 px-2.5 py-2 bg-[#21262d] rounded border border-[#30363d]">
+                                <CheckCircle size={12} className="text-green-400 flex-shrink-0" />
+                                <span className="text-xs text-gray-400 italic">No issues recorded</span>
                               </div>
                             )}
                           </td>
@@ -1383,26 +1214,26 @@ const YourProducts = () => {
                     
                     // Default row layout for other tabs
                     return (
-                      <tr key={`${product.asin}-${index}`} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-2 py-3 text-left align-top">
+                      <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
+                        <td className="px-1.5 py-2 text-left align-top">
                           <div className="flex flex-col gap-1">
-                            <code className="text-xs font-mono text-gray-900 break-all">{product.asin || '—'}</code>
-                            <span className="text-xs text-gray-600 break-words">{product.sku || '—'}</span>
+                            <code className="text-xs font-mono text-gray-100 break-all">{product.asin || '—'}</code>
+                            <span className="text-xs text-gray-400 break-words">{product.sku || '—'}</span>
                           </div>
                         </td>
-                        <td className="px-2 py-3 text-left align-top">
-                          <span className="text-xs text-gray-900 break-words line-clamp-2" title={product.title}>
+                        <td className="pl-1 pr-2 py-2 text-left align-top">
+                          <span className="text-xs text-gray-100 break-words line-clamp-2" title={product.title}>
                             {product.title || '—'}
                           </span>
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
-                          <span className="text-xs font-medium text-gray-900 whitespace-nowrap">
+                        <td className="px-2 py-2 text-center align-top">
+                          <span className="text-xs font-medium text-gray-100 whitespace-nowrap">
                             {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
                           </span>
                         </td>
                         {/* Total Issues column - shown for all tabs except inactive/incomplete */}
                         {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                          <td className="px-2 py-3 text-center align-top">
+                          <td className="px-2 py-2 text-center align-top">
                             {product.status === 'Active' ? (() => {
                               const totalIssues = getTotalIssues(product);
                               const rankingIssues = countRankingIssues(product);
@@ -1413,8 +1244,16 @@ const YourProducts = () => {
                                 <button
                                   type="button"
                                   onClick={() => navigate(`/seller-central-checker/issues/${product.asin}`)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all hover:opacity-95 hover:shadow-sm hover:-translate-y-[1px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                                  style={{ backgroundColor: badge.bg, color: badge.color }}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border-2 ${
+                                    totalIssues > 0 
+                                      ? 'border-red-500 text-red-400' 
+                                      : 'border-green-500 text-green-400'
+                                  }`}
+                                  style={totalIssues > 0 ? {
+                                    boxShadow: '0 0 8px rgba(239, 68, 68, 0.5), 0 0 12px rgba(239, 68, 68, 0.3)'
+                                  } : {
+                                    boxShadow: '0 0 8px rgba(34, 197, 94, 0.5), 0 0 12px rgba(34, 197, 94, 0.3)'
+                                  }}
                                   title={totalIssues > 0 ? `Ranking: ${rankingIssues}, Conversion: ${conversionIssues}, Inventory: ${inventoryIssues}` : 'No issues'}
                                 >
                                   {totalIssues > 0 && <AlertTriangle size={12} />}
@@ -1428,17 +1267,17 @@ const YourProducts = () => {
                         )}
                         {/* Quantity column - shown for all, active, and withoutAPlus tabs */}
                         {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                          <td className="px-2 py-3 text-center align-top">
-                            <span className="text-xs font-semibold text-gray-900 whitespace-nowrap">
+                          <td className="px-2 py-2 text-center align-top">
+                            <span className="text-xs font-semibold text-gray-100 whitespace-nowrap">
                               {product.quantity !== undefined && product.quantity !== null 
                                 ? parseInt(product.quantity).toLocaleString() 
                                 : '—'}
                             </span>
                           </td>
                         )}
-                        {/* Status column - hidden in 'active' and 'withoutAPlus' tabs */}
-                        {activeTab !== 'active' && activeTab !== 'withoutAPlus' && (
-                          <td className="px-2 py-3 text-center align-top">
+                        {/* Status column - hidden in 'active', 'withoutAPlus', and 'notTargetedInAds' tabs */}
+                        {activeTab !== 'active' && activeTab !== 'withoutAPlus' && activeTab !== 'notTargetedInAds' && (
+                          <td className="px-2 py-2 text-center align-top">
                             <span 
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
                               style={{ backgroundColor: statusBadge.bg, color: statusBadge.color }}
@@ -1448,36 +1287,46 @@ const YourProducts = () => {
                             </span>
                           </td>
                         )}
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-2 text-center align-top">
                           {product.hasAPlus ? (
-                            <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
                           ) : (
-                            <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
                           )}
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-2 text-center align-top">
                           {product.hasVideo ? (
-                            <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
                           ) : (
-                            <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
                           )}
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-2 text-center align-top">
                           {product.has_b2b_pricing ? (
-                            <Check size={16} className="text-green-600 font-bold mx-auto" strokeWidth={3} />
+                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
                           ) : (
-                            <X size={16} className="text-red-600 font-bold mx-auto" strokeWidth={3} />
+                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
                           )}
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
-                          <span className="text-xs text-gray-600 whitespace-nowrap">
+                        {/* Targeted In Ads column - shown for active, withoutAPlus, and notTargetedInAds tabs */}
+                        {(activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') && (
+                          <td className="px-2 py-2 text-center align-top">
+                            {product.isTargetedInAds ? (
+                              <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
+                            ) : (
+                              <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
+                            )}
+                          </td>
+                        )}
+                        <td className="px-2 py-2 text-center align-top">
+                          <span className="text-xs text-gray-400 whitespace-nowrap">
                             {product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}
                           </span>
                         </td>
-                        <td className="px-2 py-3 text-center align-top">
+                        <td className="px-2 py-2 text-center align-top">
                           <div className="flex items-center justify-center gap-1">
-                            <Star size={12} className="text-amber-400 fill-amber-400" />
-                            <span className="text-xs font-medium text-gray-900 whitespace-nowrap">
+                            <Star size={12} className="text-yellow-400 fill-yellow-400" />
+                            <span className="text-xs font-medium text-gray-100 whitespace-nowrap">
                               {product.starRatings ? parseFloat(product.starRatings).toFixed(1) : '0.0'}
                             </span>
                           </div>
@@ -1514,8 +1363,8 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withoutAPlus') ? 10 : 11
-                    } className="px-4 py-12 text-center text-gray-500">
+                      (activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 11 : 10
+                    } className="px-4 py-12 text-center text-gray-400">
                       {products.length === 0 
                         ? 'No products found. Please ensure your account is connected and data is synced.'
                         : 'No products match your current filters.'}
@@ -1528,11 +1377,11 @@ const YourProducts = () => {
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withoutAPlus') ? 10 : 11
-                    } className="px-4 py-8 text-center bg-gray-50">
+                      (activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 11 : 10
+                    } className="px-4 py-8 text-center bg-[#21262d]">
                       <div className="flex items-center justify-center gap-3">
-                        <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-sm text-gray-600">Loading more products...</span>
+                        <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-sm text-gray-400">Loading more products...</span>
                       </div>
                     </td>
                   </tr>
@@ -1540,17 +1389,18 @@ const YourProducts = () => {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* Load More */}
           {hasMoreFromBackend && !loadingMore && (
-            <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center gap-4">
-              <span className="text-sm text-gray-500">
+            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center gap-3">
+              <span className="text-xs text-gray-400">
                 Showing {products.length} of {pagination.totalItems || products.length} products
               </span>
               <button
                 onClick={handleLoadMoreFromBackend}
                 disabled={loadingMore}
-                className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Load More
                 <ChevronDown size={16} />
@@ -1558,8 +1408,8 @@ const YourProducts = () => {
             </div>
           )}
           {!hasMoreFromBackend && products.length > 0 && (
-            <div className="px-4 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-center">
-              <span className="text-sm text-gray-500">
+            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center">
+              <span className="text-xs text-gray-400">
                 Showing all {pagination.totalItems || products.length} products
               </span>
             </div>

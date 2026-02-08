@@ -20,16 +20,20 @@ const {
 
 // Import middleware
 const auth = require('../middlewares/Auth/auth');
-// Rate limiters disabled except for authentication
-// const { webhookRateLimiter, paymentRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateCheckoutSession } = require('../middlewares/validator/paymentValidate.js');
 
-// Webhook routes (no auth required, Stripe handles verification)
+// Webhook routes (no auth required, Stripe handles verification via signature)
 router.post('/webhook', handleWebhook);
-router.get('/webhook/test', testWebhook);
+
+// Test webhook endpoint - restrict in production
+router.get('/webhook/test', (req, res, next) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
+    next();
+}, testWebhook);
 
 // Subscription management routes (auth required)
-// Note: Rate limiting temporarily disabled on payment routes to prevent blocking legitimate payment flows
 router.post('/create-checkout-session', auth, validateCheckoutSession, createCheckoutSession);
 router.get('/payment-success', auth, handlePaymentSuccess);
 router.get('/subscription', auth, getSubscription);

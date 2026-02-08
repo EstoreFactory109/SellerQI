@@ -71,84 +71,78 @@ const SuggestionList = ({ suggestionsData }) => {
 
   const getPriorityBg = (priority) => {
     switch (priority) {
-      case 'critical': return 'bg-red-50 border-red-200';
-      case 'high': return 'bg-amber-50 border-amber-200';
-      case 'medium': return 'bg-blue-50 border-blue-200';
-      default: return 'bg-gray-50 border-gray-200';
+      case 'critical': return 'border-red-500/30';
+      case 'high': return 'border-amber-500/30';
+      case 'medium': return 'border-blue-500/30';
+      default: return 'border-gray-500/30';
     }
   };
 
   const getPriorityText = (priority) => {
     switch (priority) {
-      case 'critical': return 'text-red-700';
-      case 'high': return 'text-amber-700';
-      case 'medium': return 'text-blue-700';
-      default: return 'text-gray-700';
+      case 'critical': return '#f87171';
+      case 'high': return '#fb923c';
+      case 'medium': return '#60a5fa';
+      default: return '#9ca3af';
     }
   };
 
   const getPriorityBadge = (priority) => {
     switch (priority) {
-      case 'critical': return 'bg-red-100 text-red-800 border-red-200';
-      case 'high': return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'medium': return 'bg-blue-100 text-blue-800 border-blue-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'critical': return { background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' };
+      case 'high': return { background: 'rgba(251, 146, 60, 0.2)', color: '#fb923c', borderColor: 'rgba(251, 146, 60, 0.3)' };
+      case 'medium': return { background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' };
+      default: return { background: 'rgba(156, 163, 175, 0.2)', color: '#9ca3af', borderColor: 'rgba(156, 163, 175, 0.3)' };
     }
   };
   
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
       {/* Enhanced Header */}
-      <div className="p-6 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Lightbulb className="w-5 h-5 text-white" />
-            </div>
+      <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4" style={{ color: '#f3f4f6' }} />
             <div>
-              <h3 className="text-xl font-bold text-gray-900">AI-Powered Suggestions</h3>
-              <p className="text-sm text-gray-600">Actionable insights to optimize your profitability</p>
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>AI-Powered Suggestions</h3>
             </div>
           </div>
           <div className="text-right">
-            <div className="text-sm text-gray-600">Total Suggestions</div>
-            <div className="text-2xl font-bold text-gray-900">{suggestions.length}</div>
+            <div className="text-[10px] uppercase tracking-wide" style={{ color: '#9ca3af' }}>Total</div>
+            <div className="text-base font-bold" style={{ color: '#f3f4f6' }}>{suggestions.length}</div>
           </div>
         </div>
 
         {/* Priority Summary Cards */}
         {suggestions.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
             {criticalSuggestions.length > 0 && (
-              <div className="bg-white p-4 rounded-xl border border-red-200 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertTriangle className="w-4 h-4 text-red-600" />
-                  <span className="text-xs font-medium text-red-700">Critical Issues</span>
+              <div className="p-2 rounded border" style={{ background: '#161b22', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <AlertTriangle className="w-3 h-3" style={{ color: '#f87171' }} />
+                  <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: '#f87171' }}>Critical</span>
                 </div>
-                <div className="text-lg font-bold text-red-600">{criticalSuggestions.length}</div>
-                <p className="text-xs text-red-600 mt-1">Immediate action required</p>
+                <div className="text-sm font-bold" style={{ color: '#f87171' }}>{criticalSuggestions.length}</div>
               </div>
             )}
             
             {highPrioritySuggestions.length > 0 && (
-              <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="w-4 h-4 text-amber-600" />
-                  <span className="text-xs font-medium text-amber-700">High Priority</span>
+              <div className="p-2 rounded border" style={{ background: '#161b22', borderColor: 'rgba(251, 146, 60, 0.3)' }}>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <TrendingUp className="w-3 h-3" style={{ color: '#fb923c' }} />
+                  <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: '#fb923c' }}>High</span>
                 </div>
-                <div className="text-lg font-bold text-amber-600">{highPrioritySuggestions.length}</div>
-                <p className="text-xs text-amber-600 mt-1">Optimize within a week</p>
+                <div className="text-sm font-bold" style={{ color: '#fb923c' }}>{highPrioritySuggestions.length}</div>
               </div>
             )}
             
             {mediumPrioritySuggestions.length > 0 && (
-              <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <Target className="w-4 h-4 text-blue-600" />
-                  <span className="text-xs font-medium text-blue-700">Medium Priority</span>
+              <div className="p-2 rounded border" style={{ background: '#161b22', borderColor: 'rgba(59, 130, 246, 0.3)' }}>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <Target className="w-3 h-3" style={{ color: '#60a5fa' }} />
+                  <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: '#60a5fa' }}>Medium</span>
                 </div>
-                <div className="text-lg font-bold text-blue-600">{mediumPrioritySuggestions.length}</div>
-                <p className="text-xs text-blue-600 mt-1">Review when convenient</p>
+                <div className="text-sm font-bold" style={{ color: '#60a5fa' }}>{mediumPrioritySuggestions.length}</div>
               </div>
             )}
           </div>
@@ -156,44 +150,43 @@ const SuggestionList = ({ suggestionsData }) => {
       </div>
 
       {/* Suggestions Content */}
-      <div className="p-6">
+      <div className="p-3">
         {suggestionsToDisplay.length > 0 ? (
-          <div className="space-y-4">
+          <div className="space-y-2">
             <AnimatePresence>
               {suggestionsToDisplay.map((suggestion, index) => {
                 const IconComponent = suggestion.icon || Lightbulb;
+                const badgeStyle = getPriorityBadge(suggestion.priority);
                 return (
                   <motion.div
                     key={index}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 20 }}
-                    transition={{ duration: 0.3, delay: index * 0.1 }}
-                    className={`p-4 rounded-xl border ${getPriorityBg(suggestion.priority)} hover:shadow-md transition-all duration-200`}
+                    transition={{ duration: 0.3, delay: index * 0.05 }}
+                    className={`p-2 rounded border transition-all duration-200`}
+                    style={{ background: '#161b22', borderColor: badgeStyle.borderColor }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = '#161b22'}
                   >
-                    <div className="flex items-start gap-4">
+                    <div className="flex items-start gap-2">
                       {/* Priority Indicator & Icon */}
-                      <div className="flex-shrink-0">
-                        <div className={`w-10 h-10 bg-gradient-to-br ${getPriorityColor(suggestion.priority)} rounded-lg flex items-center justify-center shadow-sm`}>
-                          <IconComponent className="w-5 h-5 text-white" />
-                        </div>
+                      <div className="flex-shrink-0 mt-0.5">
+                        <IconComponent className="w-3.5 h-3.5" style={{ color: getPriorityText(suggestion.priority) }} />
                       </div>
 
                       {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityBadge(suggestion.priority)}`}>
-                            {suggestion.priority === 'critical' && <AlertCircle className="w-3 h-3 mr-1" />}
-                            {suggestion.priority === 'high' && <TrendingUp className="w-3 h-3 mr-1" />}
-                            {suggestion.priority === 'medium' && <Target className="w-3 h-3 mr-1" />}
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={{ background: badgeStyle.background, color: badgeStyle.color, borderColor: badgeStyle.borderColor }}>
                             {suggestion.priority.charAt(0).toUpperCase() + suggestion.priority.slice(1)}
                           </span>
-                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(156, 163, 175, 0.2)', color: '#9ca3af' }}>
                             {suggestion.category}
                           </span>
                         </div>
                         
-                        <p className={`text-sm leading-relaxed ${getPriorityText(suggestion.priority)}`}>
+                        <p className="text-[11px] leading-relaxed" style={{ color: getPriorityText(suggestion.priority) }}>
                           {suggestion.message}
                         </p>
                       </div>
@@ -205,22 +198,25 @@ const SuggestionList = ({ suggestionsData }) => {
 
             {/* Show More/Less Button */}
             {suggestions.length > 5 && (
-              <div className="flex justify-center pt-4">
+              <div className="flex justify-center pt-2">
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setShowAllSuggestions(!showAllSuggestions)}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 font-medium rounded-xl border border-blue-200 hover:from-blue-100 hover:to-indigo-100 transition-all duration-200 shadow-sm hover:shadow-md"
+                  className="flex items-center gap-1.5 px-3 py-1.5 font-medium rounded border transition-all duration-200"
+                  style={{ background: '#1a1a1a', borderColor: '#30363d', color: '#60a5fa', fontSize: '11px' }}
+                  onMouseEnter={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#161b22'; }}
+                  onMouseLeave={(e) => { e.target.style.borderColor = '#30363d'; e.target.style.background = '#1a1a1a'; }}
                 >
                   {showAllSuggestions ? (
                     <>
-                      <ChevronUp className="w-4 h-4" />
+                      <ChevronUp className="w-3 h-3" />
                       <span>Show Less</span>
                     </>
                   ) : (
                     <>
-                      <ChevronDown className="w-4 h-4" />
-                      <span>Show {suggestions.length - 5} More Suggestions</span>
+                      <ChevronDown className="w-3 h-3" />
+                      <span>Show {suggestions.length - 5} More</span>
                     </>
                   )}
                 </motion.button>
@@ -228,32 +224,12 @@ const SuggestionList = ({ suggestionsData }) => {
             )}
           </div>
         ) : (
-          <div className="text-center py-12">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-green-100 to-emerald-100 rounded-full flex items-center justify-center">
-                <Shield className="w-8 h-8 text-green-600" />
-              </div>
+          <div className="text-center py-6">
+            <div className="flex flex-col items-center gap-2">
+              <Shield className="w-5 h-5" style={{ color: '#22c55e' }} />
               <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">All Good! 🎉</h3>
-                <div className="space-y-1 text-sm text-gray-600 max-w-md">
-                  <p>No critical optimization suggestions at this time.</p>
-                  <p>Your products are performing well within healthy profit margins.</p>
-                  <p className="font-medium text-green-600 mt-3">Continue monitoring for future optimization opportunities.</p>
-                </div>
-              </div>
-              
-              {/* Motivational Tips */}
-              <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
-                <h4 className="text-sm font-medium text-green-900 mb-2 flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4" />
-                  Pro Tips for Continued Success
-                </h4>
-                <ul className="text-xs text-green-700 space-y-1">
-                  <li>• Monitor profit margins regularly to catch issues early</li>
-                  <li>• Consider seasonal adjustments to pricing and inventory</li>
-                  <li>• Keep optimizing PPC campaigns for better ACOS</li>
-                  <li>• Review and update COGS values when supplier costs change</li>
-                </ul>
+                <h3 className="text-sm font-medium mb-1" style={{ color: '#f3f4f6' }}>All Good! 🎉</h3>
+                <p className="text-xs" style={{ color: '#9ca3af' }}>No critical optimization suggestions at this time.</p>
               </div>
             </div>
           </div>

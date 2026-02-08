@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { AlertCircle, DollarSign, PieChart } from 'lucide-react';
+import { Info, Currency, PieChart } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -226,11 +226,11 @@ const TotalSales = () => {
       },
       labels: labelData,
       colors: [
-        grossProfitRaw < 0 ? "#64748b" : "#059669",
-        "#f59e0b",
-        "#ea580c",
-        "#dc2626",
-        "#9333ea",
+        grossProfitRaw < 0 ? "#64748b" : "#059669", // Gross Profit: emerald-600 (deep vibrant green)
+        "#d97706", // PPC Spent: amber-600 (deep vibrant amber)
+        "#ea580c", // FBA Fees: orange-600 (deep vibrant orange)
+        "#dc2626", // Other Amazon Fees: red-600 (deep vibrant red)
+        "#9333ea", // Refunds: purple-600 (deep vibrant purple)
       ],
       legend: { show: false },
       dataLabels: { 
@@ -245,14 +245,14 @@ const TotalSales = () => {
       },
       stroke: {
         width: 2,
-        colors: ['#ffffff']
+        colors: ['#161b22']
       },
       responsive: [{
         breakpoint: 768,
         options: {
           chart: {
-            height: 200,
-            width: 200
+            height: 280,
+            width: 280
           }
         }
       }]
@@ -300,35 +300,31 @@ const TotalSales = () => {
   const displayEndDate = displayDates.endDate;
 
   return (
-    <div className="p-6 h-full min-h-[400px] bg-white border-2 border-gray-200 rounded-md relative">
+    <div className="p-1.5 h-full bg-transparent rounded relative flex flex-col">
       {loading && (
-        <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 rounded-md">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="absolute inset-0 bg-[#161b22]/90 flex items-center justify-center z-10 rounded">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <DollarSign className="w-5 h-5 text-blue-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Total Sales</h2>
-          </div>
+      <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
+        <div className="flex items-center gap-1">
+          <Currency className="w-3 h-3 text-blue-400" />
+          <h2 className="text-xs font-semibold text-gray-100">Total Sales</h2>
           <div className="relative">
-            <AlertCircle 
-              className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors" 
+            <Info 
+              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors" 
               onMouseEnter={() => setOpenToolTipTopSales(true)} 
               onMouseLeave={() => setOpenToolTipTopSales(false)} 
             />
             {openToolTipTopSales && <ToolTipBoxLeft Information="Total revenue generated during the selected date range."/>}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <PieChart className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Gross Profit</h2>
-          </div>
+        <div className="flex items-center gap-1">
+          <PieChart className="w-3 h-3 text-blue-400" />
+          <h2 className="text-xs font-semibold text-gray-100">Gross Profit</h2>
           <div className="relative">
-            <AlertCircle 
-              className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors" 
+            <Info 
+              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors" 
               onMouseEnter={() => setOpenToolTipGrossProfit(true)} 
               onMouseLeave={() => setOpenToolTipGrossProfit(false)} 
             />
@@ -337,40 +333,39 @@ const TotalSales = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
+      <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
         <div className="flex flex-col">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-3xl font-bold text-gray-900">
-              {formatCurrencyWithLocale(totalSales, currency)}
-            </h2>
-          </div>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-xl font-bold text-gray-100">
+            {formatCurrencyWithLocale(totalSales, currency)}
+          </h2>
+          <p className="text-xs text-gray-400">
             {displayStartDate ? formatDateWithOrdinal(displayStartDate) : 'N/A'} - {displayEndDate ? formatDateWithOrdinal(displayEndDate) : 'N/A'}
           </p>
         </div>
-        
         <div className="flex flex-col items-end">
-          <h2 className={`text-2xl font-bold ${grossProfitRaw >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+          <h2 className={`text-lg font-bold ${grossProfitRaw >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
             {formatCurrencyWithLocale(grossProfitRaw, currency)}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-xs text-gray-400">
             {grossProfitRaw >= 0 ? 'Profit' : 'Loss'}
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        <div className="lg:col-span-2 flex justify-center">
-          <Chart
-            options={chartData.options}
-            series={chartData.series}
-            type="pie"
-            width="240"
-            height="240"
-          />
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-1.5 items-start min-h-0">
+        <div className="lg:col-span-2 flex justify-center items-center w-full">
+          <div className="w-full flex items-center justify-center">
+            <Chart
+              options={chartData.options}
+              series={chartData.series}
+              type="pie"
+              width="100%"
+              height={260}
+            />
+          </div>
         </div>
 
-        <div className="lg:col-span-3 space-y-3">
+        <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2">
           {labelData.map((label, index) => {
             const value = saleValues[index];
             const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
@@ -379,21 +374,21 @@ const TotalSales = () => {
               <div
                 key={index}
                 onClick={() => handleNavigateToProfitability(label)}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-blue-50 hover:border-blue-200 border border-transparent transition-all cursor-pointer group"
+                className="flex items-center justify-between p-2.5 bg-[#21262d] rounded hover:bg-blue-500/20 border border-transparent hover:border-blue-500/40 transition-all cursor-pointer group flex-1"
                 title={`Click to view ${label} details in Profitability Dashboard`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <div
                     className="w-3 h-3 rounded-full flex-shrink-0"
                     style={{ backgroundColor: chartData.options.colors[index] }}
                   ></div>
-                  <p className="text-sm font-medium text-gray-700 group-hover:text-blue-700 transition-colors">{label}</p>
+                  <p className="text-sm font-medium text-gray-200 group-hover:text-blue-400 transition-colors">{label}</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-900 transition-colors">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-100">
                     {formatCurrencyWithLocale((index === 0 ? grossProfitRaw : value), currency)}
                   </p>
-                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs font-medium min-w-[2.5rem] text-center group-hover:bg-blue-100 transition-colors">
+                  <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-medium min-w-[2.5rem] text-center">
                     {percentage}%
                   </span>
                 </div>

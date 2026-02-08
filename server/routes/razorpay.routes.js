@@ -15,18 +15,15 @@ const {
 
 // Import middleware
 const auth = require('../middlewares/Auth/auth');
-// Rate limiters disabled except for authentication
-// const { webhookRateLimiter, paymentRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateRazorpayOrder, validateRazorpayPayment } = require('../middlewares/validator/razorpayValidate.js');
 
-// Webhook route (no auth required, Razorpay handles verification)
+// Webhook route (no auth required, Razorpay handles verification via signature)
 router.post('/webhook', handleWebhook);
 
 // Configuration route (no auth required)
 router.get('/config', getConfig);
 
 // Payment routes (auth required)
-// Note: Rate limiting temporarily disabled on payment routes to prevent blocking legitimate payment flows
 router.post('/create-order', auth, validateRazorpayOrder, createOrder);
 router.post('/verify-payment', auth, validateRazorpayPayment, verifyPayment);
 

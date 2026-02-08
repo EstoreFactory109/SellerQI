@@ -3,7 +3,7 @@ import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import ScaleLoader from "react-spinners/ScaleLoader";
 import { motion, AnimatePresence } from "framer-motion";
-import dropdown from '../../assets/Icons/Arrow.png';
+import { ChevronDown } from 'lucide-react';
 
 const priorityColors = {
   High: "text-red-500",
@@ -207,7 +207,7 @@ export default function ProductTable() {
               onClick={() => setShowSortDropdown(!showSortDropdown)}
             >
               <span>{getSortDisplayText(sortBy)}</span>
-              <img src={dropdown} alt="dropdown" className="w-2 h-1" />
+              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showSortDropdown ? 'rotate-180' : ''}`} />
             </button>
             
             <AnimatePresence>

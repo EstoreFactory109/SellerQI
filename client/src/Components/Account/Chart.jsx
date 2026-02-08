@@ -5,10 +5,15 @@ import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 
 const IssuesLineChart = () => {
-  const info = useSelector(state => state.History.HistoryInfo);
+  // Read from PageDataSlice (new) with fallback to legacy HistorySlice
+  const pageDataHistory = useSelector(state => state.pageData?.accountHistory?.data?.accountHistory);
+  const legacyHistoryInfo = useSelector(state => state.History?.HistoryInfo);
+  const info = pageDataHistory || legacyHistoryInfo;
 
   console.log("🔍 ACCOUNT HISTORY DATA IN CHART COMPONENT:");
-  console.log("History Info for Chart:", info);
+  console.log("Page Data History:", pageDataHistory);
+  console.log("Legacy History Info:", legacyHistoryInfo);
+  console.log("Final History Info for Chart:", info);
   console.log("Chart data length:", info ? info.length : 0);
 
   // Handle empty or invalid data
@@ -21,9 +26,7 @@ const IssuesLineChart = () => {
         className="text-center py-8"
       >
         <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center">
-            <Activity className="w-8 h-8 text-gray-400" />
-          </div>
+          <Activity className="w-8 h-8" style={{ color: '#60a5fa' }} />
           <div className="space-y-2">
             <h4 className="text-lg font-semibold text-gray-900">No Historical Data</h4>
             <p className="text-sm text-gray-600 max-w-md">
@@ -87,7 +90,7 @@ const IssuesLineChart = () => {
         }
       }
     },
-    colors: ['#6366f1'], // Modern indigo color
+    colors: ['#3b82f6'], // Blue color
     stroke: {
       curve: 'smooth',
       width: 3,
@@ -99,7 +102,7 @@ const IssuesLineChart = () => {
         shade: 'light',
         type: 'vertical',
         shadeIntensity: 0.5,
-        gradientToColors: ['#8b5cf6'],
+        gradientToColors: ['#60a5fa'],
         inverseColors: false,
         opacityFrom: 0.1,
         opacityTo: 0.05,
@@ -109,7 +112,7 @@ const IssuesLineChart = () => {
     markers: {
       size: 6,
       colors: ['#ffffff'],
-      strokeColors: '#6366f1',
+      strokeColors: '#3b82f6',
       strokeWidth: 3,
       hover: {
         size: 8,
@@ -118,7 +121,7 @@ const IssuesLineChart = () => {
       discrete: [{
         seriesIndex: 0,
         dataPointIndex: seriesData.length - 1,
-        fillColor: '#10b981',
+        fillColor: '#3b82f6',
         strokeColor: '#ffffff',
         size: 8,
         shape: 'circle'
@@ -126,7 +129,7 @@ const IssuesLineChart = () => {
     },
     grid: {
       show: true,
-      borderColor: '#f1f5f9',
+      borderColor: '#30363d',
       strokeDashArray: 3,
       position: 'back',
       xaxis: {
@@ -158,16 +161,16 @@ const IssuesLineChart = () => {
         
         return `
           <div style="
-            padding: 12px 16px; 
-            background: rgba(255, 255, 255, 0.95); 
-            border: 1px solid #e5e7eb;
-            border-radius: 12px; 
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(10px);
+            padding: 8px; 
+            background: #21262d; 
+            border: 1px solid #30363d;
+            border-radius: 6px; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
             font-family: Inter, sans-serif;
+            color: #F3F4F6;
           ">
-            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${date}</div>
-            <div style="font-size: 16px; font-weight: 600; color: #111827; margin-bottom: 4px;">
+            <div style="font-size: 12px; color: #9ca3af; margin-bottom: 4px;">${date}</div>
+            <div style="font-size: 14px; font-weight: 600; color: #f3f4f6; margin-bottom: 4px;">
               ${issues} Issues
             </div>
             ${dataPointIndex > 0 ? `
@@ -184,7 +187,7 @@ const IssuesLineChart = () => {
       labels: {
         rotate: -45,
         style: {
-          colors: '#64748b',
+          colors: '#9ca3af',
           fontSize: '12px',
           fontWeight: '500'
         }
@@ -200,7 +203,7 @@ const IssuesLineChart = () => {
       title: {
         text: 'Number of Issues',
         style: {
-          color: '#64748b',
+          color: '#9ca3af',
           fontSize: '12px',
           fontWeight: '600'
         }
@@ -208,7 +211,7 @@ const IssuesLineChart = () => {
       min: 0,
       labels: {
         style: {
-          colors: '#64748b',
+          colors: '#9ca3af',
           fontSize: '12px',
           fontWeight: '500'
         },
@@ -231,15 +234,12 @@ const IssuesLineChart = () => {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-6">Recent Issues Trend</h2>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
         className="relative"
       >
-
-
         {/* Enhanced Chart */}
         <div className="relative">
           <Chart 

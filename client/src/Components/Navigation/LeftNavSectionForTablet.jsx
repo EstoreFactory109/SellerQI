@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import Close from '../../assets/Icons/close.png'
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package} from 'lucide-react'
-import LogoutIcon from '../../assets/Icons/Logout.png';
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package, LogOut} from 'lucide-react'
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
@@ -883,7 +881,7 @@ const LeftNavSection = () => {
                     onClick={(e)=>logoutUser(e)}
                 >
                     <div className="p-1 rounded-lg bg-red-50 group-hover:bg-red-100 transition-colors duration-300">
-                        <img src={LogoutIcon} alt="Logout" className="w-3.5 h-3.5 opacity-80" />
+                        <LogOut className="w-3.5 h-3.5 text-red-600 opacity-80" />
                     </div>
                     <span className="font-medium">Log Out</span>
                     {loader && <BeatLoader color="#dc2626" size={6} />}

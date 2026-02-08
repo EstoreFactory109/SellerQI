@@ -2,8 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { AlertTriangle, TrendingUp, Package, Filter, ChevronDown, Eye, Activity, BarChart3, Search, Layers, ShoppingCart } from 'lucide-react';
-import dropdown from '../../assets/Icons/Arrow.png'
+import { AlertTriangle, TrendingUp, Box, Filter, ChevronDown, Search, Activity, LineChart, Search as SearchIcon, Layers, ShoppingBag } from 'lucide-react';
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -63,7 +62,7 @@ const FormattedMessage = ({ message }) => {
       {highlightedText && (
         <>
           <br />
-          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+          <strong className="text-gray-100 mt-1 block">{highlightedText}</strong>
         </>
       )}
     </>
@@ -150,17 +149,15 @@ const RankingTableSection = ({ title, data }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6 }}
-      className="mb-8"
+      className="mb-2"
     >
-      <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-        <div className="bg-gradient-to-r from-red-50 via-red-50 to-orange-50 px-6 py-4 border-b border-red-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-md">
-              <TrendingUp className="w-5 h-5 text-white" />
-            </div>
+      <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+        <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-red-400" />
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-600">Optimization opportunities for better search rankings</p>
+              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <p className="text-xs text-gray-400">Optimization opportunities for better search rankings</p>
             </div>
           </div>
         </div>
@@ -168,14 +165,14 @@ const RankingTableSection = ({ title, data }) => {
         <div className="w-full">
           <table className="w-full table-fixed">
             <thead>
-              <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+              <tr className="bg-[#21262d]">
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-40">ASIN/SKU</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-[#30363d]">
               {displayedData.map((row, idx) => (
                 <tr 
                   key={idx} 
@@ -183,36 +180,34 @@ const RankingTableSection = ({ title, data }) => {
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
-                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-red-500 hover:shadow-sm"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
-                  <td className="py-5 px-4 align-top w-40 group-hover:bg-red-50/50">
+                  <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      <span className="font-mono text-xs bg-[#21262d] px-1.5 py-0.5 rounded block break-words text-gray-100" title={row.asin}>{row.asin}</span>
                       {row.sku && (
-                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                        <span className="font-mono text-xs bg-blue-500/10 px-1.5 py-0.5 rounded block break-words text-blue-400" title={row.sku}>{row.sku}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
-                    <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-blue-600" />
-                      </div>
-                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
+                  <td className="py-2 px-2 align-top">
+                    <div className="flex items-start gap-1.5">
+                      <Box className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
+                      <span className="font-medium text-gray-100 text-xs leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
-                    <div className="space-y-2">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                  <td className="py-2 px-2 align-top">
+                    <div className="space-y-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                      <p className="text-xs text-gray-300 leading-relaxed break-words">
                         <FormattedMessage message={row.message} />
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-red-50/50">
-                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-2 px-2 align-top">
+                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </tr>
               ))}
@@ -221,9 +216,9 @@ const RankingTableSection = ({ title, data }) => {
         </div>
         
         {hasMore && (
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white px-6 py-3 rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+              className="w-full bg-red-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-red-600 transition-all"
               onClick={() => setPage((prev) => prev + 1)}
             >
               Load More ({flattenedData.length - displayedData.length} remaining)
@@ -340,17 +335,15 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: 0.1 }}
-      className="mb-8"
+      className="mb-2"
     >
-      <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-        <div className="bg-gradient-to-r from-blue-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-blue-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-md">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
+      <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+        <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+          <div className="flex items-center gap-2">
+            <LineChart className="w-4 h-4 text-blue-400" />
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-600">Enhance product appeal and customer conversion rates</p>
+              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <p className="text-xs text-gray-400">Enhance product appeal and customer conversion rates</p>
             </div>
           </div>
         </div>
@@ -358,14 +351,14 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
         <div className="w-full">
           <table className="w-full table-fixed">
             <thead>
-              <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+              <tr className="bg-[#21262d]">
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-40">ASIN/SKU</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-[#30363d]">
               {displayedData.map((row, idx) => (
                 <tr 
                   key={idx} 
@@ -373,36 +366,34 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
-                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-blue-500 hover:shadow-sm"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
-                  <td className="py-5 px-4 align-top w-40 group-hover:bg-blue-50/50">
+                  <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      <span className="font-mono text-xs bg-[#21262d] px-1.5 py-0.5 rounded block break-words text-gray-100" title={row.asin}>{row.asin}</span>
                       {row.sku && (
-                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                        <span className="font-mono text-xs bg-blue-500/10 px-1.5 py-0.5 rounded block break-words text-blue-400" title={row.sku}>{row.sku}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
-                    <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-green-600" />
-                      </div>
-                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
+                  <td className="py-2 px-2 align-top">
+                    <div className="flex items-start gap-1.5">
+                      <Box className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" />
+                      <span className="font-medium text-gray-100 text-xs leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
-                    <div className="space-y-2">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <td className="py-2 px-2 align-top">
+                    <div className="space-y-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                      <p className="text-xs text-gray-300 leading-relaxed break-words">
                         <FormattedMessage message={row.message} />
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-blue-50/50">
-                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-2 px-2 align-top">
+                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </tr>
               ))}
@@ -411,9 +402,9 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
         </div>
         
         {hasMore && (
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+              className="w-full bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-blue-600 transition-all"
               onClick={() => setPage((prev) => prev + 1)}
             >
               Load More ({flattenData.length - displayedData.length} remaining)
@@ -534,17 +525,15 @@ const InventoryTableSection = ({ title, data }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: 0.2 }}
-      className="mb-8"
+      className="mb-2"
     >
-      <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-        <div className="bg-gradient-to-r from-green-50 via-green-50 to-emerald-50 px-6 py-4 border-b border-green-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-md">
-              <Package className="w-5 h-5 text-white" />
-            </div>
+      <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+        <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+          <div className="flex items-center gap-2">
+            <Box className="w-4 h-4 text-green-400" />
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-600">Manage inventory levels and warehouse operations</p>
+              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <p className="text-xs text-gray-400">Manage inventory levels and warehouse operations</p>
             </div>
           </div>
         </div>
@@ -552,14 +541,14 @@ const InventoryTableSection = ({ title, data }) => {
         <div className="w-full">
           <table className="w-full table-fixed">
             <thead>
-              <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+              <tr className="bg-[#21262d]">
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-40">ASIN/SKU</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-[#30363d]">
               {displayedData.map((row, idx) => (
                 <tr 
                   key={idx} 
@@ -567,42 +556,40 @@ const InventoryTableSection = ({ title, data }) => {
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
-                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-green-500 hover:shadow-sm"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
-                  <td className="py-5 px-4 align-top w-40 group-hover:bg-green-50/50">
+                  <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      <span className="font-mono text-xs bg-[#21262d] px-1.5 py-0.5 rounded block break-words text-gray-100" title={row.asin}>{row.asin}</span>
                       {row.sku && (
-                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                        <span className="font-mono text-xs bg-blue-500/10 px-1.5 py-0.5 rounded block break-words text-blue-400" title={row.sku}>{row.sku}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
-                    <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Package className="w-3 h-3 text-yellow-600" />
-                      </div>
-                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
+                  <td className="py-2 px-2 align-top">
+                    <div className="flex items-start gap-1.5">
+                      <Box className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                      <span className="font-medium text-gray-100 text-xs leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
-                    <div className="space-y-2">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  <td className="py-2 px-2 align-top">
+                    <div className="space-y-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                      <p className="text-xs text-gray-300 leading-relaxed break-words">
                         <FormattedMessage message={row.message} />
                         {row.recommendedReplenishmentQty !== null && row.recommendedReplenishmentQty !== undefined && row.recommendedReplenishmentQty > 0 && (
                           <>
                             <br />
-                            <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {row.recommendedReplenishmentQty} units</strong>
+                            <strong className="text-gray-100 mt-1 block">Recommended Restock Quantity: {row.recommendedReplenishmentQty} units</strong>
                           </>
                         )}
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-green-50/50">
-                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-2 px-2 align-top">
+                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </tr>
               ))}
@@ -611,9 +598,9 @@ const InventoryTableSection = ({ title, data }) => {
         </div>
         
         {hasMore && (
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-3 rounded-xl hover:from-green-600 hover:to-green-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+              className="w-full bg-green-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 transition-all"
               onClick={() => setPage((prev) => prev + 1)}
             >
               Load More ({flattenedData.length - displayedData.length} remaining)
@@ -687,17 +674,15 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: 0.3 }}
-      className="mb-8"
+      className="mb-2"
     >
-      <div className="bg-white rounded-2xl shadow-lg border-0 overflow-hidden hover:shadow-xl transition-all duration-300">
-        <div className="bg-gradient-to-r from-purple-50 via-purple-50 to-indigo-50 px-6 py-4 border-b border-purple-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md">
-              <ShoppingCart className="w-5 h-5 text-white" />
-            </div>
+      <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+        <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="w-4 h-4 text-purple-400" />
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-600">Products losing sales due to Buy Box issues</p>
+              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <p className="text-xs text-gray-400">Products losing sales due to Buy Box issues</p>
             </div>
           </div>
         </div>
@@ -705,14 +690,14 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
         <div className="w-full">
           <table className="w-full table-fixed">
             <thead>
-              <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-40">ASIN/SKU</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">Solution</th>
+              <tr className="bg-[#21262d]">
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-40">ASIN/SKU</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/5">Product Title</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Issue Details</th>
+                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">Solution</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-[#30363d]">
               {displayedData.map((row, idx) => (
                 <tr 
                   key={idx} 
@@ -720,36 +705,34 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
-                  className="group text-sm text-gray-700 cursor-pointer border-l-4 border-transparent hover:border-purple-500 hover:shadow-sm"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
-                  <td className="py-5 px-4 align-top w-40 group-hover:bg-purple-50/50">
+                  <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded block break-words" title={row.asin}>{row.asin}</span>
+                      <span className="font-mono text-xs bg-[#21262d] px-1.5 py-0.5 rounded block break-words text-gray-100" title={row.asin}>{row.asin}</span>
                       {row.sku && (
-                        <span className="font-mono text-xs bg-blue-50 px-2 py-0.5 rounded block break-words text-blue-700" title={row.sku}>{row.sku}</span>
+                        <span className="font-mono text-xs bg-blue-500/10 px-1.5 py-0.5 rounded block break-words text-blue-400" title={row.sku}>{row.sku}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
-                    <div className="flex items-start gap-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <ShoppingCart className="w-3 h-3 text-purple-600" />
-                      </div>
-                      <span className="font-medium text-gray-900 text-sm leading-relaxed break-words">{row.title}</span>
+                  <td className="py-2 px-2 align-top">
+                    <div className="flex items-start gap-1.5">
+                      <ShoppingBag className="w-3.5 h-3.5 text-purple-400 flex-shrink-0 mt-0.5" />
+                      <span className="font-medium text-gray-100 text-xs leading-relaxed break-words">{row.title}</span>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
-                    <div className="space-y-2">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                  <td className="py-2 px-2 align-top">
+                    <div className="space-y-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
                         {row.issueHeading}
                       </span>
-                      <p className="text-sm text-gray-600 leading-relaxed break-words">
+                      <p className="text-xs text-gray-300 leading-relaxed break-words">
                         <FormattedMessage message={row.message} />
                       </p>
                     </div>
                   </td>
-                  <td className="py-5 px-4 align-top group-hover:bg-purple-50/50">
-                    <p className="text-sm text-green-700 bg-green-50 p-3 rounded-lg leading-relaxed break-words">{row.solution}</p>
+                  <td className="py-2 px-2 align-top">
+                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
                   </td>
                 </tr>
               ))}
@@ -758,9 +741,9 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
         </div>
         
         {hasMore && (
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-purple-600 hover:to-purple-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+              className="w-full bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-purple-600 transition-all"
               onClick={() => setPage((prev) => prev + 1)}
             >
               Load More ({flattenedData.length - displayedData.length} remaining)
@@ -840,40 +823,37 @@ const OptimizationDashboard = () => {
   const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
 
   return (
-    <div className="min-h-screen bg-gray-50/50">
+    <div className="min-h-screen bg-[#1a1a1a]">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-slate-800 via-gray-900 to-slate-900 rounded-2xl mx-6 mt-6 shadow-lg">
-        <div className="px-6 py-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="text-white relative z-10">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+      <div className="bg-[#161b22] border border-[#30363d] rounded mb-2">
+        <div className="px-2 py-2">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+            <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-1">
+                <Layers className="w-4 h-4 text-blue-400" />
+                <h1 className="text-lg font-bold text-gray-100">
                   Category Issues
                 </h1>
               </div>
-              <p className="text-gray-300 text-lg mb-4">Detailed breakdown of issues by category</p>
+              <p className="text-xs text-gray-400">Detailed breakdown of issues by category</p>
               {totalIssues > 0 && (
-                <div className="flex items-center gap-2 text-sm text-orange-300">
-                  <AlertTriangle className="w-4 h-4" />
+                <div className="flex items-center gap-1 mt-1 text-xs text-orange-400">
+                  <AlertTriangle className="w-3 h-3" />
                   <span>Action required</span>
                 </div>
               )}
             </div>
             
-            <div className="flex items-center gap-6 text-white">
-              <div className="text-center lg:text-right">
-                <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent mb-1">
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-xl font-bold text-orange-400 mb-0.5">
                   {totalIssues}
                 </div>
-                <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Total Issues</div>
-                <div className="text-xs text-gray-400 mt-1">(Ranking + Conversion + Inventory)</div>
-                {totalIssues > 0 && (
-                  <div className="text-xs text-orange-300 mt-1">Requires optimization</div>
-                )}
+                <div className="text-xs text-gray-400 font-medium uppercase">Total Issues</div>
+                <div className="text-xs text-gray-500 mt-0.5">(Ranking + Conversion + Inventory)</div>
               </div>
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <Layers className="w-8 h-8 text-white" />
+              <div className="w-10 h-10 bg-blue-500/20 rounded flex items-center justify-center border border-blue-500/30">
+                <Layers className="w-5 h-5 text-blue-400" />
               </div>
             </div>
           </div>
@@ -881,26 +861,26 @@ const OptimizationDashboard = () => {
       </div>
 
       {/* Main Content */}
-      <div className="px-6 py-8">
+      <div className="px-2 py-2">
         {/* Filter Section */}
-        <div className="mb-8">
-          <div className="bg-white rounded-2xl shadow-lg border-0 p-6 hover:shadow-xl transition-all duration-300">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="mb-2">
+          <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
-                <h3 className="text-lg font-bold text-gray-900 mb-1">Filter Issues</h3>
-                <p className="text-sm text-gray-600">Choose a category to view specific issues</p>
+                <h3 className="text-sm font-bold text-gray-100 mb-0.5">Filter Issues</h3>
+                <p className="text-xs text-gray-400">Choose a category to view specific issues</p>
               </div>
               
               <div className="relative" ref={categoryDropdownRef}>
                 <button
-                  className="flex items-center justify-between gap-3 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-md hover:shadow-lg min-w-[160px]"
+                  className="flex items-center justify-between gap-2 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all min-w-[140px]"
                   onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
                 >
-                  <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4" />
-                    <span className="font-medium">{issuesSelectedOption}</span>
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="w-3 h-3" />
+                    <span>{issuesSelectedOption}</span>
                   </div>
-                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showCategoryDropdown ? 'rotate-180' : ''}`} />
                 </button>
                 
                 <AnimatePresence>
@@ -910,19 +890,19 @@ const OptimizationDashboard = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
+                      className="absolute top-full right-0 mt-1 w-56 bg-[#21262d] border border-[#30363d] rounded shadow-xl z-50 overflow-hidden"
                     >
-                      <div className="py-2">
-                        <div className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
+                      <div className="py-1">
+                        <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider bg-[#161b22] border-b border-[#30363d]">
                           Issue Categories
                         </div>
                         {["All", "Ranking", "Conversion", "Inventory"].map((option) => (
                           <button
                             key={option}
-                            className={`w-full text-left px-4 py-3 text-sm hover:bg-blue-50 transition-all duration-150 ${
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-[#161b22] transition-all ${
                               issuesSelectedOption === option 
-                                ? 'bg-blue-50 text-blue-700 font-semibold border-r-2 border-blue-500' 
-                                : 'text-gray-700 hover:text-blue-600'
+                                ? 'bg-blue-500/20 text-blue-400 font-semibold border-r-2 border-blue-500' 
+                                : 'text-gray-300 hover:text-gray-200'
                             }`}
                             onClick={() => {
                               setIssuesSelectedOption(option);
@@ -942,7 +922,7 @@ const OptimizationDashboard = () => {
         </div>
 
         {/* Tables based on selection */}
-        <div className="space-y-8">
+        <div className="space-y-2">
           {issuesSelectedOption === "All" ? (
             <>
               {rankingIssues > 0 && <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />}
@@ -952,13 +932,13 @@ const OptimizationDashboard = () => {
                 <motion.div 
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
+                  className="bg-[#161b22] rounded border border-[#30363d] p-8 text-center"
                 >
-                  <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                    <Activity className="w-10 h-10 text-white" />
+                  <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4 mx-auto border border-green-500/30">
+                    <Activity className="w-8 h-8 text-green-400" />
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">No Issues Found</h3>
-                  <p className="text-gray-600">Your products are performing excellently across all categories!</p>
+                  <h3 className="text-lg font-bold text-gray-100 mb-1">No Issues Found</h3>
+                  <p className="text-gray-400">Your products are performing excellently across all categories!</p>
                 </motion.div>
               )}
             </>
@@ -969,13 +949,13 @@ const OptimizationDashboard = () => {
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
+                className="bg-[#161b22] rounded border border-[#30363d] p-8 text-center"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-red-400 to-red-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                  <TrendingUp className="w-10 h-10 text-white" />
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-4 mx-auto border border-red-500/30">
+                  <TrendingUp className="w-8 h-8 text-red-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Ranking Issues</h3>
-                <p className="text-gray-600">Your products have optimal ranking performance!</p>
+                <h3 className="text-lg font-bold text-gray-100 mb-1">No Ranking Issues</h3>
+                <p className="text-gray-400">Your products have optimal ranking performance!</p>
               </motion.div>
             )
           ) : issuesSelectedOption === "Conversion" ? (
@@ -985,13 +965,13 @@ const OptimizationDashboard = () => {
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
+                className="bg-[#161b22] rounded border border-[#30363d] p-8 text-center"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-blue-400 to-blue-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                  <BarChart3 className="w-10 h-10 text-white" />
+                <div className="w-16 h-16 bg-blue-500/20 rounded-full flex items-center justify-center mb-4 mx-auto border border-blue-500/30">
+                  <LineChart className="w-8 h-8 text-blue-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Conversion Issues</h3>
-                <p className="text-gray-600">Your products have excellent conversion optimization!</p>
+                <h3 className="text-lg font-bold text-gray-100 mb-1">No Conversion Issues</h3>
+                <p className="text-gray-400">Your products have excellent conversion optimization!</p>
               </motion.div>
             )
           ) : issuesSelectedOption === "Inventory" ? (
@@ -1001,13 +981,13 @@ const OptimizationDashboard = () => {
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl shadow-lg border-0 p-12 text-center"
+                className="bg-[#161b22] rounded border border-[#30363d] p-8 text-center"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                  <Package className="w-10 h-10 text-white" />
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4 mx-auto border border-green-500/30">
+                  <Box className="w-8 h-8 text-green-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Inventory Issues</h3>
-                <p className="text-gray-600">Your inventory management is performing perfectly!</p>
+                <h3 className="text-lg font-bold text-gray-100 mb-1">No Inventory Issues</h3>
+                <p className="text-gray-400">Your inventory management is performing perfectly!</p>
               </motion.div>
             )
           ) : null}

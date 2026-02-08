@@ -37,21 +37,18 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
   }
 
   // Build query parameters
-  // For includedData, Amazon expects multiple query params OR comma-separated values
-  // Using URLSearchParams and appending each includedData value separately
+  // Amazon Listings API expects includedData as comma-separated values (collectionFormat: csv)
   const queryParamsObj = new URLSearchParams();
   queryParamsObj.append('marketplaceIds', dataToReceive.marketplaceId);
   queryParamsObj.append('issueLocale', dataToReceive.issueLocale);
   
-  // Handle includedData - can be comma-separated string or array
+  // Handle includedData - ensure it's a comma-separated string
   const includedDataValues = typeof dataToReceive.includedData === 'string' 
-    ? dataToReceive.includedData.split(',').map(v => v.trim())
-    : dataToReceive.includedData;
+    ? dataToReceive.includedData
+    : (Array.isArray(dataToReceive.includedData) ? dataToReceive.includedData.join(',') : 'summaries');
   
-  // Append each includedData value as a separate parameter
-  includedDataValues.forEach(value => {
-    queryParamsObj.append('includedData', value);
-  });
+  // Add includedData as a single comma-separated parameter
+  queryParamsObj.append('includedData', includedDataValues);
   
   const queryParams = queryParamsObj.toString();
 
@@ -103,13 +100,27 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
 
-    // Check for B2B pricing in offers array (always check, even if generic_keyword is missing)
+    // Check for B2B pricing in multiple locations:
+    // 1. response.data.offers array (offerType === "B2B")
+    // 2. response.data.attributes.purchasable_offer array (audience === "B2B")
     let hasB2BPricing = false;
+    
+    // Method 1: Check offers array (primary location)
     const offers = response.data?.offers;
-    if (Array.isArray(offers)) {
+    if (Array.isArray(offers) && offers.length > 0) {
       hasB2BPricing = offers.some(offer => 
         offer && offer.offerType === "B2B"
       );
+    }
+    
+    // Method 2: If not found in offers, check attributes.purchasable_offer (fallback)
+    if (!hasB2BPricing) {
+      const purchasableOffers = response.data?.attributes?.purchasable_offer;
+      if (Array.isArray(purchasableOffers) && purchasableOffers.length > 0) {
+        hasB2BPricing = purchasableOffers.some(offer => 
+          offer && offer.audience === "B2B"
+        );
+      }
     }
 
     // If generic_keyword is missing, still return B2B pricing info
@@ -216,26 +227,22 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
   }
 
   // Build query parameters
-  // For includedData, Amazon expects multiple query params OR comma-separated values
-  // Using URLSearchParams and appending each includedData value separately
+  // Amazon Listings API expects includedData as comma-separated values (collectionFormat: csv)
   const queryParamsObj = new URLSearchParams();
   queryParamsObj.append('marketplaceIds', dataToReceive.marketplaceId);
   queryParamsObj.append('issueLocale', dataToReceive.issueLocale);
   
-  // Handle includedData - can be comma-separated string or array
-  // For inactive SKUs, we need at least issues and offers
-  const includedDataValues = typeof dataToReceive.includedData === 'string' 
+  // Handle includedData - ensure issues and offers are included for inactive SKUs
+  let includedDataValues = typeof dataToReceive.includedData === 'string' 
     ? dataToReceive.includedData.split(',').map(v => v.trim())
     : (dataToReceive.includedData || ['issues', 'offers']);
   
   // Ensure issues and offers are included
-  const requiredData = ['issues', 'offers'];
+  const requiredData = ['issues', 'offers', 'attributes'];
   const finalIncludedData = [...new Set([...requiredData, ...includedDataValues])];
   
-  // Append each includedData value as a separate parameter
-  finalIncludedData.forEach(value => {
-    queryParamsObj.append('includedData', value);
-  });
+  // Add includedData as a single comma-separated parameter
+  queryParamsObj.append('includedData', finalIncludedData.join(','));
   
   const queryParams = queryParamsObj.toString();
 
@@ -292,13 +299,27 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
       issuesMessages = issuesArray.map(issue => issue.message || JSON.stringify(issue));
     }
 
-    // Check for B2B pricing in offers array
+    // Check for B2B pricing in multiple locations:
+    // 1. response.data.offers array (offerType === "B2B")
+    // 2. response.data.attributes.purchasable_offer array (audience === "B2B")
     let hasB2BPricing = false;
+    
+    // Method 1: Check offers array (primary location)
     const offers = response.data?.offers;
-    if (Array.isArray(offers)) {
+    if (Array.isArray(offers) && offers.length > 0) {
       hasB2BPricing = offers.some(offer => 
         offer && offer.offerType === "B2B"
       );
+    }
+    
+    // Method 2: If not found in offers, check attributes.purchasable_offer (fallback)
+    if (!hasB2BPricing) {
+      const purchasableOffers = response.data?.attributes?.purchasable_offer;
+      if (Array.isArray(purchasableOffers) && purchasableOffers.length > 0) {
+        hasB2BPricing = purchasableOffers.some(offer => 
+          offer && offer.audience === "B2B"
+        );
+      }
     }
 
     logger.info("GetListingItemIssuesForInactive ended", { 

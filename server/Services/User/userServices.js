@@ -217,5 +217,66 @@ const updatePassword = async (email, newPassword) => {
     }
 }
 
-module.exports = { createUser,getUserByEmail,verify,getUserById ,updateInfo, updatePassword}
+/**
+ * Mark first analysis as done for a user
+ * This is called after the integration worker successfully completes
+ * and sends the analysis ready email
+ * @param {string} userId - The user ID
+ * @returns {Promise<boolean>} - Returns true if successful, false otherwise
+ */
+const markFirstAnalysisDone = async (userId) => {
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is missing"));
+        return false;
+    }
+
+    try {
+        const user = await UserModel.findById(userId);
+        
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return false;
+        }
+
+        // Only update if not already done (to avoid unnecessary writes)
+        if (!user.FirstAnalysisDone) {
+            user.FirstAnalysisDone = true;
+            await user.save();
+            logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
+        }
+        
+        return true;
+    } catch (error) {
+        logger.error(`Error in marking first analysis done: ${error}`);
+        return false;
+    }
+}
+
+/**
+ * Get the FirstAnalysisDone status for a user
+ * @param {string} userId - The user ID
+ * @returns {Promise<boolean|null>} - Returns the status or null if user not found
+ */
+const getFirstAnalysisStatus = async (userId) => {
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is missing"));
+        return null;
+    }
+
+    try {
+        const user = await UserModel.findById(userId).select("FirstAnalysisDone");
+        
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return null;
+        }
+        
+        return user.FirstAnalysisDone;
+    } catch (error) {
+        logger.error(`Error in getting first analysis status: ${error}`);
+        return null;
+    }
+}
+
+module.exports = { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassword, markFirstAnalysisDone, getFirstAnalysisStatus }
 

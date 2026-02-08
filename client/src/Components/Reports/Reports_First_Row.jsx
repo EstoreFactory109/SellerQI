@@ -1,5 +1,5 @@
 import React,{useState} from 'react';
-import issue from "../../assets/Icons/error.png";
+import { Info } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import TooltipForGrossProfit from '../ToolTipBox/ToolTipBoxBottomLeft'
 import TooltipForCenter from '../ToolTipBox/ToolTipBoxBottom'
@@ -21,7 +21,7 @@ const Reports_First_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Gross Profit</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenToolTipForGrossProfit(true)} onMouseLeave={() => setOpenToolTipForGrossProfit(false)}/>
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenToolTipForGrossProfit(true)} onMouseLeave={() => setOpenToolTipForGrossProfit(false)}/>
            { openToolTipForGrossProfit && <TooltipForGrossProfit Information='Gross profit after deducting ad spend, storage fees, FBA fees, and product return refunds from sales revenue.'/>}
             </div>
           </div>
@@ -35,7 +35,7 @@ const Reports_First_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Total Sales</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenToolTipForTotalSales(true)} onMouseLeave={() => setOpenToolTipForTotalSales(false)} />
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenToolTipForTotalSales(true)} onMouseLeave={() => setOpenToolTipForTotalSales(false)} />
             { openToolTipForTotalSales && <TooltipForCenter Information='Total revenue generated during the selected date range.'/>}
             </div>
           </div>
@@ -49,7 +49,7 @@ const Reports_First_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Products Without Buybox</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenTollTipForBuyBox(true)} onMouseLeave={() => setOpenTollTipForBuyBox(false)} />
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenTollTipForBuyBox(true)} onMouseLeave={() => setOpenTollTipForBuyBox(false)} />
             { openTollTipForBuyBox && <TooltipForCenter Information='Products without BuyBox which are not eligible for Sponsored ads.'/>}
             </div>
           </div>
@@ -63,7 +63,7 @@ const Reports_First_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Active Products</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenToolTipFromActiveProducts(true)} onMouseLeave={() => setOpenToolTipFromActiveProducts(false)} />
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenToolTipFromActiveProducts(true)} onMouseLeave={() => setOpenToolTipFromActiveProducts(false)} />
             { openToolTipFromActiveProducts && <TooltipForCenter Information='Active products with fulfillable inventory.'/>}
             </div>
           </div>
@@ -74,7 +74,7 @@ const Reports_First_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Products to Replenish</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenToolTipForReplinish(true)} onMouseLeave={() => setOpenToolTipForReplinish(false)} />
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenToolTipForReplinish(true)} onMouseLeave={() => setOpenToolTipForReplinish(false)} />
             { openToolTipForReplinish && <ToolTipForReplenishment Information='Number of products that are ready to be replenished.'/>}
             </div>
           </div>

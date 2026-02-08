@@ -1,5 +1,5 @@
 import React,{useState} from 'react';
-import issue from "../../assets/Icons/error.png";
+import { Info } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import ToolTipBoxForTotalIssues from '../ToolTipBox/ToolTipTopLeft.jsx'
 import ToolTipBoxForPotentialReimburstments from '../ToolTipBox/TootTipBoxTop.jsx'
@@ -18,7 +18,7 @@ const Reports_Fourth_Row = () => {
           <div className='flex gap-3 items-center'>
             <p className='text-xs'>Total Issues</p>
             <div className='relative fit-content'>
-            <img src={issue} className='w-3 h-3 cursor-pointer' onMouseEnter={() => setOpenTooltipForTotalIssues(true)} onMouseLeave={() => setOpenTooltipForTotalIssues(false)} />
+            <Info className='w-3 h-3 cursor-pointer text-gray-400 hover:text-blue-400 transition-colors' onMouseEnter={() => setOpenTooltipForTotalIssues(true)} onMouseLeave={() => setOpenTooltipForTotalIssues(false)} />
             { openTooltipForTotalIssues && <ToolTipBoxForTotalIssues Information='A total number of issues in all products and the Amazon account that required attention.​ '/>}
             </div>
           </div>

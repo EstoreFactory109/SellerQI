@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { useReimbursementData } from '../hooks/usePageData';
+import { PageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 const ReimbursementDashboard = () => {
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -448,71 +449,58 @@ const ReimbursementDashboard = () => {
     );
   };
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading reimbursement data...</p>
-        </div>
-      </div>
-    );
-  }
-
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <p className="text-gray-900 font-semibold mb-2">Error loading reimbursement data</p>
-          <p className="text-gray-600">{error}</p>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1a1a' }}>
+          <div className="text-center">
+          <AlertCircle className="w-6 h-6 mx-auto mb-2" style={{ color: '#f87171' }} />
+          <p className="font-semibold mb-2 text-sm" style={{ color: '#f3f4f6' }}>Error loading reimbursement data</p>
+          <p className="text-xs" style={{ color: '#9ca3af' }}>{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
-      <div className="w-full">
-        <div className="p-6 lg:p-8 pt-6 lg:pt-8">
+    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div className="w-full" style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        <div>
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
+            style={{ marginBottom: '10px' }}
           >
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <DollarSign className="w-5 h-5 text-white" />
-                  </div>
-                  <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                    Reimbursement Dashboard
-                  </h1>
-                </div>
-                <p className="text-sm text-gray-600 ml-13">
-                  Track Amazon FBA reimbursements and potential claims
-                </p>
+            <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-4 h-4" style={{ color: '#60a5fa' }} />
+                <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+                  Reimbursement Dashboard
+                </h1>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowFilters(!showFilters)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all text-sm font-medium"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-medium"
+                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                 >
-                  <Filter className="w-4 h-4" />
+                  <Filter className="w-3.5 h-3.5" />
                   <span>Filters</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
                 </button>
 
                 <button
                   onClick={exportToCSV}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all text-sm font-medium"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-medium"
+                  style={{ background: '#10b981', color: 'white' }}
+                  onMouseEnter={(e) => e.target.style.background = '#059669'}
+                  onMouseLeave={(e) => e.target.style.background = '#10b981'}
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-3.5 h-3.5" />
                   <span>Export CSV</span>
                 </button>
               </div>
@@ -525,50 +513,60 @@ const ReimbursementDashboard = () => {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="mt-4 p-4 bg-white rounded-lg border border-gray-200"
+                  className="mt-2 p-3 rounded-lg"
+                  style={{ background: '#161b22', border: '1px solid #30363d' }}
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
                       <select
                         value={filterStatus}
                         onChange={(e) => setFilterStatus(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        className="w-full px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all">All Statuses</option>
-                        <option value="approved">Approved</option>
-                        <option value="pending">Pending</option>
-                        <option value="potential">Potential</option>
-                        <option value="denied">Denied</option>
+                        <option value="all" style={{ background: '#21262d' }}>All Statuses</option>
+                        <option value="approved" style={{ background: '#21262d' }}>Approved</option>
+                        <option value="pending" style={{ background: '#21262d' }}>Pending</option>
+                        <option value="potential" style={{ background: '#21262d' }}>Potential</option>
+                        <option value="denied" style={{ background: '#21262d' }}>Denied</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Type</label>
                       <select
                         value={filterType}
                         onChange={(e) => setFilterType(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        className="w-full px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all">All Types</option>
-                        <option value="lost">Lost</option>
-                        <option value="damaged">Damaged</option>
-                        <option value="customer_return">Customer Return</option>
-                        <option value="inbound_shipment">Inbound Shipment</option>
-                        <option value="fee_correction">Fee Correction</option>
+                        <option value="all" style={{ background: '#21262d' }}>All Types</option>
+                        <option value="lost" style={{ background: '#21262d' }}>Lost</option>
+                        <option value="damaged" style={{ background: '#21262d' }}>Damaged</option>
+                        <option value="customer_return" style={{ background: '#21262d' }}>Customer Return</option>
+                        <option value="inbound_shipment" style={{ background: '#21262d' }}>Inbound Shipment</option>
+                        <option value="fee_correction" style={{ background: '#21262d' }}>Fee Correction</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Sort By</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Sort By</label>
                       <select
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        className="w-full px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="date">Date (Newest)</option>
-                        <option value="amount">Amount (Highest)</option>
-                        <option value="status">Status</option>
+                        <option value="date" style={{ background: '#21262d' }}>Date (Newest)</option>
+                        <option value="amount" style={{ background: '#21262d' }}>Amount (Highest)</option>
+                        <option value="status" style={{ background: '#21262d' }}>Status</option>
                       </select>
                     </div>
                   </div>
@@ -577,8 +575,13 @@ const ReimbursementDashboard = () => {
             </AnimatePresence>
           </motion.div>
 
+          {/* Only data area is skeleton when loading; header above is always real */}
+          {loading ? (
+            <PageSkeleton statCards={4} sections={2} />
+          ) : (
+          <>
           {/* Summary Boxes */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" style={{ gap: '8px', marginBottom: '10px' }}>
             {summaryBoxes.map((box, index) => {
               const Icon = box.icon;
               const colorClasses = {
@@ -596,19 +599,22 @@ const ReimbursementDashboard = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
-                  className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all w-full"
+                  className="rounded-lg transition-all w-full flex flex-col"
+                  style={{ background: '#161b22', border: '1px solid #30363d', padding: '10px' }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = '#3b82f6'}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#30363d'}
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className={`w-10 h-10 bg-gradient-to-br ${colorClasses[box.color]} rounded-lg flex items-center justify-center`}>
-                      <Icon className="w-5 h-5 text-white" />
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className="w-4 h-4 flex-shrink-0" style={{ color: '#60a5fa' }} />
+                    <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: '#ffffff' }}>
+                      {box.label}
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-gray-900 mb-1">
+                  <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: '#ffffff' }}>
                     {box.value}
                   </div>
-                  <div className="text-sm text-gray-600">{box.label}</div>
                   {box.subtitle && (
-                    <div className="text-xs text-gray-500 mt-1">{box.subtitle}</div>
+                    <div className="text-[10px] mt-0.5" style={{ color: '#6b7280' }}>{box.subtitle}</div>
                   )}
                 </motion.div>
               );
@@ -619,67 +625,120 @@ const ReimbursementDashboard = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8"
+              className="rounded-lg overflow-hidden"
+              style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: '10px' }}
             >
             {/* Tabs Navigation */}
-            <div className="border-b border-gray-200 bg-gray-50">
+            <div style={{ borderBottom: '1px solid #30363d', background: '#21262d' }}>
               <div className="flex overflow-x-auto">
                 <button
                   onClick={() => setActiveTab('shipment')}
-                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                     activeTab === 'shipment'
-                      ? 'border-blue-500 text-blue-600 bg-white'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      ? 'border-blue-500 bg-[#161b22]'
+                      : 'border-transparent'
                   }`}
+                  style={activeTab === 'shipment' ? { color: '#60a5fa' } : { color: '#9ca3af' }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'shipment') {
+                      e.target.style.color = '#d1d5db';
+                      e.target.style.borderBottomColor = '#30363d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'shipment') {
+                      e.target.style.color = '#9ca3af';
+                      e.target.style.borderBottomColor = 'transparent';
+                    }
+                  }}
                 >
                   Shipment Discrepancy
                   {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
                       {summary.feeProtector.backendShipmentItems.data.length}
                     </span>
                   )}
                 </button>
                 <button
                   onClick={() => setActiveTab('lost')}
-                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                     activeTab === 'lost'
-                      ? 'border-orange-500 text-orange-600 bg-white'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      ? 'border-orange-500 bg-[#161b22]'
+                      : 'border-transparent'
                   }`}
+                  style={activeTab === 'lost' ? { color: '#fb923c' } : { color: '#9ca3af' }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'lost') {
+                      e.target.style.color = '#d1d5db';
+                      e.target.style.borderBottomColor = '#30363d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'lost') {
+                      e.target.style.color = '#9ca3af';
+                      e.target.style.borderBottomColor = 'transparent';
+                    }
+                  }}
                 >
                   Lost Inventory
                   {filteredLostInventoryData.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-600 rounded-full">
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full" style={{ background: 'rgba(251, 146, 60, 0.2)', color: '#fb923c' }}>
                       {filteredLostInventoryData.length}
                     </span>
                   )}
                 </button>
                 <button
                   onClick={() => setActiveTab('damaged')}
-                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                     activeTab === 'damaged'
-                      ? 'border-red-500 text-red-600 bg-white'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      ? 'border-red-500 bg-[#161b22]'
+                      : 'border-transparent'
                   }`}
+                  style={activeTab === 'damaged' ? { color: '#f87171' } : { color: '#9ca3af' }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'damaged') {
+                      e.target.style.color = '#d1d5db';
+                      e.target.style.borderBottomColor = '#30363d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'damaged') {
+                      e.target.style.color = '#9ca3af';
+                      e.target.style.borderBottomColor = 'transparent';
+                    }
+                  }}
                 >
                   Damaged Inventory
                   {filteredDamagedInventoryData.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full" style={{ background: 'rgba(248, 113, 113, 0.2)', color: '#f87171' }}>
                       {filteredDamagedInventoryData.length}
                     </span>
                   )}
                 </button>
                 <button
                   onClick={() => setActiveTab('disposed')}
-                  className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                     activeTab === 'disposed'
-                      ? 'border-purple-500 text-purple-600 bg-white'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      ? 'border-purple-500 bg-[#161b22]'
+                      : 'border-transparent'
                   }`}
+                  style={activeTab === 'disposed' ? { color: '#c084fc' } : { color: '#9ca3af' }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'disposed') {
+                      e.target.style.color = '#d1d5db';
+                      e.target.style.borderBottomColor = '#30363d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'disposed') {
+                      e.target.style.color = '#9ca3af';
+                      e.target.style.borderBottomColor = 'transparent';
+                    }
+                  }}
                 >
                   Disposed Inventory
                   {filteredDisposedInventoryData.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full" style={{ background: 'rgba(192, 132, 252, 0.2)', color: '#c084fc' }}>
                       {filteredDisposedInventoryData.length}
                     </span>
                   )}
@@ -688,14 +747,14 @@ const ReimbursementDashboard = () => {
               </div>
 
             {/* Tab Content */}
-              <div className="p-6">
+              <div className="p-3">
               {/* Shipment Discrepancy Tab */}
               {activeTab === 'shipment' && (
                       <div>
                   {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 ? (
                     <>
-                      <div className="mb-4">
-                        <p className="text-sm text-gray-600">
+                      <div className="mb-2">
+                        <p className="text-xs" style={{ color: '#9ca3af' }}>
                           {summary.feeProtector.backendShipmentItems.count || summary.feeProtector.backendShipmentItems.data.length} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
                         </p>
                     </div>
@@ -712,31 +771,31 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '10%' }} />
                           <col style={{ width: '12%' }} />
                         </colgroup>
-                        <thead className="bg-gray-50 border-b border-gray-200">
+                        <thead style={{ background: '#21262d' }}>
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipment ID</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipment Name</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipped</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Received</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discrepancy</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipment ID</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipment Name</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipped</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Received</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Discrepancy</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
                           </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody>
                           {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
-                            <tr key={index} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
-                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.shipmentId || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.shipmentName || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.quantityShipped || 0}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.quantityReceived || 0}</td>
-                              <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.discrepancyUnits || 0}</td>
-                              <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
+                            <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentId || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentName || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityShipped || 0}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityReceived || 0}</td>
+                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
+                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -744,7 +803,7 @@ const ReimbursementDashboard = () => {
                     </div>
                     </>
                   ) : (
-                    <div className="text-center py-12 text-gray-500">
+                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
                       No shipment discrepancy data found
                     </div>
                   )}
@@ -756,22 +815,21 @@ const ReimbursementDashboard = () => {
                   <div>
                   {filteredLostInventoryData.length > 0 ? (
                     <>
-                    <div className="flex items-center justify-between mb-4">
-                        <p className="text-sm text-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs" style={{ color: '#9ca3af' }}>
                           {filteredLostInventoryData.length} items (last 30 days) • {formatCurrency(lostInventoryTotal)} total
                           {filteredLostInventoryData.filter(item => item.isUnderpaid).length > 0 && (
-                            <span className="ml-2 text-orange-600 font-medium">
+                            <span className="ml-2 font-medium" style={{ color: '#fb923c' }}>
                               • {filteredLostInventoryData.filter(item => item.isUnderpaid).length} underpaid
                             </span>
                           )}
                         </p>
                         <button
                           onClick={() => setShowUnderpaidOnly(!showUnderpaidOnly)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
-                            showUnderpaidOnly
-                              ? 'bg-orange-100 border-orange-300 text-orange-700'
-                              : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
-                          }`}
+                          className="px-2 py-1 text-[10px] font-medium rounded border transition-all"
+                          style={showUnderpaidOnly ? { background: 'rgba(251, 146, 60, 0.2)', borderColor: 'rgba(251, 146, 60, 0.3)', color: '#fb923c' } : { background: '#1a1a1a', borderColor: '#30363d', color: '#f3f4f6' }}
+                          onMouseEnter={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#3b82f6')}
+                          onMouseLeave={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#30363d')}
                         >
                           {showUnderpaidOnly ? 'Show All' : 'Show Underpaid Only'}
                         </button>
@@ -789,48 +847,48 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '13%' }} />
                           <col style={{ width: '15%' }} />
                         </colgroup>
-                        <thead className="bg-gray-50 border-b border-gray-200">
+                        <thead style={{ background: '#21262d' }}>
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lost</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Found</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursed</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discrepancy</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Month</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Lost</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Found</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursed</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Discrepancy</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
                           </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody>
                             {filteredLostInventoryData
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
-                              <tr key={index} className={`hover:bg-gray-50 transition-colors ${item.isUnderpaid ? 'bg-orange-50' : ''}`}>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatMonthName(item.date)}</td>
-                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.lostUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.foundUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{item.reimbursedUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.discrepancyUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">
+                              <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d', background: item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.15)' : '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent'}>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatMonthName(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.lostUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.foundUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.reimbursedUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>
                                   {item.isUnderpaid && item.underpaidExpectedAmount ? (
                                     <div>
-                                      <div className="text-gray-900">{formatCurrency(item.expectedAmount || 0)}</div>
-                                      <div className="text-xs text-orange-600 font-medium">Underpaid: {formatCurrency(item.underpaidExpectedAmount)}</div>
+                                      <div>{formatCurrency(item.expectedAmount || 0)}</div>
+                                      <div className="text-[10px] font-medium" style={{ color: '#fb923c' }}>Underpaid: {formatCurrency(item.underpaidExpectedAmount)}</div>
                                     </div>
                                   ) : (
                                     formatCurrency(item.expectedAmount || 0)
                                   )}
                                 </td>
-                                <td className="px-4 py-3 align-top">
+                                <td className="px-2 py-2 align-top">
                                   {item.isUnderpaid ? (
-                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(251, 146, 60, 0.2)', color: '#fb923c' }}>
                                       Underpaid
                                     </span>
                                   ) : (
-                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(156, 163, 175, 0.2)', color: '#9ca3af' }}>
                                       Normal
                                     </span>
                                   )}
@@ -842,7 +900,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-12 text-gray-500">
+                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
                       No lost inventory data found
                     </div>
                   )}
@@ -854,8 +912,8 @@ const ReimbursementDashboard = () => {
                   <div>
                   {filteredDamagedInventoryData.length > 0 ? (
                     <>
-                      <div className="mb-4">
-                        <p className="text-sm text-gray-600">
+                      <div className="mb-2">
+                        <p className="text-xs" style={{ color: '#9ca3af' }}>
                           {filteredDamagedInventoryData.length} items (last 30 days) • {formatCurrency(damagedInventoryTotal)} total
                         </p>
                     </div>
@@ -872,31 +930,31 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '11%' }} />
                           <col style={{ width: '11%' }} />
                         </colgroup>
-                        <thead className="bg-gray-50 border-b border-gray-200">
+                        <thead style={{ background: '#21262d' }}>
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FNSKU</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Damaged Units</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sales Price</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fees</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursement/Unit</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>FNSKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Damaged Units</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales Price</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Fees</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursement/Unit</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
                           </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody>
                             {filteredDamagedInventoryData.map((item, index) => (
-                              <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
-                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.fnsku || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.damagedUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
+                              <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.damagedUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                               </tr>
                             ))}
                         </tbody>
@@ -904,7 +962,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-12 text-gray-500">
+                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
                       No damaged inventory data found
                     </div>
                   )}
@@ -916,8 +974,8 @@ const ReimbursementDashboard = () => {
                 <div>
                   {filteredDisposedInventoryData.length > 0 ? (
                     <>
-                      <div className="mb-4">
-                        <p className="text-sm text-gray-600">
+                      <div className="mb-2">
+                        <p className="text-xs" style={{ color: '#9ca3af' }}>
                           {filteredDisposedInventoryData.length} items (last 30 days) • {formatCurrency(disposedInventoryTotal)} total
                         </p>
             </div>
@@ -934,31 +992,31 @@ const ReimbursementDashboard = () => {
                   <col style={{ width: '11%' }} />
                   <col style={{ width: '11%' }} />
                 </colgroup>
-                <thead className="bg-gray-50 border-b border-gray-200">
+                <thead style={{ background: '#21262d' }}>
                   <tr>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ASIN</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FNSKU</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disposed Units</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sales Price</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fees</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reimbursement/Unit</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Amount</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>FNSKU</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Disposed Units</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales Price</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Fees</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursement/Unit</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody>
                             {filteredDisposedInventoryData.map((item, index) => (
-                      <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatDate(item.date)}</td>
-                                <td className="px-4 py-3 text-sm font-mono text-gray-900 break-words align-top">{item.asin || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.sku || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 break-words align-top">{item.fnsku || 'N/A'}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-red-600 align-top">{item.disposedUnits || 0}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900 align-top">{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 align-top">{formatCurrency(item.expectedAmount || 0)}</td>
+                      <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.disposedUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                       </tr>
                             ))}
                           </tbody>
@@ -966,7 +1024,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-12 text-gray-500">
+                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
                       No disposed inventory data found
                     </div>
                   )}
@@ -975,6 +1033,8 @@ const ReimbursementDashboard = () => {
 
             </div>
           </motion.div>
+          </>
+          )}
         </div>
       </div>
     </div>

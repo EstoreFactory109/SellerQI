@@ -2,28 +2,34 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { motion, AnimatePresence } from "framer-motion";
-import { loginSuccess,addBrand } from "../redux/slices/authSlice.js";
+import { loginSuccess, addBrand } from "../redux/slices/authSlice.js";
 import { updateImageLink } from "../redux/slices/profileImage.js";
-import { setDashboardInfo } from '../redux/slices/DashboardSlice.js';
-import { setHistoryInfo } from '../redux/slices/HistorySlice.js';
 import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
-import { setProfitabilityErrorDetails, setSponsoredAdsErrorDetails } from '../redux/slices/errorsSlice.js';
-import { createDefaultDashboardData, isEmptyDashboardData } from '../utils/defaultDataStructure.js';
+import { setCurrency } from '../redux/slices/currencySlice.js';
+import { setDashboardInfo } from '../redux/slices/DashboardSlice.js';
 import axiosInstance from '../config/axios.config.js';
-import { coordinatedAuthCheck, clearAuthCache } from '../utils/authCoordinator.js';
+import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
 import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
+
+// Map country codes to currency symbols
+const amazonMarketplaceCurrencies = {
+  US: "$", CA: "C$", MX: "MX$", BR: "R$",
+  UK: "£", DE: "€", FR: "€", IT: "€", ES: "€", NL: "€", SE: "kr", PL: "zł", BE: "€", TR: "₺",
+  SA: "﷼", AE: "د.إ", EG: "E£",
+  IN: "₹", JP: "¥", SG: "S$", AU: "A$"
+};
 
 const ProtectedRouteWrapper = ({ children }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [navbarDataLoaded, setNavbarDataLoaded] = useState(false);
   const isMountedRef = useRef(true);
   const hasCheckedAuthRef = useRef(false);
 
-  const info = useSelector(state => state.Dashboard?.DashBoardInfo);
   const userData = useSelector(state => state.Auth?.user);
 
   const [showLoader, setShowLoader] = useState(true);
@@ -132,131 +138,62 @@ const ProtectedRouteWrapper = ({ children }) => {
     };
 
     const fetchData = async (freshUserData) => {
-      let hasAnyData = false;
-      let dashboardData = null;
-
       try {
-        // NEW: Fetch pre-calculated dashboard data from the backend page-wise endpoint
-        // This replaces the old flow of fetching raw data and calculating in frontend
-        const response = await axiosInstance.get('/api/pagewise/dashboard');
+        // OPTIMIZED: Fetch only navbar data (user info, accounts, brand)
+        // Individual pages will fetch their own data on mount
+        const response = await axiosInstance.get('/api/pagewise/navbar');
 
         // Check if component is still mounted
         if (!isMountedRef.current) return;
 
-        console.log("=== ProtectedRouteWrapper: Dashboard data fetch response ===");
+        console.log("=== ProtectedRouteWrapper: Navbar data fetch response ===");
         console.log("Response status:", response?.status);
-        console.log("Response data:", response?.data);
 
-        // Handle different response scenarios gracefully
-        if (response?.status === 200) {
-          // Dashboard data is now pre-calculated by the backend
-          dashboardData = response.data?.data?.dashboardData;
-            
-            // Check if we got empty data or actual data
-          if (!dashboardData || isEmptyDashboardData(dashboardData)) {
-              console.log("⚠️ Account has no data available - showing zero data instead of error");
-            dashboardData = dashboardData || createDefaultDashboardData();
-            hasAnyData = false;
-            } else {
-              console.log("✅ Account has data available");
-              hasAnyData = true;
-            }
-            
-            // Always dispatch the dashboard data (either real data or empty structure)
-            dispatch(setDashboardInfo(dashboardData));
+        if (response?.status === 200 && response.data?.data) {
+          const navbarData = response.data.data;
           
           // Dispatch brand name if available
-          if (dashboardData.Brand) {
-            dispatch(addBrand(dashboardData.Brand));
+          if (navbarData.Brand) {
+            dispatch(addBrand(navbarData.Brand));
+          }
+          
+          // Dispatch country and currency for TopNav display
+          if (navbarData.Country) {
+            const currency = amazonMarketplaceCurrencies[navbarData.Country] || '$';
+            dispatch(setCurrency({ currency, country: navbarData.Country }));
+            
+            // Also set minimal DashboardInfo for TopNav compatibility
+            dispatch(setDashboardInfo({ 
+              Country: navbarData.Country,
+              Region: navbarData.Region
+            }));
           }
           
           // Dispatch all seller accounts for account switching
-          if (dashboardData.AllSellerAccounts && dashboardData.AllSellerAccounts.length > 0) {
-            dispatch(setAllAccounts(dashboardData.AllSellerAccounts));
+          if (navbarData.AllSellerAccounts && navbarData.AllSellerAccounts.length > 0) {
+            dispatch(setAllAccounts(navbarData.AllSellerAccounts));
           }
-            
-            // Dispatch error details if available
-            if (dashboardData.totalProfitabilityErrors !== undefined) {
-              dispatch(setProfitabilityErrorDetails({
-                totalErrors: dashboardData.totalProfitabilityErrors || 0,
-                errorDetails: dashboardData.profitabilityErrorDetails || []
-              }));
-            }
-            if (dashboardData.totalSponsoredAdsErrors !== undefined) {
-              dispatch(setSponsoredAdsErrorDetails({
-                totalErrors: dashboardData.totalSponsoredAdsErrors || 0,
-                errorDetails: dashboardData.sponsoredAdsErrorDetails || []
-              }));
-          }
-        } else if (response?.status && response.status !== 200) {
-          console.warn(`⚠️ Non-200 response: ${response.status}`);
-          // For accounts with no data, don't redirect to error page
-          // Instead, provide empty data structure
-          if (response.status === 404 || response.status === 204) {
-            console.log("⚠️ Account not found or no content - providing empty data structure");
-            dashboardData = createDefaultDashboardData();
-            dispatch(setDashboardInfo(dashboardData));
-            hasAnyData = false;
-          } else if (response.status >= 500) {
-            // Only redirect for server errors (not data availability issues)
-            console.error("❌ Server error detected, redirecting to error page");
-            navigate(`/error/${response.status}`);
-            return;
-          }
+          
+          console.log("✅ Navbar data loaded successfully", navbarData);
+          setNavbarDataLoaded(true);
         } else {
-          // No response or invalid response - provide empty data
-          console.log("⚠️ No valid response - providing empty data structure");
-          dashboardData = createDefaultDashboardData();
-          dispatch(setDashboardInfo(dashboardData));
-          hasAnyData = false;
-        }
-
-        // History is now recorded by the backend when dashboard data is calculated
-        // Fetch history data for display purposes
-        try {
-          const historyResponse = await axiosInstance.get('/app/accountHistory/getAccountHistory');
-
-          // Check if component is still mounted
-          if (!isMountedRef.current) return;
-
-          console.log("🔍 ACCOUNT HISTORY DATA FETCHED IN PROTECTEDROUTEWRAPPER:");
-          console.log("Response Status:", historyResponse?.status);
-          console.log("Account History Data:", historyResponse?.data?.data);
-
-          if (historyResponse?.status === 200 && historyResponse.data?.data) {
-            const historyList = historyResponse.data.data || [];
-            dispatch(setHistoryInfo(historyList));
-          } else {
-            dispatch(setHistoryInfo([]));
-          }
-        } catch (historyError) {
-          console.error("❌ History fetch failed:", historyError);
-          // Continue without history data
-          dispatch(setHistoryInfo([]));
-        }
-
-        // Don't redirect to error page for accounts with no data
-        // The dashboard components will handle displaying zero data gracefully
-        if (!dashboardData) {
-          console.log("⚠️ No dashboard data structure available - creating default empty structure");
-          dashboardData = createDefaultDashboardData();
-          dispatch(setDashboardInfo(dashboardData));
+          // Even if navbar data fails, allow user to proceed
+          // Pages will fetch their own data
+          console.warn("⚠️ Navbar data not available, proceeding anyway");
+          setNavbarDataLoaded(true);
         }
 
       } catch (error) {
-        console.error("❌ Data fetch failed:", error);
+        console.error("❌ Navbar data fetch failed:", error);
         
         // Check if component is still mounted
         if (!isMountedRef.current) return;
         
-        // Create default data structure instead of redirecting to error page
-        // This ensures accounts with no data can still access the dashboard
-        console.log("⚠️ Data fetch error - providing default empty data structure instead of error page");
-        dashboardData = createDefaultDashboardData();
-        dispatch(setDashboardInfo(dashboardData));
-        hasAnyData = false;
+        // Allow user to proceed even if navbar data fails
+        // Pages will fetch their own data
+        setNavbarDataLoaded(true);
         
-        // Only redirect for critical authentication errors (not data availability)
+        // Only redirect for critical authentication errors
         if (error.response?.status === 401) {
           console.error("❌ Authentication error, redirecting to login");
           navigate("/");
@@ -267,19 +204,19 @@ const ProtectedRouteWrapper = ({ children }) => {
     checkAuthAndFetchData();
   }, []); // Empty dependency array to run only once on mount
 
-  // Hide loader when authentication is complete and we have dashboard data (even if empty)
+  // Hide loader when authentication is complete and navbar data is loaded
   useEffect(() => {
-    if (authChecked && info) {
+    if (authChecked && navbarDataLoaded) {
       const timer = setTimeout(() => {
         if (isMountedRef.current) {
           setShowLoader(false);
         }
-      }, 500); // optional small delay for better UX
+      }, 300); // shorter delay since we're loading less data
       
       // Cleanup timeout on unmount
       return () => clearTimeout(timer);
     }
-  }, [authChecked, info]);
+  }, [authChecked, navbarDataLoaded]);
 
   return (
     <>
@@ -291,7 +228,7 @@ const ProtectedRouteWrapper = ({ children }) => {
             initial={{ y: 0 }}
             animate={{ y: 0 }}
             exit={{ y: "-100%", transition: { duration: 1, ease: "easeInOut" } }}
-            className="fixed top-0 left-0 w-full h-screen z-[9999] bg-white flex justify-center items-center"
+            className="fixed top-0 left-0 w-full h-screen z-[9999] bg-[#1a1a1a] flex justify-center items-center"
           >
             <Loader />
           </motion.div>

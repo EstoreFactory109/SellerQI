@@ -35,5 +35,8 @@ const strandedInventoryUIDataSchema=new mongoose.Schema({
     }]
 },{timestamps:true})
 
+// Compound index for efficient queries by User, country, region and sorted by createdAt
+strandedInventoryUIDataSchema.index({ User: 1, country: 1, region: 1, createdAt: -1 });
+
 module.exports = mongoose.model("strandedInventoryUIData", strandedInventoryUIDataSchema);
 

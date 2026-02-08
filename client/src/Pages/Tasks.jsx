@@ -129,14 +129,14 @@ const FormattedMessage = ({ message, errorCategory, currency }) => {
   
   return (
     <>
-      {mainText && <span>{mainText}</span>}
+      {mainText && <span style={{ color: '#f3f4f6' }}>{mainText}</span>}
       {highlightedText && (
         <>
           <br />
           {shouldBold ? (
-            <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+            <strong className="mt-1 block" style={{ color: '#f3f4f6' }}>{highlightedText}</strong>
           ) : (
-            <span className="text-gray-900 mt-1 block">{highlightedText}</span>
+            <span className="mt-1 block" style={{ color: '#f3f4f6' }}>{highlightedText}</span>
           )}
         </>
       )}
@@ -436,13 +436,13 @@ export default function Tasks() {
   const getSeverityColor = (severity) => {
     switch (severity.toLowerCase()) {
       case 'high':
-        return 'text-red-600 bg-red-50 border-red-200';
+        return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
       case 'medium':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+        return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
       case 'low':
-        return 'text-green-600 bg-green-50 border-green-200';
+        return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
       default:
-        return 'text-gray-600 bg-gray-50 border-gray-200';
+        return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -450,19 +450,19 @@ export default function Tasks() {
   const getCategoryColor = (category) => {
     switch (category?.toLowerCase()) {
       case 'ranking':
-        return 'text-yellow-700 bg-yellow-50 border-yellow-200';
+        return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
       case 'conversion':
-        return 'text-red-700 bg-red-50 border-red-200';
+        return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
       case 'inventory':
-        return 'text-orange-700 bg-orange-50 border-orange-200';
+        return { color: '#fb923c', background: 'rgba(251, 146, 60, 0.2)', border: 'rgba(251, 146, 60, 0.3)' };
       case 'account health':
-        return 'text-blue-700 bg-blue-50 border-blue-200';
+        return { color: '#60a5fa', background: 'rgba(96, 165, 250, 0.2)', border: 'rgba(96, 165, 250, 0.3)' };
       case 'profitability':
-        return 'text-green-700 bg-green-50 border-green-200';
+        return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
       case 'sponsored ads':
-        return 'text-indigo-700 bg-indigo-50 border-indigo-200';
+        return { color: '#c084fc', background: 'rgba(192, 132, 252, 0.2)', border: 'rgba(192, 132, 252, 0.3)' };
       default:
-        return 'text-gray-700 bg-gray-50 border-gray-200';
+        return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -474,10 +474,10 @@ export default function Tasks() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="text-gray-600">Loading tasks...</p>
+      <div className="min-h-screen overflow-x-hidden w-full flex items-center justify-center" style={{ background: '#1a1a1a' }}>
+        <div className="flex flex-col items-center gap-2">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2" style={{ borderBottomColor: '#3b82f6' }}></div>
+          <p className="text-xs" style={{ color: '#9ca3af' }}>Loading tasks...</p>
         </div>
       </div>
     );
@@ -485,13 +485,16 @@ export default function Tasks() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <AlertTriangle className="w-12 h-12 text-red-500" />
-          <p className="text-red-600">{error}</p>
+      <div className="min-h-screen overflow-x-hidden w-full flex items-center justify-center" style={{ background: '#1a1a1a' }}>
+        <div className="flex flex-col items-center gap-2">
+          <AlertTriangle className="w-6 h-6" style={{ color: '#f87171' }} />
+          <p className="text-xs" style={{ color: '#f87171' }}>{error}</p>
           <button 
             onClick={refreshTasks}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="px-3 py-1.5 rounded-lg transition-all text-xs"
+            style={{ background: '#3b82f6', color: 'white' }}
+            onMouseEnter={(e) => e.target.style.background = '#2563eb'}
+            onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
           >
             Retry
           </button>
@@ -501,192 +504,218 @@ export default function Tasks() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 overflow-x-hidden w-full">
+    <div className="min-h-screen overflow-x-hidden w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header Section */}
-      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40 w-full'>
-        <div className='px-4 lg:px-6 py-4 w-full'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 w-full'>
-            <div className='flex items-center gap-4 min-w-0'>
-              <div className='min-w-0 flex-1'>
-                <h1 className='text-2xl font-bold text-gray-900'>Tasks</h1>
-                <p className='text-sm text-gray-600 mt-1'>Manage and track issues across your Amazon catalog</p>
-              </div>
-              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium flex-shrink-0'>
-                <AlertTriangle className='w-2 h-2' />
-                {filterStatus === 'all' ? 'All tasks' : filterStatus === 'completed' ? 'Completed tasks' : 'Pending tasks'}
-                                 {filterStatus === 'all' && (
-                   <>
-                     <span className='ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full'>
-                       {filteredAndSortedData.filter(item => completedTasks.has(item.taskId)).length} completed
-                     </span>
-                     <span className='ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full'>
-                       {filteredAndSortedData.filter(item => !completedTasks.has(item.taskId)).length} pending
-                     </span>
-                   </>
-                 )}
-                {filterStatus !== 'all' && (
-                  <span className='ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full'>
-                    {filteredAndSortedData.length} {filterStatus === 'completed' ? 'completed' : 'pending'}
+      <div className='sticky top-0 z-40 w-full' style={{ background: '#161b22', borderBottom: '1px solid #30363d', marginBottom: '10px', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+        <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 w-full'>
+          <div className='flex items-center gap-2 min-w-0'>
+            <AlertTriangle className='w-4 h-4' style={{ color: '#fb923c' }} />
+            <div className='min-w-0 flex-1'>
+              <h1 className='text-base font-bold' style={{ color: '#f3f4f6' }}>Tasks</h1>
+            </div>
+            <div className='hidden sm:flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium flex-shrink-0' style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+              {filterStatus === 'all' ? 'All tasks' : filterStatus === 'completed' ? 'Completed tasks' : 'Pending tasks'}
+              {filterStatus === 'all' && (
+                <>
+                  <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>
+                    {filteredAndSortedData.filter(item => completedTasks.has(item.taskId)).length} completed
                   </span>
-                )}
-              </div>
+                  <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                    {filteredAndSortedData.filter(item => !completedTasks.has(item.taskId)).length} pending
+                  </span>
+                </>
+              )}
+              {filterStatus !== 'all' && (
+                <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                  {filteredAndSortedData.length} {filterStatus === 'completed' ? 'completed' : 'pending'}
+                </span>
+              )}
             </div>
+          </div>
+          
+          <div className='flex items-center gap-2 flex-shrink-0'>
+            {/* Export Button */}
+            <button 
+              onClick={exportToCSV}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium"
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
+              onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export CSV
+            </button>
             
-            <div className='flex items-center gap-3 flex-shrink-0'>
-              {/* Export Button */}
-              <button 
-                onClick={exportToCSV}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700"
-              >
-                <Download className="w-4 h-4" />
-                Export as CSV
-              </button>
-              
-              {/* Refresh Button */}
-              <button 
-                onClick={refreshTasks}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow text-sm font-medium text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-            </div>
+            {/* Refresh Button */}
+            <button 
+              onClick={refreshTasks}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              onMouseEnter={(e) => !loading && (e.target.style.borderColor = '#3b82f6')}
+              onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
           </div>
         </div>
       </div>
 
       {/* Filters and Search Section */}
-      <div className='bg-white border-b border-gray-200/80 w-full'>
-        <div className='px-4 lg:px-6 py-4 w-full'>
-          <div className='flex flex-col sm:flex-row gap-4 w-full'>
-            {/* Search */}
-            <div className='flex-1 min-w-0'>
-              <div className='relative'>
-                <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
-                <input
-                  type='text'
-                  placeholder='Search tasks...'
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className='w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-                />
-              </div>
+      <div className='w-full' style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '10px', padding: '8px 12px' }}>
+        <div className='flex flex-col sm:flex-row gap-2 w-full'>
+          {/* Search */}
+          <div className='flex-1 min-w-0'>
+            <div className='relative'>
+              <Search className='absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5' style={{ color: '#6b7280' }} />
+              <input
+                type='text'
+                placeholder='Search tasks...'
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className='w-full pl-8 pr-3 py-1.5 rounded-lg text-xs'
+                style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                onBlur={(e) => e.target.style.borderColor = '#30363d'}
+              />
             </div>
+          </div>
 
-            {/* Category Filter */}
-            <div className='sm:w-48 flex-shrink-0'>
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-              >
-                {categories.map(category => (
-                  <option key={category} value={category}>
-                    {category === 'all' ? 'All Categories' : category}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Category Filter */}
+          <div className='sm:w-40 flex-shrink-0'>
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className='w-full px-2 py-1.5 rounded-lg text-xs'
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = '#30363d'}
+            >
+              {categories.map(category => (
+                <option key={category} value={category} style={{ background: '#21262d' }}>
+                  {category === 'all' ? 'All Categories' : category}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            {/* Status Filter */}
-            <div className='sm:w-40 flex-shrink-0'>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-              >
-                <option value="all">All Tasks</option>
-                <option value="pending">Pending Only</option>
-                <option value="completed">Completed Only</option>
-              </select>
-            </div>
+          {/* Status Filter */}
+          <div className='sm:w-36 flex-shrink-0'>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className='w-full px-2 py-1.5 rounded-lg text-xs'
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = '#30363d'}
+            >
+              <option value="all" style={{ background: '#21262d' }}>All Tasks</option>
+              <option value="pending" style={{ background: '#21262d' }}>Pending Only</option>
+              <option value="completed" style={{ background: '#21262d' }}>Completed Only</option>
+            </select>
           </div>
         </div>
       </div>
 
       {/* Table Section */}
-      <div className='px-4 lg:px-6 py-6 w-full'>
-        <div className='bg-white rounded-xl shadow-sm border border-gray-200'>
+      <div className='w-full' style={{ marginBottom: '10px' }}>
+        <div className='rounded-lg' style={{ background: '#161b22', border: '1px solid #30363d' }}>
           {/* Google Sheets-like Table */}
           <div className='w-full'>
             <table className='w-full'>
-              <thead className='bg-gray-50 border-b border-gray-200'>
+              <thead style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
                 <tr>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[60px]'
+                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[60px]'
                     onClick={() => handleSort('slNo')}
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
-                    <div className='flex items-center gap-2'>
+                    <div className='flex items-center gap-1.5'>
                       Sl No.
                       {sortBy === 'slNo' && (
                         sortOrder === 'asc' ? 
-                        <TrendingUp className='w-3 h-3' /> : 
-                        <TrendingDown className='w-3 h-3' />
+                        <TrendingUp className='w-2.5 h-2.5' /> : 
+                        <TrendingDown className='w-2.5 h-2.5' />
                       )}
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors min-w-[200px] max-w-[350px]'
+                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[200px] max-w-[350px]'
                     onClick={() => handleSort('product')}
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
-                    <div className='flex items-center gap-2'>
+                    <div className='flex items-center gap-1.5'>
                       Product
                       {sortBy === 'product' && (
                         sortOrder === 'asc' ? 
-                        <TrendingUp className='w-3 h-3' /> : 
-                        <TrendingDown className='w-3 h-3' />
+                        <TrendingUp className='w-2.5 h-2.5' /> : 
+                        <TrendingDown className='w-2.5 h-2.5' />
                       )}
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors min-w-[130px]'
+                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[130px]'
                     onClick={() => handleSort('asin')}
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
-                    <div className='flex items-center gap-2'>
+                    <div className='flex items-center gap-1.5'>
                       ASIN/SKU
                       {sortBy === 'asin' && (
                         sortOrder === 'asc' ? 
-                        <TrendingUp className='w-3 h-3' /> : 
-                        <TrendingDown className='w-3 h-3' />
+                        <TrendingUp className='w-2.5 h-2.5' /> : 
+                        <TrendingDown className='w-2.5 h-2.5' />
                       )}
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors w-[110px]'
+                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[110px]'
                     onClick={() => handleSort('errorCategory')}
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
-                    <div className='flex items-center gap-2'>
+                    <div className='flex items-center gap-1.5'>
                       Error Category
                       {sortBy === 'errorCategory' && (
                         sortOrder === 'asc' ? 
-                        <TrendingUp className='w-3 h-3' /> : 
-                        <TrendingDown className='w-3 h-3' />
+                        <TrendingUp className='w-2.5 h-2.5' /> : 
+                        <TrendingDown className='w-2.5 h-2.5' />
                       )}
                     </div>
                   </th>
                   <th 
-                    className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors'
+                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors'
                     onClick={() => handleSort('error')}
+                    style={{ color: '#9ca3af' }}
+                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
+                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
-                    <div className='flex items-center gap-2'>
+                    <div className='flex items-center gap-1.5'>
                       Error
                       {sortBy === 'error' && (
                         sortOrder === 'asc' ? 
-                        <TrendingUp className='w-3 h-3' /> : 
-                        <TrendingDown className='w-3 h-3' />
+                        <TrendingUp className='w-2.5 h-2.5' /> : 
+                        <TrendingDown className='w-2.5 h-2.5' />
                       )}
                     </div>
                   </th>
-                  <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide' style={{ color: '#9ca3af' }}>
                     How To Solve
                   </th>
-                  <th className='px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[100px]'>
+                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide w-[100px]' style={{ color: '#9ca3af' }}>
                     Status
                   </th>
                 </tr>
               </thead>
-              <tbody className='bg-white divide-y divide-gray-200'>
+              <tbody>
                 {currentItems.length > 0 ? (
                   currentItems.map((item, index) => (
                     <motion.tr
@@ -694,59 +723,68 @@ export default function Tasks() {
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      className='hover:bg-gray-50 transition-colors'
+                      className='transition-colors'
+                      style={{ borderBottom: '1px solid #30363d' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
-                      <td className='px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-[60px]'>
+                      <td className='px-2 py-2 whitespace-nowrap text-[11px] font-medium w-[60px]' style={{ color: '#f3f4f6' }}>
                         {item.slNo}
                       </td>
-                      <td className='px-4 py-4 text-sm text-gray-900 min-w-[200px] max-w-[350px]'>
+                      <td className='px-2 py-2 text-[11px] min-w-[200px] max-w-[350px]' style={{ color: '#f3f4f6' }}>
                         <div className='whitespace-normal break-words leading-relaxed' title={item.product}>
                           {item.product}
                         </div>
                       </td>
-                      <td className='px-4 py-4 text-sm text-gray-900 min-w-[130px]'>
-                        <div className='space-y-1'>
+                      <td className='px-2 py-2 text-[11px] min-w-[130px]' style={{ color: '#f3f4f6' }}>
+                        <div className='space-y-0.5'>
                           <div className='flex items-center gap-1'>
-                            <span className='text-xs text-gray-500 font-medium'>ASIN:</span>
-                            <span className='font-mono text-gray-900'>{item.asin}</span>
+                            <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>ASIN:</span>
+                            <span className='font-mono' style={{ color: '#f3f4f6' }}>{item.asin}</span>
                           </div>
                           {item.sku && (
                             <div className='flex items-center gap-1'>
-                              <span className='text-xs text-gray-500 font-medium'>SKU:</span>
-                              <span className='font-mono text-gray-700 text-xs'>{item.sku}</span>
+                              <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>SKU:</span>
+                              <span className='font-mono text-[10px]' style={{ color: '#9ca3af' }}>{item.sku}</span>
                             </div>
                           )}
                         </div>
                       </td>
-                      <td className='px-4 py-4 whitespace-nowrap w-[110px]'>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getCategoryColor(item.errorCategory)}`}>
-                          {item.errorCategory}
-                        </span>
+                      <td className='px-2 py-2 whitespace-nowrap w-[110px]'>
+                        {(() => {
+                          const categoryStyle = getCategoryColor(item.errorCategory);
+                          return (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={categoryStyle}>
+                              {item.errorCategory}
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className='px-4 py-4 text-sm text-gray-900'>
+                      <td className='px-2 py-2 text-[11px]' style={{ color: '#f3f4f6' }}>
                         <div>
                           <p className='whitespace-normal'>
                             <FormattedMessage message={item.error} errorCategory={item.errorCategory} currency={currency} />
                           </p>
                         </div>
                       </td>
-                      <td className='px-4 py-4 text-sm text-gray-900'>
+                      <td className='px-2 py-2 text-[11px]' style={{ color: '#f3f4f6' }}>
                         <div>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
                       </td>
-                                             <td className='px-4 py-4 whitespace-nowrap w-[100px]'>
-                         <div className='flex items-center gap-2'>
+                                             <td className='px-2 py-2 whitespace-nowrap w-[100px]'>
+                         <div className='flex items-center gap-1.5'>
                            <input
                              type="checkbox"
                              checked={completedTasks.has(item.taskId)}
                              onChange={() => toggleTaskStatus(item.taskId)}
-                             className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                             className="w-3.5 h-3.5 rounded focus:ring-2 cursor-pointer"
+                             style={{ accentColor: '#3b82f6', background: '#1a1a1a', border: '1px solid #30363d' }}
                            />
-                           <span className={`text-xs font-medium ${
+                           <span className={`text-[10px] font-medium ${
                              completedTasks.has(item.taskId)
-                               ? 'text-green-600'
-                               : 'text-yellow-600'
+                               ? 'text-green-400'
+                               : 'text-yellow-400'
                            }`}>
                              {completedTasks.has(item.taskId) ? 'Completed' : 'Pending'}
                            </span>
@@ -756,12 +794,12 @@ export default function Tasks() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="7" className='px-4 py-12 text-center'>
-                      <div className='flex flex-col items-center gap-3'>
-                        <AlertTriangle className='w-12 h-12 text-gray-400' />
+                    <td colSpan="7" className='px-4 py-8 text-center'>
+                      <div className='flex flex-col items-center gap-2'>
+                        <AlertTriangle className='w-6 h-6' style={{ color: '#6b7280' }} />
                         <div>
-                          <h3 className='text-lg font-medium text-gray-900'>No tasks found</h3>
-                          <p className='text-sm text-gray-500 mt-1'>
+                          <h3 className='text-sm font-medium' style={{ color: '#f3f4f6' }}>No tasks found</h3>
+                          <p className='text-xs mt-1' style={{ color: '#9ca3af' }}>
                             {searchQuery || filterCategory !== 'all' 
                               ? 'Try adjusting your search or filter criteria' 
                               : 'No issues detected in your account'
@@ -778,32 +816,35 @@ export default function Tasks() {
 
           {/* Pagination Controls */}
           {filteredAndSortedData.length > 0 && (
-            <div className="flex items-center justify-between px-4 py-4 bg-gray-50 border-t border-gray-200">
+            <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-700">
+                <span className="text-xs" style={{ color: '#9ca3af' }}>
                   Showing {filteredAndSortedData.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredAndSortedData.length)} of {filteredAndSortedData.length} tasks
                 </span>
               </div>
               
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={goToPreviousPage}
                   disabled={currentPage === 1}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 ${
                     currentPage === 1
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 shadow-sm hover:shadow-md'
+                      ? 'cursor-not-allowed' 
+                      : ''
                   }`}
+                  style={currentPage === 1 ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                  onMouseEnter={(e) => currentPage !== 1 && (e.target.style.borderColor = '#3b82f6')}
+                  onMouseLeave={(e) => currentPage !== 1 && (e.target.style.borderColor = '#30363d')}
                   aria-label="Previous page"
                 >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span className="text-sm font-medium">Previous</span>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="text-xs font-medium">Previous</span>
                 </motion.button>
                 
                 <div className="flex items-center gap-2">
-                  <span className="px-4 py-2 text-sm font-medium text-gray-700 bg-blue-50 border border-blue-200 rounded-lg">
+                  <span className="px-2 py-1 text-xs font-medium rounded-lg" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
                     {currentPage} of {totalPages || 1}
                   </span>
                 </div>
@@ -813,20 +854,24 @@ export default function Tasks() {
                   whileTap={{ scale: 0.95 }}
                   onClick={goToNextPage}
                   disabled={currentPage === totalPages || totalPages === 0}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 ${
                     currentPage === totalPages || totalPages === 0
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 shadow-sm hover:shadow-md'
+                      ? 'cursor-not-allowed' 
+                      : ''
                   }`}
+                  style={(currentPage === totalPages || totalPages === 0) ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                  onMouseEnter={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#3b82f6')}
+                  onMouseLeave={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#30363d')}
                   aria-label="Next page"
                 >
-                  <span className="text-sm font-medium">Next</span>
-                  <ChevronRight className="w-4 h-4" />
+                  <span className="text-xs font-medium">Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </motion.button>
               </div>
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

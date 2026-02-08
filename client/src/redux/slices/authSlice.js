@@ -20,6 +20,16 @@ const authSlice = createSlice({
       if (state.user) {
         state.user.packageType = action.payload.packageType;
         state.user.subscriptionStatus = action.payload.subscriptionStatus;
+        // Also update trial-related fields when package type changes
+        if (action.payload.isInTrialPeriod !== undefined) {
+          state.user.isInTrialPeriod = action.payload.isInTrialPeriod;
+        }
+        if (action.payload.trialEndsDate !== undefined) {
+          state.user.trialEndsDate = action.payload.trialEndsDate;
+        }
+        if (action.payload.servedTrial !== undefined) {
+          state.user.servedTrial = action.payload.servedTrial;
+        }
       }
     },
     updateProfileDetails(state, action) {
@@ -34,11 +44,15 @@ const authSlice = createSlice({
     },
     updateTrialStatus(state, action) {
       if (state.user) {
-        // Update trial-related fields
+        // Update all trial-related fields
         state.user.packageType = action.payload.packageType;
         state.user.subscriptionStatus = action.payload.subscriptionStatus;
         state.user.isInTrialPeriod = action.payload.isInTrialPeriod;
         state.user.trialEndsDate = action.payload.trialEndsDate;
+        // Also update servedTrial when trial status changes
+        if (action.payload.servedTrial !== undefined) {
+          state.user.servedTrial = action.payload.servedTrial;
+        }
       }
     },
     logout(state) {

@@ -1,9 +1,8 @@
 import React, { useState, useMemo } from "react";
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
-import Connect from '../../../assets/Icons/connect.png';
 import {useNavigate} from 'react-router-dom'
-import { Search, ChevronDown } from 'lucide-react';
+import { Search, ChevronDown, Link } from 'lucide-react';
 
 // Complete list of Amazon marketplaces with region mapping
 const COUNTRY_DATA = [
@@ -119,34 +118,34 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+      <div className="bg-[#161b22] rounded-lg shadow-lg w-full max-w-md p-4 relative border border-[#30363d]">
         {/* Close button */}
-        <button onClick={closeAddAccount} className="absolute top-4 right-4 text-gray-500 hover:text-gray-700">
+        <button onClick={closeAddAccount} className="absolute top-3 right-3 text-gray-400 hover:text-gray-200">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
         {/* Icon */}
-        <div className="flex justify-center mb-4">
-          <div className="bg-yellow-100 rounded-full p-2">
-            <img src={Connect} alt="Connect" className="w-8 h-8" />
+        <div className="flex justify-center mb-3">
+          <div className="bg-yellow-600/20 rounded-full p-2 border border-yellow-600/40">
+            <Link className="w-8 h-8 text-yellow-400" />
           </div>
         </div>
 
-        <h2 className="text-2xl font-semibold text-center mb-2">Connect to Amazon</h2>
-        <p className="text-center text-gray-500 text-sm mb-6">Select your country to connect</p>
+        <h2 className="text-xl font-semibold text-center mb-1 text-gray-100">Connect to Amazon</h2>
+        <p className="text-center text-gray-400 text-sm mb-4">Select your country to connect</p>
 
         <form onSubmit={handleSubmit}>
           {/* Country Selection with Search */}
-          <label className="block text-gray-700 mb-1">Select Country</label>
-          <div className="relative mb-4">
+          <label className="block text-gray-200 mb-1 text-sm">Select Country</label>
+          <div className="relative mb-3">
             {/* Selected Country Display / Dropdown Trigger */}
             <button
               type="button"
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="w-full border border-gray-300 rounded-md p-2.5 outline-none text-left flex items-center justify-between hover:border-gray-400 transition-colors"
+              className="w-full border border-[#30363d] rounded-md p-2.5 outline-none text-left flex items-center justify-between hover:border-[#21262d] transition-colors bg-[#1a1a1a] text-gray-100"
             >
               {selectedCountry ? (
                 <span className="flex items-center gap-2">
@@ -161,9 +160,9 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
 
             {/* Dropdown */}
             {isDropdownOpen && (
-              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg overflow-hidden">
+              <div className="absolute z-50 w-full mt-1 bg-[#161b22] border border-[#30363d] rounded-md shadow-lg overflow-hidden">
                 {/* Search Input */}
-                <div className="p-2 border-b border-gray-200">
+                <div className="p-2 border-b border-[#30363d]">
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
@@ -171,7 +170,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
                       placeholder="Search country..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded outline-none focus:border-[#333651] text-sm"
+                      className="w-full pl-8 pr-3 py-2 bg-[#1a1a1a] border border-[#30363d] rounded outline-none focus:border-blue-500 text-sm text-gray-100"
                       autoFocus
                     />
                   </div>
@@ -180,7 +179,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
                 {/* Country List */}
                 <div className="max-h-48 overflow-y-auto">
                   {filteredCountries.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                    <div className="px-3 py-4 text-center text-gray-400 text-sm">
                       No countries found
                     </div>
                   ) : (
@@ -191,7 +190,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
                         
                         return (
                           <div key={regionCode}>
-                            <div className="px-3 py-1.5 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0">
+                            <div className="px-3 py-1.5 bg-[#1a1a1a] text-xs font-semibold text-gray-400 uppercase tracking-wider sticky top-0 border-b border-[#30363d]">
                               {REGION_NAMES[regionCode]}
                             </div>
                             {regionCountries.map(country => (
@@ -199,8 +198,8 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
                                 key={country.code}
                                 type="button"
                                 onClick={() => handleCountrySelect(country.code)}
-                                className={`w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-2 text-sm ${
-                                  marketPlace === country.code ? 'bg-blue-50 border-l-2 border-[#333651]' : ''
+                                className={`w-full px-3 py-2 text-left hover:bg-[#21262d] transition-colors flex items-center gap-2 text-sm text-gray-100 ${
+                                  marketPlace === country.code ? 'bg-[#21262d] border-l-2 border-blue-500' : ''
                                 }`}
                               >
                                 <span className="text-base">{country.flag}</span>
@@ -230,17 +229,17 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
           )}
 
           {/* Buttons */}
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-2">
             <button
               type="button"
               onClick={closeAddAccount}
-              className="w-1/2 h-12 border border-gray-300 rounded-md mr-2 text-gray-700 hover:bg-gray-100"
+              className="w-1/2 h-10 border border-[#30363d] rounded-md text-gray-200 hover:bg-[#21262d] transition"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="w-1/2 h-12 bg-[#333651] text-white rounded-md hover:bg-gray-700 flex items-center justify-center"
+              className="w-1/2 h-10 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center justify-center transition"
             >
               {loading ? <BeatLoader color="#ffffff" size={10} /> : "Connect Now"}
             </button>

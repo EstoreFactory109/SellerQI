@@ -391,11 +391,11 @@ const UserLogging = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'completed': return 'text-green-600 bg-green-50 border-green-200';
-      case 'failed': return 'text-red-600 bg-red-50 border-red-200';
-      case 'partial': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'in_progress': return 'text-blue-600 bg-blue-50 border-blue-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+      case 'completed': return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
+      case 'failed': return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
+      case 'partial': return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
+      case 'in_progress': return { color: '#60a5fa', background: 'rgba(96, 165, 250, 0.2)', border: 'rgba(96, 165, 250, 0.3)' };
+      default: return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -427,112 +427,136 @@ const UserLogging = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const StatCard = ({ title, value, subtitle, icon: Icon, color = "blue" }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow"
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">{value}</p>
-          {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
+  const StatCard = ({ title, value, subtitle, icon: Icon, color = "blue" }) => {
+    const colorMap = {
+      blue: { bg: 'rgba(59, 130, 246, 0.2)', text: '#60a5fa' },
+      green: { bg: 'rgba(34, 197, 94, 0.2)', text: '#22c55e' },
+      purple: { bg: 'rgba(192, 132, 252, 0.2)', text: '#c084fc' },
+      red: { bg: 'rgba(239, 68, 68, 0.2)', text: '#f87171' }
+    };
+    const colors = colorMap[color] || colorMap.blue;
+    
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-lg p-3 transition-shadow"
+        style={{ background: '#161b22', border: '1px solid #30363d' }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: '#9ca3af' }}>{title}</p>
+            <p className="text-[18px] font-bold mt-0.5" style={{ color: '#f3f4f6' }}>{value}</p>
+            {subtitle && <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{subtitle}</p>}
+          </div>
+          <Icon className="w-4 h-4" style={{ color: colors.text }} />
         </div>
-        <div className={`p-3 rounded-lg bg-${color}-50`}>
-          <Icon className={`w-6 h-6 text-${color}-600`} />
-        </div>
-      </div>
-    </motion.div>
-  );
+      </motion.div>
+    );
+  };
 
   if (loading && !stats && !sessions.length) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1a1a' }}>
         <div className="text-center">
-          <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading logging data...</p>
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" style={{ color: '#3b82f6' }} />
+          <p className="text-xs" style={{ color: '#9ca3af' }}>Loading logging data...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen overflow-x-hidden w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="py-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-                  <Activity className="w-7 h-7 text-blue-600" />
-                  User Activity Logging
-                </h1>
-                <p className="text-gray-600 mt-1">Monitor and analyze user session logs and system performance</p>
-              </div>
-              
-              <div className="flex items-center gap-4">
-                <select
-                  value={dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="7">Last 7 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="90">Last 90 days</option>
-                </select>
-                
-                <button
-                  onClick={fetchData}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Refresh
-                </button>
-                
-                <button
-                  onClick={triggerIntegration}
-                  disabled={triggerSubmitting}
-                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Run analysis for the current user"
-                >
-                  {triggerSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Play className="w-4 h-4" />
-                  )}
-                  {triggerSubmitting ? 'Running...' : 'Run Analysis'}
-                </button>
-              </div>
-            </div>
-
-            {/* Tab Navigation */}
-            <div className="mt-6 border-b border-gray-200">
-              <nav className="flex space-x-8">
-                {[
-                  { id: 'overview', label: 'Overview', icon: BarChart3 },
-                  { id: 'sessions', label: 'Sessions', icon: Database },
-                  { id: 'errors', label: 'Error Logs', icon: AlertCircle },
-                  { id: 'emails', label: 'Email Logs', icon: Mail },
-                  { id: 'payment-logs', label: 'Payment Logs', icon: CreditCard }
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <tab.icon className="w-4 h-4" />
-                    {tab.label}
-                  </button>
-                ))}
-              </nav>
+      <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '10px' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <div>
+              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>User Activity Logging</h1>
             </div>
           </div>
+          
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs transition-all"
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = '#30363d'}
+            >
+              <option value="7" style={{ background: '#21262d' }}>Last 7 days</option>
+              <option value="30" style={{ background: '#21262d' }}>Last 30 days</option>
+              <option value="90" style={{ background: '#21262d' }}>Last 90 days</option>
+            </select>
+            
+            <button
+              onClick={fetchData}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{ background: '#3b82f6', color: 'white' }}
+              onMouseEnter={(e) => e.target.style.background = '#2563eb'}
+              onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
+            </button>
+            
+            <button
+              onClick={triggerIntegration}
+              disabled={triggerSubmitting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: '#fb923c', color: 'white' }}
+              onMouseEnter={(e) => !triggerSubmitting && (e.target.style.background = '#f97316')}
+              onMouseLeave={(e) => e.target.style.background = '#fb923c'}
+              title="Run analysis for the current user"
+            >
+              {triggerSubmitting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              {triggerSubmitting ? 'Running...' : 'Run Analysis'}
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="mt-3 border-t pt-2" style={{ borderColor: '#30363d' }}>
+          <nav className="flex space-x-4 overflow-x-auto">
+            {[
+              { id: 'overview', label: 'Overview', icon: BarChart3 },
+              { id: 'sessions', label: 'Sessions', icon: Database },
+              { id: 'errors', label: 'Error Logs', icon: AlertCircle },
+              { id: 'emails', label: 'Email Logs', icon: Mail },
+              { id: 'payment-logs', label: 'Payment Logs', icon: CreditCard }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="flex items-center gap-1.5 py-2 px-2 border-b-2 font-medium text-xs transition-colors"
+                style={{
+                  borderBottomColor: activeTab === tab.id ? '#3b82f6' : 'transparent',
+                  color: activeTab === tab.id ? '#60a5fa' : '#9ca3af'
+                }}
+                onMouseEnter={(e) => {
+                  if (activeTab !== tab.id) {
+                    e.target.style.color = '#d1d5db';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (activeTab !== tab.id) {
+                    e.target.style.color = '#9ca3af';
+                  }
+                }}
+              >
+                <tab.icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
       </div>
 
@@ -543,19 +567,19 @@ const UserLogging = () => {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className={`fixed top-4 right-4 z-[60] p-4 rounded-lg shadow-lg max-w-md ${
-              integrationMessage.type === 'success'
-                ? 'bg-green-50 border border-green-200'
-                : 'bg-red-50 border border-red-200'
-            }`}
+            className="fixed top-4 right-4 z-[60] p-3 rounded-lg shadow-lg max-w-md text-xs"
+            style={{
+              background: integrationMessage.type === 'success' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+              border: `1px solid ${integrationMessage.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+            }}
           >
             <div className="flex items-center gap-2">
               {integrationMessage.type === 'success' ? (
-                <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+                <CheckCircle className="w-4 h-4 shrink-0" style={{ color: '#22c55e' }} />
               ) : (
-                <XCircle className="w-5 h-5 text-red-600 shrink-0" />
+                <XCircle className="w-4 h-4 shrink-0" style={{ color: '#f87171' }} />
               )}
-              <p className={integrationMessage.type === 'success' ? 'text-green-800' : 'text-red-800'}>
+              <p style={{ color: integrationMessage.type === 'success' ? '#22c55e' : '#f87171' }}>
                 {integrationMessage.text}
               </p>
             </div>
@@ -564,21 +588,21 @@ const UserLogging = () => {
       </AnimatePresence>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div>
         {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="mb-2 rounded-lg p-2" style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-600" />
-              <p className="text-red-800">{error}</p>
+              <AlertCircle className="w-4 h-4" style={{ color: '#f87171' }} />
+              <p className="text-xs" style={{ color: '#f87171' }}>{error}</p>
             </div>
           </div>
         )}
 
         {/* Overview Tab */}
         {activeTab === 'overview' && (
-          <div className="space-y-8">
+          <div className="space-y-2">
             {/* Statistics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
               <StatCard
                 title="Total Sessions"
                 value={stats?.totalSessions || 0}
@@ -610,57 +634,63 @@ const UserLogging = () => {
             </div>
 
             {/* Recent Sessions */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Recent Sessions</h3>
-                <p className="text-gray-600 text-sm mt-1">Latest user activity sessions</p>
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Recent Sessions</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50">
+                  <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Success Rate</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Session</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Duration</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Success Rate</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Started</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
                     {sessions && sessions.length > 0 ? (
                       sessions.slice(0, 5).map((session, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">
+                        <tr key={index} className="transition-colors" style={{ borderColor: '#30363d' }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <div className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
                               {session.sessionId?.split('_').slice(-2).join('_') || 'Unknown'}
                             </div>
-                            <div className="text-sm text-gray-500">
+                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>
                               {session.region || 'N/A'} • {session.country || 'N/A'}
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(session.sessionStatus)}`}>
-                              {session.sessionStatus || 'unknown'}
-                            </span>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            {(() => {
+                              const statusStyle = getStatusColor(session.sessionStatus);
+                              return (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={statusStyle}>
+                                  {session.sessionStatus || 'unknown'}
+                                </span>
+                              );
+                            })()}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
                             {formatDuration(session.sessionEndTime ? new Date(session.sessionEndTime) - new Date(session.sessionStartTime) : null)}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
                             {calculateSessionSuccessRate(session)}%
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
                             {formatDate(session.sessionStartTime)}
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan="5" className="px-4 py-6 text-center">
                           <div className="flex flex-col items-center">
-                            <Database className="w-8 h-8 text-gray-300 mb-2" />
-                            <p>No sessions found</p>
-                            <p className="text-sm">Sessions will appear here after users run data analysis</p>
+                            <Database className="w-6 h-6 mb-2" style={{ color: '#6b7280' }} />
+                            <p className="text-xs" style={{ color: '#9ca3af' }}>No sessions found</p>
+                            <p className="text-[10px]" style={{ color: '#6b7280' }}>Sessions will appear here after users run data analysis</p>
                           </div>
                         </td>
                       </tr>
@@ -671,24 +701,23 @@ const UserLogging = () => {
             </div>
 
             {/* Recent Errors */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Recent Errors</h3>
-                <p className="text-gray-600 text-sm mt-1">Latest system errors and issues</p>
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Recent Errors</h3>
               </div>
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y" style={{ borderColor: '#30363d' }}>
                 {errorLogs && errorLogs.length > 0 ? (
                   errorLogs.slice(0, 5).map((error, index) => (
-                    <div key={index} className="p-6">
-                      <div className="flex items-start gap-3">
-                        {getLogTypeIcon('error')}
+                    <div key={index} className="p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#f87171' }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <p className="text-sm font-medium text-gray-900">{error.functionName || 'Unknown Function'}</p>
-                            <span className="text-xs text-gray-500">{formatDate(error.timestamp)}</span>
+                            <p className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{error.functionName || 'Unknown Function'}</p>
+                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{formatDate(error.timestamp)}</span>
                           </div>
-                          <p className="text-sm text-gray-600 mb-2">{error.message || 'No error message'}</p>
-                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <p className="text-[11px] mb-1.5" style={{ color: '#9ca3af' }}>{error.message || 'No error message'}</p>
+                          <div className="flex items-center gap-3 text-[10px]" style={{ color: '#6b7280' }}>
                             <span>Session: {error.sessionId?.split('_').slice(-2).join('_') || 'Unknown'}</span>
                             <span>Region: {error.contextData?.region || 'N/A'}</span>
                             <span>Country: {error.contextData?.country || 'N/A'}</span>
@@ -698,11 +727,11 @@ const UserLogging = () => {
                     </div>
                   ))
                 ) : (
-                  <div className="p-8 text-center text-gray-500">
+                  <div className="p-6 text-center">
                     <div className="flex flex-col items-center">
-                      <AlertCircle className="w-8 h-8 text-gray-300 mb-2" />
-                      <p>No error logs found</p>
-                      <p className="text-sm">Error logs will appear here when system errors occur</p>
+                      <AlertCircle className="w-6 h-6 mb-2" style={{ color: '#6b7280' }} />
+                      <p className="text-xs" style={{ color: '#9ca3af' }}>No error logs found</p>
+                      <p className="text-[10px]" style={{ color: '#6b7280' }}>Error logs will appear here when system errors occur</p>
                     </div>
                   </div>
                 )}
@@ -713,87 +742,103 @@ const UserLogging = () => {
 
         {/* Sessions Tab */}
         {activeTab === 'sessions' && (
-          <div className="space-y-6">
+          <div className="space-y-2">
             {/* Filters */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-              <div className="flex flex-col sm:flex-row gap-4">
+            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#6b7280' }} />
                     <input
                       type="text"
                       placeholder="Search by session ID, region, or country..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="pl-8 pr-3 py-1.5 w-full rounded-lg text-xs transition-all"
+                      style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                      onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                      onBlur={(e) => e.target.style.borderColor = '#30363d'}
                     />
                   </div>
                 </div>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onBlur={(e) => e.target.style.borderColor = '#30363d'}
                 >
-                  <option value="all">All Status</option>
-                  <option value="completed">Completed</option>
-                  <option value="failed">Failed</option>
-                  <option value="partial">Partial</option>
-                  <option value="in_progress">In Progress</option>
+                  <option value="all" style={{ background: '#21262d' }}>All Status</option>
+                  <option value="completed" style={{ background: '#21262d' }}>Completed</option>
+                  <option value="failed" style={{ background: '#21262d' }}>Failed</option>
+                  <option value="partial" style={{ background: '#21262d' }}>Partial</option>
+                  <option value="in_progress" style={{ background: '#21262d' }}>In Progress</option>
                 </select>
               </div>
             </div>
 
             {/* Sessions List */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50">
+                  <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session Details</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Session Details</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Performance</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Duration</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
                     {filteredSessions.map((session, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                      <tr key={index} className="transition-colors" style={{ borderColor: '#30363d' }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                        <td className="px-2 py-2 whitespace-nowrap">
                           <div>
-                            <div className="text-sm font-medium text-gray-900">
+                            <div className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
                               {session.sessionId.split('_').slice(-2).join('_')}
                             </div>
-                            <div className="text-sm text-gray-500">
+                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>
                               {session.region} • {session.country}
                             </div>
-                            <div className="text-xs text-gray-400 mt-1">
+                            <div className="text-[10px] mt-0.5" style={{ color: '#6b7280' }}>
                               {formatDate(session.sessionStartTime)}
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(session.sessionStatus)}`}>
-                            {session.sessionStatus}
-                          </span>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {(() => {
+                            const statusStyle = getStatusColor(session.sessionStatus);
+                            return (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={statusStyle}>
+                                {session.sessionStatus}
+                              </span>
+                            );
+                          })()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          <div className="text-[11px]" style={{ color: '#f3f4f6' }}>
                             {calculateSessionSuccessRate(session)}% success
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-[10px]" style={{ color: '#9ca3af' }}>
                             {session.overallSummary?.successfulFunctions || 0}/{session.overallSummary?.totalFunctions || 0} functions
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
                           {formatDuration(session.sessionEndTime ? new Date(session.sessionEndTime) - new Date(session.sessionStartTime) : null)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <td className="px-2 py-2 whitespace-nowrap text-[11px] font-medium">
                           <button
                             onClick={() => fetchSessionDetails(session.sessionId)}
-                            className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
+                            className="flex items-center gap-1 transition-colors"
+                            style={{ color: '#60a5fa' }}
+                            onMouseEnter={(e) => e.target.style.color = '#3b82f6'}
+                            onMouseLeave={(e) => e.target.style.color = '#60a5fa'}
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5" />
                             View Details
                           </button>
                         </td>
@@ -811,69 +856,78 @@ const UserLogging = () => {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+                  className="fixed inset-0 flex items-center justify-center p-4 z-50"
+                  style={{ background: 'rgba(0, 0, 0, 0.7)' }}
                   onClick={() => setSelectedSession(null)}
                 >
                   <motion.div
                     initial={{ y: 20 }}
                     animate={{ y: 0 }}
                     exit={{ y: 20 }}
-                    className="bg-white rounded-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto"
+                    className="rounded-lg max-w-4xl w-full max-h-[80vh] overflow-y-auto"
+                    style={{ background: '#161b22', border: '1px solid #30363d' }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="p-6 border-b border-gray-200">
+                    <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
                       <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-gray-900">Session Details</h3>
+                        <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Session Details</h3>
                         <button
                           onClick={() => setSelectedSession(null)}
-                          className="text-gray-400 hover:text-gray-600"
+                          style={{ color: '#9ca3af' }}
+                          onMouseEnter={(e) => e.target.style.color = '#f3f4f6'}
+                          onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                         >
-                          <EyeOff className="w-5 h-5" />
+                          <EyeOff className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
                     
-                    <div className="p-6">
+                    <div className="p-3">
                       {/* Session Summary */}
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                        <div className="text-center p-4 bg-blue-50 rounded-lg">
-                          <div className="text-2xl font-bold text-blue-600">{sessionDetails.overallSummary?.totalFunctions || 0}</div>
-                          <div className="text-sm text-blue-600">Total Functions</div>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+                        <div className="text-center p-2 rounded-lg" style={{ background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                          <div className="text-base font-bold" style={{ color: '#60a5fa' }}>{sessionDetails.overallSummary?.totalFunctions || 0}</div>
+                          <div className="text-[10px]" style={{ color: '#60a5fa' }}>Total Functions</div>
                         </div>
-                        <div className="text-center p-4 bg-green-50 rounded-lg">
-                          <div className="text-2xl font-bold text-green-600">{sessionDetails.overallSummary?.successfulFunctions || 0}</div>
-                          <div className="text-sm text-green-600">Successful</div>
+                        <div className="text-center p-2 rounded-lg" style={{ background: 'rgba(34, 197, 94, 0.2)', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+                          <div className="text-base font-bold" style={{ color: '#22c55e' }}>{sessionDetails.overallSummary?.successfulFunctions || 0}</div>
+                          <div className="text-[10px]" style={{ color: '#22c55e' }}>Successful</div>
                         </div>
-                        <div className="text-center p-4 bg-red-50 rounded-lg">
-                          <div className="text-2xl font-bold text-red-600">{sessionDetails.overallSummary?.failedFunctions || 0}</div>
-                          <div className="text-sm text-red-600">Failed</div>
+                        <div className="text-center p-2 rounded-lg" style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                          <div className="text-base font-bold" style={{ color: '#f87171' }}>{sessionDetails.overallSummary?.failedFunctions || 0}</div>
+                          <div className="text-[10px]" style={{ color: '#f87171' }}>Failed</div>
                         </div>
-                        <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                          <div className="text-2xl font-bold text-yellow-600">{calculateSessionSuccessRate(sessionDetails)}%</div>
-                          <div className="text-sm text-yellow-600">Success Rate</div>
+                        <div className="text-center p-2 rounded-lg" style={{ background: 'rgba(251, 191, 36, 0.2)', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
+                          <div className="text-base font-bold" style={{ color: '#fbbf24' }}>{calculateSessionSuccessRate(sessionDetails)}%</div>
+                          <div className="text-[10px]" style={{ color: '#fbbf24' }}>Success Rate</div>
                         </div>
-                        <div className="text-center p-4 bg-purple-50 rounded-lg">
-                          <div className="text-2xl font-bold text-purple-600">{sessionDetails.sessionDurationFormatted}</div>
-                          <div className="text-sm text-purple-600">Duration</div>
+                        <div className="text-center p-2 rounded-lg" style={{ background: 'rgba(192, 132, 252, 0.2)', border: '1px solid rgba(192, 132, 252, 0.3)' }}>
+                          <div className="text-base font-bold" style={{ color: '#c084fc' }}>{sessionDetails.sessionDurationFormatted}</div>
+                          <div className="text-[10px]" style={{ color: '#c084fc' }}>Duration</div>
                         </div>
                       </div>
 
                       {/* Logs */}
-                      <div className="space-y-4">
-                        <h4 className="text-md font-semibold text-gray-900">Function Logs</h4>
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Function Logs</h4>
+                        <div className="space-y-1.5 max-h-96 overflow-y-auto">
                           {sessionDetails.logs?.map((log, index) => (
-                            <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                            <div key={index} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: '#21262d', border: '1px solid #30363d' }}>
                               {getLogTypeIcon(log.logType)}
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-sm font-medium text-gray-900">{log.functionName}</span>
-                                  <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(log.status)}`}>
-                                    {log.status}
-                                  </span>
+                                  <span className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{log.functionName}</span>
+                                  {(() => {
+                                    const statusStyle = getStatusColor(log.status);
+                                    return (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] border" style={statusStyle}>
+                                        {log.status}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
-                                <p className="text-sm text-gray-600">{log.message}</p>
-                                <div className="flex items-center gap-4 text-xs text-gray-500 mt-1">
+                                <p className="text-[11px]" style={{ color: '#9ca3af' }}>{log.message}</p>
+                                <div className="flex items-center gap-3 text-[10px] mt-1" style={{ color: '#6b7280' }}>
                                   <span>{formatDate(log.timestamp)}</span>
                                   {log.executionTime?.duration && (
                                     <span>Duration: {formatDuration(log.executionTime.duration)}</span>
@@ -894,27 +948,29 @@ const UserLogging = () => {
 
         {/* Errors Tab */}
         {activeTab === 'errors' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Error Logs</h3>
-                <p className="text-gray-600 text-sm mt-1">Detailed error information and stack traces</p>
+          <div className="space-y-2">
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Error Logs</h3>
               </div>
               
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y" style={{ borderColor: '#30363d' }}>
                 {errorLogs.map((error, index) => (
-                  <div key={index} className="p-6">
-                    <div className="flex items-start gap-3">
-                      {getLogTypeIcon('error')}
+                  <div key={index} className="p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#f87171' }} />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between mb-1.5">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-gray-900">{error.functionName}</p>
-                            <span className="text-xs text-gray-500">{formatDate(error.timestamp)}</span>
+                            <p className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{error.functionName}</p>
+                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{formatDate(error.timestamp)}</span>
                           </div>
                           <button
                             onClick={() => toggleErrorExpansion(index)}
-                            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+                            className="flex items-center gap-1 text-[10px] transition-colors"
+                            style={{ color: '#60a5fa' }}
+                            onMouseEnter={(e) => e.target.style.color = '#3b82f6'}
+                            onMouseLeave={(e) => e.target.style.color = '#60a5fa'}
                           >
                             {expandedErrors.has(index) ? (
                               <>
@@ -930,9 +986,9 @@ const UserLogging = () => {
                           </button>
                         </div>
                         
-                        <p className="text-sm text-gray-600 mb-2">{error.message}</p>
+                        <p className="text-[11px] mb-1.5" style={{ color: '#9ca3af' }}>{error.message}</p>
                         
-                        <div className="flex items-center gap-4 text-xs text-gray-500 mb-2">
+                        <div className="flex items-center gap-3 text-[10px] mb-1.5" style={{ color: '#6b7280' }}>
                           <span>Session: {error.sessionId.split('_').slice(-2).join('_')}</span>
                           <span>Region: {error.contextData?.region}</span>
                           <span>Country: {error.contextData?.country}</span>
@@ -944,28 +1000,29 @@ const UserLogging = () => {
                               initial={{ opacity: 0, height: 0 }}
                               animate={{ opacity: 1, height: 'auto' }}
                               exit={{ opacity: 0, height: 0 }}
-                              className="mt-4 p-4 bg-gray-50 rounded-lg"
+                              className="mt-2 p-2 rounded-lg"
+                              style={{ background: '#21262d', border: '1px solid #30363d' }}
                             >
                               {error.errorDetails && (
-                                <div className="space-y-2">
+                                <div className="space-y-1.5">
                                   {error.errorDetails.errorMessage && (
                                     <div>
-                                      <span className="text-xs font-medium text-gray-700">Error Message:</span>
-                                      <p className="text-xs text-gray-600 mt-1">{error.errorDetails.errorMessage}</p>
+                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>Error Message:</span>
+                                      <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{error.errorDetails.errorMessage}</p>
                                     </div>
                                   )}
                                   
                                   {error.errorDetails.httpStatus && (
                                     <div>
-                                      <span className="text-xs font-medium text-gray-700">HTTP Status:</span>
-                                      <p className="text-xs text-gray-600 mt-1">{error.errorDetails.httpStatus}</p>
+                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>HTTP Status:</span>
+                                      <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{error.errorDetails.httpStatus}</p>
                                     </div>
                                   )}
                                   
                                   {error.errorDetails.stackTrace && (
                                     <div>
-                                      <span className="text-xs font-medium text-gray-700">Stack Trace:</span>
-                                      <pre className="text-xs text-gray-600 mt-1 whitespace-pre-wrap bg-white p-2 rounded border max-h-40 overflow-y-auto">
+                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>Stack Trace:</span>
+                                      <pre className="text-[10px] mt-0.5 whitespace-pre-wrap p-2 rounded border max-h-32 overflow-y-auto" style={{ background: '#1a1a1a', borderColor: '#30363d', color: '#9ca3af' }}>
                                         {error.errorDetails.stackTrace}
                                       </pre>
                                     </div>
@@ -986,31 +1043,31 @@ const UserLogging = () => {
 
         {/* Email Logs Tab */}
         {activeTab === 'emails' && (
-          <div className="space-y-6">
+          <div className="space-y-2">
             {/* Email Statistics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {emailStats.map((stat, index) => (
-                <div key={stat._id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <div key={stat._id} className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">{stat._id.replace('_', ' ')}</p>
-                      <p className="text-2xl font-bold text-gray-900">{stat.totalCount}</p>
+                      <p className="text-[11px] font-medium" style={{ color: '#9ca3af' }}>{stat._id.replace('_', ' ')}</p>
+                      <p className="text-[18px] font-bold mt-0.5" style={{ color: '#f3f4f6' }}>{stat.totalCount}</p>
                     </div>
-                    <Mail className="w-8 h-8 text-blue-600" />
+                    <Mail className="w-4 h-4" style={{ color: '#60a5fa' }} />
                   </div>
-                  <div className="mt-4 space-y-1">
+                  <div className="mt-2 space-y-1">
                     {stat.statuses.map(status => (
-                      <div key={status.status} className="flex items-center justify-between text-xs">
-                        <span className={`flex items-center gap-1 ${
-                          status.status === 'SENT' ? 'text-green-600' : 
-                          status.status === 'FAILED' ? 'text-red-600' : 'text-yellow-600'
-                        }`}>
+                      <div key={status.status} className="flex items-center justify-between text-[10px]">
+                        <span className="flex items-center gap-1" style={{
+                          color: status.status === 'SENT' ? '#22c55e' : 
+                                 status.status === 'FAILED' ? '#f87171' : '#fbbf24'
+                        }}>
                           {status.status === 'SENT' ? <Send className="w-3 h-3" /> : 
                            status.status === 'FAILED' ? <XCircle className="w-3 h-3" /> : 
                            <Clock className="w-3 h-3" />}
                           {status.status}
                         </span>
-                        <span className="font-medium">{status.count}</span>
+                        <span className="font-medium" style={{ color: '#f3f4f6' }}>{status.count}</span>
                       </div>
                     ))}
                   </div>
@@ -1019,142 +1076,149 @@ const UserLogging = () => {
             </div>
 
             {/* Email Filters */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Filters</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Type</label>
+                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Email Type</label>
                   <select
                     value={emailTypeFilter}
                     onChange={(e) => setEmailTypeFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
+                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
                   >
-                    <option value="all">All Types</option>
-                    <option value="OTP">OTP</option>
-                    <option value="WELCOME_LITE">Welcome Lite</option>
-                    <option value="PASSWORD_RESET">Password Reset</option>
-                    <option value="ANALYSIS_READY">Analysis Ready</option>
-                    <option value="WEEKLY_REPORT">Weekly Report</option>
-                    <option value="UPGRADE_REMINDER">Upgrade Reminder</option>
-                    <option value="CONNECTION_REMINDER">Connection Reminder</option>
-                    <option value="SUPPORT_MESSAGE">Support Message</option>
-                    <option value="USER_REGISTERED">User Registered</option>
+                    <option value="all" style={{ background: '#21262d' }}>All Types</option>
+                    <option value="OTP" style={{ background: '#21262d' }}>OTP</option>
+                    <option value="WELCOME_LITE" style={{ background: '#21262d' }}>Welcome Lite</option>
+                    <option value="PASSWORD_RESET" style={{ background: '#21262d' }}>Password Reset</option>
+                    <option value="ANALYSIS_READY" style={{ background: '#21262d' }}>Analysis Ready</option>
+                    <option value="WEEKLY_REPORT" style={{ background: '#21262d' }}>Weekly Report</option>
+                    <option value="UPGRADE_REMINDER" style={{ background: '#21262d' }}>Upgrade Reminder</option>
+                    <option value="CONNECTION_REMINDER" style={{ background: '#21262d' }}>Connection Reminder</option>
+                    <option value="SUPPORT_MESSAGE" style={{ background: '#21262d' }}>Support Message</option>
+                    <option value="USER_REGISTERED" style={{ background: '#21262d' }}>User Registered</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
                   <select
                     value={emailStatusFilter}
                     onChange={(e) => setEmailStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
+                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
                   >
-                    <option value="all">All Status</option>
-                    <option value="SENT">Sent</option>
-                    <option value="FAILED">Failed</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="DELIVERED">Delivered</option>
+                    <option value="all" style={{ background: '#21262d' }}>All Status</option>
+                    <option value="SENT" style={{ background: '#21262d' }}>Sent</option>
+                    <option value="FAILED" style={{ background: '#21262d' }}>Failed</option>
+                    <option value="PENDING" style={{ background: '#21262d' }}>Pending</option>
+                    <option value="DELIVERED" style={{ background: '#21262d' }}>Delivered</option>
                   </select>
                 </div>
               </div>
             </div>
 
             {/* Email Logs Table */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Email Logs</h3>
-                <p className="text-gray-600 text-sm mt-1">Recent email delivery logs and status</p>
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Email Logs</h3>
               </div>
               
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                <table className="min-w-full divide-y" style={{ borderColor: '#30363d' }}>
+                  <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
                         Type & Status
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
                         Recipient
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
                         Subject
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
                         Sent Date
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
                         Provider
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
                     {emailLogs.map((email, index) => (
-                      <tr key={email.id || index} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                      <tr key={email.id || index} className="transition-colors" style={{ borderColor: '#30363d' }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                        <td className="px-2 py-2 whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="text-sm font-medium text-gray-900">
+                            <span className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
                               {email.emailType.replace('_', ' ')}
                             </span>
-                            <div className="flex items-center gap-1 mt-1">
+                            <div className="flex items-center gap-1 mt-0.5">
                               {email.status === 'SENT' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  <Send className="w-3 h-3" />
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>
+                                  <Send className="w-2.5 h-2.5" />
                                   Sent
                                 </span>
                               ) : email.status === 'FAILED' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                  <XCircle className="w-3 h-3" />
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+                                  <XCircle className="w-2.5 h-2.5" />
                                   Failed
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                  <Clock className="w-3 h-3" />
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                                  <Clock className="w-2.5 h-2.5" />
                                   {email.status}
                                 </span>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-2 py-2 whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="text-sm text-gray-900">{email.receiverEmail}</span>
+                            <span className="text-[11px]" style={{ color: '#f3f4f6' }}>{email.receiverEmail}</span>
                             {email.receiverName && email.receiverName !== 'Unknown User' && (
-                              <span className="text-xs text-gray-500">{email.receiverName}</span>
+                              <span className="text-[10px]" style={{ color: '#9ca3af' }}>{email.receiverName}</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="text-sm text-gray-900 line-clamp-2">
+                        <td className="px-2 py-2">
+                          <span className="text-[11px] line-clamp-2" style={{ color: '#f3f4f6' }}>
                             {email.subject || 'No subject'}
                           </span>
                           {email.errorMessage && (
-                            <p className="text-xs text-red-600 mt-1 line-clamp-1">
+                            <p className="text-[10px] mt-0.5 line-clamp-1" style={{ color: '#f87171' }}>
                               Error: {email.errorMessage}
                             </p>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-2 py-2 whitespace-nowrap">
                           <div className="flex flex-col">
                             {email.sentDate ? (
                               <>
-                                <span className="text-sm text-gray-900">
+                                <span className="text-[11px]" style={{ color: '#f3f4f6' }}>
                                   {new Date(email.sentDate).toLocaleDateString()}
                                 </span>
-                                <span className="text-xs text-gray-500">
+                                <span className="text-[10px]" style={{ color: '#9ca3af' }}>
                                   {email.sentTime}
                                 </span>
                               </>
                             ) : (
-                              <span className="text-sm text-gray-500">
+                              <span className="text-[11px]" style={{ color: '#9ca3af' }}>
                                 {new Date(email.createdAt).toLocaleDateString()}
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-2 py-2 whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="text-sm text-gray-900">{email.emailProvider}</span>
+                            <span className="text-[11px]" style={{ color: '#f3f4f6' }}>{email.emailProvider}</span>
                             {email.retryCount > 0 && (
-                              <span className="text-xs text-orange-600">
+                              <span className="text-[10px]" style={{ color: '#fb923c' }}>
                                 Retries: {email.retryCount}
                               </span>
                             )}
@@ -1166,10 +1230,10 @@ const UserLogging = () => {
                 </table>
                 
                 {emailLogs.length === 0 && (
-                  <div className="text-center py-12">
-                    <Mail className="mx-auto h-12 w-12 text-gray-400" />
-                    <h3 className="mt-2 text-sm font-medium text-gray-900">No email logs found</h3>
-                    <p className="mt-1 text-sm text-gray-500">
+                  <div className="text-center py-8">
+                    <Mail className="mx-auto h-6 w-6 mb-2" style={{ color: '#6b7280' }} />
+                    <h3 className="mt-2 text-xs font-medium" style={{ color: '#f3f4f6' }}>No email logs found</h3>
+                    <p className="mt-1 text-[10px]" style={{ color: '#9ca3af' }}>
                       No email logs match the current filters.
                     </p>
                   </div>
@@ -1181,137 +1245,152 @@ const UserLogging = () => {
 
         {/* Payment Logs Tab (superadmin) */}
         {activeTab === 'payment-logs' && (
-          <div className="space-y-6">
+          <div className="space-y-2">
             {/* Filters */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
-              <div className="flex flex-col sm:flex-row gap-4">
+            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Filters</h3>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Event Type</label>
+                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Event Type</label>
                   <select
                     value={paymentEventFilter}
                     onChange={(e) => { setPaymentEventFilter(e.target.value); setPaymentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
+                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
                   >
-                    <option value="all">All Events</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CREATED">Razorpay Subscription Created</option>
-                    <option value="RAZORPAY_PAYMENT_SUCCESS">Razorpay Payment Success</option>
-                    <option value="RAZORPAY_PAYMENT_FAILED">Razorpay Payment Failed</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_AUTHENTICATED">Razorpay Authenticated</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_ACTIVATED">Razorpay Activated</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CHARGED">Razorpay Charged</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CANCELLED">Razorpay Cancelled</option>
-                    <option value="STRIPE_CHECKOUT_CREATED">Stripe Checkout Created</option>
-                    <option value="STRIPE_PAYMENT_SUCCESS">Stripe Payment Success</option>
-                    <option value="STRIPE_PAYMENT_FAILED">Stripe Payment Failed</option>
-                    <option value="TRIAL_STARTED">Trial Started</option>
-                    <option value="TRIAL_ENDED">Trial Ended</option>
+                    <option value="all" style={{ background: '#21262d' }}>All Events</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CREATED" style={{ background: '#21262d' }}>Razorpay Subscription Created</option>
+                    <option value="RAZORPAY_PAYMENT_SUCCESS" style={{ background: '#21262d' }}>Razorpay Payment Success</option>
+                    <option value="RAZORPAY_PAYMENT_FAILED" style={{ background: '#21262d' }}>Razorpay Payment Failed</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_AUTHENTICATED" style={{ background: '#21262d' }}>Razorpay Authenticated</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_ACTIVATED" style={{ background: '#21262d' }}>Razorpay Activated</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CHARGED" style={{ background: '#21262d' }}>Razorpay Charged</option>
+                    <option value="RAZORPAY_SUBSCRIPTION_CANCELLED" style={{ background: '#21262d' }}>Razorpay Cancelled</option>
+                    <option value="STRIPE_CHECKOUT_CREATED" style={{ background: '#21262d' }}>Stripe Checkout Created</option>
+                    <option value="STRIPE_PAYMENT_SUCCESS" style={{ background: '#21262d' }}>Stripe Payment Success</option>
+                    <option value="STRIPE_PAYMENT_FAILED" style={{ background: '#21262d' }}>Stripe Payment Failed</option>
+                    <option value="TRIAL_STARTED" style={{ background: '#21262d' }}>Trial Started</option>
+                    <option value="TRIAL_ENDED" style={{ background: '#21262d' }}>Trial Ended</option>
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
                   <select
                     value={paymentStatusFilter}
                     onChange={(e) => { setPaymentStatusFilter(e.target.value); setPaymentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
+                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
                   >
-                    <option value="all">All Status</option>
-                    <option value="SUCCESS">Success</option>
-                    <option value="FAILED">Failed</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="PROCESSING">Processing</option>
+                    <option value="all" style={{ background: '#21262d' }}>All Status</option>
+                    <option value="SUCCESS" style={{ background: '#21262d' }}>Success</option>
+                    <option value="FAILED" style={{ background: '#21262d' }}>Failed</option>
+                    <option value="PENDING" style={{ background: '#21262d' }}>Pending</option>
+                    <option value="PROCESSING" style={{ background: '#21262d' }}>Processing</option>
                   </select>
                 </div>
               </div>
             </div>
 
             {/* Payment Logs Table */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Payment Logs</h3>
-                <p className="text-gray-600 text-sm mt-1">Payment events and errors across all users</p>
+            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Payment Logs</h3>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                <table className="min-w-full divide-y" style={{ borderColor: '#30363d' }}>
+                  <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gateway</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Message / Error</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>User</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Event</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gateway</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Amount</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Message / Error</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
                     {paymentLogs.length > 0 ? (
                       paymentLogs.map((log, index) => (
-                        <tr key={log._id || index} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <tr key={log._id || index} className="transition-colors" style={{ borderColor: '#30363d' }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
                             {formatDate(log.createdAt)}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <div className="text-[11px]" style={{ color: '#f3f4f6' }}>
                               {log.userId?.firstName} {log.userId?.lastName}
                             </div>
-                            <div className="text-xs text-gray-500">{log.userId?.email}</div>
+                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>{log.userId?.email}</div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
                             {log.eventType?.replace(/_/g, ' ')}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
                             {log.paymentGateway}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' :
-                              log.status === 'FAILED' ? 'bg-red-100 text-red-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style={{
+                              background: log.status === 'SUCCESS' ? 'rgba(34, 197, 94, 0.2)' :
+                                         log.status === 'FAILED' ? 'rgba(239, 68, 68, 0.2)' :
+                                         'rgba(251, 191, 36, 0.2)',
+                              color: log.status === 'SUCCESS' ? '#22c55e' :
+                                     log.status === 'FAILED' ? '#f87171' : '#fbbf24'
+                            }}>
                               {log.status}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
                             {log.amount != null ? `${log.currency || ''} ${log.amount}` : '—'}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                          <td className="px-2 py-2 text-[11px] max-w-xs">
                             {log.errorMessage ? (
-                              <span className="text-red-600" title={log.errorDescription}>{log.errorMessage}</span>
+                              <span style={{ color: '#f87171' }} title={log.errorDescription}>{log.errorMessage}</span>
                             ) : (
-                              log.message || '—'
+                              <span style={{ color: '#9ca3af' }}>{log.message || '—'}</span>
                             )}
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
-                          <CreditCard className="w-10 h-10 mx-auto text-gray-300 mb-2" />
-                          <p>No payment logs found</p>
-                          <p className="text-sm">Payment events will appear here</p>
+                        <td colSpan="7" className="px-4 py-8 text-center">
+                          <CreditCard className="w-6 h-6 mx-auto mb-2" style={{ color: '#6b7280' }} />
+                          <p className="text-xs" style={{ color: '#9ca3af' }}>No payment logs found</p>
+                          <p className="text-[10px]" style={{ color: '#6b7280' }}>Payment events will appear here</p>
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
                 {paymentLogsPagination.totalPages > 1 && (
-                  <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-                    <p className="text-sm text-gray-600">
+                  <div className="px-3 py-2 border-t flex items-center justify-between" style={{ borderColor: '#30363d' }}>
+                    <p className="text-xs" style={{ color: '#9ca3af' }}>
                       Page {paymentLogsPagination.currentPage} of {paymentLogsPagination.totalPages} ({paymentLogsPagination.totalCount} total)
                     </p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setPaymentPage(p => Math.max(1, p - 1))}
                         disabled={paymentLogsPagination.currentPage <= 1}
-                        className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50"
+                        className="px-3 py-1 rounded-lg text-xs transition-all disabled:opacity-50"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onMouseEnter={(e) => !(paymentLogsPagination.currentPage <= 1) && (e.target.style.borderColor = '#3b82f6')}
+                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                       >
                         Previous
                       </button>
                       <button
                         onClick={() => setPaymentPage(p => p + 1)}
                         disabled={paymentLogsPagination.currentPage >= paymentLogsPagination.totalPages}
-                        className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50"
+                        className="px-3 py-1 rounded-lg text-xs transition-all disabled:opacity-50"
+                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        onMouseEnter={(e) => !(paymentLogsPagination.currentPage >= paymentLogsPagination.totalPages) && (e.target.style.borderColor = '#3b82f6')}
+                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                       >
                         Next
                       </button>
@@ -1322,6 +1401,7 @@ const UserLogging = () => {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

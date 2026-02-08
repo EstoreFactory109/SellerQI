@@ -73,7 +73,7 @@ const userSchema = new mongoose.Schema(
       },
       subscriptionStatus: {
         type: String,
-        enum: ["active", "inactive", "cancelled", "past_due", "trialing"],
+        enum: ["active", "inactive", "cancelled", "past_due", "trialing", "incomplete"],
         default: "active"
       },
       isInTrialPeriod: {
@@ -151,6 +151,10 @@ const userSchema = new mongoose.Schema(
       subscribedToAlerts: {
         type: Boolean,
         default: true
+      },
+      FirstAnalysisDone: {
+        type: Boolean,
+        default: false
       }
     },
     {
@@ -158,5 +162,15 @@ const userSchema = new mongoose.Schema(
     }
   );
 
-const User = mongoose.model("User", userSchema);
+// Indexes for better query performance
+// Note: email index is automatically created by unique: true in schema
+userSchema.index({ packageType: 1 });
+userSchema.index({ subscriptionStatus: 1 });
+userSchema.index({ isInTrialPeriod: 1 });
+userSchema.index({ isVerified: 1 });
+// Compound indexes for common queries
+userSchema.index({ packageType: 1, subscriptionStatus: 1 });
+userSchema.index({ isVerified: 1, packageType: 1 });
+
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 module.exports = User;

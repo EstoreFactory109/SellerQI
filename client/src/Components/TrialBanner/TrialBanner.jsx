@@ -69,7 +69,7 @@ const TrialBanner = () => {
   };
 
   return (
-    <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-3 shadow-md relative">
+    <div className="bg-gradient-to-r from-green-700 to-emerald-800 text-white px-4 py-3 border-b border-green-900/50 relative">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">

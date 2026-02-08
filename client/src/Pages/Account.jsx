@@ -4,113 +4,87 @@ import { History, BarChart3 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import Table from '../Components/Account/Table.jsx';
 import Chart from '../Components/Account/Chart.jsx';
+import { useAccountHistoryData } from '../hooks/usePageData.js';
+import { SkeletonChart, SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx';
 
 const AccountHistoryPanel = () => {
-  const historyInfo = useSelector(state => state.History.HistoryInfo || []);
+  // Fetch account history data using the hook (automatically fetches on mount)
+  const { data: accountHistoryPageData, loading: accountHistoryLoading, refetch: refetchAccountHistory } = useAccountHistoryData();
+  
+  // Use page-wise data if available, fall back to legacy HistorySlice
+  const legacyHistoryInfo = useSelector(state => state.History.HistoryInfo || []);
+  const historyInfo = accountHistoryPageData?.accountHistory || legacyHistoryInfo;
 
   console.log("🔍 ACCOUNT HISTORY PAGE DATA:");
   console.log("History Info:", historyInfo);
   console.log("Number of history records:", historyInfo.length);
+  console.log("Account history loading:", accountHistoryLoading);
 
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-100">
-      <div className="h-[90vh] overflow-y-auto">
-        <div className="p-6 lg:p-8">
-          <div className="max-w-[1600px] mx-auto">
-            
-            {/* Modern Header Section */}
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="mb-8"
-            >
-                            <div className="flex flex-col gap-6">
-                {/* Header Title and Description */}
-                <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <History className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                      Account History
-                    </h1>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Track your account performance and health score trends over time
-                    </p>
-                  </div>
-                </div>
-              </div>
-              </div>
-            </motion.div>
-
-
-
-            {/* Enhanced Chart Section */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="mb-8"
-            >
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="p-6 pb-0">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-                        <BarChart3 className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-900">Issues Trend Analysis</h3>
-                        <p className="text-sm text-gray-600">Track your account health and issues over time</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full"></div>
-                        <span className="text-gray-600">Issues Count</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="px-6 pb-6">
-                  <Chart />
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Enhanced Table Section */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="mb-8"
-            >
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="p-6 pb-4 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-br from-gray-500 to-gray-600 rounded-lg flex items-center justify-center">
-                      <History className="w-4 h-4 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">Account Snapshot History</h3>
-                      <p className="text-sm text-gray-600">Detailed historical records of your account performance</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6">
-                  <Table />
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Bottom Spacer */}
-            <div className='w-full h-8'></div>
+    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        {/* Header Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          style={{ marginBottom: '10px' }}
+        >
+          <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <History className="w-4 h-4" style={{ color: '#60a5fa' }} />
+            <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+              Account History
+            </h1>
           </div>
-        </div>
+        </motion.div>
+
+        {/* Chart Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          style={{ marginBottom: '10px' }}
+        >
+          <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #30363d' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4" style={{ color: '#60a5fa' }} />
+                  <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Issues Trend Analysis</h3>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
+                  <span className="text-xs" style={{ color: '#9ca3af' }}>Issues Count</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '8px 12px' }}>
+              {accountHistoryLoading ? <SkeletonChart height={256} /> : <Chart />}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Table Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          style={{ marginBottom: '10px' }}
+        >
+          <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #30363d' }}>
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4" style={{ color: '#60a5fa' }} />
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Account Snapshot History</h3>
+              </div>
+            </div>
+            <div style={{ padding: '8px 12px' }}>
+              {accountHistoryLoading ? <SkeletonTableBody rows={6} /> : <Table />}
+            </div>
+          </div>
+        </motion.div>
       </div>
     </div>
   );

@@ -1,18 +1,21 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Calendar, TrendingUp, AlertTriangle, DollarSign, Package, ShoppingCart, Activity, BarChart3, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Zap, Target, RefreshCw } from 'lucide-react'
+import { Calendar, TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Award, Target, RefreshCw, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
 import Calender from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
-import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
+import { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
+import { SkeletonStatValue, SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx'
+import { SkeletonBar } from '../Components/Skeleton/Skeleton.jsx'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../redux/slices/PPCMetricsSlice.js'
 import { parseLocalDate } from '../utils/dateUtils.js'
+import { useDashboardData } from '../hooks/usePageData.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -31,11 +34,7 @@ const Dashboard = () => {
     if (location.pathname.includes('/dashboard') || location.pathname === '/seller-central-checker/dashboard') {
       // Use requestAnimationFrame to ensure DOM is ready
       const resetScroll = () => {
-        // Reset scroll position of the main content area (Dashboard's own scroll container)
-        if (contentRef.current) {
-          contentRef.current.scrollTop = 0
-        }
-        // Also reset the parent scroll container (MainPagesLayout's scrollable div)
+        // Reset the parent scroll container (MainPagesLayout's scrollable div)
         // Try multiple selectors to find the scroll container
         const selectors = [
           'div.flex-1.overflow-y-auto.scrollbar-hide',
@@ -53,14 +52,6 @@ const Dashboard = () => {
         
         // Reset window scroll (in case of any window-level scrolling)
         window.scrollTo({ top: 0, behavior: 'instant' })
-        
-        // Also reset any nested scrollable containers
-        const nestedScrollContainers = document.querySelectorAll('[class*="overflow-y-auto"], [class*="overflow-auto"]')
-        nestedScrollContainers.forEach(container => {
-          if (container.scrollTop > 0) {
-            container.scrollTop = 0
-          }
-        })
       }
       
       // Reset immediately
@@ -76,6 +67,9 @@ const Dashboard = () => {
       })
     }
   }, [location.pathname]) // Reset when route changes
+  
+  // Fetch dashboard data using the hook (automatically fetches on mount)
+  const { data: dashboardInfo, loading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardData()
   
   // Get reimbursement data from Redux (cached)
   const reimbursementData = useSelector(state => state.reimbursement)
@@ -140,8 +134,7 @@ const Dashboard = () => {
     return shipmentTotal + lostTotal + damagedTotal + disposedTotal;
   }, [reimbursementRawData]);
 
-  // Get dashboard data from Redux
-  const dashboardInfo = useSelector(state => state.Dashboard.DashBoardInfo)
+  // Note: dashboardInfo is now obtained from useDashboardData hook above
   
   // Get PPC metrics from PPCMetrics model (NEW - primary source for PPC data)
   const ppcSummaryLatest = useSelector(selectPPCSummary)
@@ -513,37 +506,34 @@ const Dashboard = () => {
   const amazonOwesYou = calculateAmazonOwesYou();
 
   const quickStats = [
-    { icon: RefreshCw, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
-    { icon: DollarSign, label: 'Money Wasted in Ads', value: formatCurrencyWithLocale(amazonOwesYou, currency), change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
-    { icon: Target, label: 'ACoS %', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
-    { icon: AlertTriangle, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
+    { icon: Receipt, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
+    { icon: TrendingDown, label: 'Money Wasted in Ads', value: formatCurrencyWithLocale(amazonOwesYou, currency), change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: Gauge, label: 'ACoS %', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: FileWarning, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
   ]
 
   return (
-    <div className='min-h-screen w-full bg-gray-50/50'>
-      {/* Header Section */}
-      <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
-        <div className='px-4 lg:px-6 py-4'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-            <div className='flex items-center gap-4'>
-              <div>
-                <h1 className='text-2xl font-bold text-gray-900'>Dashboard</h1>
-                <p className='text-sm text-gray-600 mt-1'>Monitor your Amazon business performance</p>
-              </div>
-              <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium'>
-                <div className='w-2 h-2 bg-emerald-500 rounded-full'></div>
-                All systems operational
+    <div className='w-full bg-[#1a1a1a]'>
+      {/* Header Section - compact */}
+      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+        <div className='px-2 lg:px-3 py-1.5'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1'>
+            <div className='flex items-center gap-2'>
+              <h1 className='text-lg font-bold text-gray-100'>Dashboard</h1>
+              <div className='hidden sm:flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-medium border border-blue-500/30'>
+                <div className='w-1 h-1 bg-blue-500 rounded-full'></div>
+                OK
               </div>
             </div>
             
-            <div className='flex items-center gap-3'>
+            <div className='flex items-center gap-1.5'>
               <div className='relative' ref={CalenderRef}>
                 <button 
                   onClick={() => setOpenCalender(!openCalender)}
-                  className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+                  className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded transition-all duration-200'
                 >
-                  <Calendar className='w-4 h-4 text-gray-500' />
-                  <span className='text-sm font-medium text-gray-700'>{selectedPeriod}</span>
+                  <Calendar className='w-3 h-3 text-gray-300' />
+                  <span className='text-xs font-medium text-gray-200'>{selectedPeriod}</span>
                 </button>
                 
                 <AnimatePresence>
@@ -553,7 +543,7 @@ const Dashboard = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 z-[9999] bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
+                      className="absolute top-full right-0 mt-1 z-[9999] bg-[#21262d] rounded border border-[#30363d] overflow-hidden max-h-[80vh] overflow-y-auto"
                       style={{ 
                         maxHeight: 'calc(100vh - 150px)',
                         transform: 'translateY(0)'
@@ -571,11 +561,11 @@ const Dashboard = () => {
               <div className='relative' ref={ExportRef}>
                 <button 
                   onClick={() => setOpenExportDropdown(!openExportDropdown)}
-                  className='flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+                  className='flex items-center gap-1 px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors'
                 >
-                  <Download className='w-4 h-4' />
-                  <span className='hidden sm:inline text-sm font-medium'>Export</span>
-                  <ChevronDown className='w-4 h-4' />
+                  <Download className='w-3 h-3' />
+                  <span className='hidden sm:inline'>Export</span>
+                  <ChevronDown className='w-3 h-3' />
                 </button>
                 
                 <AnimatePresence>
@@ -585,21 +575,21 @@ const Dashboard = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
+                      className="absolute top-full right-0 mt-1 z-50 bg-[#21262d] rounded border border-[#30363d] overflow-hidden min-w-[160px]"
                     >
                       <div className="py-1">
                         <button
                           onClick={handleDownloadCSV}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                          className="w-full flex items-center gap-1.5 px-2 py-1.5 text-gray-200 hover:bg-[#161b22] transition-colors text-sm"
                         >
-                          <FileText className="w-4 h-4 text-green-600" />
+                          <FileText className="w-4 h-4 text-blue-400" />
                           <span className="text-sm font-medium">Download as CSV</span>
                         </button>
                         <button
                           onClick={handleDownloadExcel}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                          className="w-full flex items-center gap-1.5 px-2 py-1.5 text-gray-200 hover:bg-[#161b22] transition-colors text-sm"
                         >
-                          <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                          <FileSpreadsheet className="w-4 h-4 text-blue-400" />
                           <span className="text-sm font-medium">Download as Excel</span>
                         </button>
                       </div>
@@ -612,161 +602,92 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Main Content - Scrollable */}
+      {/* Main Content */}
       <div 
         ref={contentRef}
-        className='overflow-y-auto' 
-        style={{ height: 'calc(100vh - 120px)' }}
+        className='px-2 lg:px-3 py-1.5 pb-0'
       >
-        <div className='px-4 lg:px-6 py-6 pb-20'>
-          {/* Show partial data notice if some data is missing */}
-          {hasAnyData && !hasAllData && (
+            {hasAnyData && !hasAllData && (
             <PartialDataNotice 
               missingItems={missingItems} 
               availableItems={availableItems}
-              className="mb-6"
+              className="mb-1.5"
             />
           )}
 
-          {/* Show fallback if no data at all */}
-          {!hasAnyData ? (
-            <DataFallback 
-              type="database"
-              message="Dashboard data is currently unavailable. Please try refreshing the page or contact support if the issue persists."
-              size="large"
-            />
-          ) : (
-            <>
-              {/* Quick Stats */}
-              <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
-            {quickStats.map((stat, index) => {
+          {/* Quick Stats */}
+          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 mb-1'>
+            {quickStats.map((stat) => {
               const Icon = stat.icon
-              const colorClasses = {
-                emerald: {
-                  iconBg: 'bg-gradient-to-br from-emerald-100 via-emerald-50 to-emerald-200',
-                  iconColor: 'text-emerald-700',
-                  badge: 'bg-gradient-to-br from-emerald-100 via-emerald-50 to-emerald-200 text-emerald-800 border border-emerald-200/80',
-                  badgeShadow: 'shadow-emerald-200/60',
-                  gradient: 'from-emerald-50 to-emerald-100',
-                  shadow: 'shadow-emerald-200/60'
-                },
-                blue: {
-                  iconBg: 'bg-gradient-to-br from-blue-100 via-blue-50 to-blue-200',
-                  iconColor: 'text-blue-700',
-                  badge: 'bg-gradient-to-br from-blue-100 via-blue-50 to-blue-200 text-blue-800 border border-blue-200/80',
-                  badgeShadow: 'shadow-blue-200/60',
-                  gradient: 'from-blue-50 to-blue-100',
-                  shadow: 'shadow-blue-200/60'
-                },
-                purple: {
-                  iconBg: 'bg-gradient-to-br from-purple-100 via-purple-50 to-purple-200',
-                  iconColor: 'text-purple-700',
-                  badge: 'bg-gradient-to-br from-purple-100 via-purple-50 to-purple-200 text-purple-800 border border-purple-200/80',
-                  badgeShadow: 'shadow-purple-200/60',
-                  gradient: 'from-purple-50 to-purple-100',
-                  shadow: 'shadow-purple-200/60'
-                },
-                orange: {
-                  iconBg: 'bg-gradient-to-br from-orange-100 via-orange-50 to-orange-200',
-                  iconColor: 'text-orange-700',
-                  badge: 'bg-gradient-to-br from-orange-100 via-orange-50 to-orange-200 text-orange-800 border border-orange-200/80',
-                  badgeShadow: 'shadow-orange-200/60',
-                  gradient: 'from-orange-50 to-orange-100',
-                  shadow: 'shadow-orange-200/60'
-                }
-              }
-              const colors = colorClasses[stat.color] || colorClasses.blue
+              const isLoading = dashboardLoading || !hasAnyData
               
               return (
                 <motion.div
                   key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ scale: 1.05, y: -4 }}
-                  whileTap={{ scale: 0.98 }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                  onClick={() => navigate(stat.link)}
-                  className={`bg-gradient-to-br ${colors.gradient} rounded-xl p-6 border border-gray-200/80 hover:border-gray-300 transition-colors duration-300 hover:shadow-xl shadow-lg cursor-pointer`}
-                  style={{
-                    boxShadow: `
-                      0 10px 15px -3px rgba(0, 0, 0, 0.1),
-                      0 4px 6px -2px rgba(0, 0, 0, 0.05),
-                      inset 0 1px 0 rgba(255, 255, 255, 0.3)
-                    `
-                  }}
+                  whileHover={{ scale: 1.01 }}
+                  transition={{ duration: 0.2 }}
+                  onClick={() => !isLoading && navigate(stat.link)}
+                  className="rounded p-2 border border-border-dark hover:border-accent/50 transition-colors cursor-pointer"
                 >
-                  <div className='flex items-center gap-3 mb-4'>
-                    <div className={`w-12 h-12 ${colors.iconBg} rounded-xl flex items-center justify-center shadow-lg ${colors.shadow} border-2 border-white/90 ring-1 ring-gray-300/30 transform transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5`} 
-                         style={{
-                           boxShadow: `
-                             0 4px 6px -1px rgba(0, 0, 0, 0.1),
-                             0 2px 4px -1px rgba(0, 0, 0, 0.06),
-                             inset 0 1px 0 rgba(255, 255, 255, 0.6),
-                             inset 0 -1px 0 rgba(0, 0, 0, 0.1)
-                           `
-                         }}>
-                      <Icon className={`w-6 h-6 ${colors.iconColor} drop-shadow-sm`} />
-                    </div>
-                    <div>
-                      <p className='text-sm font-medium text-gray-600'>{stat.label}</p>
-                    </div>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Icon className="w-4 h-4 text-accent" />
+                    <p className='text-xs font-medium text-gray-300'>{stat.label}</p>
                   </div>
-                  <div className='text-2xl font-bold text-gray-900'>{stat.value}</div>
+                  {isLoading ? <SkeletonStatValue /> : <div className='text-lg font-bold text-gray-100'>{stat.value}</div>}
                 </motion.div>
               )
             })}
           </div>
 
-              {/* Main Dashboard Grid */}
-              <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8'>
-                {/* Left Column - Account Health */}
-                <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.6, delay: 0.2 }}
-                  className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
-                >
-                  <ErrorBoundary
-                    title="Account Health Unavailable"
-                    message="Unable to load account health data. Showing available information."
-                  >
-                    <AccountHealth />
-                  </ErrorBoundary>
-                </motion.div>
-
-                {/* Middle Column - Total Sales */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 0.3 }}
-                  className='lg:col-span-2 bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
-                >
-                  <ErrorBoundary
-                    title="Sales Data Unavailable"
-                    message="Unable to load sales data. Showing available information."
-                  >
-                    <TotalSales />
-                  </ErrorBoundary>
-                </motion.div>
-              </div>
-
-              {/* Second Row - Product Checker */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.4 }}
-                className='bg-white rounded-xl border border-gray-200/80 hover:border-gray-300 transition-all duration-300 hover:shadow-lg overflow-hidden'
-              >
-                <ErrorBoundary
-                  title="Product Analysis Unavailable"
-                  message="Unable to load product analysis data. Showing available information."
-                >
-                  <ProductChecker />
+          {/* Main grid */}
+          <div className='grid grid-cols-1 lg:grid-cols-3 gap-1.5 mb-1'>
+            <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }} className='bg-[#161b22] rounded border border-[#30363d] overflow-hidden'>
+              {(dashboardLoading || !hasAnyData) ? (
+                <>
+                  <div className="p-1.5 border-b border-[#30363d]">
+                    <h3 className="text-xs font-semibold text-gray-100">Account Health</h3>
+                  </div>
+                  <SkeletonCardBody rows={3} />
+                </>
+              ) : (
+                <ErrorBoundary title="Account Health Unavailable" message="Unable to load account health data.">
+                  <AccountHealth />
                 </ErrorBoundary>
-              </motion.div>
-            </>
-          )}
-        </div>
+              )}
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-hidden'>
+              {(dashboardLoading || !hasAnyData) ? (
+                <>
+                  <div className="p-1.5 border-b border-[#30363d]">
+                    <h3 className="text-xs font-semibold text-gray-100">Total Sales</h3>
+                  </div>
+                  <div className="p-1"><SkeletonChart height={220} /></div>
+                </>
+              ) : (
+                <ErrorBoundary title="Sales Data Unavailable" message="Unable to load sales data.">
+                  <TotalSales />
+                </ErrorBoundary>
+              )}
+            </motion.div>
+          </div>
+
+          {/* Product Checker */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.06 }} className='bg-[#161b22] rounded border border-[#30363d] overflow-hidden mb-0'>
+            {(dashboardLoading || !hasAnyData) ? (
+              <>
+                <div className="p-1.5 border-b border-[#30363d]">
+                  <h3 className="text-xs font-semibold text-gray-100">Product Checker</h3>
+                </div>
+                <div className="p-1"><SkeletonTableBody rows={3} /></div>
+              </>
+            ) : (
+              <ErrorBoundary title="Product Analysis Unavailable" message="Unable to load product analysis data.">
+                <ProductChecker />
+              </ErrorBoundary>
+            )}
+          </motion.div>
       </div>
     </div>
   )

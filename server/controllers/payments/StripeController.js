@@ -7,6 +7,32 @@ const logger = require('../../utils/Logger');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 
 /**
+ * Sanitize error messages to prevent information disclosure
+ */
+const sanitizeErrorMessage = (error) => {
+    // List of safe error messages that can be shown to users
+    const safeMessages = [
+        'Invalid plan type',
+        'Trial period is only available for PRO plan',
+        'Trial period must be between 0 and 365 days',
+        'User not found',
+        'Session ID is required',
+        'Payment intent ID is required',
+        'You have already used your free trial',
+        'Subscription not found',
+        'Session does not belong to this user'
+    ];
+    
+    // Check if the error message is safe to show
+    if (error.message && safeMessages.some(safe => error.message.includes(safe))) {
+        return error.message;
+    }
+    
+    // Return generic message for other errors
+    return null;
+};
+
+/**
  * Create checkout session for subscription
  * Supports three options:
  * 1. PRO with trial: 7-day free trial, payment collected upfront, charged after trial ends
@@ -48,6 +74,16 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
             );
         }
 
+        // SERVER-SIDE VALIDATION: Check if user has already used their trial
+        if (trialPeriodDays !== undefined && trialPeriodDays !== null && parseInt(trialPeriodDays) > 0) {
+            if (user.servedTrial === true) {
+                logger.warn(`User ${userId} attempted to start trial again but has already used trial`);
+                return res.status(400).json(
+                    new ApiResponse(400, null, 'You have already used your free trial. Please subscribe to continue.')
+                );
+            }
+        }
+
         // Create success and cancel URLs
         // Ensure FRONTEND_URL has proper scheme (https:// or http://)
         let baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -85,18 +121,21 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
 
     } catch (error) {
         logger.error('Error creating checkout session:', error);
+        const safeMessage = sanitizeErrorMessage(error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to create checkout session')
+            new ApiResponse(500, null, safeMessage || 'Failed to create checkout session')
         );
     }
 });
 
 /**
  * Handle successful payment
+ * SECURITY: Validates that the session belongs to the authenticated user
  */
 const handlePaymentSuccess = asyncHandler(async (req, res) => {
     try {
         const { session_id } = req.query;
+        const authenticatedUserId = req.userId;
 
         if (!session_id) {
             return res.status(400).json(
@@ -104,10 +143,21 @@ const handlePaymentSuccess = asyncHandler(async (req, res) => {
             );
         }
 
+        // SECURITY: Verify session ownership before processing
+        // First retrieve the session to check metadata
+        const sessionValidation = await stripeService.validateSessionOwnership(session_id, authenticatedUserId);
+        
+        if (!sessionValidation.isValid) {
+            logger.warn(`Session ownership validation failed for session: ${session_id}, user: ${authenticatedUserId}, reason: ${sessionValidation.reason}`);
+            return res.status(403).json(
+                new ApiResponse(403, null, 'Session does not belong to this user')
+            );
+        }
+
         // Handle successful payment
         const result = await stripeService.handleSuccessfulPayment(session_id);
 
-        logger.info(`Payment success handled for session: ${session_id}`);
+        logger.info(`Payment success handled for session: ${session_id}, user: ${authenticatedUserId}`);
 
         // If admin token was created for AGENCY user, set it as cookie
         if (result.adminToken) {
@@ -126,8 +176,9 @@ const handlePaymentSuccess = asyncHandler(async (req, res) => {
 
     } catch (error) {
         logger.error('Error handling payment success:', error);
+        const safeMessage = sanitizeErrorMessage(error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to process payment')
+            new ApiResponse(500, null, safeMessage || 'Failed to process payment')
         );
     }
 });
@@ -148,7 +199,7 @@ const getSubscription = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error getting subscription:', error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to get subscription')
+            new ApiResponse(500, null, 'Failed to get subscription')
         );
     }
 });
@@ -176,7 +227,7 @@ const cancelSubscription = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error cancelling subscription:', error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to cancel subscription')
+            new ApiResponse(500, null, 'Failed to cancel subscription')
         );
     }
 });
@@ -199,7 +250,7 @@ const reactivateSubscription = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error reactivating subscription:', error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to reactivate subscription')
+            new ApiResponse(500, null, 'Failed to reactivate subscription')
         );
     }
 });
@@ -222,7 +273,7 @@ const getPaymentHistory = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error getting payment history:', error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to get payment history')
+            new ApiResponse(500, null, 'Failed to get payment history')
         );
     }
 });
@@ -250,7 +301,7 @@ const getInvoiceDownloadUrl = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error('Error getting invoice download URL:', error);
         return res.status(500).json(
-            new ApiResponse(500, null, error.message || 'Failed to get invoice URL')
+            new ApiResponse(500, null, 'Failed to get invoice URL')
         );
     }
 });

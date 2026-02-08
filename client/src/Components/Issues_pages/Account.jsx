@@ -142,25 +142,25 @@ export default function AccountHealthDashboard() {
     // If no data is available, show the no data found message
     if (!hasData || !hasHealthData) {
         return (
-            <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 flex items-center justify-center">
+            <div className="min-h-screen bg-[#1a1a1a] p-2 md:p-3 flex items-center justify-center">
                 <div className="text-center max-w-md mx-auto">
-                    <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Shield className="w-12 h-12 text-gray-400" />
+                    <div className="w-16 h-16 bg-[#21262d] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#30363d]">
+                        <Shield className="w-8 h-8 text-gray-400" />
                     </div>
-                    <h3 className="text-2xl font-semibold text-gray-900 mb-2">No Data Found</h3>
-                    <p className="text-gray-500 mb-6">
+                    <h3 className="text-lg font-semibold text-gray-100 mb-1">No Data Found</h3>
+                    <p className="text-gray-400 mb-4 text-sm">
                         Account health data is not available at the moment. Please check back later or contact support if this issue persists.
                     </p>
-                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center">
                         <button 
                             onClick={() => window.location.reload()}
-                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow font-medium"
+                            className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs transition-all font-medium"
                         >
                             Refresh Page
                         </button>
                         <button 
                             onClick={() => window.history.back()}
-                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all duration-200 font-medium"
+                            className="px-4 py-1.5 bg-[#21262d] hover:bg-[#30363d] text-gray-300 rounded text-xs transition-all font-medium border border-[#30363d]"
                         >
                             Go Back
                         </button>
@@ -171,45 +171,44 @@ export default function AccountHealthDashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 space-y-8">
+        <div className="min-h-screen bg-[#1a1a1a] p-2 md:p-3 space-y-2">
             {/* Header Section */}
-            <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 rounded-2xl p-8 text-white relative overflow-hidden">
-                <div className="absolute inset-0 opacity-20" style={{backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")"}}></div>
+            <div className="bg-[#161b22] border border-[#30363d] rounded p-2 relative overflow-hidden">
                 <div className="relative z-10">
-                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
-                                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                        <div className="space-y-1">
+                            <div className="flex items-center gap-2 mb-1">
+                                <Shield className="w-4 h-4 text-blue-400" />
+                                <h1 className="text-lg font-bold text-gray-100">
                                     Account Health Dashboard
                                 </h1>
                             </div>
-                            <p className="text-gray-300 text-lg">Monitor your Amazon seller account health and performance metrics</p>
-                            <div className="flex items-center gap-4 mt-4">
-                                <div className="flex items-center gap-2 text-sm text-gray-400">
-                                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                            <p className="text-xs text-gray-400">Monitor your Amazon seller account health and performance metrics</p>
+                            <div className="flex items-center gap-3 mt-2">
+                                <div className="flex items-center gap-1 text-xs text-gray-400">
+                                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
                                     <span>Real-time monitoring</span>
                                 </div>
                                 {totalIssues > 0 && (
-                                    <div className="flex items-center gap-2 text-sm text-orange-300">
-                                        <AlertTriangle className="w-4 h-4" />
+                                    <div className="flex items-center gap-1 text-xs text-orange-400">
+                                        <AlertTriangle className="w-3 h-3" />
                                         <span>{totalIssues} issues detected</span>
                                     </div>
                                 )}
                             </div>
                         </div>
-                        <div className="flex items-center gap-6">
-                            <div className="text-center lg:text-right">
-                                <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent mb-1">
+                        <div className="flex items-center gap-3">
+                            <div className="text-right">
+                                <div className="text-xl font-bold text-green-400 mb-0.5">
                                     {healthPercentage}%
                                 </div>
-                                <div className="text-sm text-gray-300 font-medium tracking-wide uppercase">Account Health</div>
-                                <div className="text-xs text-gray-400 mt-1">
+                                <div className="text-xs text-gray-400 font-medium uppercase">Account Health</div>
+                                <div className="text-xs text-gray-500 mt-0.5">
                                     {totalIssues > 0 ? `${totalIssues} issues detected` : 'All systems healthy'}
                                 </div>
                             </div>
-                            <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
-                                <Shield className="w-8 h-8 text-white" />
+                            <div className="w-10 h-10 bg-green-500/20 rounded flex items-center justify-center border border-green-500/30">
+                                <Shield className="w-5 h-5 text-green-400" />
                             </div>
                         </div>
                     </div>
@@ -221,24 +220,24 @@ export default function AccountHealthDashboard() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
-                className="bg-white rounded-2xl shadow-lg border border-gray-200/80 p-6"
+                className="bg-[#161b22] rounded border border-[#30363d] p-2"
             >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">Account Health Metrics</h3>
-                        <p className="text-sm text-gray-500">Detailed breakdown of your account health indicators</p>
+                        <h3 className="text-sm font-semibold text-gray-100 mb-0.5">Account Health Metrics</h3>
+                        <p className="text-xs text-gray-400">Detailed breakdown of your account health indicators</p>
                     </div>
                     
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         {/* Search */}
                         <div className="relative">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
                             <input
                                 type="text"
                                 placeholder="Search metrics..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                className="pl-7 pr-2 py-1 border border-[#30363d] rounded bg-[#1a1a1a] text-gray-100 text-xs focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 placeholder-gray-500"
                             />
                         </div>
                         
@@ -246,7 +245,7 @@ export default function AccountHealthDashboard() {
                          <select
                              value={selectedFilter}
                              onChange={(e) => setSelectedFilter(e.target.value)}
-                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                             className="px-2 py-1 border border-[#30363d] rounded bg-[#1a1a1a] text-gray-100 text-xs focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
                          >
                              <option value="all">All Metrics</option>
                              <option value="errors">Issues Only</option>
@@ -257,11 +256,11 @@ export default function AccountHealthDashboard() {
                         <div className="relative" ref={exportRef}>
                             <button 
                                 onClick={() => setShowExportDropdown(!showExportDropdown)}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow text-sm font-medium"
+                                className="flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs transition-all font-medium"
                             >
-                                <Download className="w-4 h-4" />
+                                <Download className="w-3 h-3" />
                                 Export
-                                <ChevronDown className="w-4 h-4" />
+                                <ChevronDown className="w-3 h-3" />
                             </button>
                             
                             <AnimatePresence>
@@ -271,13 +270,13 @@ export default function AccountHealthDashboard() {
                                         animate={{ opacity: 1, y: 0, scale: 1 }}
                                         exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                         transition={{ duration: 0.2 }}
-                                        className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden min-w-[180px]"
+                                        className="absolute top-full right-0 mt-1 z-50 bg-[#21262d] shadow-xl rounded border border-[#30363d] overflow-hidden min-w-[160px]"
                                     >
                                         <DownloadReport
                                             prepareDataFunc={prepareAccountData}
                                             filename="Account_Health_Report"
                                             buttonText="Download CSV"
-                                            buttonClass="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-50 transition-colors duration-200 text-sm"
+                                            buttonClass="w-full flex items-center gap-2 px-2 py-1.5 text-gray-300 hover:bg-[#161b22] transition-colors duration-200 text-xs"
                                             showIcon={true}
                                         />
                                     </motion.div>
@@ -289,10 +288,10 @@ export default function AccountHealthDashboard() {
 
                 {/* Results Summary */}
                 {(searchQuery || selectedFilter !== 'all') && (
-                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <div className="flex items-center gap-2 text-sm">
-                            <Filter className="w-4 h-4 text-blue-600" />
-                            <span className="text-blue-700 font-medium">
+                    <div className="mb-2 p-2 bg-blue-500/10 border border-blue-500/30 rounded">
+                        <div className="flex items-center gap-1.5 text-xs">
+                            <Filter className="w-3 h-3 text-blue-400" />
+                            <span className="text-blue-400 font-medium">
                                 Showing {filteredMetrics.length} of {accountMetrics.length} metrics
                             </span>
                             {(searchQuery || selectedFilter !== 'all') && (
@@ -301,7 +300,7 @@ export default function AccountHealthDashboard() {
                                         setSearchQuery('');
                                         setSelectedFilter('all');
                                     }}
-                                    className="ml-auto text-blue-600 hover:text-blue-800 text-xs underline"
+                                    className="ml-auto text-blue-400 hover:text-blue-300 text-xs underline"
                                 >
                                     Clear filters
                                 </button>
@@ -311,18 +310,18 @@ export default function AccountHealthDashboard() {
                 )}
 
                 {/* Issues Table */}
-                <div className="overflow-hidden rounded-xl border border-gray-200">
+                <div className="overflow-hidden rounded border border-[#30363d]">
                     <div className="overflow-x-auto">
                         <table className="w-full table-fixed min-w-[768px]">
                             <thead>
-                                <tr className="border-b-2 border-gray-200">
-                                    <th className="w-1/4 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Category</th>
-                                    <th className="w-1/6 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Status</th>
-                                    <th className="w-2/5 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Issue Details</th>
-                                    <th className="w-1/4 text-left py-4 px-3 font-semibold text-gray-900 bg-gray-50 text-sm">Solution</th>
+                                <tr className="border-b-2 border-[#30363d]">
+                                    <th className="w-1/4 text-left py-2 px-2 font-semibold text-gray-400 bg-[#21262d] text-xs">Category</th>
+                                    <th className="w-1/6 text-left py-2 px-2 font-semibold text-gray-400 bg-[#21262d] text-xs">Status</th>
+                                    <th className="w-2/5 text-left py-2 px-2 font-semibold text-gray-400 bg-[#21262d] text-xs">Issue Details</th>
+                                    <th className="w-1/4 text-left py-2 px-2 font-semibold text-gray-400 bg-[#21262d] text-xs">Solution</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 bg-white">
+                            <tbody className="divide-y divide-[#30363d] bg-[#161b22]">
                                 {filteredMetrics.map((metric, index) => {
                                     const Icon = metric.icon;
                                     const isError = metric.data?.status === "Error";
@@ -333,25 +332,25 @@ export default function AccountHealthDashboard() {
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ duration: 0.3, delay: index * 0.05 }}
-                                            className="hover:bg-gray-50 transition-colors duration-200"
+                                            className="border-b border-[#30363d]"
                                         >
-                                            <td className="w-1/4 py-4 px-3">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                                        isError ? 'bg-red-100' : 'bg-green-100'
+                                            <td className="w-1/4 py-2 px-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
+                                                        isError ? 'bg-red-500/20 border border-red-500/30' : 'bg-green-500/20 border border-green-500/30'
                                                     }`}>
                                                         <Icon className={`w-3 h-3 ${
-                                                            isError ? 'text-red-600' : 'text-green-600'
+                                                            isError ? 'text-red-400' : 'text-green-400'
                                                         }`} />
                                                     </div>
-                                                    <span className="font-medium text-gray-900 text-sm truncate">{metric.name}</span>
+                                                    <span className="font-medium text-gray-100 text-xs truncate">{metric.name}</span>
                                                 </div>
                                             </td>
-                                            <td className="w-1/6 py-4 px-3">
-                                                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                                            <td className="w-1/6 py-2 px-2">
+                                                <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
                                                     isError 
-                                                        ? 'bg-red-100 text-red-700' 
-                                                        : 'bg-green-100 text-green-700'
+                                                        ? 'bg-red-500/20 text-red-400 border border-red-500/30' 
+                                                        : 'bg-green-500/20 text-green-400 border border-green-500/30'
                                                 }`}>
                                                     {isError ? (
                                                         <XCircle className="w-3 h-3" />
@@ -363,13 +362,13 @@ export default function AccountHealthDashboard() {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="w-2/5 py-4 px-3">
-                                                <p className={`text-sm leading-relaxed ${isError ? 'text-red-600 font-medium' : 'text-green-600'}`}>
+                                            <td className="w-2/5 py-2 px-2">
+                                                <p className={`text-xs leading-relaxed ${isError ? 'text-red-400 font-medium' : 'text-green-400'}`}>
                                                     {metric.data?.Message || 'No issues detected'}
                                                 </p>
                                             </td>
-                                            <td className="w-1/4 py-4 px-3">
-                                                <p className="text-sm text-gray-600 leading-relaxed">
+                                            <td className="w-1/4 py-2 px-2">
+                                                <p className="text-xs text-gray-300 leading-relaxed">
                                                     {metric.data?.HowTOSolve?.length > 0 ? metric.data.HowTOSolve : (isError ? 'Contact support for assistance' : 'N/A')}
                                                 </p>
                                             </td>
@@ -381,12 +380,12 @@ export default function AccountHealthDashboard() {
                     </div>
                     
                     {filteredMetrics.length === 0 && (
-                        <div className="text-center py-12 bg-white">
-                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Search className="w-8 h-8 text-gray-400" />
+                        <div className="text-center py-8 bg-[#161b22]">
+                            <div className="w-12 h-12 bg-[#21262d] rounded-full flex items-center justify-center mx-auto mb-3 border border-[#30363d]">
+                                <Search className="w-6 h-6 text-gray-400" />
                             </div>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No metrics found</h3>
-                            <p className="text-gray-500">Try adjusting your search or filter criteria</p>
+                            <h3 className="text-sm font-medium text-gray-100 mb-1">No metrics found</h3>
+                            <p className="text-gray-400 text-xs">Try adjusting your search or filter criteria</p>
                         </div>
                     )}
                 </div>

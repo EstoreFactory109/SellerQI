@@ -29,7 +29,8 @@ export default function Login() {
     // Check if user is already logged in
     const isAuthenticated = localStorage.getItem('isAuth') === 'true';
     if (isAuthenticated) {
-      navigate('/seller-central-checker/dashboard');
+      // Redirect to analyse-account page - it will handle dashboard access based on analysis status
+      navigate('/analyse-account');
     }
   }, [navigate]);
 
@@ -132,11 +133,16 @@ export default function Login() {
         
         console.log('Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users need both SP-API and Ads account.
-        if (isSuperAdmin || (spApiConnected && adsAccountConnected)) {
-          // Super admin or both accounts connected → redirect to dashboard
-          console.log('Login: Super admin or both accounts connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users go to analyse-account page.
+        if (isSuperAdmin) {
+          // Super admin → redirect to dashboard directly
+          console.log('Login: Super admin - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
+        } else if (spApiConnected && adsAccountConnected) {
+          // Both accounts connected → redirect to analyse-account page
+          // Dashboard access will be determined by FirstAnalysisDone status on that page
+          console.log('Login: Both accounts connected - redirecting to analyse-account');
+          navigate('/analyse-account');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
           console.log('Login: Accounts not connected - redirecting to connect-to-amazon');
@@ -194,11 +200,16 @@ export default function Login() {
         
         console.log('Google Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users need both SP-API and Ads account.
-        if (isSuperAdmin || (spApiConnected && adsAccountConnected)) {
-          // Super admin or both accounts connected → redirect to dashboard
-          console.log('Google Login: Super admin or both accounts connected - redirecting to dashboard');
+        // Flow: Super admins always go to dashboard. Regular users go to analyse-account page.
+        if (isSuperAdmin) {
+          // Super admin → redirect to dashboard directly
+          console.log('Google Login: Super admin - redirecting to dashboard');
           navigate('/seller-central-checker/dashboard');
+        } else if (spApiConnected && adsAccountConnected) {
+          // Both accounts connected → redirect to analyse-account page
+          // Dashboard access will be determined by FirstAnalysisDone status on that page
+          console.log('Google Login: Both accounts connected - redirecting to analyse-account');
+          navigate('/analyse-account');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
           console.log('Google Login: Accounts not connected - redirecting to connect-to-amazon');
@@ -221,12 +232,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-white flex items-center justify-center">
-      {/* Background Elements */}
-      <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:bg-grid-slate-700/25 dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))]"></div>
-      <div className="absolute top-10 right-10 w-72 h-72 bg-gray-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-      <div className="absolute top-40 left-10 w-72 h-72 bg-emerald-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
-      
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">
@@ -234,7 +240,7 @@ export default function Login() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6"
+            className="bg-[#161b22] rounded-2xl border border-[#30363d] p-6"
           >
             {/* Logo and Header */}
             <div className="text-center mb-6">
@@ -250,10 +256,10 @@ export default function Login() {
                   className="h-10 w-auto"
                 />
               </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-gray-900 mb-2">
+              <h1 className="text-xl lg:text-2xl font-bold text-gray-100 mb-2">
                 Welcome Back
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-gray-500 text-sm">
                 Sign in to your SellerQI account
               </p>
             </div>
@@ -262,7 +268,7 @@ export default function Login() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Email Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Email Address
                 </label>
                 <div className="relative">
@@ -274,7 +280,7 @@ export default function Login() {
                     onChange={handleChange}
                     onFocus={handleFocus}
                     className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                      errors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                      errors.email ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                     }`}
                     placeholder="Enter your email"
                   />
@@ -292,7 +298,7 @@ export default function Login() {
 
               {/* Password Field */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Password
                 </label>
                 <div className="relative">
@@ -304,14 +310,14 @@ export default function Login() {
                     onChange={handleChange}
                     onFocus={handleFocus}
                     className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 ${
-                      errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
+                      errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                     }`}
                     placeholder="Enter your password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -331,7 +337,7 @@ export default function Login() {
               <div className="flex justify-end">
                 <Link 
                   to="/verify-email-for-password-reset" 
-                  className="text-sm text-[#3B4A6B] hover:text-[#2d3a52] font-medium hover:underline transition-colors"
+                  className="text-sm text-blue-400 hover:text-blue-300 font-medium hover:underline transition-colors"
                 >
                   Forgot your password?
                 </Link>
@@ -343,8 +349,8 @@ export default function Login() {
                 disabled={isLoading}
                 className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
                   isLoading
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-500'
                 }`}
               >
                 {isLoading ? (
@@ -359,9 +365,9 @@ export default function Login() {
 
               {/* Divider */}
               <div className="flex items-center my-4">
-                <div className="flex-1 border-t border-gray-300"></div>
+                <div className="flex-1 border-t border-[#30363d]"></div>
                 <span className="mx-3 text-gray-500 text-sm font-medium">Or continue with</span>
-                <div className="flex-1 border-t border-gray-300"></div>
+                <div className="flex-1 border-t border-[#30363d]"></div>
               </div>
 
               {/* Social Buttons */}
@@ -370,10 +376,10 @@ export default function Login() {
                   type="button"
                   onClick={handleGoogleLogin}
                   disabled={googleLoading}
-                  className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-gray-300 rounded-lg transition-all duration-300 font-medium text-sm ${
+                  className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-[#30363d] rounded-lg transition-all duration-300 font-medium text-sm bg-[#21262d] ${
                     googleLoading 
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                      : 'hover:bg-gray-50 hover:border-gray-400'
+                      ? 'text-gray-500 cursor-not-allowed' 
+                      : 'hover:bg-[#1c2128] hover:border-gray-500 text-gray-300'
                   }`}
                 >
                   {googleLoading ? (
@@ -408,12 +414,12 @@ export default function Login() {
 
               {/* Sign Up Link */}
               <div className="text-center pt-2 space-y-2">
-                <p className="text-gray-600 text-sm">
+                <p className="text-gray-500 text-sm">
                   Don't have an account?{' '}
                   <button
                     type="button"
                     onClick={navigateToSignUp}
-                    className="text-[#3B4A6B] hover:text-[#2d3a52] font-semibold hover:underline transition-colors"
+                    className="text-blue-400 hover:text-blue-300 font-semibold hover:underline transition-colors"
                   >
                     Sign up
                   </button>
@@ -427,18 +433,18 @@ export default function Login() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 rounded-xl p-4 relative"
+                    className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 relative"
                   >
                     <div className="flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
-                        <p className="text-red-800 font-medium text-sm">Login Failed</p>
-                        <p className="text-red-600 text-sm mt-1">{errorMessage}</p>
+                        <p className="text-red-300 font-medium text-sm">Login Failed</p>
+                        <p className="text-red-400/90 text-sm mt-1">{errorMessage}</p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setErrorMessage('')}
-                        className="text-red-600 hover:text-red-800 transition-colors"
+                        className="text-red-400 hover:text-red-300 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -454,11 +460,11 @@ export default function Login() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-green-50 border border-green-200 rounded-xl p-4"
+                    className="bg-green-500/10 border border-green-500/40 rounded-xl p-4"
                   >
                     <div className="flex items-center gap-3">
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                      <p className="text-green-700 text-sm font-medium">{successMessage}</p>
+                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      <p className="text-green-300 text-sm font-medium">{successMessage}</p>
                     </div>
                   </motion.div>
                 )}

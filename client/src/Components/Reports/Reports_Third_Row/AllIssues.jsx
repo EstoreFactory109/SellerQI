@@ -1,5 +1,5 @@
 import React,{useState, useEffect} from 'react'
-import issue from '../../../assets/Icons/error.png';
+import { Info } from 'lucide-react';
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
 

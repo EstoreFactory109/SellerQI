@@ -1,5 +1,5 @@
 import React, { useState,useEffect } from 'react';
-import { AlertCircle, TrendingUp, BarChart3, Eye, Package2 } from 'lucide-react';
+import { Info, TrendingUp, LineChart, Search, Box } from 'lucide-react';
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -51,7 +51,7 @@ const ProductChecker = () => {
         fontFamily: "'Inter', sans-serif",
       },
       labels: LableData,
-      colors: ["#fad12a", "#b92533", "#ff6b35", "#90acc7", "#05724e", "#333651"],
+      colors: ["#ca8a04", "#dc2626", "#ea580c", "#2563eb", "#059669", "#6366f1"], // Rankings: yellow-600 (deep yellow), Conversion: red-600 (deep red), Inventory: orange-600 (deep orange), Account: blue-600 (deep blue), Profitability: emerald-600 (deep green), Sponsored Ads: indigo-600 (deep indigo)
       legend: {
         show: false
       },
@@ -78,15 +78,16 @@ const ProductChecker = () => {
         }
       },
       stroke: {
-        width: 3,
-        colors: ['#ffffff']
+        width: 2,
+        colors: ['#161b22']
       },
       responsive: [
         {
           breakpoint: 764,
           options: {
             chart: {
-              width: 200,
+              width: 240,
+              height: 240,
             },
           },
         },
@@ -151,17 +152,14 @@ const ProductChecker = () => {
   const [hoveredProductIndex, setHoveredProductIndex] = useState(null)
 
   return (
-    <div className='p-6 h-full'>
-      {/* Header Section */}
-      <div className='flex items-center justify-between mb-6'>
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-2'>
-            <BarChart3 className='w-5 h-5 text-blue-600' />
-            <h2 className='text-lg font-semibold text-gray-900'>Product Issues</h2>
-          </div>
+    <div className='p-1.5 h-full'>
+      <div className='flex items-center justify-between mb-1'>
+        <div className='flex items-center gap-1'>
+          <LineChart className='w-3 h-3 text-blue-400' />
+          <h2 className='text-xs font-semibold text-gray-100'>Product Issues</h2>
           <div className='relative'>
-            <AlertCircle 
-              className='w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors' 
+            <Info 
+              className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors' 
               onMouseEnter={() => setToolTipForProductChecker(true)}
               onMouseLeave={() => setToolTipForProductChecker(false)}
             />
@@ -170,27 +168,24 @@ const ProductChecker = () => {
         </div>
         <button 
           onClick={navigateToIssue} 
-          className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all duration-200 shadow-sm hover:shadow'
+          className='px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded transition-colors'
         >
-          View All Issues
+          View All
         </button>
       </div>
 
-      {/* Chart and Legend Section */}
-      <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8'>
-        {/* Chart */}
-        <div className='flex justify-center items-center'>
-          <div className='relative'>
-            <Chart options={chartData.options} series={chartData.series} type="donut" width={240} height={240} />
+      <div className='grid grid-cols-1 lg:grid-cols-3 gap-1 mb-1'>
+        <div className='flex justify-center items-center w-full'>
+          <div className='relative w-full'>
+            <Chart options={chartData.options} series={chartData.series} type="donut" width="100%" height={220} />
             <div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
-              <div className='text-3xl font-bold text-gray-900'>{totalErrors}</div>
-              <div className='text-sm font-medium text-red-600'>TOTAL ISSUES</div>
+              <div className='text-xl font-bold text-gray-100'>{totalErrors}</div>
+              <div className='text-xs font-medium text-blue-400'>ISSUES</div>
             </div>
           </div>
         </div>
 
-        {/* Legend */}
-        <div className='flex flex-col justify-center space-y-3'>
+        <div className='flex flex-col justify-center space-y-1'>
           {LableData.map((label, index) => {
             const errorCount = seriesData[index] || 0;
             const hasErrors = errorCount > 0;
@@ -199,35 +194,32 @@ const ProductChecker = () => {
               <div 
                 key={index} 
                 onClick={() => hasErrors && navigateToCategoryPage(label)}
-                className={`flex items-center justify-between p-3 bg-gray-50 rounded-lg transition-colors ${
+                className={`flex items-center justify-between p-1.5 bg-[#21262d] rounded transition-colors ${
                   hasErrors 
-                    ? 'hover:bg-gray-100 cursor-pointer hover:shadow-md' 
+                    ? 'hover:bg-blue-500/10 cursor-pointer border border-transparent hover:border-blue-500/30' 
                     : 'opacity-60 cursor-not-allowed'
                 }`}
               >
-                <div className='flex items-center gap-3'>
+                <div className='flex items-center gap-2'>
                   <div 
-                    className='w-3 h-3 rounded-full flex-shrink-0' 
+                    className='w-2.5 h-2.5 rounded-full flex-shrink-0' 
                     style={{ backgroundColor: chartData.options.colors[index] }}
                   ></div>
-                  <p className='text-sm font-medium text-gray-700'>{label}</p>
+                  <p className='text-sm font-medium text-gray-200'>{label}</p>
                 </div>
-                <span className='text-sm font-semibold text-gray-900'>{errorCount}</span>
+                <span className='text-sm font-semibold text-gray-100'>{errorCount}</span>
               </div>
             );
           })}
         </div>
 
-        {/* Top Products to Optimize */}
-        <div className=''>
-          <div className='flex items-center gap-3 mb-4'>
-            <div className='flex items-center gap-2'>
-              <Package2 className='w-5 h-5 text-amber-600' />
-              <h3 className='text-lg font-semibold text-gray-900'>Top Products to Optimize</h3>
-            </div>
+        <div className='ml-2'>
+          <div className='flex items-center gap-1 mb-1'>
+            <Box className='w-3 h-3 text-blue-400' />
+            <h3 className='text-xs font-semibold text-gray-100'>Top Products</h3>
             <div className='relative'>
-              <AlertCircle 
-                className='w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors'
+              <Info 
+                className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors'
                 onMouseEnter={() => setToolTipForProductWithIssues(true)}
                 onMouseLeave={() => setToolTipForProductWithIssues(false)}
               />
@@ -235,49 +227,49 @@ const ProductChecker = () => {
             </div>
           </div>
 
-          <div className='space-y-3'>
+          <div className='space-y-1'>
             {productErrors.slice(0, 4).map((product, index) => {
               if (!product) return null;
               return (
                 <div 
                   key={index} 
                   onClick={() => navigateToProductWithIssuesPage(product.asin)}
-                  className='flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 cursor-pointer transition-all duration-200'
+                  className='flex items-center justify-between p-1.5 border border-[#30363d] rounded hover:border-blue-500/40 hover:bg-[#21262d] cursor-pointer transition-all duration-200'
                 >
-                  <div className='flex items-center gap-3'>
-                    <div className='w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center'>
-                      <Package2 className='w-5 h-5 text-gray-600' />
+                  <div className='flex items-center gap-1'>
+                    <div className='w-6 h-6 bg-[#21262d] rounded flex items-center justify-center'>
+                      <Box className='w-3 h-3 text-gray-400' />
                     </div>
                     <div>
-                      <p className='font-medium text-gray-900'>{product.asin}</p>
-                      <p className='text-sm text-gray-500'>{product.errors || product.totalErrors || 0} issues found</p>
+                      <p className='font-medium text-gray-100 text-sm'>{product.asin}</p>
+                      <p className='text-xs text-gray-400'>{product.errors || product.totalErrors || 0} issues</p>
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>
                     {(() => {
                       const errorCount = product.errors || product.totalErrors || 0;
                       return (
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           errorCount > 5 
-                            ? 'bg-red-50 text-red-700' 
+                            ? 'bg-blue-500/20 text-blue-400' 
                             : errorCount > 2 
-                            ? 'bg-amber-50 text-amber-700' 
-                            : 'bg-red-50 text-red-700'
+                            ? 'bg-blue-500/10 text-blue-400' 
+                            : 'bg-blue-500/20 text-blue-400'
                         }`}>
-                          {errorCount > 5 ? 'High' : errorCount > 2 ? 'Medium' : 'High Priority'}
+                          {errorCount > 5 ? 'High' : errorCount > 2 ? 'Medium' : 'High'}
                         </span>
                       );
                     })()}
                     <div className='relative'>
-                      <Eye 
-                        className='w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors'
+                      <Search 
+                        className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors'
                         onMouseEnter={() => setHoveredProductIndex(index)}
                         onMouseLeave={() => setHoveredProductIndex(null)}
                       />
                       {hoveredProductIndex === index && (
-                        <div className='absolute bottom-full right-0 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap z-50'>
-                          Total Issues: {product.errors || product.totalErrors || 0}
-                          <div className='absolute top-full right-3 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'></div>
+                        <div className='absolute bottom-full right-0 mb-1 px-2 py-1 bg-[#21262d] border border-[#30363d] text-gray-100 text-xs rounded whitespace-nowrap z-50'>
+                          Total: {product.errors || product.totalErrors || 0}
+                          <div className='absolute top-full right-2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-[#30363d]'></div>
                         </div>
                       )}
                     </div>
@@ -288,9 +280,9 @@ const ProductChecker = () => {
           </div>
 
           {productErrors.filter(p => p).length === 0 && (
-            <div className='text-center py-8'>
-              <Package2 className='w-12 h-12 text-gray-300 mx-auto mb-3' />
-              <p className='text-gray-500'>No product issues found</p>
+            <div className='text-center py-2'>
+              <Box className='w-8 h-8 text-gray-400 mx-auto mb-1' />
+              <p className='text-xs text-gray-400'>No issues found</p>
             </div>
           )}
         </div>

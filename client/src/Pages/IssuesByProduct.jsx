@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, Filter, ChevronDown, Package, Eye, Activity, Star, TrendingUp, BarChart3, ArrowRight, Download } from 'lucide-react';
+import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, LineChart, ArrowRight, Download } from 'lucide-react';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import noImage from '../assets/Icons/no-image.png';
 
@@ -66,7 +66,7 @@ const FormattedMessage = ({ message }) => {
       {highlightedText && (
         <>
           <br />
-          <strong className="text-gray-900 mt-1 block">{highlightedText}</strong>
+          <strong className="text-gray-100 mt-1 block">{highlightedText}</strong>
         </>
       )}
     </>
@@ -132,44 +132,44 @@ const RankingIssuesTable = ({ product, info }) => {
     
     if (errors.length === 0) {
         return (
-            <div className="text-center py-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto shadow-lg">
-                    <Star className="w-8 h-8 text-white" />
+            <div className="text-center py-6">
+                <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mb-3 mx-auto border border-green-500/30">
+                    <Star className="w-6 h-6 text-green-400" />
                 </div>
-                <p className="text-lg font-semibold text-gray-700 mb-2">No ranking issues found</p>
-                <p className="text-gray-500">This product's ranking optimization is on track!</p>
+                <p className="text-sm font-semibold text-gray-100 mb-1">No ranking issues found</p>
+                <p className="text-xs text-gray-400">This product's ranking optimization is on track!</p>
             </div>
         );
     }
     
     return (
         <div>
-            <div className="w-full rounded-xl shadow-sm border border-gray-200">
-                <table className="w-full table-fixed bg-white">
+            <div className="w-full rounded border border-[#30363d]">
+                <table className="w-full table-fixed bg-[#161b22]">
                     <thead>
-                        <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                        <tr className="bg-[#21262d] border-b border-[#30363d]">
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-[#30363d]">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
-                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                            <tr key={idx} className="border-b border-[#30363d] min-h-[60px]">
+                                <td className="px-2 py-2 text-xs font-medium text-gray-100 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">
                                     <FormattedMessage message={error.message} />
                                 </td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
             {hasMore && (
-                <div className="mt-4 text-center">
+                <div className="mt-2 text-center">
                     <button
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                        className="bg-blue-500 text-white px-4 py-1.5 rounded text-xs hover:bg-blue-600 transition-all"
                         onClick={() => setPage((prev) => prev + 1)}
                     >
                         View More Issues
@@ -258,44 +258,44 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
     
     if (errors.length === 0) {
         return (
-            <div className="text-center py-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto shadow-lg">
-                    <Star className="w-8 h-8 text-white" />
+            <div className="text-center py-6">
+                <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mb-3 mx-auto border border-green-500/30">
+                    <Star className="w-6 h-6 text-green-400" />
                 </div>
-                <p className="text-lg font-semibold text-gray-700 mb-2">No conversion issues found</p>
-                <p className="text-gray-500">This product's conversion optimization looks great!</p>
+                <p className="text-sm font-semibold text-gray-100 mb-1">No conversion issues found</p>
+                <p className="text-xs text-gray-400">This product's conversion optimization looks great!</p>
             </div>
         );
     }
     
     return (
         <div>
-            <div className="w-full rounded-xl shadow-sm border border-gray-200">
-                <table className="w-full table-fixed bg-white">
+            <div className="w-full rounded border border-[#30363d]">
+                <table className="w-full table-fixed bg-[#161b22]">
                     <thead>
-                        <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                        <tr className="bg-[#21262d] border-b border-[#30363d]">
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-[#30363d]">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
-                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                            <tr key={idx} className="border-b border-[#30363d] min-h-[60px]">
+                                <td className="px-2 py-2 text-xs font-medium text-gray-100 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">
                                     <FormattedMessage message={error.message} />
                                 </td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
             {hasMore && (
-                <div className="mt-4 text-center">
+                <div className="mt-2 text-center">
                     <button
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                        className="bg-blue-500 text-white px-4 py-1.5 rounded text-xs hover:bg-blue-600 transition-all"
                         onClick={() => setPage((prev) => prev + 1)}
                     >
                         View More Issues
@@ -386,50 +386,50 @@ const InventoryIssuesTable = ({ product }) => {
     
     if (errors.length === 0) {
         return (
-            <div className="text-center py-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto shadow-lg">
-                    <Star className="w-8 h-8 text-white" />
+            <div className="text-center py-6">
+                <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mb-3 mx-auto border border-green-500/30">
+                    <Star className="w-6 h-6 text-green-400" />
                 </div>
-                <p className="text-lg font-semibold text-gray-700 mb-2">No inventory issues found</p>
-                <p className="text-gray-500">Your inventory management is working perfectly!</p>
+                <p className="text-sm font-semibold text-gray-100 mb-1">No inventory issues found</p>
+                <p className="text-xs text-gray-400">Your inventory management is working perfectly!</p>
             </div>
         );
     }
     
     return (
         <div>
-            <div className="w-full rounded-xl shadow-sm border border-gray-200">
-                <table className="w-full table-fixed bg-white">
+            <div className="w-full rounded border border-[#30363d]">
+                <table className="w-full table-fixed bg-[#161b22]">
                     <thead>
-                        <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/4">Issue Type</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-2/5">Description</th>
-                            <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider w-1/3">How to Solve</th>
+                        <tr className="bg-[#21262d] border-b border-[#30363d]">
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Type</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Description</th>
+                            <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">How to Solve</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-[#30363d]">
                         {displayedErrors.map((error, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition-colors duration-200 min-h-[80px]">
-                                <td className="px-4 py-5 text-sm font-medium text-gray-900 align-top break-words leading-relaxed">{error.issueHeading}</td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">
+                            <tr key={idx} className="border-b border-[#30363d] min-h-[60px]">
+                                <td className="px-2 py-2 text-xs font-medium text-gray-100 align-top break-words leading-relaxed">{error.issueHeading}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">
                                     <FormattedMessage message={error.message} />
                                     {error.recommendedReplenishmentQty !== null && error.recommendedReplenishmentQty !== undefined && error.recommendedReplenishmentQty > 0 && (
                                         <>
                                             <br />
-                                            <strong className="text-gray-900 mt-1 block">Recommended Restock Quantity: {error.recommendedReplenishmentQty} units</strong>
+                                            <strong className="text-gray-100 mt-1 block">Recommended Restock Quantity: {error.recommendedReplenishmentQty} units</strong>
                                         </>
                                     )}
                                 </td>
-                                <td className="px-4 py-5 text-sm text-gray-700 align-top break-words leading-relaxed">{error.solution}</td>
+                                <td className="px-2 py-2 text-xs text-gray-300 align-top break-words leading-relaxed">{error.solution}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
             {hasMore && (
-                <div className="mt-4 text-center">
+                <div className="mt-2 text-center">
                     <button
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+                        className="bg-blue-500 text-white px-4 py-1.5 rounded text-xs hover:bg-blue-600 transition-all"
                         onClick={() => setPage((prev) => prev + 1)}
                     >
                         View More Issues
@@ -910,17 +910,17 @@ const IssuesByProduct = () => {
     // Handle clicks outside dropdown
 
     return (
-        <div className="min-h-screen bg-gray-50/50">
+        <div className="min-h-screen bg-[#1a1a1a]">
             {/* Modern Header Section */}
-            <div className='bg-white border-b border-gray-200/80 sticky top-0 z-40'>
-                <div className='px-4 lg:px-6 py-4'>
-                    <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
-                        <div className='flex items-center gap-4'>
+            <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+                <div className='px-2 lg:px-3 py-1.5'>
+                    <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
+                        <div className='flex items-center gap-2'>
                             <div>
-                                <h1 className='text-2xl font-bold text-gray-900'>Issues By Product</h1>
-                                <p className='text-sm text-gray-600 mt-1'>Detailed analysis of issues for individual products in your catalog</p>
+                                <h1 className='text-lg font-bold text-gray-100'>Issues By Product</h1>
+                                <p className='text-xs text-gray-400 mt-0.5'>Detailed analysis of issues for individual products in your catalog</p>
                             </div>
-                            <div className='hidden sm:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-full text-xs font-medium'>
+                            <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded text-xs font-medium border border-orange-500/30'>
                                 <AlertTriangle className='w-3 h-3' />
                                 Product Analysis
                             </div>
@@ -930,56 +930,55 @@ const IssuesByProduct = () => {
             </div>
 
             {/* Main Content - Scrollable */}
-            <div className='overflow-y-auto' style={{ height: 'calc(100vh - 120px)' }}>
-                <div className='px-4 lg:px-6 py-6 pb-20 space-y-6'>
+            <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
+                <div className='px-2 lg:px-3 py-1.5 pb-1 space-y-2'>
 
             {!info?.productWiseError || info.productWiseError.length === 0 ? (
                 <motion.div 
-                    className="bg-white rounded-2xl shadow-lg border-0 p-8 text-center"
+                    className="bg-[#161b22] rounded border border-[#30363d] p-4 text-center"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5, ease: "easeOut" }}
                 >
-                    <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
-                        <Star className="w-10 h-10 text-white" />
+                    <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mb-3 mx-auto border border-green-500/30">
+                        <Star className="w-6 h-6 text-green-400" />
                     </div>
-                    <h1 className="text-2xl font-bold text-gray-900 mb-2">No Product Issues Found</h1>
-                    <p className="text-gray-600">Excellent! All your products are performing optimally without any detected issues.</p>
+                    <h1 className="text-lg font-bold text-gray-100 mb-1">No Product Issues Found</h1>
+                    <p className="text-xs text-gray-400">Excellent! All your products are performing optimally without any detected issues.</p>
                 </motion.div>
             ) : (
-                <div className="space-y-6">
+                <div className="space-y-2">
                     {/* Enhanced Banner Section with margins */}
-                    <div className="mx-2">
-                        <div className="bg-gradient-to-br from-green-900 via-emerald-950 to-red-950 text-white relative overflow-hidden rounded-2xl">
-                            <div className="absolute inset-0 opacity-20" style={{backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")"}}></div>
-                            <div className="relative z-10 px-6 py-8">
-                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
-                                            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                    <div className="mx-1">
+                        <div className="bg-[#161b22] border border-[#30363d] rounded p-2 relative overflow-hidden">
+                            <div className="relative z-10 px-2 py-2">
+                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <Box className="w-4 h-4 text-blue-400" />
+                                            <h1 className="text-lg font-bold text-gray-100">
                                                 Issues by Product
                                             </h1>
                                         </div>
-                                        <p className="text-gray-300 text-lg">Detailed issue analysis for individual products</p>
+                                        <p className="text-xs text-gray-400">Detailed issue analysis for individual products</p>
                                         {stats.totalProducts > 0 && (
-                                            <div className="flex items-center gap-2 text-sm text-orange-300 mt-4">
-                                                <AlertTriangle className="w-4 h-4" />
+                                            <div className="flex items-center gap-1 text-xs text-orange-400 mt-2">
+                                                <AlertTriangle className="w-3 h-3" />
                                                 <span>{stats.totalProducts} products need attention</span>
                                             </div>
                                         )}
                                     </div>
                                     
                                     {/* Stats Cards */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                                            <div className="text-2xl font-bold text-white mb-1">{stats.totalProducts}</div>
-                                            <div className="text-xs text-gray-300">Products with Issues</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="bg-[#21262d] border border-[#30363d] rounded p-2 text-center">
+                                            <div className="text-lg font-bold text-gray-100 mb-0.5">{stats.totalProducts}</div>
+                                            <div className="text-xs text-gray-400">Products with Issues</div>
                                         </div>
-                                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                                            <div className="text-2xl font-bold text-orange-300 mb-1">{stats.totalIssues}</div>
-                                            <div className="text-xs text-gray-300">Total Issues</div>
-                                            <div className="text-xs text-gray-400 mt-0.5">(Ranking + Conversion + Inventory)</div>
+                                        <div className="bg-[#21262d] border border-[#30363d] rounded p-2 text-center">
+                                            <div className="text-lg font-bold text-orange-400 mb-0.5">{stats.totalIssues}</div>
+                                            <div className="text-xs text-gray-400">Total Issues</div>
+                                            <div className="text-xs text-gray-500 mt-0.5">(Ranking + Conversion + Inventory)</div>
                                         </div>
                                     </div>
                                 </div>
@@ -988,12 +987,12 @@ const IssuesByProduct = () => {
                     </div>
 
                     {/* Enhanced Filters and Search Section */}
-                    <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
-                        <div className="px-6 py-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                                <div className="flex items-center gap-4">
-                                    <div className="text-sm text-gray-600">
-                                        Showing <span className="font-semibold text-blue-600">{products.length}</span> of <span className="font-semibold">{total}</span> products
+                    <div className="bg-[#161b22] border border-[#30363d] rounded p-2">
+                        <div className="px-2 py-1.5">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="text-xs text-gray-400">
+                                        Showing <span className="font-semibold text-blue-400">{products.length}</span> of <span className="font-semibold text-gray-300">{total}</span> products
                                     </div>
                                     {(searchQuery || selectedPriority !== 'all' || sortBy !== 'issues') && (
                                         <button
@@ -1002,21 +1001,21 @@ const IssuesByProduct = () => {
                                                 setSelectedPriority('all');
                                                 setSortBy('issues');
                                             }}
-                                            className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                            className="text-xs text-blue-400 hover:text-blue-300 underline"
                                         >
                                             Clear filters
                                         </button>
                                     )}
                                 </div>
                                 
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
                                     {/* Search */}
                                     <div className="relative">
-                                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
                                         <input
                                             type="text"
                                             placeholder="Search products..."
-                                            className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-48 transition-all duration-200"
+                                            className="pl-7 pr-2 py-1 border border-[#30363d] rounded bg-[#1a1a1a] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 w-40 transition-all placeholder-gray-500"
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
                                         />
@@ -1026,7 +1025,7 @@ const IssuesByProduct = () => {
                                     <select
                                         value={selectedPriority}
                                         onChange={(e) => setSelectedPriority(e.target.value)}
-                                        className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                        className="px-2 py-1 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 bg-[#1a1a1a]"
                                     >
                                         {priorityOptions.map(option => (
                                             <option key={option.value} value={option.value}>{option.label}</option>
@@ -1037,7 +1036,7 @@ const IssuesByProduct = () => {
                                     <select
                                         value={sortBy}
                                         onChange={(e) => setSortBy(e.target.value)}
-                                        className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                        className="px-2 py-1 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 bg-[#1a1a1a]"
                                     >
                                         {sortOptions.map(option => (
                                             <option key={option.value} value={option.value}>{option.label}</option>
@@ -1052,21 +1051,21 @@ const IssuesByProduct = () => {
                     <div className="space-y-6">
                 {products.length === 0 ? (
                     <motion.div 
-                        className="bg-white rounded-2xl shadow-lg border-0 p-8 text-center"
+                        className="bg-[#161b22] rounded border border-[#30363d] p-4 text-center"
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ duration: 0.4, ease: "easeOut" }}
                     >
-                        <div className="w-20 h-20 bg-gradient-to-br from-gray-200 to-gray-300 rounded-full flex items-center justify-center mb-6 mx-auto shadow-sm">
-                            <Package className="w-10 h-10 text-gray-400" />
+                        <div className="w-12 h-12 bg-[#21262d] rounded-full flex items-center justify-center mb-3 mx-auto border border-[#30363d]">
+                            <Box className="w-6 h-6 text-gray-400" />
                         </div>
-                        <p className="text-lg font-semibold text-gray-700 mb-2">No products found</p>
-                        <p className="text-sm text-gray-500">Try adjusting your search terms or filters to find what you're looking for.</p>
+                        <p className="text-sm font-semibold text-gray-100 mb-1">No products found</p>
+                        <p className="text-xs text-gray-400">Try adjusting your search terms or filters to find what you're looking for.</p>
                     </motion.div>
                 ) : (
                     <>
                         {/* Products Grid */}
-                        <div className="space-y-8">
+                        <div className="space-y-2">
                                             {products.map((product, index) => {
                                                 const activeTab = getActiveTab(product.asin);
                                                 const rankingCount = countRankingIssues(product);
@@ -1080,7 +1079,7 @@ const IssuesByProduct = () => {
                                 return (
                                     <motion.div 
                                         key={product.asin} 
-                                        className="bg-white rounded-2xl shadow-lg border-0 hover:shadow-xl transition-all duration-300"
+                                        className="bg-[#161b22] rounded border border-[#30363d] transition-all duration-300"
                                         initial={{ opacity: 0, y: 20 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{
@@ -1090,38 +1089,42 @@ const IssuesByProduct = () => {
                                         }}
                                     >
                                         {/* Enhanced Product Header */}
-                                        <div className="p-6 border-b border-gray-100">
+                                        <div className="p-2 border-b border-[#30363d]">
                                             <div className="flex items-center justify-between">
-                                                <div className="flex items-center space-x-4">
+                                                <div className="flex items-center space-x-2">
                                                     <div className="relative">
                                                         <LazyLoadImage
                                                             src={product.MainImage || noImage}
                                                             alt="Product"
-                                                            className="w-20 h-20 rounded-xl object-cover shadow-md"
+                                                            className="w-12 h-12 rounded object-cover"
                                                             effect="blur"
                                                             placeholderSrc={noImage}
                                                         />
-                                                        <div className={`absolute -top-2 -right-2 w-6 h-6 ${priority.color} rounded-full flex items-center justify-center shadow-lg`}>
+                                                        <div className={`absolute -top-1 -right-1 w-4 h-4 ${priority.color} rounded-full flex items-center justify-center`}>
                                                             <span className="text-white text-xs font-bold">{totalIssues}</span>
                                                         </div>
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <h3 className="font-bold text-xl mb-2 text-gray-900 break-words">
+                                                        <h3 className="font-bold text-sm mb-1 text-gray-100 break-words">
                                                             {product.name}
                                                         </h3>
-                                                        <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-                                                            <span className="flex items-center gap-1">
+                                                        <div className="flex flex-wrap gap-2 text-xs text-gray-400">
+                                                            <span className="flex items-center gap-0.5">
                                                                 <span className="font-medium">ASIN:</span> {product.asin}
                                                             </span>
-                                                            <span className="flex items-center gap-1">
+                                                            <span className="flex items-center gap-0.5">
                                                                 <span className="font-medium">SKU:</span> {product.sku}
                                                             </span>
-                                                            <span className="flex items-center gap-1">
+                                                            <span className="flex items-center gap-0.5">
                                                                 <span className="font-medium">Price:</span> {formatCurrencyWithLocale(product.price || 0, currency)}
                                                             </span>
                                                         </div>
-                                                        <div className="flex items-center gap-3 mt-3">
-                                                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${priority.bgColor} ${priority.textColor}`}>
+                                                        <div className="flex items-center gap-2 mt-1.5">
+                                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${
+                                                                priority.level === 'high' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                                                priority.level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                                'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                                            }`}>
                                                                 {priority.label} Priority
                                                             </span>
                                                             <span className="text-xs text-gray-500">
@@ -1131,69 +1134,69 @@ const IssuesByProduct = () => {
                                                     </div>
                                                 </div>
                                                 <button 
-                                                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg flex items-center gap-2"
+                                                    className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-all flex items-center gap-1"
                                                     onClick={() => viewProductDetails(product.asin)}
                                                 >
-                                                    <Eye className="w-4 h-4" />
+                                                    <Eye className="w-3 h-3" />
                                                     View Details
                                                 </button>
                                             </div>
                                         </div>
                                         
                                         {/* Enhanced Product Tabs */}
-                                        <div className="flex border-b border-gray-100">
+                                        <div className="flex border-b border-[#30363d]">
                                             <button
-                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-2 py-2 font-medium transition-all duration-200 text-xs ${
                                                     activeTab === 'ranking'
-                                                        ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
-                                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                                        ? 'border-b-2 border-blue-500 text-blue-400 bg-blue-500/10'
+                                                        : 'text-gray-400 hover:text-gray-300 hover:bg-[#21262d]'
                                                 }`}
                                                 onClick={() => setActiveTab(product.asin, 'ranking')}
                                             >
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <TrendingUp className="w-4 h-4" />
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <TrendingUp className="w-3 h-3" />
                                                     <span className="hidden sm:inline">Ranking Issues</span>
                                                     <span className="sm:hidden">Ranking</span>
-                                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                        rankingCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                    <span className={`px-1 py-0.5 rounded text-xs font-semibold ${
+                                                        rankingCount > 0 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'
                                                     }`}>
                                                         {rankingCount}
                                                     </span>
                                                 </div>
                                             </button>
                                             <button
-                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-2 py-2 font-medium transition-all duration-200 text-xs ${
                                                     activeTab === 'conversion'
-                                                        ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
-                                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                                        ? 'border-b-2 border-blue-500 text-blue-400 bg-blue-500/10'
+                                                        : 'text-gray-400 hover:text-gray-300 hover:bg-[#21262d]'
                                                 }`}
                                                 onClick={() => setActiveTab(product.asin, 'conversion')}
                                             >
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <BarChart3 className="w-4 h-4" />
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <LineChart className="w-3 h-3" />
                                                     <span className="hidden sm:inline">Conversion (incl. Buy Box)</span>
                                                     <span className="sm:hidden">Conversion</span>
-                                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                        conversionCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                    <span className={`px-1 py-0.5 rounded text-xs font-semibold ${
+                                                        conversionCount > 0 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'
                                                     }`}>
                                                         {conversionCount}
                                                     </span>
                                                 </div>
                                             </button>
                                             <button
-                                                className={`flex-1 px-4 py-4 font-medium transition-all duration-200 ${
+                                                className={`flex-1 px-2 py-2 font-medium transition-all duration-200 text-xs ${
                                                     activeTab === 'inventory'
-                                                        ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50/50'
-                                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                                        ? 'border-b-2 border-blue-500 text-blue-400 bg-blue-500/10'
+                                                        : 'text-gray-400 hover:text-gray-300 hover:bg-[#21262d]'
                                                 }`}
                                                 onClick={() => setActiveTab(product.asin, 'inventory')}
                                             >
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <Package className="w-4 h-4" />
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <Box className="w-3 h-3" />
                                                     <span className="hidden sm:inline">Inventory Issues</span>
                                                     <span className="sm:hidden">Inventory</span>
-                                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                        inventoryCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                    <span className={`px-1 py-0.5 rounded text-xs font-semibold ${
+                                                        inventoryCount > 0 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'
                                                     }`}>
                                                         {inventoryCount}
                                                     </span>
@@ -1202,7 +1205,7 @@ const IssuesByProduct = () => {
                                         </div>
                                         
                                         {/* Enhanced Tab Content */}
-                                        <div className="p-6 relative bg-gray-50/30" style={{ minHeight: '300px' }}>
+                                        <div className="p-2 relative bg-[#1a1a1a]" style={{ minHeight: '200px' }}>
                                             <AnimatePresence custom={getDirection(product.asin)} mode="sync">
                                                 <motion.div
                                                     key={activeTab}
@@ -1233,7 +1236,7 @@ const IssuesByProduct = () => {
                         {/* Enhanced View More Button */}
                         {hasMore && (
                             <motion.div 
-                                className="text-center pt-8"
+                                className="text-center pt-2"
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{
@@ -1243,13 +1246,13 @@ const IssuesByProduct = () => {
                                 }}
                             >
                                 <button
-                                    className="px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 text-lg font-medium shadow-lg hover:shadow-xl flex items-center gap-2 mx-auto"
+                                    className="px-4 py-2 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-all flex items-center gap-1 mx-auto"
                                     onClick={() => setCurrentPage(prev => prev + 1)}
                                 >
-                                    <ArrowRight className="w-5 h-5" />
+                                    <ArrowRight className="w-3 h-3" />
                                     Load More Products
                                 </button>
-                                <p className="text-sm text-gray-500 mt-3">
+                                <p className="text-xs text-gray-500 mt-1.5">
                                     {total - products.length} more products available
                                 </p>
                             </motion.div>

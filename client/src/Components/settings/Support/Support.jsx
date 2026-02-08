@@ -125,31 +125,30 @@ const Support = () => {
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* Header Section */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
-        <div className="bg-gradient-to-r from-slate-900 via-purple-900 to-slate-900 px-6 py-8 text-white relative overflow-hidden">
-          <div className="absolute inset-0 opacity-20" style={{backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")"}}></div>
+      <div className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
+        <div className="bg-blue-600 px-4 py-5 text-white relative overflow-hidden">
           <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-2 h-8 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full"></div>
+            <div className="flex items-center gap-3 mb-1">
+              <div className="w-2 h-6 bg-blue-400 rounded-full"></div>
               <div className="flex items-center gap-3">
-                <HelpCircle className="w-6 h-6 text-white" />
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                <HelpCircle className="w-5 h-5 text-white" />
+                <h2 className="text-xl font-bold text-white">
                   Support
                 </h2>
               </div>
             </div>
-            <p className="text-gray-300 text-sm">Get help and support for your SellerQI account</p>
+            <p className="text-gray-200 text-xs">Get help and support for your SellerQI account</p>
           </div>
         </div>
       </div>
 
       {/* Contact Form Section */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
-          <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">Send us a Message</h3>
-            <p className="text-gray-600 mb-8">
+      <div className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
+          <div className="p-4">
+            <h3 className="text-xl font-bold text-gray-100 mb-1">Send us a Message</h3>
+            <p className="text-gray-400 mb-4 text-sm">
               Fill out the form below and we'll get back to you within 24 hours.
             </p>
             
@@ -160,13 +159,13 @@ const Support = () => {
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
-                  className="text-center py-12"
+                  className="text-center py-8"
                 >
-                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <CheckCircle className="w-8 h-8 text-emerald-600" />
+                  <div className="w-14 h-14 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-3 border border-emerald-500/40">
+                    <CheckCircle className="w-7 h-7 text-emerald-400" />
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Message Sent!</h3>
-                  <p className="text-gray-600 mb-6">
+                  <h3 className="text-lg font-semibold text-gray-100 mb-1">Message Sent!</h3>
+                  <p className="text-gray-400 mb-4 text-sm">
                     Thank you for reaching out. We've received your message and will get back to you soon.
                   </p>
                   <button
@@ -175,7 +174,7 @@ const Support = () => {
                       setError('');
                       setForm({ name: '', email: '', subject: '', message: '', helpType: '' });
                     }}
-                    className="text-[#3B4A6B] hover:text-[#2d3a52] font-medium"
+                    className="text-blue-400 hover:text-blue-300 font-medium text-sm"
                   >
                     Send Another Message
                   </button>
@@ -187,37 +186,37 @@ const Support = () => {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onSubmit={handleSubmit}
-                  className="space-y-6"
+                  className="space-y-4"
                 >
                   {/* Error Message */}
                   {error && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3"
+                      className="bg-red-500/10 border border-red-500/40 rounded-xl p-3 flex items-start gap-3"
                     >
-                      <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                      <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div>
-                        <h4 className="text-red-800 font-medium mb-1">Error</h4>
-                        <p className="text-red-700 text-sm">{error}</p>
+                        <h4 className="text-red-400 font-medium mb-1">Error</h4>
+                        <p className="text-red-300 text-sm">{error}</p>
                       </div>
                     </motion.div>
                   )}
                   
                   <div className="relative" ref={dropdownRef}>
-                    <label className="block text-gray-700 font-medium mb-2">
+                    <label className="block text-gray-200 font-medium mb-1 text-sm">
                       How can we help you? *
                     </label>
                     <button
                       type="button"
                       onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className={`w-full border border-gray-300 rounded-xl px-4 py-3 bg-white text-left focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 flex items-center justify-between ${
-                        !form.helpType ? 'text-gray-400' : 'text-gray-900'
+                      className={`w-full border border-[#30363d] rounded-xl px-3 py-2.5 bg-[#1a1a1a] text-left focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 flex items-center justify-between ${
+                        !form.helpType ? 'text-gray-400' : 'text-gray-100'
                       }`}
                     >
                       <span>{form.helpType || 'Select a topic...'}</span>
                       <ChevronDown 
-                        className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                        className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${
                           isDropdownOpen ? 'transform rotate-180' : ''
                         }`} 
                       />
@@ -230,7 +229,7 @@ const Support = () => {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
                           transition={{ duration: 0.2 }}
-                          className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
+                          className="absolute z-50 w-full mt-2 bg-[#161b22] border border-[#30363d] rounded-xl shadow-lg overflow-hidden"
                         >
                           <div className="max-h-60 overflow-y-auto">
                             {helpTopics.map((topic, index) => (
@@ -238,11 +237,11 @@ const Support = () => {
                                 key={index}
                                 type="button"
                                 onClick={() => handleTopicSelect(topic)}
-                                className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors duration-150 ${
+                                className={`w-full px-3 py-2.5 text-left hover:bg-[#21262d] transition-colors duration-150 ${
                                   form.helpType === topic 
-                                    ? 'bg-[#3B4A6B] text-white hover:bg-[#2d3a52]' 
-                                    : 'text-gray-900'
-                                } ${index !== helpTopics.length - 1 ? 'border-b border-gray-100' : ''}`}
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                                    : 'text-gray-100'
+                                } ${index !== helpTopics.length - 1 ? 'border-b border-[#30363d]' : ''}`}
                               >
                                 {topic}
                               </button>
@@ -261,9 +260,9 @@ const Support = () => {
                     />
                   </div>
                   
-                  <div className="grid md:grid-cols-2 gap-6">
+                  <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-gray-700 font-medium mb-2">
+                      <label className="block text-gray-200 font-medium mb-1 text-sm">
                         Name *
                       </label>
                       <input
@@ -272,12 +271,12 @@ const Support = () => {
                         value={form.name}
                         onChange={handleChange}
                         required
-                        className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300"
+                        className="w-full border border-[#30363d] rounded-xl px-3 py-2 bg-[#1a1a1a] text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300"
                         placeholder="Your full name"
                       />
                     </div>
                     <div>
-                      <label className="block text-gray-700 font-medium mb-2">
+                      <label className="block text-gray-200 font-medium mb-1 text-sm">
                         Email *
                       </label>
                       <input
@@ -286,14 +285,14 @@ const Support = () => {
                         value={form.email}
                         onChange={handleChange}
                         required
-                        className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300"
+                        className="w-full border border-[#30363d] rounded-xl px-3 py-2 bg-[#1a1a1a] text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300"
                         placeholder="your.email@example.com"
                       />
                     </div>
                   </div>
                   
                   <div>
-                    <label className="block text-gray-700 font-medium mb-2">
+                    <label className="block text-gray-200 font-medium mb-1 text-sm">
                       Subject *
                     </label>
                     <input
@@ -302,13 +301,13 @@ const Support = () => {
                       value={form.subject}
                       onChange={handleChange}
                       required
-                      className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300"
+                      className="w-full border border-[#30363d] rounded-xl px-3 py-2 bg-[#1a1a1a] text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300"
                       placeholder="Brief description of your inquiry"
                     />
                   </div>
                   
                   <div>
-                    <label className="block text-gray-700 font-medium mb-2">
+                    <label className="block text-gray-200 font-medium mb-1 text-sm">
                       Message *
                     </label>
                     <textarea
@@ -316,8 +315,8 @@ const Support = () => {
                       value={form.message}
                       onChange={handleChange}
                       required
-                      rows={6}
-                      className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3B4A6B] focus:border-transparent transition-all duration-300 resize-none"
+                      rows={5}
+                      className="w-full border border-[#30363d] rounded-xl px-3 py-2 bg-[#1a1a1a] text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 resize-none"
                       placeholder="Please provide as much detail as possible..."
                     />
                   </div>
@@ -325,10 +324,10 @@ const Support = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className={`w-full py-4 px-6 rounded-xl font-semibold text-lg transition-all duration-300 flex items-center justify-center gap-2 ${
+                    className={`w-full py-3 px-4 rounded-xl font-semibold text-base transition-all duration-300 flex items-center justify-center gap-2 ${
                       isSubmitting
-                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-[#3B4A6B] to-[#333651] text-white hover:from-[#2d3a52] hover:to-[#2a2e42] shadow-lg hover:shadow-xl'
+                        ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl'
                     }`}
                   >
                     {isSubmitting ? (
@@ -339,7 +338,7 @@ const Support = () => {
                     ) : (
                       <>
                         Send Message
-                        <Send className="w-5 h-5" />
+                        <Send className="w-4 h-4" />
                       </>
                     )}
                   </button>
@@ -350,29 +349,29 @@ const Support = () => {
         </div>
 
       {/* Use Cases */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
-        <div className="p-6">
-          <div className="text-center mb-8">
-            <h3 className="text-2xl font-bold text-gray-900 mb-4">
+      <div className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden">
+        <div className="p-4">
+          <div className="text-center mb-4">
+            <h3 className="text-xl font-bold text-gray-100 mb-2">
               Need Quick Answers?
             </h3>
-            <p className="text-lg text-gray-600 mb-6">
+            <p className="text-sm text-gray-400 mb-4">
               Discover how SellerQI can help you optimize your Amazon business and drive growth.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <a
                 href="https://www.sellerqi.com/use-cases"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-[#3B4A6B] text-white px-8 py-3 rounded-lg hover:bg-[#2d3a52] transition-all duration-300 font-semibold inline-flex items-center justify-center gap-2"
+                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-all duration-300 font-semibold inline-flex items-center justify-center gap-2 text-sm"
               >
                 View Use Cases
                 <ArrowRight className="w-4 h-4" />
               </a>
               <Link
                 to="/seller-central-checker/consultation"
-                className="border-2 border-gray-300 text-gray-700 px-8 py-3 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-all duration-300 font-semibold text-center"
+                className="border-2 border-[#30363d] text-gray-200 px-6 py-2 rounded-lg hover:border-[#21262d] hover:bg-[#21262d] transition-all duration-300 font-semibold text-center text-sm"
               >
                 Need Help?
               </Link>
@@ -380,7 +379,7 @@ const Support = () => {
           </div>
 
           {/* Use Cases Preview */}
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-3 gap-4">
             {[
               {
                 title: "Account Health Monitoring",
@@ -397,10 +396,10 @@ const Support = () => {
             ].map((useCase, index) => (
               <div
                 key={index}
-                className="bg-gradient-to-br from-gray-50 to-white rounded-xl p-6 border border-gray-100 hover:border-[#3B4A6B] hover:shadow-md transition-all duration-300"
+                className="bg-[#1a1a1a] rounded-xl p-4 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md transition-all duration-300"
               >
-                <h4 className="font-semibold text-gray-900 mb-3 text-lg">{useCase.title}</h4>
-                <p className="text-gray-600 text-sm leading-relaxed">{useCase.description}</p>
+                <h4 className="font-semibold text-gray-100 mb-2 text-base">{useCase.title}</h4>
+                <p className="text-gray-400 text-sm leading-relaxed">{useCase.description}</p>
               </div>
             ))}
           </div>
