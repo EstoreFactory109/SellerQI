@@ -1,7 +1,7 @@
 const asyncHandler = require('../../utils/AsyncHandler');
 const logger = require('../../utils/Logger.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
-const AdminUserLogsService = require('../../Services/Admin/AdminUserLogsService.js');
+const AdminUserLogsService = require('../../Services/admin/AdminUserLogsService.js');
 
 /**
  * Get logging sessions for a specific user (Admin only)

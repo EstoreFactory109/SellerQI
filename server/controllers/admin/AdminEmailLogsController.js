@@ -7,7 +7,7 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
-const { getAllEmailLogs } = require('../../Services/Admin/AdminEmailLogsService.js');
+const { getAllEmailLogs } = require('../../Services/admin/AdminEmailLogsService.js');
 
 const getAdminEmailLogs = asyncHandler(async (req, res) => {
   const adminId = req.SuperAdminId;
