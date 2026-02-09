@@ -22,7 +22,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
-const User = require('../../models/user-auth/UserModel.js');
+const User = require('../../models/user-auth/userModel.js');
 const { getProductWiseSponsoredAdsData } = require('../../Services/amazon-ads/ProductWiseSponsoredAdsService.js');
 
 /**
