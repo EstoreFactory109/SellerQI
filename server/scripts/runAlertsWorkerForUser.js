@@ -106,7 +106,6 @@ async function runForUser(userIdInput, countryFilter, regionFilter) {
       buyBox: r.results?.buyBoxMissing?.count,
       inventory: r.results?.inventory?.counts,
       salesDrop: r.results?.salesDrop?.count,
-      conversionRates: r.results?.conversionRates?.count,
     })),
   });
 

@@ -401,7 +401,6 @@ const testSalesDrop = asyncHandler(async (req, res) => {
           buyBoxMissing: { count: 0, products: [] },
           aplusMissing: { count: 0, products: [] },
           salesDrop: { count: result.drops.length, drops: result.drops },
-          conversionRates: { count: 0 },
         };
         await sendAlertsEmail(user.email, user.firstName || 'Seller', payload, undefined, userIdQuery);
       }

@@ -53,15 +53,11 @@
   #dashboard-main {
     height: 90vh;
     margin-top: 2px;
+    overflow-y: hidden;
   }
   #dashboard-stats {
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: auto;
-    grid-template-areas: 
-    "a a b b" 
-    "a a b b" 
-    "c c b b" 
-    "c c d e" 
-    "c c f g";
+    grid-template-areas: "a a b b" "a a b b" "a a b b" "c c b b" "c c d e" "c c f g";
   }
 }/*# sourceMappingURL=dashboard.css.map */

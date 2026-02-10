@@ -42,6 +42,7 @@ const merchantListingsTestRoute=require('../routes/merchantListingsTest.routes.j
 const cogsRoute=require('../routes/cogs.routes.js')
 const integrationRoute=require('../routes/integration.routes.js')
 const alertsRoute=require('../routes/alerts.routes.js')
+const qmateRoute=require('../routes/qmate.routes.js')
 const dbConnect=require('../config/dbConn.js')
 const logger=require('../utils/Logger.js')
 const {connectRedis} = require('../config/redisConn.js')
@@ -156,6 +157,7 @@ app.use('/api/test/merchant-listings',merchantListingsTestRoute)
 app.use('/api/cogs',cogsRoute)
 app.use('/api/integration',integrationRoute)
 app.use('/api/alerts',alertsRoute)
+app.use('/api/qmate',qmateRoute)
 
 app.use(express.static(path.join(_dirname,'/client/dist')))
  

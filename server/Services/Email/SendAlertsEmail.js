@@ -70,7 +70,7 @@ function escapeHtml(str) {
  * Build summary sentence from only the counts that are included (non-zero).
  * Used so product-content email says only "content + negative reviews", buybox email says only "buybox", etc.
  */
-function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissingCount, aplusMissingCount = 0, salesDropCount = 0, conversionRatesCount = 0, lowInventoryCount = 0, strandedInventoryCount = 0, inboundShipmentCount = 0) {
+function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissingCount, aplusMissingCount = 0, salesDropCount = 0, lowInventoryCount = 0, strandedInventoryCount = 0, inboundShipmentCount = 0) {
   const parts = [];
   if (productContentCount > 0) {
     parts.push(`${productContentCount} product content change${productContentCount === 1 ? '' : 's'}`);
@@ -86,9 +86,6 @@ function buildSummaryText(productContentCount, negativeReviewsCount, buyBoxMissi
   }
   if (salesDropCount > 0) {
     parts.push(`${salesDropCount} sales drop alert${salesDropCount === 1 ? '' : 's'}`);
-  }
-  if (conversionRatesCount > 0) {
-    parts.push('conversion rates snapshot');
   }
   if (lowInventoryCount > 0) {
     parts.push(`${lowInventoryCount} low inventory alert${lowInventoryCount === 1 ? '' : 's'}`);
@@ -114,7 +111,6 @@ function buildSummaryRowsHtml(payload) {
   const buyBoxMissing = payload?.buyBoxMissing ?? { count: 0 };
   const aplusMissing = payload?.aplusMissing ?? { count: 0 };
   const salesDrop = payload?.salesDrop ?? { count: 0, drops: [] };
-  const conversionRates = payload?.conversionRates ?? { count: 0 };
   const lowInventory = payload?.lowInventory ?? { count: 0 };
   const strandedInventory = payload?.strandedInventory ?? { count: 0 };
   const inboundShipment = payload?.inboundShipment ?? { count: 0 };
@@ -135,9 +131,6 @@ function buildSummaryRowsHtml(payload) {
   const dropCount = (salesDrop.drops?.length ?? 0) || (salesDrop.count ?? 0);
   if (dropCount > 0) {
     rows.push({ label: 'Sales drop', count: dropCount, suffix: dropCount === 1 ? 'day' : 'days' });
-  }
-  if ((conversionRates.count ?? 0) > 0) {
-    rows.push({ label: 'Conversion rates', count: null, suffix: 'Snapshot' });
   }
   if ((lowInventory.count ?? 0) > 0) {
     rows.push({ label: 'Low inventory / out of stock', count: lowInventory.count, suffix: 'Products' });
@@ -169,7 +162,7 @@ function buildSummaryRowsHtml(payload) {
  * Send alerts email to user.
  * @param {string} email - Recipient email
  * @param {string} firstName - User first name (for greeting)
- * @param {Object} alertsPayload - { productContentChange, negativeReviews, buyBoxMissing, aplusMissing, salesDrop, conversionRates, lowInventory, strandedInventory, inboundShipment }
+ * @param {Object} alertsPayload - { productContentChange, negativeReviews, buyBoxMissing, aplusMissing, salesDrop, lowInventory, strandedInventory, inboundShipment }
  * @param {string} [alertsDashboardUrl] - Link to alerts page
  * @param {mongoose.Types.ObjectId} [userId] - For EmailLogs
  * @param {Object} [options] - { summaryOnly: boolean } - If true, email shows one row per alert type (summary only), no full details
@@ -196,7 +189,6 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
   const buyBoxMissing = alertsPayload?.buyBoxMissing ?? { count: 0, products: [] };
   const aplusMissing = alertsPayload?.aplusMissing ?? { count: 0, products: [] };
   const salesDrop = alertsPayload?.salesDrop ?? { count: 0, drops: [] };
-  const conversionRates = alertsPayload?.conversionRates ?? { count: 0, dateRange: null, conversionRates: [] };
   const lowInventory = alertsPayload?.lowInventory ?? { count: 0, products: [] };
   const strandedInventory = alertsPayload?.strandedInventory ?? { count: 0, products: [] };
   const inboundShipment = alertsPayload?.inboundShipment ?? { count: 0, products: [] };
@@ -207,7 +199,6 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
     buyBoxMissing.count,
     aplusMissing.count,
     salesDrop.count,
-    conversionRates.count,
     lowInventory.count,
     strandedInventory.count,
     inboundShipment.count
@@ -251,20 +242,6 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
         })()
       : '';
 
-  // Conversion rates: date range + short summary
-  const conversionRatesList =
-    conversionRates.count > 0 && (conversionRates.conversionRates?.length ?? 0) > 0
-      ? (() => {
-          const range = conversionRates.dateRange
-            ? `${escapeHtml(conversionRates.dateRange.startDate)} to ${escapeHtml(conversionRates.dateRange.endDate)}`
-            : '';
-          const rows = (conversionRates.conversionRates || []).slice(0, 8).map((r) => {
-            return `<tr><td style="padding: 6px 0; border-bottom: 1px solid #e2e8f0; font-size: 14px;">${escapeHtml(r.date)}: ${escapeHtml(String(r.sessions))} sessions, ${escapeHtml(String(r.conversionRate))}% conversion</td></tr>`;
-          }).join('');
-          return `<p style="margin: 0 0 8px 0; font-size: 14px; color: #64748b;">Date range: ${range}</p><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 8px;"><tbody>${rows}</tbody></table>`;
-        })()
-      : '';
-
   let productContentSectionHtml =
     productContentList === ''
       ? ''
@@ -287,11 +264,6 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
       ? ''
       : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #fef2f2; border-radius: 8px; padding: 20px; border-left: 4px solid #ef4444;"><h2 style="font-size: 16px; font-weight: 600; color: #991b1b; margin: 0 0 12px 0;">📉 Sales drop detected</h2><p style="font-size: 14px; color: #b91c1c; margin: 0 0 12px 0;">Day-over-day sales velocity dropped significantly on the following date(s).</p>${salesDropList}</td></tr></table>`;
 
-  let conversionRatesSectionHtml =
-    conversionRatesList === ''
-      ? ''
-      : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;"><tr><td style="background-color: #eff6ff; border-radius: 8px; padding: 20px; border-left: 4px solid #3b82f6;"><h2 style="font-size: 16px; font-weight: 600; color: #1e40af; margin: 0 0 12px 0;">📊 Conversion rates snapshot</h2><p style="font-size: 14px; color: #1d4ed8; margin: 0 0 12px 0;">Daily sessions and conversion rate (unit session %) for the last 7 days.</p>${conversionRatesList}</td></tr></table>`;
-
   // Inventory alerts: low inventory, stranded inventory, inbound shipment (same product list format: asin, sku?, message)
   const lowInventoryList = (lowInventory.products?.length ?? 0) > 0 ? buildProductListHtml(lowInventory.products, 'No low inventory alerts.') : '';
   const strandedInventoryList = (strandedInventory.products?.length ?? 0) > 0 ? buildProductListHtml(strandedInventory.products, 'No stranded inventory alerts.') : '';
@@ -306,7 +278,6 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
     buyBoxMissingSectionHtml = '';
     aplusMissingSectionHtml = '';
     salesDropSectionHtml = '';
-    conversionRatesSectionHtml = '';
     lowInventorySectionHtml = '';
     strandedInventorySectionHtml = '';
     inboundShipmentSectionHtml = '';
@@ -321,7 +292,7 @@ async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardU
   template = safeReplace(template, '{{buyBoxMissingSection}}', buyBoxMissingSectionHtml);
   template = safeReplace(template, '{{aplusMissingSection}}', aplusMissingSectionHtml);
   template = safeReplace(template, '{{salesDropSection}}', salesDropSectionHtml);
-  template = safeReplace(template, '{{conversionRatesSection}}', conversionRatesSectionHtml);
+  template = safeReplace(template, '{{conversionRatesSection}}', '');
   template = safeReplace(template, '{{lowInventorySection}}', lowInventorySectionHtml);
   template = safeReplace(template, '{{strandedInventorySection}}', strandedInventorySectionHtml);
   template = safeReplace(template, '{{inboundShipmentSection}}', inboundShipmentSectionHtml);

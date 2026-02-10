@@ -111,9 +111,22 @@ const ProfitabilityDashboard = () => {
   // Use profitability page data if available, fall back to legacy DashboardSlice data
   // Backend returns data directly (not nested) e.g. { profitibilityData, TotalProduct, ... }
   const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const info = profitabilityPageData || legacyInfo;
   
-  // Get calendar mode and dates from the page data or legacy
+  // IMPORTANT: Always get calendar/date properties from legacyInfo (DashboardSlice)
+  // because the Calendar component updates these values in DashboardSlice via UpdateDashboardInfo
+  // If we use profitabilityPageData for dates, the date filters won't work since profitabilityPageData is cached
+  const info = useMemo(() => {
+    const baseInfo = profitabilityPageData || legacyInfo;
+    // Merge calendar-related properties from legacyInfo to ensure date filters work
+    return {
+      ...baseInfo,
+      calendarMode: legacyInfo?.calendarMode,
+      startDate: legacyInfo?.startDate,
+      endDate: legacyInfo?.endDate,
+    };
+  }, [profitabilityPageData, legacyInfo]);
+  
+  // Get calendar mode and dates from info (now properly sourced from legacyInfo)
   const calendarMode = info?.calendarMode || 'default';
   const startDate = info?.startDate;
   const endDate = info?.endDate;

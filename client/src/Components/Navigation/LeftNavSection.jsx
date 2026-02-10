@@ -165,7 +165,7 @@ const LeftNavSection = () => {
                 {/* Top Section - Logo and Navigation */}
                 <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     {/* Logo Section */}
-                    <div className="w-full px-3 py-4 border-b border-[#30363d] flex-shrink-0">
+                    <div className="w-full px-3 py-4 flex-shrink-0">
                         <div className="flex items-center justify-center">
                             <img 
                                 src={sellerQILogo}

@@ -348,7 +348,7 @@ const getRankings = (ProductDetails) => {
     return { finalResult };
 }
 
-module.exports = { getRankings, BackendKeyWordOrAttributesStatus };
+module.exports = { getRankings, BackendKeyWordOrAttributesStatus, checkTitle, checkBulletPoints };
 
 
 

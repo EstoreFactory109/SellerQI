@@ -170,7 +170,20 @@ const PPCDashboard = () => {
   // Use PPC page data if available, fall back to legacy DashboardSlice data
   // Backend returns data directly (not nested) e.g. { sponsoredAdsMetrics, keywords, ... }
   const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const info = ppcPageData || legacyInfo;
+  
+  // IMPORTANT: Always get calendar/date properties from legacyInfo (DashboardSlice)
+  // because the Calendar component updates these values in DashboardSlice via UpdateDashboardInfo
+  // If we use ppcPageData for dates, the date filters won't work since ppcPageData is cached
+  const info = useMemo(() => {
+    const baseInfo = ppcPageData || legacyInfo;
+    // Merge calendar-related properties from legacyInfo to ensure date filters work
+    return {
+      ...baseInfo,
+      calendarMode: legacyInfo?.calendarMode,
+      startDate: legacyInfo?.startDate,
+      endDate: legacyInfo?.endDate,
+    };
+  }, [ppcPageData, legacyInfo]);
   
   // Get sponsoredAdsMetrics from page data or legacy
   const sponsoredAdsMetrics = info?.sponsoredAdsMetrics || {};

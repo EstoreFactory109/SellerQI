@@ -38,6 +38,7 @@ import AboutUs from './Pages/AboutUs.jsx';
 import HowItWorks from './Pages/HowItWorks.jsx';
 import PromotionsPage from './Pages/PromotionsPage.jsx';
 import Advertisement from './Pages/advertisement.jsx';
+import QMate from './Pages/QMate.jsx';
 import Features from './Pages/features.jsx';
 import InventoryManagement from './Pages/inventoryManagement.jsx';
 import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
@@ -128,6 +129,9 @@ const App = () => {
         >
           <Route path='/profile-selection' element={<ProfileIDSelection />} />
           <Route path='/auth-error' element={<AuthError />} />
+
+          {/* QMate - Standalone page without MainLayout */}
+          <Route path='/seller-central-checker/qmate' element={<QMate />} />
 
           <Route path='/seller-central-checker' element={
             <PackageRouteWrapper>

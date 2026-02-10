@@ -14,7 +14,6 @@
  *   - Buy box missing (detectAndStoreBuyBoxMissingAlerts)
  *   - Low inventory, stranded inventory, inbound shipment (inventory alert services)
  *   - Sales drop (detectSalesDrop -> create SalesDropAlert + email)
- *   - Conversion rates (getConversionRates -> create ConversionRatesAlert + email)
  *
  * Notes:
  * - This worker does NOT depend on the queue-based daily updates.
@@ -40,7 +39,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const User = require('../../models/user-auth/userModel.js');
 
 const { sendAlertsEmail } = require('../Email/SendAlertsEmail.js');
-const { SalesDropAlert, ConversionRatesAlert } = require('../../models/alerts/Alert.js');
+const { SalesDropAlert } = require('../../models/alerts/Alert.js');
 
 const { detectAndStoreAlerts } = require('../Alerts/Other-Alerts/ProductContentChangeAlertService.js');
 const { detectAndStoreBuyBoxMissingAlerts } = require('../Alerts/Other-Alerts/BuyBoxMissingAlertService.js');
@@ -48,7 +47,6 @@ const { detectAndStoreLowInventoryAlerts } = require('../Alerts/Other-Alerts/Low
 const { detectAndStoreStrandedInventoryAlerts } = require('../Alerts/Other-Alerts/StrandedInventoryAlertService.js');
 const { detectAndStoreInboundShipmentAlerts } = require('../Alerts/Other-Alerts/InboundShipmentAlertService.js');
 const { detectSalesDrop } = require('../Alerts/Other-Alerts/SalesDropAlertService.js');
-const { getConversionRates } = require('../Alerts/Other-Alerts/ConversionAlertService.js');
 
 const DEFAULT_CRON = '0 6 * * 0,3'; // 06:00 UTC Sunday + Wednesday
 const BATCH_SIZE = 10;
@@ -66,9 +64,6 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
 
   if (!country || !region) return { success: true, skipped: 'missing_country_or_region' };
 
-  // Skip disconnected accounts (no tokens) to avoid noisy failures in conversion rates.
-  const spiRefreshToken = account.spiRefreshToken;
-
   const results = {
     country,
     region,
@@ -76,7 +71,6 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
     buyBoxMissing: { ran: false, error: null, count: 0 },
     inventory: { low: null, stranded: null, inbound: null, counts: { low: 0, stranded: 0, inbound: 0 } },
     salesDrop: { created: false, error: null, count: 0 },
-    conversionRates: { created: false, error: null, count: 0 },
   };
 
   // 1) Product content change + negative reviews + A+ missing (no email; we send one at the end)
@@ -142,31 +136,7 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
     logger.warn('[AlertsWorker] Sales drop alert failed (non-fatal)', { userId: String(userId), country, region, error: results.salesDrop.error });
   }
 
-  // 5) Conversion rates (store alert only; no email here) - requires SP-API refresh token
-  try {
-    if (spiRefreshToken) {
-      const convRes = await getConversionRates(spiRefreshToken, region, country, {});
-      if (convRes?.success && Array.isArray(convRes.conversionRates) && convRes.conversionRates.length > 0) {
-        await ConversionRatesAlert.create({
-          User: userId,
-          region,
-          country,
-          message: `Conversion rates for last 7 days (${convRes.dateRange.startDate} to ${convRes.dateRange.endDate})`,
-          status: 'active',
-          dateRange: convRes.dateRange,
-          marketplace: convRes.marketplace,
-          conversionRates: convRes.conversionRates,
-        });
-        results.conversionRates.created = true;
-        results.conversionRates.count = 1;
-      }
-    }
-  } catch (e) {
-    results.conversionRates.error = e?.message || 'conversion rates alert failed';
-    logger.warn('[AlertsWorker] Conversion rates alert failed (non-fatal)', { userId: String(userId), country, region, error: results.conversionRates.error });
-  }
-
-  // 6) Single email with summary-only rows (one row per alert type with count)
+  // 5) Single email with summary-only rows (one row per alert type with count)
   const productContentCount = results.productContent.counts.productContent;
   const negativeReviewsCount = results.productContent.counts.negativeReviews;
   const aplusCount = results.productContent.counts.aplus;
@@ -175,9 +145,8 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
   const strandedCount = results.inventory.counts.stranded;
   const inboundCount = results.inventory.counts.inbound;
   const salesDropCount = results.salesDrop.count;
-  const conversionCount = results.conversionRates.count;
 
-  const totalAlerts = productContentCount + negativeReviewsCount + aplusCount + buyBoxCount + lowCount + strandedCount + inboundCount + salesDropCount + conversionCount;
+  const totalAlerts = productContentCount + negativeReviewsCount + aplusCount + buyBoxCount + lowCount + strandedCount + inboundCount + salesDropCount;
 
   if (totalAlerts > 0 && email) {
     try {
@@ -190,7 +159,6 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
           buyBoxMissing: { count: buyBoxCount, products: [] },
           aplusMissing: { count: aplusCount, products: [] },
           salesDrop: { count: salesDropCount, drops: [] },
-          conversionRates: { count: conversionCount, dateRange: null, conversionRates: [] },
           lowInventory: { count: lowCount, products: [] },
           strandedInventory: { count: strandedCount, products: [] },
           inboundShipment: { count: inboundCount, products: [] },
@@ -209,7 +177,7 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
 
 async function processAllUsersAlerts() {
   const startedAt = Date.now();
-  logger.info('[AlertsWorker] Starting alerts run – all alert services will run (product content, negative reviews, A+ missing, buybox missing, low/stranded/inbound inventory, sales drop, conversion rates)');
+  logger.info('[AlertsWorker] Starting alerts run – all alert services will run (product content, negative reviews, A+ missing, buybox missing, low/stranded/inbound inventory, sales drop)');
 
   await dbConnect();
 
@@ -240,7 +208,6 @@ async function processAllUsersAlerts() {
     for (const account of accounts) {
       // Skip entries without any token; many alerts require stored data or refresh token.
       if (!account?.country || !account?.region) continue;
-      // Still allow no tokens for buybox/content/inventory (they use stored docs), but conversion needs refresh token.
       items.push({ user, account });
     }
   }
