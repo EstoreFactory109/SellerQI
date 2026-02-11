@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package, LogOut} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package, LogOut, Bot} from 'lucide-react'
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
@@ -195,6 +195,36 @@ const LeftNavSection = () => {
                                                 }`}/>
                                             </div>
                                             <span className="font-medium flex-1">Dashboard</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
+
+                            {/* Amazon Copilot - AI Assistant */}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavLink
+                                    to="/seller-central-checker/qmate"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'
+                                            }`}>
+                                                <Bot className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-purple-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium flex-1">Amazon Copilot</span>
                                             {isPremiumLocked && (
                                                 <Lock className="w-3 h-3 text-amber-500" />
                                             )}

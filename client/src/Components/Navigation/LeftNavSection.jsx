@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, Settings, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut } from 'lucide-react';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, Settings, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -194,6 +194,26 @@ const LeftNavSection = () => {
                                     <>
                                         <LayoutDashboard className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Dashboard</span>
+                                        {isPremiumLocked && (
+                                            <Lock className="w-3.5 h-3.5 text-amber-500" />
+                                        )}
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
+
+                        {/* Amazon Copilot - AI Assistant */}
+                        {(!isLiteUser || isPremiumLocked) && (
+                            <NavLink
+                                to="/seller-central-checker/qmate"
+                                className={({ isActive }) =>
+                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <Bot className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
+                                        <span className="font-medium flex-1">Amazon Copilot</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
                                         )}

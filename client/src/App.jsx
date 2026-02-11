@@ -130,9 +130,6 @@ const App = () => {
           <Route path='/profile-selection' element={<ProfileIDSelection />} />
           <Route path='/auth-error' element={<AuthError />} />
 
-          {/* QMate - Standalone page without MainLayout */}
-          <Route path='/seller-central-checker/qmate' element={<QMate />} />
-
           <Route path='/seller-central-checker' element={
             <PackageRouteWrapper>
               <MainLayout />
@@ -140,6 +137,7 @@ const App = () => {
           }>
 
             <Route path='dashboard' element={<DashBoard />} />
+            <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
             <Route path='keyword-analysis' element={<KeywordAnalysisDashboard />} />
