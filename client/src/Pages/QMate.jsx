@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import axiosInstance from '../config/axios.config.js';
-import { MessageSquare, Send, Plus, Trash2, Bot, User, ArrowLeft, Search, X } from 'lucide-react';
+import { MessageSquare, Send, Plus, Trash2, Bot, User, Search, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
 import {
   LineChart,
   Line,
@@ -236,7 +235,6 @@ function QMateChart({ chart }) {
 }
 
 const QMate = () => {
-  const navigate = useNavigate();
   const [welcomeHeadline, setWelcomeHeadline] = useState(() => pickHeadlineForNow());
   const [chats, setChats] = useState([]);
   const [chatsLoading, setChatsLoading] = useState(true);
@@ -509,9 +507,14 @@ const QMate = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[#0f0f0f] text-gray-100 overflow-hidden">
+    <div className="flex h-full min-h-0 bg-[#0f0f0f] text-gray-100 overflow-hidden">
       {/* Sidebar - Chat History */}
       <aside className="w-64 bg-[#161b22] border-r border-[#30363d] flex flex-col flex-shrink-0">
+        {/* QMate title */}
+        <div className="p-3 border-b border-[#30363d] flex items-center gap-2">
+          <Bot className="w-5 h-5 text-blue-400 flex-shrink-0" />
+          <h1 className="text-sm font-semibold text-white">QMate</h1>
+        </div>
         {/* Search history */}
         <div className="p-3 border-b border-[#30363d]">
           <div className="relative">
@@ -583,57 +586,35 @@ const QMate = () => {
             )}
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="p-3 border-t border-[#30363d]">
-          <button
-            onClick={() => navigate('/seller-central-checker/dashboard')}
-            className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#21262d] hover:bg-[#1c2128] border border-[#30363d] rounded-lg text-sm font-medium text-gray-300 hover:text-white transition-colors duration-200"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Dashboard</span>
-          </button>
-        </div>
       </aside>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="h-14 border-b border-[#30363d] bg-[#161b22] flex items-center justify-between px-4 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <Bot className="w-5 h-5 text-blue-400" />
-            <div>
-              <h1 className="text-sm font-semibold text-white">QMate</h1>
-              <p className="text-xs text-gray-400">AI Assistant</p>
-            </div>
-          </div>
-        </header>
-
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 py-6">
-          <div className="max-w-3xl mx-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 py-4">
+          <div className="max-w-3xl mx-auto h-full">
             {/* Welcome Message & Suggestions - Show when no messages */}
             {messages.length === 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center justify-center min-h-[60vh] space-y-10"
+                className="flex flex-col items-center justify-center min-h-0 h-full py-2 space-y-4"
               >
                 {/* Welcome Header - Attractive hero message */}
-                <div className="text-center space-y-5">
+                <div className="text-center space-y-3 flex-shrink-0">
                   <motion.div
                     initial={{ scale: 0.9, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ delay: 0.1, duration: 0.4 }}
-                    className="w-20 h-20 bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-blue-500/30 ring-2 ring-blue-400/20"
+                    className="w-14 h-14 bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 rounded-xl flex items-center justify-center mx-auto shadow-lg shadow-blue-500/20 ring-2 ring-blue-400/20"
                   >
-                    <Bot className="w-10 h-10 text-white" />
+                    <Bot className="w-7 h-7 text-white" />
                   </motion.div>
                   <motion.h2
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="text-3xl font-bold text-white tracking-tight bg-clip-text text-center max-w-md mx-auto leading-tight"
+                    className="text-xl font-bold text-white tracking-tight bg-clip-text text-center max-w-md mx-auto leading-tight"
                   >
                     {welcomeHeadline}
                   </motion.h2>
@@ -641,14 +622,14 @@ const QMate = () => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.3 }}
-                    className="text-gray-400 text-sm max-w-sm mx-auto leading-relaxed"
+                    className="text-gray-400 text-xs max-w-sm mx-auto leading-relaxed"
                   >
                     I'm QMate, your AI assistant for SellerQI. Ask me anything about your Amazon seller account.
                   </motion.p>
                 </div>
 
                 {/* Suggestion Blocks */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
                   {suggestions.map((suggestion, index) => (
                     <motion.button
                       key={index}
@@ -656,7 +637,7 @@ const QMate = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
                       onClick={() => handleSuggestionClick(suggestion.message)}
-                      className="group relative p-4 bg-[#21262d] border border-[#30363d] rounded-xl hover:border-blue-500/50 hover:bg-[#1c2128] transition-all duration-200 text-left"
+                      className="group relative p-3 bg-[#21262d] border border-[#30363d] rounded-xl hover:border-blue-500/50 hover:bg-[#1c2128] transition-all duration-200 text-left"
                     >
                       <div className="flex items-start gap-3">
                         <div className="text-2xl flex-shrink-0">{suggestion.icon}</div>

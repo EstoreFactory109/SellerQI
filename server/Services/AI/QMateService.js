@@ -3,6 +3,7 @@ const { AnalyseService } = require('../main/Analyse.js');
 const { analyseData } = require('../Calculations/DashboardCalculation.js');
 const { checkTitle, checkBulletPoints, BackendKeyWordOrAttributesStatus } = require('../Calculations/Rankings.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
+const CogsService = require('../Finance/CogsService.js');
 const logger = require('../../utils/Logger.js');
 
 let openaiClient = null;
@@ -267,8 +268,9 @@ Remember: **never** fabricate raw numbers. Only interpret the structured context
  * @param {Object} dashboardData - Dashboard data from analyseData()
  * @param {string} question - User's question
  * @param {Object|null} ppcMetrics - PPCMetrics data from PPCMetrics model (optional)
+ * @param {Object} cogsValues - COGS values keyed by ASIN (optional)
  */
-const buildModelContext = (dashboardData, question, ppcMetrics = null) => {
+const buildModelContext = (dashboardData, question, ppcMetrics = null, cogsValues = {}) => {
     if (!dashboardData) {
         return {
             question,
@@ -298,6 +300,7 @@ const buildModelContext = (dashboardData, question, ppcMetrics = null) => {
         campaignWiseTotalSalesAndCost,
         totalSponsoredAdsErrors,
         sponsoredAdsErrorDetails,
+        adsKeywordsPerformanceData, // Raw keyword data for wasted spend calculation
         totalErrorInConversion,
         TotalRankingerrors,
         totalInventoryErrors,
@@ -367,16 +370,51 @@ const buildModelContext = (dashboardData, question, ppcMetrics = null) => {
         },
     };
 
+    // IMPORTANT: Calculate net profit margin WITH COGS to match the dashboard
+    // Dashboard uses: netProfit = grossProfit - (cogsPerUnit * quantity)
+    // Dashboard uses: profitMargin = (netProfit / sales) * 100
     const topProfitability = Array.isArray(profitibilityData)
         ? profitibilityData
               .slice()
+              .map(p => {
+                  // Get COGS for this ASIN (if user has entered it)
+                  const cogsPerUnit = cogsValues[p.asin] || 0;
+                  const quantity = p.quantity || 0;
+                  const totalCogs = cogsPerUnit * quantity;
+                  
+                  // Calculate gross profit (same as backend)
+                  const grossProfit = p.grossProfit !== undefined 
+                      ? p.grossProfit 
+                      : ((p.sales || 0) - (p.ads || 0) - (p.totalFees || p.amzFee || 0));
+                  
+                  // Calculate net profit (subtracting COGS like dashboard does)
+                  const netProfit = grossProfit - totalCogs;
+                  
+                  // Calculate net profit margin (same as dashboard: ProfitibilityDashboard.jsx line 854)
+                  const netProfitMargin = p.sales > 0 ? (netProfit / p.sales) * 100 : 0;
+                  
+                  return {
+                      ...p,
+                      grossProfit: parseFloat(grossProfit.toFixed(2)),
+                      totalCogs: parseFloat(totalCogs.toFixed(2)),
+                      netProfit: parseFloat(netProfit.toFixed(2)),
+                      // Use net profit margin (with COGS) for consistency with dashboard
+                      netProfitMargin: parseFloat(netProfitMargin.toFixed(2)),
+                  };
+              })
               .sort((a, b) => (b.sales || 0) - (a.sales || 0))
               .slice(0, 25)
         : [];
 
-    const lossMakingAsins = topProfitability.filter((p) => (p.grossProfit || 0) < 0).slice(0, 15);
+    // Filter loss-making ASINs using NET profit (after COGS)
+    const lossMakingAsins = topProfitability
+        .filter((p) => (p.netProfit || 0) < 0)
+        .slice(0, 15);
+    
+    // Filter low margin ASINs using NET profit margin (after COGS)
+    // This matches dashboard: ProfitibilityDashboard.jsx line 662-663
     const lowMarginAsins = topProfitability
-        .filter((p) => (p.profitMargin || 0) > 0 && p.profitMargin < 10)
+        .filter((p) => (p.netProfitMargin || 0) >= 0 && p.netProfitMargin < 10)
         .slice(0, 15);
 
     const profitability = {
@@ -397,20 +435,37 @@ const buildModelContext = (dashboardData, question, ppcMetrics = null) => {
             overallAcos: acosValue,
             overallTacos: tacosValue,
         },
+        // IMPORTANT: Calculate wasted spend from raw keyword data WITHOUT aggregation
+        // This matches how Dashboard.jsx calculates it (lines 483-504)
+        // Dashboard sums ALL keyword rows where cost > 0 and sales < 0.01
         wastedSpendSummary: (() => {
-            if (!Array.isArray(sponsoredAdsErrorDetails)) {
+            if (!Array.isArray(adsKeywordsPerformanceData)) {
                 return null;
             }
-            const wastedKeywords = sponsoredAdsErrorDetails.filter(
-                (e) => e.errorType === 'wasted_spend_keyword'
-            );
+            // Filter keywords with cost > 0 and sales < 0.01 (wasted spend)
+            const wastedKeywords = adsKeywordsPerformanceData.filter(kw => {
+                const cost = parseFloat(kw.cost) || 0;
+                const sales = parseFloat(kw.attributedSales30d) || 0;
+                return cost > 0 && sales < 0.01;
+            });
+            // Sum all wasted spend without aggregation (same as dashboard)
             const wastedSpend = wastedKeywords.reduce(
-                (sum, kw) => sum + (kw.spend || 0),
+                (sum, kw) => sum + (parseFloat(kw.cost) || 0),
                 0
             );
+            // Get top wasted keywords by spend for AI context
+            const topWastedKeywords = wastedKeywords
+                .sort((a, b) => (parseFloat(b.cost) || 0) - (parseFloat(a.cost) || 0))
+                .slice(0, 10)
+                .map(kw => ({
+                    keyword: kw.keyword,
+                    spend: parseFloat(kw.cost) || 0,
+                    campaignName: kw.campaignName || 'Unknown Campaign',
+                }));
             return {
-                wastedSpend,
+                wastedSpend: parseFloat(wastedSpend.toFixed(2)),
                 wastedKeywordsCount: wastedKeywords.length,
+                topWastedKeywords,
             };
         })(),
         ppcDatewiseSample: Array.isArray(dateWiseTotalCosts)
@@ -532,8 +587,29 @@ class QMateService {
             });
         }
 
+        // Step 2.6: Fetch COGS data - needed to calculate net profit margin like the dashboard
+        let cogsValues = {};
+        try {
+            const cogsStart = Date.now();
+            const cogsResult = await CogsService.getCogs(userId, country);
+            if (cogsResult?.success && cogsResult?.data?.cogsValues) {
+                cogsValues = cogsResult.data.cogsValues;
+            }
+            logger.info('[QMate] CogsService.getCogs completed', {
+                userId,
+                country,
+                durationMs: Date.now() - cogsStart,
+                cogsCount: Object.keys(cogsValues).length,
+            });
+        } catch (cogsError) {
+            logger.warn('[QMate] Failed to fetch COGS, will use 0 for all products', {
+                userId,
+                error: cogsError.message,
+            });
+        }
+
         // Step 3: Build compact context for the model
-        const modelContext = buildModelContext(dashboardData, question, ppcMetrics);
+        const modelContext = buildModelContext(dashboardData, question, ppcMetrics, cogsValues);
 
         // Step 4: Build messages for OpenAI
         const baseMessages = [
