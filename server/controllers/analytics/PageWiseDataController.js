@@ -362,14 +362,20 @@ const getIssuesData = asyncHandler(async (req, res) => {
 
 /**
  * Get Issues by Product data
+ * Enhanced with product performance metrics, recommendations, and optional WoW/MoM comparison
+ * 
+ * Query params:
+ * - comparison: 'wow' | 'mom' | 'none' (default: 'none') - comparison type for performance deltas
  */
 const getIssuesByProductData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
+    // Optional comparison type from query params (wow, mom, none)
+    const comparisonType = req.query.comparison || 'none';
 
     try {
-        logger.info(`Getting issues by product data for user ${userId}`);
+        logger.info(`Getting issues by product data for user ${userId}, comparison: ${comparisonType}`);
 
         // Get raw data
         const analyseResult = await AnalyseService.Analyse(userId, Country, Region);
@@ -383,17 +389,96 @@ const getIssuesByProductData = asyncHandler(async (req, res) => {
         // Calculate full dashboard data
         const calculatedData = await analyseData(analyseResult.message, userId);
         const dashboardData = calculatedData.dashboardData;
+        
+        // Get raw data for performance metrics
+        const rawData = analyseResult.message;
 
-        // Extract issues by product specific data
+        // Import performance and recommendation services
+        const { aggregateProductPerformance, enrichProductsWithPerformance } = require('../../Services/Calculations/ProductPerformanceService.js');
+        const { buildErrorMaps, generateAllRecommendations, enrichProductsWithRecommendations } = require('../../Services/Calculations/RecommendationService.js');
+        const { fetchAndEnrichWithComparison, COMPARISON_TYPES } = require('../../Services/Calculations/ProductPerformanceComparisonService.js');
+        
+        // Aggregate performance metrics per ASIN
+        const productList = dashboardData.productWiseError || [];
+        const performanceMap = aggregateProductPerformance({
+            productList,
+            buyBoxData: rawData.BuyBoxData,
+            productWiseSponsoredAds: rawData.ProductWiseSponsoredAds,
+            economicsMetrics: rawData.EconomicsMetrics
+        });
+        
+        // Enrich products with performance
+        let enrichedProducts = enrichProductsWithPerformance(productList, performanceMap);
+        
+        // Optionally enrich with comparison data (WoW/MoM) - MUST be done BEFORE recommendations
+        // so that recommendations can consider sales/traffic trends
+        let comparisonMeta = null;
+        if (comparisonType && comparisonType !== 'none') {
+            logger.info('[PageWiseDataController] Calling fetchAndEnrichWithComparison', {
+                userId,
+                region: Region,
+                country: Country,
+                comparisonType,
+                hasBuyBoxData: !!rawData.BuyBoxData,
+                buyBoxDateRange: rawData.BuyBoxData?.dateRange,
+                hasEconomicsData: !!rawData.EconomicsMetrics,
+                economicsDateRange: rawData.EconomicsMetrics?.dateRange,
+                productsCount: enrichedProducts?.length
+            });
+            
+            const comparisonResult = await fetchAndEnrichWithComparison({
+                userId,
+                region: Region,
+                country: Country,
+                comparisonType,
+                currentBuyBoxData: rawData.BuyBoxData,
+                currentEconomicsData: rawData.EconomicsMetrics,
+                products: enrichedProducts
+            });
+            enrichedProducts = comparisonResult.products;
+            comparisonMeta = comparisonResult.comparisonMeta;
+            
+            logger.info('[PageWiseDataController] Comparison enrichment complete', {
+                comparisonMeta,
+                productsWithComparison: enrichedProducts.filter(p => p.comparison?.hasComparison).length,
+                sampleComparison: enrichedProducts[0]?.comparison
+            });
+        }
+        
+        // Build error maps for recommendations (including inventory errors)
+        const errorMaps = buildErrorMaps(
+            dashboardData.conversionProductWiseErrors || [],
+            dashboardData.rankingProductWiseErrors || [],
+            dashboardData.inventoryProductWiseErrors || []
+        );
+        
+        // Generate recommendations (now with comparison data available for trend-based recommendations)
+        const recommendationsMap = generateAllRecommendations(enrichedProducts, errorMaps);
+        
+        // Enrich products with recommendations
+        enrichedProducts = enrichProductsWithRecommendations(enrichedProducts, recommendationsMap);
+
+        // Extract issues by product specific data (with enriched product data)
         const issuesByProductData = {
-            productWiseError: dashboardData.productWiseError || [],
+            productWiseError: enrichedProducts,
             rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
             conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
             inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || [],
             TotalProduct: dashboardData.TotalProduct || [],
             ActiveProducts: dashboardData.ActiveProducts || [],
             InventoryAnalysis: dashboardData.InventoryAnalysis || {},
-            Country: dashboardData.Country
+            Country: dashboardData.Country,
+            // Include profitability data for Product Details page (grossProfit per ASIN)
+            profitibilityData: dashboardData.profitibilityData || [],
+            // Include BuyBox summary for reference
+            buyBoxSummary: rawData.BuyBoxData ? {
+                totalProducts: rawData.BuyBoxData.totalProducts,
+                productsWithBuyBox: rawData.BuyBoxData.productsWithBuyBox,
+                productsWithoutBuyBox: rawData.BuyBoxData.productsWithoutBuyBox,
+                dateRange: rawData.BuyBoxData.dateRange
+            } : null,
+            // Comparison metadata (if comparison was requested)
+            comparisonMeta: comparisonMeta
         };
 
         return res.status(200).json(
@@ -1296,6 +1381,121 @@ const getAccountHistoryData = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get historical performance data for a specific product (ASIN)
+ * Returns sessions, sales, conversion over time for trend graphs
+ * 
+ * Query params:
+ * - limit: Max data points (default 30)
+ * - granularity: 'daily' | 'weekly' | 'monthly' (default: 'daily')
+ *   - 'weekly': Labels as "Week 1", "Week 2", etc. (for WoW comparison)
+ *   - 'monthly': Labels as "Jan 2024", "Feb 2024", etc. (for MoM comparison)
+ */
+const getProductHistory = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+    const limit = parseInt(req.query.limit) || 30;
+    const granularity = req.query.granularity || 'daily';
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        logger.info(`Getting product history for ASIN ${asin}, user ${userId}, granularity: ${granularity}`);
+
+        const { getProductHistory: fetchHistory } = require('../../Services/Calculations/ProductHistoryService.js');
+        
+        const historyData = await fetchHistory({
+            userId,
+            region: Region,
+            country: Country,
+            asin,
+            limit,
+            granularity
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, historyData, "Product history retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProductHistory:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting product history: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Debug endpoint: Check historical data availability for WoW/MoM comparison
+ * Returns counts of BuyBoxData and EconomicsMetrics documents for the user
+ */
+const getComparisonDebugInfo = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
+        
+        // Get counts
+        const buyBoxDocs = await BuyBoxData.find({
+            User: userId,
+            region: Region,
+            country: Country
+        }).sort({ createdAt: -1 }).select('createdAt dateRange').lean();
+        
+        const economicsDocs = await EconomicsMetrics.find({
+            User: userId,
+            region: Region,
+            country: Country
+        }).sort({ createdAt: -1 }).select('createdAt dateRange').lean();
+        
+        const debugInfo = {
+            userId,
+            region: Region,
+            country: Country,
+            buyBoxData: {
+                count: buyBoxDocs.length,
+                canCompare: buyBoxDocs.length >= 2,
+                documents: buyBoxDocs.slice(0, 5).map(d => ({
+                    createdAt: d.createdAt,
+                    dateRange: d.dateRange
+                }))
+            },
+            economicsMetrics: {
+                count: economicsDocs.length,
+                canCompare: economicsDocs.length >= 2,
+                documents: economicsDocs.slice(0, 5).map(d => ({
+                    createdAt: d.createdAt,
+                    dateRange: d.dateRange
+                }))
+            },
+            comparisonAvailable: buyBoxDocs.length >= 2 || economicsDocs.length >= 2,
+            message: (buyBoxDocs.length >= 2 || economicsDocs.length >= 2) 
+                ? 'WoW/MoM comparison is available' 
+                : 'Need at least 2 data snapshots for comparison. Run analysis multiple times to build history.'
+        };
+        
+        logger.info('[getComparisonDebugInfo] Debug info:', debugInfo);
+
+        return res.status(200).json(
+            new ApiResponse(200, debugInfo, "Comparison debug info retrieved")
+        );
+
+    } catch (error) {
+        logger.error("Error in getComparisonDebugInfo:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting comparison debug info: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     getDashboardData,
     getProfitabilityData,
@@ -1310,6 +1510,8 @@ module.exports = {
     getAsinWiseSalesData,
     getYourProductsData,
     getNavbarData,
-    getAccountHistoryData
+    getAccountHistoryData,
+    getProductHistory,
+    getComparisonDebugInfo
 };
 

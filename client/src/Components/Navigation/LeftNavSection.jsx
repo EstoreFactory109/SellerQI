@@ -81,13 +81,14 @@ const LeftNavSection = () => {
     const isPPCDashboardPage = location.pathname === '/seller-central-checker/ppc-dashboard';
     const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
     const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
-    
-    // Keep dropdown open if we're on any issues-related page
+    const isIssuesSection = isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product';
+
+    // Keep dropdown open if we're on issues or issues-by-product (not on product detail page)
     React.useEffect(() => {
-        if (isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product') {
+        if (isIssuesSection) {
             setIssuesDropdownOpen(true);
         }
-    }, [isIssuesPage, location.pathname]);
+    }, [isIssuesPage, location.pathname, isIssuesSection]);
 
     // Keep settings dropdown open if we're on settings page
     React.useEffect(() => {
@@ -269,8 +270,8 @@ const LeftNavSection = () => {
                                 onClick={handleIssuesClick}
                             >
                                 <BadgeAlert className={`${iconClass} ${
-                                    isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product' 
-                                        ? iconActiveClass 
+                                    isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
+                                        ? iconActiveClass
                                         : iconInactiveClass
                                 }`} />
                                 <span className="font-medium flex-1">Issues</span>

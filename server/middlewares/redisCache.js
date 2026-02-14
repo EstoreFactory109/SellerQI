@@ -43,10 +43,23 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
                 }
             }
             
+            // For issues-by-product endpoint, include comparison param in cache key
+            // This ensures WoW and MoM comparisons get separate cache entries
+            if (pageType === 'issues-by-product') {
+                const comparison = req.query.comparison || 'none';
+                cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:comparison${comparison}`;
+            }
+            
             const redisClient = getRedisClient();
             
-            // Try to get cached data
-            const cachedData = await redisClient.get(cacheKey);
+            // Allow client to bypass cache for issues-by-product (e.g. after server deploy with recommendation text changes)
+            const skipCacheRead = pageType === 'issues-by-product' && req.query.forceRefresh === 'true';
+            if (skipCacheRead) {
+                logger.info(`Bypassing cache for ${pageType} (forceRefresh=true)`);
+            }
+            
+            // Try to get cached data (unless bypass requested)
+            const cachedData = skipCacheRead ? null : await redisClient.get(cacheKey);
             
             if (cachedData) {
                 logger.info(`Cache hit for key: ${cacheKey}`);
@@ -125,6 +138,18 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
             }
         } catch (patternError) {
             logger.warn('Could not clear your-products pattern cache:', patternError.message);
+        }
+
+        // Clear issues-by-product cache (keys include :comparisonnone, :comparisonwow, :comparisonmom)
+        const issuesByProductPattern = `analyse_data:issues-by-product:${userId}:${country}:${region}:${adminId || 'null'}:*`;
+        try {
+            const issuesKeys = await redisClient.keys(issuesByProductPattern);
+            if (issuesKeys && issuesKeys.length > 0) {
+                await Promise.all(issuesKeys.map(key => redisClient.del(key)));
+                logger.info(`Cleared ${issuesKeys.length} issues-by-product cache entries for user: ${userId}`);
+            }
+        } catch (patternError) {
+            logger.warn('Could not clear issues-by-product pattern cache:', patternError.message);
         }
         
         // Also clear the legacy cache key format for backward compatibility

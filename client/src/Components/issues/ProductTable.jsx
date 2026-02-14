@@ -17,7 +17,7 @@ export default function ProductTable() {
 
   const openProductWithIssuePage = (asin) => {
     if (asin) {
-      navigate(`/seller-central-checker/issues/${asin}`)
+      navigate(`/seller-central-checker/${asin}`)
     }
   }
 
@@ -186,7 +186,7 @@ export default function ProductTable() {
     const value = query.trim()
     const getProduct = sortedAllProducts.find(product => product.asin.toLowerCase() === value.toLowerCase() || product.name.toLowerCase() === value.toLowerCase());
     if (getProduct) {
-      navigate(`/seller-central-checker/issues/${getProduct.asin}`)
+      navigate(`/seller-central-checker/${getProduct.asin}`)
     }
   }
 
@@ -284,7 +284,7 @@ export default function ProductTable() {
                     suggestions.map((product) => (
                       <li
                         key={product.asin}
-                        onClick={() => navigate(`/seller-central-checker/issues/${product.asin}`)}
+                        onClick={() => navigate(`/seller-central-checker/${product.asin}`)}
                         className="text-sm cursor-pointer hover:scale-105 hover:bg-gray-100 transition-all ease-in-out duration-300 py-2 px-2 w-full"
                       >
                         {product.asin} - {product.name}...

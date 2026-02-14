@@ -27,7 +27,9 @@ const {
     getAsinWiseSalesData,
     getYourProductsData,
     getNavbarData,
-    getAccountHistoryData
+    getAccountHistoryData,
+    getProductHistory,
+    getComparisonDebugInfo
 } = require('../controllers/analytics/PageWiseDataController.js');
 
 const {
@@ -73,6 +75,14 @@ router.get('/issues', auth, getLocation, analyseDataCache(3600, 'issues'), getIs
 // ===== ISSUES BY PRODUCT PAGE =====
 // Returns detailed issues by product data
 router.get('/issues-by-product', auth, getLocation, analyseDataCache(3600, 'issues-by-product'), getIssuesByProductData);
+
+// ===== PRODUCT HISTORY (for single product trend graphs) =====
+// Returns historical performance data for a specific ASIN
+router.get('/product-history/:asin', auth, getLocation, getProductHistory);
+
+// ===== COMPARISON DEBUG (for checking WoW/MoM data availability) =====
+// Returns counts of BuyBoxData and EconomicsMetrics documents
+router.get('/comparison-debug', auth, getLocation, getComparisonDebugInfo);
 
 // ===== KEYWORD ANALYSIS PAGE =====
 // Returns keyword analysis data

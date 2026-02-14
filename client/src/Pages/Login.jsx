@@ -26,11 +26,26 @@ export default function Login() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
+    // Check if admin is logged in via admin-login page
+    const isAdminAuth = localStorage.getItem('isAdminAuth') === 'true';
+    if (isAdminAuth) {
+      // Admin is logged in via admin portal → redirect to manage-accounts
+      navigate('/manage-accounts');
+      return;
+    }
+    
     // Check if user is already logged in
     const isAuthenticated = localStorage.getItem('isAuth') === 'true';
     if (isAuthenticated) {
-      // Redirect to analyse-account page - it will handle dashboard access based on analysis status
-      navigate('/analyse-account');
+      // Check if user is a super admin (set during regular login)
+      const userAccessType = localStorage.getItem('userAccessType');
+      if (userAccessType === 'superAdmin') {
+        // Super admin logged in via regular login → redirect to manage-accounts page
+        navigate('/manage-accounts');
+      } else {
+        // Regular user → redirect to analyse-account page - it will handle dashboard access based on analysis status
+        navigate('/analyse-account');
+      }
     }
   }, [navigate]);
 
@@ -131,13 +146,20 @@ export default function Login() {
         const isSuperAdmin = user?.accessType === 'superAdmin';
         const adsAccountConnected = isAdsAccountConnected(user);
         
+        // Store accessType for redirect on page refresh
+        if (isSuperAdmin) {
+          localStorage.setItem('userAccessType', 'superAdmin');
+        } else {
+          localStorage.removeItem('userAccessType');
+        }
+        
         console.log('Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users go to analyse-account page.
+        // Flow: Super admins go to manage-accounts. Regular users go to analyse-account page.
         if (isSuperAdmin) {
-          // Super admin → redirect to dashboard directly
-          console.log('Login: Super admin - redirecting to dashboard');
-          navigate('/seller-central-checker/dashboard');
+          // Super admin → redirect to manage-accounts page
+          console.log('Login: Super admin - redirecting to manage-accounts');
+          navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
           // Both accounts connected → redirect to analyse-account page
           // Dashboard access will be determined by FirstAnalysisDone status on that page
@@ -198,13 +220,20 @@ export default function Login() {
         const adsAccountConnected = isAdsAccountConnected(user);
         const isSuperAdmin = user?.accessType === 'superAdmin';
         
+        // Store accessType for redirect on page refresh
+        if (isSuperAdmin) {
+          localStorage.setItem('userAccessType', 'superAdmin');
+        } else {
+          localStorage.removeItem('userAccessType');
+        }
+        
         console.log('Google Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
         
-        // Flow: Super admins always go to dashboard. Regular users go to analyse-account page.
+        // Flow: Super admins go to manage-accounts. Regular users go to analyse-account page.
         if (isSuperAdmin) {
-          // Super admin → redirect to dashboard directly
-          console.log('Google Login: Super admin - redirecting to dashboard');
-          navigate('/seller-central-checker/dashboard');
+          // Super admin → redirect to manage-accounts page
+          console.log('Google Login: Super admin - redirecting to manage-accounts');
+          navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
           // Both accounts connected → redirect to analyse-account page
           // Dashboard access will be determined by FirstAnalysisDone status on that page

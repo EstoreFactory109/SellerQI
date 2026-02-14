@@ -8,7 +8,10 @@ const { verifyPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
+const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
+const RazorpayService = require('../../Services/Razorpay/RazorpayService.js');
+const StripeService = require('../../Services/Stripe/StripeService.js');
 
 /**
  * SuperAdmin Login Controller
@@ -627,6 +630,195 @@ const getAllPaymentLogs = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Cancel User Subscription (Admin action)
+ * Allows superAdmin to cancel any user's subscription (Stripe or Razorpay)
+ * Works for both active subscriptions and trial subscriptions
+ * Protected route - requires superAdmin access
+ */
+const cancelUserSubscription = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId; // Should be set by auth middleware
+    const { userId } = req.params;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is required"));
+        return res.status(400).json(new ApiResponse(400, "", "User ID is required"));
+    }
+
+    // Verify admin exists and has superAdmin access
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        // Get user info
+        const user = await UserModel.findById(userId).select('firstName lastName email packageType subscriptionStatus isInTrialPeriod');
+        if (!user) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        // Find the user's subscription
+        const subscription = await Subscription.findOne({ 
+            userId,
+            status: { $in: ['active', 'trialing', 'authenticated'] }
+        });
+
+        if (!subscription) {
+            // Check if user is on LITE plan (no active subscription to cancel)
+            if (user.packageType === 'LITE') {
+                return res.status(400).json(new ApiResponse(400, "", "User is on LITE plan with no active subscription to cancel"));
+            }
+            
+            // User might have subscription data but no active subscription - update status manually
+            await UserModel.findByIdAndUpdate(userId, {
+                packageType: 'LITE',
+                subscriptionStatus: 'cancelled',
+                isInTrialPeriod: false,
+                trialEndsDate: null
+            });
+
+            logger.info(`SuperAdmin ${adminId} cancelled subscription for user ${userId} (no active subscription found, status updated)`);
+
+            return res.status(200).json(new ApiResponse(200, {
+                userId,
+                previousPackageType: user.packageType,
+                newPackageType: 'LITE',
+                message: 'User status updated to cancelled (no active subscription found)'
+            }, "User subscription status updated"));
+        }
+
+        const paymentGateway = subscription.paymentGateway;
+        const previousPackageType = subscription.planType || user.packageType;
+        const wasTrialing = subscription.status === 'trialing' || subscription.hasTrial || user.isInTrialPeriod;
+
+        let result;
+
+        // Cancel subscription based on payment gateway
+        if (paymentGateway === 'razorpay') {
+            // Check if Razorpay is configured
+            if (!RazorpayService.isConfigured()) {
+                // Manually update subscription in database if Razorpay is not configured
+                await Subscription.findOneAndUpdate(
+                    { userId },
+                    {
+                        status: 'cancelled',
+                        cancelAtPeriodEnd: false,
+                        hasTrial: false,
+                        trialEndsAt: null
+                    }
+                );
+
+                await UserModel.findByIdAndUpdate(userId, {
+                    packageType: 'LITE',
+                    subscriptionStatus: 'cancelled',
+                    isInTrialPeriod: false,
+                    trialEndsDate: null
+                });
+
+                result = {
+                    success: true,
+                    message: 'Subscription cancelled in database (Razorpay not configured)',
+                    wasTrialing
+                };
+            } else {
+                // Cancel via Razorpay service
+                result = await RazorpayService.cancelSubscription(userId);
+            }
+        } else if (paymentGateway === 'stripe') {
+            // Cancel via Stripe service (immediate cancellation for admin action)
+            result = await StripeService.cancelSubscription(userId, false);
+        } else {
+            // Unknown payment gateway - update database manually
+            await Subscription.findOneAndUpdate(
+                { userId },
+                {
+                    status: 'cancelled',
+                    cancelAtPeriodEnd: false,
+                    hasTrial: false,
+                    trialEndsAt: null
+                }
+            );
+
+            await UserModel.findByIdAndUpdate(userId, {
+                packageType: 'LITE',
+                subscriptionStatus: 'cancelled',
+                isInTrialPeriod: false,
+                trialEndsDate: null
+            });
+
+            result = {
+                success: true,
+                message: 'Subscription cancelled in database',
+                wasTrialing
+            };
+        }
+
+        // Log the admin action
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_SUBSCRIPTION_CANCELLED',
+            paymentGateway: paymentGateway?.toUpperCase() || 'UNKNOWN',
+            status: 'SUCCESS',
+            subscriptionId: subscription.stripeSubscriptionId || subscription.razorpaySubscriptionId,
+            planType: 'LITE',
+            previousPlanType: previousPackageType,
+            previousStatus: subscription.status,
+            newStatus: 'cancelled',
+            message: `SuperAdmin cancelled subscription${wasTrialing ? ' (was in trial)' : ''}`,
+            source: 'ADMIN',
+            metadata: {
+                adminId: adminId.toString(),
+                adminEmail: admin.email,
+                wasTrialing
+            }
+        });
+
+        logger.info(`SuperAdmin ${adminId} cancelled subscription for user ${userId} (gateway: ${paymentGateway}, wasTrialing: ${wasTrialing})`);
+
+        return res.status(200).json(new ApiResponse(200, {
+            userId,
+            userEmail: user.email,
+            userName: `${user.firstName} ${user.lastName}`,
+            previousPackageType,
+            newPackageType: 'LITE',
+            paymentGateway,
+            wasTrialing,
+            ...result
+        }, wasTrialing ? "Trial subscription cancelled successfully" : "Subscription cancelled successfully"));
+
+    } catch (error) {
+        // Log the failure
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_SUBSCRIPTION_CANCELLED',
+            paymentGateway: 'UNKNOWN',
+            status: 'FAILED',
+            errorMessage: error.message,
+            message: 'SuperAdmin failed to cancel subscription',
+            source: 'ADMIN',
+            metadata: {
+                adminId: adminId.toString()
+            }
+        });
+
+        logger.error(new ApiError(500, `Error cancelling subscription: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", error.message || "Failed to cancel subscription"));
+    }
+});
+
 module.exports = {
     adminLogin,
     adminLogout,
@@ -634,5 +826,6 @@ module.exports = {
     loginSelectedUser,
     deleteUser,
     getPaymentLogs,
-    getAllPaymentLogs
+    getAllPaymentLogs,
+    cancelUserSubscription
 };

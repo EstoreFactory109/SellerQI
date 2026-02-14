@@ -1389,11 +1389,12 @@ class RazorpayService {
                 throw new Error('Razorpay is not configured');
             }
 
-            // Find user's active subscription
+            // Find user's active or trialing subscription
+            // Include 'trialing' status to allow cancellation during trial period
             const subscription = await Subscription.findOne({ 
                 userId, 
                 paymentGateway: 'razorpay',
-                status: { $in: ['active', 'authenticated'] }
+                status: { $in: ['active', 'authenticated', 'trialing'] }
             });
 
             if (!subscription) {
@@ -1404,6 +1405,8 @@ class RazorpayService {
                 throw new Error('No Razorpay subscription ID found');
             }
 
+            const wasTrialing = subscription.status === 'trialing' || subscription.hasTrial;
+
             // Cancel subscription in Razorpay
             await this.razorpay.subscriptions.cancel(subscription.razorpaySubscriptionId);
 
@@ -1412,7 +1415,9 @@ class RazorpayService {
                 { userId, razorpaySubscriptionId: subscription.razorpaySubscriptionId },
                 {
                     status: 'cancelled',
-                    cancelAtPeriodEnd: false
+                    cancelAtPeriodEnd: false,
+                    hasTrial: false,
+                    trialEndsAt: null
                 }
             );
 
@@ -1421,10 +1426,11 @@ class RazorpayService {
                 packageType: 'LITE',
                 subscriptionStatus: 'cancelled',
                 isInTrialPeriod: false, // Reset trial status
+                trialEndsDate: null, // Clear trial end date
                 accessType: 'user' // Reset accessType
             });
 
-            logger.info(`Razorpay subscription cancelled for user: ${userId}, subscription: ${subscription.razorpaySubscriptionId}`);
+            logger.info(`Razorpay subscription cancelled for user: ${userId}, subscription: ${subscription.razorpaySubscriptionId}, wasTrialing: ${wasTrialing}`);
 
             // Log subscription cancellation from user action
             await PaymentLogs.logEvent({
@@ -1437,13 +1443,14 @@ class RazorpayService {
                 previousPlanType: subscription.planType,
                 previousStatus: subscription.status,
                 newStatus: 'cancelled',
-                message: 'User cancelled subscription',
+                message: wasTrialing ? 'User cancelled subscription during trial' : 'User cancelled subscription',
                 source: 'FRONTEND'
             });
 
             return { 
                 success: true, 
-                message: 'Subscription cancelled successfully' 
+                message: 'Subscription cancelled successfully',
+                wasTrialing
             };
 
         } catch (error) {

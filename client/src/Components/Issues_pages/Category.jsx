@@ -178,8 +178,8 @@ const RankingTableSection = ({ title, data }) => {
                   key={idx} 
                   role="button"
                   tabIndex={0}
-                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
                   className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
                   <td className="py-2 px-2 align-top w-40">
@@ -364,8 +364,8 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                   key={idx} 
                   role="button"
                   tabIndex={0}
-                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
                   className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
                   <td className="py-2 px-2 align-top w-40">
@@ -554,8 +554,8 @@ const InventoryTableSection = ({ title, data }) => {
                   key={idx} 
                   role="button"
                   tabIndex={0}
-                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
                   className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
                   <td className="py-2 px-2 align-top w-40">
@@ -703,8 +703,8 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
                   key={idx} 
                   role="button"
                   tabIndex={0}
-                  onClick={() => row.asin && navigate(`/seller-central-checker/issues/${row.asin}`)}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/issues/${row.asin}`); } }}
+                  onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
                   className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
                 >
                   <td className="py-2 px-2 align-top w-40">

@@ -156,11 +156,27 @@ const AnalysingAccount = () => {
     if (hasCheckedAuthRef.current) return;
     hasCheckedAuthRef.current = true;
 
+    // Check if admin is logged in via admin-login page - redirect to manage-accounts
+    const isAdminAuth = localStorage.getItem('isAdminAuth') === 'true';
+    if (isAdminAuth) {
+      navigate('/manage-accounts', { replace: true });
+      return;
+    }
+
     const checkAuth = async () => {
       try {
         const result = await coordinatedAuthCheck();
         
         if (result.isAuthenticated && result.user) {
+          // Check if user is a super admin - redirect to manage-accounts
+          const isSuperAdmin = result.user?.accessType === 'superAdmin';
+          if (isSuperAdmin) {
+            // Store accessType for future redirects
+            localStorage.setItem('userAccessType', 'superAdmin');
+            navigate('/manage-accounts', { replace: true });
+            return;
+          }
+          
           setIsAuthenticated(true);
           // Update Redux state with user data
           dispatch(loginSuccess(result.user));

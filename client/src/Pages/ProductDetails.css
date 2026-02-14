@@ -21,4 +21,15 @@
   position: relative;
   overflow: hidden;
   background-color: #f3f4f6;
+}
+
+/* Product Details page sections - aligned with app theme (#161b22, #30363d, #21262d) */
+.product-details-page .section-card {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.product-details-page .section-header {
+  background-color: #21262d;
+  border-bottom: 1px solid #30363d;
 } 

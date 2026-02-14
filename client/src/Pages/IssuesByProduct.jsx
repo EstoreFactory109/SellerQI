@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useSelector } from "react-redux";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, LineChart, ArrowRight, Download } from 'lucide-react';
+import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, TrendingDown, LineChart, ArrowRight, Download, Calendar, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import noImage from '../assets/Icons/no-image.png';
+import { fetchIssuesByProductData } from '../redux/slices/PageDataSlice.js';
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -440,9 +441,55 @@ const InventoryIssuesTable = ({ product }) => {
     );
 };
 
+/**
+ * ChangeIndicator - Displays period-over-period change with color coding
+ * @param {number|null} percentChange - Percentage change (e.g., 15.5 for +15.5%)
+ * @param {number} delta - Raw delta value (used when percentChange is null)
+ * @param {boolean} positiveIsGood - Whether a positive change is good (green) or bad (red)
+ * @param {boolean} isPercentagePoint - Whether to display as "pp" instead of "%"
+ */
+const ChangeIndicator = ({ percentChange, delta, positiveIsGood = true, isPercentagePoint = false }) => {
+    // Determine the value to display
+    const value = percentChange !== null && percentChange !== undefined ? percentChange : delta;
+    
+    if (value === null || value === undefined) {
+        return <span className="text-[9px] text-gray-500">New</span>;
+    }
+    
+    const isPositive = value > 0;
+    const isNegative = value < 0;
+    const isNeutral = Math.abs(value) < 0.5;
+    
+    // Determine color based on direction and whether positive is good
+    let colorClass = 'text-gray-400';
+    if (!isNeutral) {
+        if (positiveIsGood) {
+            colorClass = isPositive ? 'text-green-400' : 'text-red-400';
+        } else {
+            colorClass = isPositive ? 'text-red-400' : 'text-green-400';
+        }
+    }
+    
+    // Format the value
+    const formattedValue = Math.abs(value).toFixed(1);
+    const suffix = isPercentagePoint ? 'pp' : '%';
+    const prefix = isPositive ? '+' : isNegative ? '-' : '';
+    
+    return (
+        <span className={`inline-flex items-center text-[9px] ${colorClass}`}>
+            {isPositive && <ArrowUpRight className="w-2 h-2" />}
+            {isNegative && <ArrowDownRight className="w-2 h-2" />}
+            {isNeutral && <Minus className="w-2 h-2" />}
+            <span>{prefix}{formattedValue}{suffix}</span>
+        </span>
+    );
+};
+
 const IssuesByProduct = () => {
+    const dispatch = useDispatch();
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const currency = useSelector(state => state.currency?.currency) || '$';
+    const pageDataState = useSelector((state) => state.pageData?.issuesByProduct);
     const navigate = useNavigate();
     // Enhanced state management
     const [currentPage, setCurrentPage] = useState(0);
@@ -458,6 +505,10 @@ const IssuesByProduct = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
     
+    // Comparison state for WoW/MoM
+    const [comparisonType, setComparisonType] = useState('none');
+    const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+    
     
     const ITEMS_PER_PAGE = 6; // Reduced for better layout
     
@@ -471,10 +522,35 @@ const IssuesByProduct = () => {
     
     const sortOptions = [
         { value: 'issues', label: 'Most Issues' },
+        { value: 'sessions', label: 'Most Sessions' },
+        { value: 'conversion', label: 'Conversion Rate' },
+        { value: 'sales', label: 'Sales' },
+        { value: 'acos', label: 'ACOS' },
         { value: 'name', label: 'Product Name' },
         { value: 'asin', label: 'ASIN' },
         { value: 'price', label: 'Price' }
     ];
+    
+    // Comparison options for period-over-period analysis
+    const comparisonOptions = [
+        { value: 'none', label: 'Day Over Day', shortLabel: 'DOD' },
+        { value: 'wow', label: 'Week Over Week', shortLabel: 'WoW' },
+        { value: 'mom', label: 'Month Over Month', shortLabel: 'MoM' }
+    ];
+    
+    // Handle comparison type change
+    const handleComparisonChange = useCallback(async (newType) => {
+        if (newType === comparisonType) return;
+        setComparisonType(newType);
+        setIsLoadingComparison(true);
+        try {
+            await dispatch(fetchIssuesByProductData({ comparison: newType, forceRefresh: true })).unwrap();
+        } catch (error) {
+            console.error('Error fetching comparison data:', error);
+        } finally {
+            setIsLoadingComparison(false);
+        }
+    }, [dispatch, comparisonType]);
     
     // Check if product has any ranking issues
     const hasAnyRankingIssues = (product) => {
@@ -651,6 +727,24 @@ const IssuesByProduct = () => {
                     const aIssues = countRankingIssues(a) + countConversionIssues(a) + countInventoryIssues(a);
                     const bIssues = countRankingIssues(b) + countConversionIssues(b) + countInventoryIssues(b);
                     return bIssues - aIssues;
+                case 'sessions':
+                    // Sort by sessions (descending) - higher sessions first
+                    return (b.performance?.sessions || 0) - (a.performance?.sessions || 0);
+                case 'conversion':
+                    // Sort by conversion rate (descending) - higher conversion first
+                    return (b.performance?.conversionRate || 0) - (a.performance?.conversionRate || 0);
+                case 'sales':
+                    // Sort by sales (descending) - higher sales first
+                    return (b.performance?.sales || 0) - (a.performance?.sales || 0);
+                case 'acos':
+                    // Sort by ACOS (ascending) - lower ACOS first (better)
+                    // Products with 0 ACOS (no PPC) go to end
+                    const aAcos = a.performance?.acos || 0;
+                    const bAcos = b.performance?.acos || 0;
+                    if (aAcos === 0 && bAcos === 0) return 0;
+                    if (aAcos === 0) return 1;
+                    if (bAcos === 0) return -1;
+                    return aAcos - bAcos;
                 case 'name':
                     return (a.name || '').localeCompare(b.name || '');
                 case 'asin':
@@ -773,7 +867,7 @@ const IssuesByProduct = () => {
     
     // Navigate to detailed product issues page
     const viewProductDetails = (asin) => {
-        navigate(`/seller-central-checker/issues/${asin}`);
+        navigate(`/seller-central-checker/${asin}`);
     };
     
     // Count issues for each category
@@ -907,6 +1001,11 @@ const IssuesByProduct = () => {
         setCurrentPage(0);
     }, [searchQuery, selectedPriority, sortBy]);
 
+    // Fetch issues-by-product data on mount so this page has its own data (and comparison can be applied)
+    useEffect(() => {
+        dispatch(fetchIssuesByProductData());
+    }, [dispatch]);
+
     // Handle clicks outside dropdown
 
     return (
@@ -967,6 +1066,30 @@ const IssuesByProduct = () => {
                                                 <span>{stats.totalProducts} products need attention</span>
                                             </div>
                                         )}
+                                        {/* Compare to: WoW / MoM - prominent in banner so always visible */}
+                                        <div className="flex items-center gap-2 mt-3 flex-wrap">
+                                            <span className="text-xs font-medium text-gray-400">Compare to:</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                                <select
+                                                    value={comparisonType}
+                                                    onChange={(e) => handleComparisonChange(e.target.value)}
+                                                    disabled={isLoadingComparison}
+                                                    className="px-2.5 py-1.5 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-[#1a1a1a] disabled:opacity-50 min-w-[160px]"
+                                                    title="Show week-on-week or month-on-month change vs previous period"
+                                                >
+                                                    {comparisonOptions.map(option => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                                {isLoadingComparison && (
+                                                    <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                                                )}
+                                                {comparisonType !== 'none' && !isLoadingComparison && info?.comparisonMeta?.hasComparison && (
+                                                    <span className="text-xs text-green-400 font-medium">{comparisonType === 'wow' ? 'WoW active' : 'MoM active'}</span>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                     
                                     {/* Stats Cards */}
@@ -1044,6 +1167,21 @@ const IssuesByProduct = () => {
                                     </select>
                                 </div>
                             </div>
+                            
+                            {/* Message when comparison is selected (Compare control is in banner above) */}
+                            {comparisonType !== 'none' && !isLoadingComparison && (
+                                <div className="mt-2 px-2">
+                                    {info?.comparisonMeta?.hasComparison ? (
+                                        <p className="text-xs text-gray-400">
+                                            Showing <span className="text-blue-400 font-medium">{comparisonType === 'wow' ? 'Week-on-Week' : 'Month-on-Month'}</span> comparison. Change % appears next to Sessions, Conv %, Sales, and ACOS on each product.
+                                        </p>
+                                    ) : (
+                                        <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
+                                            No previous period data available for comparison. Comparison needs at least two data snapshots (e.g. run analysis again next week for Week-on-Week).
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1130,18 +1268,159 @@ const IssuesByProduct = () => {
                                                             <span className="text-xs text-gray-500">
                                                                 {totalIssues} {totalIssues === 1 ? 'issue' : 'issues'} found
                                                             </span>
+                                                            {/* Recommendation Badge */}
+                                                            {product.primaryRecommendation && (
+                                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${
+                                                                    product.primaryRecommendation.type === 'add_ppc' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                                                                    product.primaryRecommendation.type === 'reduce_ppc' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                                                    product.primaryRecommendation.type === 'fix_listing' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                                    product.primaryRecommendation.type === 'optimize_keywords' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                                                                    'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                                                                }`}>
+                                                                    {product.primaryRecommendation.shortLabel}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <button 
-                                                    className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-all flex items-center gap-1"
-                                                    onClick={() => viewProductDetails(product.asin)}
-                                                >
-                                                    <Eye className="w-3 h-3" />
-                                                    View Details
-                                                </button>
+                                                
+                                                {/* Performance Metrics Strip */}
+                                                <div className="flex items-center gap-3">
+                                                    {product.performance && (
+                                                        <div className="hidden lg:flex items-center gap-2 text-xs">
+                                                            <div className="flex flex-col items-center px-2 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                                <span className="text-gray-400">Sessions</span>
+                                                                <span className="font-semibold text-gray-100">{product.performance.sessions?.toLocaleString() || 0}</span>
+                                                                {product.comparison?.hasComparison && product.comparison?.changes?.sessions && (
+                                                                    <ChangeIndicator 
+                                                                        percentChange={product.comparison.changes.sessions.percentChange} 
+                                                                        positiveIsGood={true}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-col items-center px-2 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                                <span className="text-gray-400">Conv %</span>
+                                                                <span className={`font-semibold ${product.performance.conversionRate >= 10 ? 'text-green-400' : product.performance.conversionRate >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                    {product.performance.conversionRate?.toFixed(1) || 0}%
+                                                                </span>
+                                                                {product.comparison?.hasComparison && product.comparison?.changes?.conversionRate && (
+                                                                    <ChangeIndicator 
+                                                                        percentChange={product.comparison.changes.conversionRate.percentChange} 
+                                                                        positiveIsGood={true}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-col items-center px-2 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                                <span className="text-gray-400">Sales</span>
+                                                                <span className="font-semibold text-gray-100">{formatCurrencyWithLocale(product.performance.sales || 0, currency)}</span>
+                                                                {product.comparison?.hasComparison && product.comparison?.changes?.sales && (
+                                                                    <ChangeIndicator 
+                                                                        percentChange={product.comparison.changes.sales.percentChange} 
+                                                                        positiveIsGood={true}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                            {product.performance.hasPPC && (
+                                                                <div className="flex flex-col items-center px-2 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                                    <span className="text-gray-400">ACOS</span>
+                                                                    <span className={`font-semibold ${product.performance.acos <= 30 ? 'text-green-400' : product.performance.acos <= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                        {product.performance.acos?.toFixed(1) || 0}%
+                                                                    </span>
+                                                                    {product.comparison?.hasComparison && product.comparison?.changes?.acos && (
+                                                                        <ChangeIndicator 
+                                                                            percentChange={null}
+                                                                            delta={product.comparison.changes.acos.delta}
+                                                                            positiveIsGood={false}
+                                                                            isPercentagePoint={true}
+                                                                        />
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    <button 
+                                                        className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-all flex items-center gap-1"
+                                                        onClick={() => viewProductDetails(product.asin)}
+                                                    >
+                                                        <Eye className="w-3 h-3" />
+                                                        View Details
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
+                                        
+                                        {/* Mobile Performance Metrics Strip */}
+                                        {product.performance && (
+                                            <div className="lg:hidden border-b border-[#30363d] p-2 bg-[#1a1a1a]">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="grid grid-cols-4 gap-2 flex-1 text-xs">
+                                                        <div className="flex flex-col items-center px-1.5 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                            <span className="text-gray-400 text-[10px]">Sessions</span>
+                                                            <span className="font-semibold text-gray-100">{product.performance.sessions?.toLocaleString() || 0}</span>
+                                                            {product.comparison?.hasComparison && product.comparison?.changes?.sessions && (
+                                                                <ChangeIndicator 
+                                                                    percentChange={product.comparison.changes.sessions.percentChange} 
+                                                                    positiveIsGood={true}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-col items-center px-1.5 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                            <span className="text-gray-400 text-[10px]">Conv %</span>
+                                                            <span className={`font-semibold ${product.performance.conversionRate >= 10 ? 'text-green-400' : product.performance.conversionRate >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                {product.performance.conversionRate?.toFixed(1) || 0}%
+                                                            </span>
+                                                            {product.comparison?.hasComparison && product.comparison?.changes?.conversionRate && (
+                                                                <ChangeIndicator 
+                                                                    percentChange={product.comparison.changes.conversionRate.percentChange} 
+                                                                    positiveIsGood={true}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-col items-center px-1.5 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                            <span className="text-gray-400 text-[10px]">Sales</span>
+                                                            <span className="font-semibold text-gray-100">{formatCurrencyWithLocale(product.performance.sales || 0, currency)}</span>
+                                                            {product.comparison?.hasComparison && product.comparison?.changes?.sales && (
+                                                                <ChangeIndicator 
+                                                                    percentChange={product.comparison.changes.sales.percentChange} 
+                                                                    positiveIsGood={true}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-col items-center px-1.5 py-1 bg-[#21262d] rounded border border-[#30363d]">
+                                                            <span className="text-gray-400 text-[10px]">{product.performance.hasPPC ? 'ACOS' : 'PPC'}</span>
+                                                            {product.performance.hasPPC ? (
+                                                                <>
+                                                                    <span className={`font-semibold ${product.performance.acos <= 30 ? 'text-green-400' : product.performance.acos <= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                        {product.performance.acos?.toFixed(1) || 0}%
+                                                                    </span>
+                                                                    {product.comparison?.hasComparison && product.comparison?.changes?.acos && (
+                                                                        <ChangeIndicator 
+                                                                            percentChange={null}
+                                                                            delta={product.comparison.changes.acos.delta}
+                                                                            positiveIsGood={false}
+                                                                            isPercentagePoint={true}
+                                                                        />
+                                                                    )}
+                                                                </>
+                                                            ) : (
+                                                                <span className="font-semibold text-gray-500">None</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {product.primaryRecommendation && (
+                                                        <div className={`px-2 py-1 rounded text-[10px] font-semibold whitespace-nowrap ${
+                                                            product.primaryRecommendation.type === 'add_ppc' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                                                            product.primaryRecommendation.type === 'reduce_ppc' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                                            product.primaryRecommendation.type === 'fix_listing' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                            product.primaryRecommendation.type === 'optimize_keywords' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                                                            'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                                                        }`}>
+                                                            {product.primaryRecommendation.shortLabel}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
                                         
                                         {/* Enhanced Product Tabs */}
                                         <div className="flex border-b border-[#30363d]">

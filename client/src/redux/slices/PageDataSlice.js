@@ -53,7 +53,8 @@ const initialState = {
         data: null,
         loading: false,
         error: null,
-        lastFetched: null
+        lastFetched: null,
+        comparison: 'none' // Current comparison type: 'wow', 'mom', or 'none'
     },
     // Keyword Analysis Data
     keywordAnalysis: {
@@ -84,9 +85,10 @@ const initialState = {
         error: null,
         lastFetched: null
     },
-    // Your Products Data
+    // Your Products Data (per-status cache so Inactive/Incomplete don't refetch on tab switch)
     yourProducts: {
         data: null,
+        cacheByStatus: {}, // { 'Active'|'Inactive'|'Incomplete'|'All': { products, summary, pagination, currentStatus, lastFetched } }
         loading: false,
         error: null,
         lastFetched: null
@@ -215,18 +217,61 @@ export const fetchIssuesData = createAsyncThunk(
     }
 );
 
+/**
+ * Fetch issues by product data with optional comparison type
+ * @param {Object} options - Optional parameters
+ * @param {string} options.comparison - Comparison type: 'wow' | 'mom' | 'none' (default: 'none')
+ * @param {boolean} options.forceRefresh - Force refresh ignoring cache
+ */
 export const fetchIssuesByProductData = createAsyncThunk(
     'pageData/fetchIssuesByProduct',
-    async (_, { getState, rejectWithValue }) => {
+    async (options = {}, { getState, dispatch, rejectWithValue }) => {
         try {
+            const { comparison = 'none', forceRefresh = false } = options || {};
             const state = getState();
             const lastFetched = state.pageData?.issuesByProduct?.lastFetched;
-            if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
-                return state.pageData.issuesByProduct.data;
+            const cachedComparison = state.pageData?.issuesByProduct?.comparison;
+            
+            // Use cache if available, not forcing refresh, and comparison type matches
+            if (!forceRefresh && lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS && cachedComparison === comparison) {
+                const cachedData = state.pageData.issuesByProduct.data;
+                
+                // Still sync cached data to DashboardSlice for ProductDetails.jsx
+                // This ensures enriched productWiseError (with performance) is available
+                if (cachedData) {
+                    const existingDashboard = getState().Dashboard?.DashBoardInfo || {};
+                    dispatch(setDashboardInfo({
+                        ...existingDashboard,
+                        ...cachedData
+                    }));
+                }
+                
+                return cachedData;
             }
             
-            const response = await axiosInstance.get('/api/pagewise/issues-by-product');
-            return response.data.data;
+            // Build URL with optional comparison and forceRefresh params (forceRefresh bypasses server Redis cache)
+            let url = '/api/pagewise/issues-by-product';
+            const params = new URLSearchParams();
+            if (comparison && comparison !== 'none') params.set('comparison', comparison);
+            if (forceRefresh) params.set('forceRefresh', 'true');
+            if (params.toString()) url += `?${params.toString()}`;
+            
+            const response = await axiosInstance.get(url);
+            const data = response.data.data;
+            
+            // Sync to DashboardSlice for backward compatibility with ProductDetails.jsx
+            // This ensures the single-product detail view has access to enriched data
+            // (performance metrics and recommendations)
+            if (data) {
+                const existingDashboard = getState().Dashboard?.DashBoardInfo || {};
+                dispatch(setDashboardInfo({
+                    ...existingDashboard,
+                    ...data
+                }));
+            }
+            
+            // Return data along with comparison type for caching
+            return { ...data, _comparison: comparison };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch issues by product data');
         }
@@ -359,16 +404,19 @@ export const fetchAccountHistoryData = createAsyncThunk(
     }
 );
 
+// Cache key for your-products by status (Active, Inactive, Incomplete, or All)
+const yourProductsCacheKey = (status) => (status === undefined || status === null ? 'All' : status);
+
 export const fetchYourProductsData = createAsyncThunk(
     'pageData/fetchYourProducts',
     async ({ page = 1, limit = 20, summaryOnly = false, append = false, status = undefined, reset = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existingData = state.pageData?.yourProducts?.data;
+            const cacheByStatus = state.pageData?.yourProducts?.cacheByStatus || {};
             const lastFetched = state.pageData?.yourProducts?.lastFetched;
             
             // If reset is true, always fetch fresh data (bypass cache)
-            // Otherwise, check cache first before fetching
             if (reset) {
                 console.log('[Redux] Reset flag set - fetching fresh data from database');
                 const response = await axiosInstance.get('/api/pagewise/your-products', {
@@ -377,35 +425,28 @@ export const fetchYourProductsData = createAsyncThunk(
                 return { ...response.data.data, currentStatus: status, fromCache: false };
             }
             
-            // Check cache BEFORE fetching - only fetch if data doesn't exist or is stale
-            // For page 1 requests (initial load or tab switch), check if we have cached data for this status
+            // For page 1 (initial load or tab switch), check per-status cache first
             if (page === 1 && !append) {
-                const hasCachedData = existingData && 
-                                    existingData.products && 
-                                    Array.isArray(existingData.products) && 
-                                    existingData.products.length > 0;
+                const cacheKey = yourProductsCacheKey(status);
+                const cached = cacheByStatus[cacheKey];
+                const hasCached = cached?.products && Array.isArray(cached.products);
+                const cacheRecent = cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS;
                 
-                const statusMatches = existingData?.currentStatus === status;
-                const isRecent = lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS;
-                
-                // If we have cached data for this exact status and it's recent, return it
-                if (hasCachedData && statusMatches && isRecent && existingData.issuesData !== undefined) {
-                    console.log('[Redux] Using cached data from Redux (no database call):', {
+                if (hasCached && cacheRecent && cached.issuesData !== undefined) {
+                    console.log('[Redux] Using per-status cached data (no database call):', {
                         status,
-                        productsCount: existingData.products.length,
-                        lastFetched: new Date(lastFetched).toISOString(),
-                        ageMinutes: ((Date.now() - lastFetched) / 1000 / 60).toFixed(2)
+                        cacheKey,
+                        productsCount: cached.products.length,
+                        ageMinutes: ((Date.now() - cached.lastFetched) / 1000 / 60).toFixed(2)
                     });
-                    return { ...existingData, fromCache: true };
+                    return { ...cached, fromCache: true };
                 }
                 
-                // If we don't have data or status doesn't match or data is stale, fetch from database
-                console.log('[Redux] Cache miss - fetching from database:', {
-                    hasCachedData,
-                    statusMatches,
-                    isRecent,
+                console.log('[Redux] Cache miss for status - fetching from database:', {
                     requestedStatus: status,
-                    cachedStatus: existingData?.currentStatus
+                    cacheKey,
+                    hasCached: !!cached,
+                    cacheRecent: !!cacheRecent
                 });
             }
             
@@ -525,12 +566,8 @@ const pageDataSlice = createSlice({
         clearPageData: (state, action) => {
             const page = action.payload;
             if (state[page]) {
-                state[page] = {
-                    data: null,
-                    loading: false,
-                    error: null,
-                    lastFetched: null
-                };
+                const base = { data: null, loading: false, error: null, lastFetched: null };
+                state[page] = page === 'yourProducts' ? { ...base, cacheByStatus: {} } : base;
             }
         },
         // Force refresh - clear lastFetched to allow re-fetch
@@ -618,7 +655,10 @@ const pageDataSlice = createSlice({
             })
             .addCase(fetchIssuesByProductData.fulfilled, (state, action) => {
                 state.issuesByProduct.loading = false;
-                state.issuesByProduct.data = action.payload;
+                // Extract comparison type from payload and store separately
+                const { _comparison, ...data } = action.payload || {};
+                state.issuesByProduct.data = data;
+                state.issuesByProduct.comparison = _comparison || 'none';
                 state.issuesByProduct.lastFetched = Date.now();
             })
             .addCase(fetchIssuesByProductData.rejected, (state, action) => {
@@ -696,9 +736,16 @@ const pageDataSlice = createSlice({
                 state.yourProducts.error = null;
             })
             .addCase(fetchYourProductsData.fulfilled, (state, action) => {
+                const payload = action.payload;
                 state.yourProducts.loading = false;
-                state.yourProducts.data = action.payload;
+                state.yourProducts.data = payload;
                 state.yourProducts.lastFetched = Date.now();
+                // Store in per-status cache so switching back to Inactive/Inactive/etc. uses cache
+                const cacheKey = yourProductsCacheKey(payload?.currentStatus);
+                state.yourProducts.cacheByStatus[cacheKey] = {
+                    ...payload,
+                    lastFetched: Date.now()
+                };
             })
             .addCase(fetchYourProductsData.rejected, (state, action) => {
                 state.yourProducts.loading = false;

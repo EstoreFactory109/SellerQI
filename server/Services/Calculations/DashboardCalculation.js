@@ -1019,7 +1019,7 @@ const analyseData = async (data, userId = null) => {
             // Filter description errors if A+ content is present
             const filteredElm = filterDescriptionErrors(elm, asin);
 
-            const title = filteredElm.data?.Title?.substring(0, 50) || "N/A";
+            const title = filteredElm.data?.Title || "N/A";
             // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
             const productDetails = salesByAsinMap.get(asin);
             const sales = productDetails?.amount || 0;
@@ -1091,7 +1091,7 @@ const analyseData = async (data, userId = null) => {
         if (inventoryErrors > 0) {
             // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
             const totalProduct = totalProductsByAsinMap.get(asin);
-            const title = totalProduct?.itemName?.substring(0, 50) || totalProduct?.title?.substring(0, 50) || "N/A";
+            const title = totalProduct?.itemName || totalProduct?.title || "N/A";
             
             // Add to inventoryProductWiseErrors array
             inventoryProductWiseErrors.push({
@@ -1159,7 +1159,7 @@ const analyseData = async (data, userId = null) => {
                     }
                     // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
                     const totalProduct = totalProductsByAsinMap.get(asin);
-                    const title = totalProduct?.itemName || totalProduct?.title?.substring(0, 50) || "N/A";
+                    const title = totalProduct?.itemName || totalProduct?.title || "N/A";
                     
                     // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
                     const imageItem = imageResultMap.get(asin);
@@ -1185,9 +1185,9 @@ const analyseData = async (data, userId = null) => {
                     // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
                     const totalProduct = totalProductsByAsinMap.get(asin);
                     const fallbackTitle =
-                        totalProduct?.itemName?.substring(0, 50) ||
-                        totalProduct?.title?.substring(0, 50) ||
-                        elm.data?.Title?.substring(0, 50) ||
+                        totalProduct?.itemName ||
+                        totalProduct?.title ||
+                        elm.data?.Title ||
                         "N/A";
 
                     rankingErrors = {
@@ -1219,7 +1219,7 @@ const analyseData = async (data, userId = null) => {
         errorData[index]
             ? {
                 asin: errorData[index].asin,
-                name: errorData[index].name?.substring(0, 50) || "N/A",
+                name: errorData[index].name || "N/A",
                 errors: errorData[index].errors,
             }
             : null;

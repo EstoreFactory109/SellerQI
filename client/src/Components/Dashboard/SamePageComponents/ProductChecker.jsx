@@ -109,7 +109,7 @@ const ProductChecker = () => {
 
   const navigateToProductWithIssuesPage=(asin)=>{
     if(asin){
-      navigate(`/seller-central-checker/issues/${asin}`)
+      navigate(`/seller-central-checker/${asin}`)
     }
   }
 

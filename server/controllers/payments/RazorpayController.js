@@ -245,6 +245,7 @@ const handleWebhook = asyncHandler(async (req, res) => {
 
 /**
  * Cancel Razorpay subscription
+ * Handles both regular subscriptions and trial subscriptions
  */
 const cancelSubscription = asyncHandler(async (req, res) => {
     try {
@@ -260,10 +261,15 @@ const cancelSubscription = asyncHandler(async (req, res) => {
         // Cancel subscription
         const result = await razorpayService.cancelSubscription(userId);
 
-        logger.info(`Razorpay subscription cancelled for user: ${userId}`);
+        // Generate appropriate message based on cancellation type
+        const message = result.wasTrialing 
+            ? 'Trial subscription cancelled successfully'
+            : 'Subscription cancelled successfully';
+
+        logger.info(`Razorpay subscription cancelled for user: ${userId}, wasTrialing: ${result.wasTrialing}`);
 
         return res.status(200).json(
-            new ApiResponse(200, result, 'Subscription cancelled successfully')
+            new ApiResponse(200, result, message)
         );
 
     } catch (error) {

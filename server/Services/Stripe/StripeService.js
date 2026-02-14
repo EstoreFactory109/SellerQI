@@ -700,16 +700,25 @@ class StripeService {
      */
     async cancelSubscription(userId, cancelAtPeriodEnd = true) {
         try {
-            const subscription = await Subscription.findOne({ userId });
+            // Find subscription - include active, trialing, and authenticated statuses
+            const subscription = await Subscription.findOne({ 
+                userId,
+                paymentGateway: 'stripe',
+                status: { $in: ['active', 'trialing', 'authenticated'] }
+            });
             
             if (!subscription || !subscription.stripeSubscriptionId) {
                 throw new Error('No active subscription found');
             }
 
+            const wasTrialing = subscription.status === 'trialing' || subscription.hasTrial;
+            const previousStatus = subscription.status;
+            const previousPlanType = subscription.planType;
+
             // Cancel in Stripe
             let updatedSubscription;
-            if (cancelAtPeriodEnd) {
-                // Schedule cancellation at period end
+            if (cancelAtPeriodEnd && !wasTrialing) {
+                // Schedule cancellation at period end (not for trialing - cancel immediately for trials)
                 updatedSubscription = await this.stripe.subscriptions.update(
                     subscription.stripeSubscriptionId,
                     {
@@ -717,32 +726,45 @@ class StripeService {
                     }
                 );
             } else {
-                // Cancel immediately
+                // Cancel immediately (for trial users, always cancel immediately)
                 updatedSubscription = await this.stripe.subscriptions.cancel(
                     subscription.stripeSubscriptionId
                 );
             }
 
+            // Determine the actual cancellation behavior
+            const immediatelyCancelled = wasTrialing || !cancelAtPeriodEnd;
+
             // Update our database
             await Subscription.findOneAndUpdate(
                 { userId },
                 {
-                    cancelAtPeriodEnd: cancelAtPeriodEnd,
-                    status: cancelAtPeriodEnd ? 'active' : 'cancelled'
+                    cancelAtPeriodEnd: immediatelyCancelled ? false : cancelAtPeriodEnd,
+                    status: immediatelyCancelled ? 'cancelled' : 'active',
+                    hasTrial: false,
+                    trialEndsAt: null
                 }
             );
 
             // Update user status if immediately cancelled
-            if (!cancelAtPeriodEnd) {
+            if (immediatelyCancelled) {
                 await User.findByIdAndUpdate(userId, {
                     packageType: 'LITE',
-                    subscriptionStatus: 'cancelled'
+                    subscriptionStatus: 'cancelled',
+                    isInTrialPeriod: false,
+                    trialEndsDate: null
                 });
             }
 
-            logger.info(`Subscription ${cancelAtPeriodEnd ? 'scheduled for cancellation' : 'cancelled'} for user: ${userId}`);
+            logger.info(`Stripe subscription ${immediatelyCancelled ? 'cancelled' : 'scheduled for cancellation'} for user: ${userId}, wasTrialing: ${wasTrialing}`);
             
-            return { success: true, cancelAtPeriodEnd };
+            return { 
+                success: true, 
+                cancelAtPeriodEnd: !immediatelyCancelled && cancelAtPeriodEnd,
+                wasTrialing,
+                previousStatus,
+                previousPlanType
+            };
 
         } catch (error) {
             logger.error('Error cancelling subscription:', error);

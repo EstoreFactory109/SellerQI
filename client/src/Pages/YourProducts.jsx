@@ -19,9 +19,70 @@ import {
   FileText,
   BookOpen
 } from 'lucide-react';
-import { fetchYourProductsData } from '../redux/slices/PageDataSlice.js';
+import { fetchYourProductsData, fetchIssuesByProductData } from '../redux/slices/PageDataSlice.js';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import { SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx';
+
+// Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
+// Product tabs: pick 2 from this list to fill columns 5 and 6.
+const PRODUCT_SELECTABLE_COLUMNS = [
+  { id: 'price', label: 'Price' },
+  { id: 'quantity', label: 'Available Stocks' },
+  { id: 'starRating', label: 'Ratings ⭐' },
+  { id: 'aPlus', label: 'A+ Content' },
+  { id: 'video', label: 'Videos' },
+  { id: 'b2b', label: 'B2B Pricing' },
+  { id: 'ads', label: 'Targeted in Ads' },
+  { id: 'reviews', label: 'Reviews' }
+];
+
+// Optimization tab: pick 2 from this list.
+const OPTIMIZATION_SELECTABLE_COLUMNS = [
+  { id: 'sessions', label: 'Sessions' },
+  { id: 'pageViews', label: 'Page Views' },
+  { id: 'conversionRate', label: 'Conv %' },
+  { id: 'sales', label: 'Sales' },
+  { id: 'ppcSpend', label: 'PPC Spend' },
+  { id: 'acos', label: 'ACOS %' }
+];
+
+const COLUMN_STORAGE_KEY_PRODUCT = 'yourProducts_selectedProductColumns';
+const COLUMN_STORAGE_KEY_OPTIMIZATION = 'yourProducts_selectedOptimizationColumns';
+
+const DEFAULT_PRODUCT_SELECTED = ['price', 'quantity'];
+const DEFAULT_OPTIMIZATION_SELECTED = ['sessions', 'sales'];
+
+function loadSelectedProductColumns() {
+  try {
+    const s = localStorage.getItem(COLUMN_STORAGE_KEY_PRODUCT);
+    if (s) {
+      const arr = JSON.parse(s);
+      const validIds = new Set(PRODUCT_SELECTABLE_COLUMNS.map(c => c.id));
+      if (Array.isArray(arr) && arr.length >= 2 && validIds.has(arr[0]) && validIds.has(arr[1])) {
+        let c1 = arr[0], c2 = arr[1];
+        if (c1 === c2) c2 = PRODUCT_SELECTABLE_COLUMNS.find(c => c.id !== c1)?.id ?? c2;
+        return [c1, c2];
+      }
+    }
+  } catch (_) {}
+  return [...DEFAULT_PRODUCT_SELECTED];
+}
+
+function loadSelectedOptimizationColumns() {
+  try {
+    const s = localStorage.getItem(COLUMN_STORAGE_KEY_OPTIMIZATION);
+    if (s) {
+      const arr = JSON.parse(s);
+      const validIds = new Set(OPTIMIZATION_SELECTABLE_COLUMNS.map(c => c.id));
+      if (Array.isArray(arr) && arr.length >= 2 && validIds.has(arr[0]) && validIds.has(arr[1])) {
+        let c1 = arr[0], c2 = arr[1];
+        if (c1 === c2) c2 = OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id !== c1)?.id ?? c2;
+        return [c1, c2];
+      }
+    }
+  } catch (_) {}
+  return [...DEFAULT_OPTIMIZATION_SELECTED];
+}
 
 // Helper function to format text with numbered points on separate lines
 // Handles both formats: "1) " and "(1) "
@@ -124,6 +185,90 @@ const FormattedIssueText = ({ text, hasHTML, processedHTML, onClick }) => {
   );
 };
 
+/**
+ * Generate all client-side recommendations for a product
+ * Uses profitabilityProduct data for accurate sales/profitability metrics
+ * @param {Object} profitabilityProduct - Product data from profitibilityData (sales, grossProfit, ads, etc.)
+ * @param {Object} performance - Performance data (sessions, conversionRate, etc.)
+ * @param {string} currency - Currency symbol
+ * @returns {Array} Array of recommendation objects { shortLabel, message, reason }
+ */
+const generateProductRecommendations = (profitabilityProduct, performance, currency = '$') => {
+  const recommendations = [];
+  
+  if (!profitabilityProduct) {
+    return recommendations;
+  }
+  
+  const sales = profitabilityProduct.sales || 0;
+  const grossProfit = profitabilityProduct.grossProfit || 0;
+  const adsSpend = profitabilityProduct.ads || 0;
+  const amzFee = profitabilityProduct.amzFee || 0;
+  
+  // Calculate profit margin
+  const profitMargin = sales > 0 ? (grossProfit / sales) * 100 : 0;
+  
+  // Calculate ACOS if there's ads spend and sales
+  const acos = (adsSpend > 0 && sales > 0) ? (adsSpend / sales) * 100 : 0;
+  
+  // Check profitability (most critical)
+  if (grossProfit < 0) {
+    recommendations.push({
+      shortLabel: 'Review Profitability',
+      message: 'Product is operating at a loss. Consider reviewing pricing, reducing PPC spend, or negotiating better costs.',
+      reason: `Gross profit is ${currency}${grossProfit.toFixed(2)} (loss)`
+    });
+  } else if (profitMargin < 10 && sales > 0) {
+    // Low profit margin (only if not already at a loss)
+    recommendations.push({
+      shortLabel: 'Low Profit Margin',
+      message: 'Product has low profit margin. Consider increasing price or reducing costs.',
+      reason: `Profit margin is ${profitMargin.toFixed(1)}% (below 10% threshold)`
+    });
+  }
+  
+  // High ACOS (only if there's PPC activity)
+  if (adsSpend > 0 && acos > 30) {
+    recommendations.push({
+      shortLabel: 'Optimize PPC',
+      message: 'Advertising cost of sale is high. Review and optimize keyword targeting and bids.',
+      reason: `ACOS is ${acos.toFixed(1)}% (above 30% threshold)`
+    });
+  }
+  
+  // PPC spend exceeds gross profit
+  if (adsSpend > grossProfit && grossProfit > 0) {
+    recommendations.push({
+      shortLabel: 'Reduce PPC Spend',
+      message: 'PPC spend is consuming most of the profit margin. Consider reducing ad spend or improving conversion.',
+      reason: `PPC spend (${currency}${adsSpend.toFixed(2)}) exceeds gross profit (${currency}${grossProfit.toFixed(2)})`
+    });
+  }
+  
+  // Low conversion rate
+  if (performance?.conversionRate !== undefined && performance.conversionRate < 5 && performance.conversionRate > 0) {
+    recommendations.push({
+      shortLabel: 'Improve Conversion',
+      message: 'Conversion rate is below average. Optimize listing images, description, and reviews.',
+      reason: `Conversion rate is ${performance.conversionRate.toFixed(1)}% (below 5% threshold)`
+    });
+  }
+  
+  // High fees relative to sales
+  if (amzFee > 0 && sales > 0) {
+    const feePercentage = (amzFee / sales) * 100;
+    if (feePercentage > 40) {
+      recommendations.push({
+        shortLabel: 'Review Fees',
+        message: 'Amazon fees are consuming a large portion of revenue. Consider FBA alternatives or product bundling.',
+        reason: `Amazon fees are ${feePercentage.toFixed(1)}% of sales`
+      });
+    }
+  }
+  
+  return recommendations;
+};
+
 const YourProducts = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -133,12 +278,88 @@ const YourProducts = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if this is the first load
   const itemsPerPage = 20; // Items fetched from backend per page
+  const [optimizationDisplayLimit, setOptimizationDisplayLimit] = useState(20); // Optimization tab: show 20 then load more
   const fetchingRef = useRef(false); // Prevent duplicate fetches
+
+  // Exactly 6 columns: 4 fixed + 2 chosen. State is [column5Id, column6Id].
+  const [selectedProductColumns, setSelectedProductColumns] = useState(loadSelectedProductColumns);
+  const [selectedOptimizationColumns, setSelectedOptimizationColumns] = useState(loadSelectedOptimizationColumns);
+  const [columnDropdownOpen, setColumnDropdownOpen] = useState(false);
+  const columnDropdownRef = useRef(null);
+
+  // Persist selected columns to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_STORAGE_KEY_PRODUCT, JSON.stringify(selectedProductColumns));
+    } catch (_) {}
+  }, [selectedProductColumns]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_STORAGE_KEY_OPTIMIZATION, JSON.stringify(selectedOptimizationColumns));
+    } catch (_) {}
+  }, [selectedOptimizationColumns]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (columnDropdownRef.current && !columnDropdownRef.current.contains(e.target)) {
+        setColumnDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Get current marketplace and currency from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
   const currency = useSelector((state) => state.currency?.currency) || '$';
+
+  // Optimization tab: issues-by-product data (ASIN-wise performance + recommendations)
+  const issuesByProductData = useSelector((state) => state.pageData?.issuesByProduct?.data);
+  const optimizationProductsRaw = issuesByProductData?.productWiseError || [];
+  const optimizationLoading = useSelector((state) => state.pageData?.issuesByProduct?.loading) || false;
+  
+  // Get profitability data for accurate sales/profit recommendations
+  const profitibilityData = useSelector((state) => state.Dashboard.DashBoardInfo?.profitibilityData) || [];
+  
+  // Create profitability map for quick lookup
+  const profitabilityMap = useMemo(() => {
+    const map = new Map();
+    profitibilityData.forEach(item => {
+      if (item.asin) {
+        map.set(item.asin, item);
+      }
+    });
+    return map;
+  }, [profitibilityData]);
+  
+  // Enrich optimization products with client-generated recommendations
+  // This replaces backend recommendations which may have stale/incorrect profitability data
+  const optimizationProducts = useMemo(() => {
+    return optimizationProductsRaw.map(product => {
+      const profitabilityProduct = profitabilityMap.get(product.asin);
+      const clientRecommendations = generateProductRecommendations(
+        profitabilityProduct,
+        product.performance,
+        currency
+      );
+      
+      return {
+        ...product,
+        // Store all recommendations for display
+        recommendations: clientRecommendations,
+        // Keep primaryRecommendation as the first one for compatibility
+        primaryRecommendation: clientRecommendations.length > 0 ? clientRecommendations[0] : null
+      };
+    });
+  }, [optimizationProductsRaw, profitabilityMap, currency]);
+
+  // Fetch optimization data on mount so tab count is available immediately
+  useEffect(() => {
+    if (!issuesByProductData && !optimizationLoading) {
+      dispatch(fetchIssuesByProductData());
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Helper function to detect and process HTML content in issues
   const processIssueHTML = useMemo(() => (issueText) => {
@@ -294,7 +515,7 @@ const YourProducts = () => {
     });
   }, [products.length, pagination.totalItems, pagination.hasMore, pagination.page]);
 
-  // Map tab key to status filter for backend
+  // Map tab key to status filter for backend (Optimization tab uses issues-by-product data, not your-products)
   const getStatusForTab = (tab) => {
     switch (tab) {
       case 'active':
@@ -305,10 +526,23 @@ const YourProducts = () => {
         return 'Incomplete';
       case 'withoutAPlus':
         return undefined; // Keep client-side filtering for Without A+ tab
+      case 'optimization':
+        return undefined; // Optimization tab uses fetchIssuesByProductData
       default:
         return undefined;
     }
   };
+
+  // Show table skeleton when current tab's data is loading (on initial load or tab switch)
+  const showTableSkeleton = useMemo(() => {
+    if (activeTab === 'optimization') {
+      return optimizationLoading;
+    }
+    const expectedStatus = getStatusForTab(activeTab);
+    const hasDataForThisTab = yourProductsData?.products?.length > 0 &&
+      (expectedStatus == null ? true : yourProductsData?.currentStatus === expectedStatus);
+    return loading && !hasDataForThisTab;
+  }, [activeTab, loading, optimizationLoading, yourProductsData?.products?.length, yourProductsData?.currentStatus]);
 
   // Track when data is first loaded to distinguish initial load from tab switches
   useEffect(() => {
@@ -321,6 +555,12 @@ const YourProducts = () => {
 
   // Fetch products data when component mounts or when tab changes
   useEffect(() => {
+    // Optimization tab uses issues-by-product API instead of your-products
+    if (activeTab === 'optimization') {
+      dispatch(fetchIssuesByProductData());
+      return;
+    }
+
     const status = getStatusForTab(activeTab);
     const currentStatus = yourProductsData?.currentStatus;
     
@@ -485,8 +725,76 @@ const YourProducts = () => {
     return filtered;
   }, [products, searchQuery, activeTab, sortConfig]);
 
-  // For display, we use all filtered products (no client-side pagination needed since we paginate from backend)
-  const displayedProducts = filteredProducts;
+  // Optimization tab: filter and sort ASIN-wise data (sessions, conversion, PPC, recommendations)
+  const filteredOptimizationProducts = useMemo(() => {
+    if (activeTab !== 'optimization' || !optimizationProducts.length) return [];
+    let list = [...optimizationProducts];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(p =>
+        (p.asin || '').toLowerCase().includes(q) ||
+        (p.sku || '').toLowerCase().includes(q) ||
+        (p.name || p.title || '').toLowerCase().includes(q)
+      );
+    }
+    if (sortConfig.key) {
+      list.sort((a, b) => {
+        const perfA = a.performance || {};
+        const perfB = b.performance || {};
+        let aVal, bVal;
+        switch (sortConfig.key) {
+          case 'sessions': aVal = perfA.sessions ?? 0; bVal = perfB.sessions ?? 0; break;
+          case 'pageViews': aVal = perfA.pageViews ?? 0; bVal = perfB.pageViews ?? 0; break;
+          case 'conversionRate': aVal = perfA.conversionRate ?? 0; bVal = perfB.conversionRate ?? 0; break;
+          case 'sales': aVal = perfA.sales ?? 0; bVal = perfB.sales ?? 0; break;
+          case 'ppcSpend': aVal = perfA.ppcSpend ?? 0; bVal = perfB.ppcSpend ?? 0; break;
+          case 'acos': aVal = perfA.acos ?? 0; bVal = perfB.acos ?? 0; break;
+          case 'asin': aVal = (a.asin || '').toLowerCase(); bVal = (b.asin || '').toLowerCase(); break;
+          case 'title': aVal = (a.name || a.title || '').toLowerCase(); bVal = (b.name || b.title || '').toLowerCase(); break;
+          default: aVal = (a[sortConfig.key] ?? '').toString(); bVal = (b[sortConfig.key] ?? '').toString();
+        }
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        const cmp = String(aVal).localeCompare(String(bVal));
+        return sortConfig.direction === 'asc' ? cmp : -cmp;
+      });
+    }
+    return list;
+  }, [activeTab, optimizationProducts, searchQuery, sortConfig]);
+
+  // Optimization tab: paginate client-side (first 20, then load more 20 at a time)
+  const displayedOptimizationProducts = useMemo(() => {
+    if (activeTab !== 'optimization') return [];
+    return filteredOptimizationProducts.slice(0, optimizationDisplayLimit);
+  }, [activeTab, filteredOptimizationProducts, optimizationDisplayLimit]);
+
+  // Reset optimization display limit when switching to Optimization tab or when search changes (show first 20 again)
+  const prevActiveTabRef = useRef(activeTab);
+  const prevSearchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    const switchedToOptimization = prevActiveTabRef.current !== 'optimization' && activeTab === 'optimization';
+    const searchChanged = prevSearchQueryRef.current !== searchQuery;
+    prevActiveTabRef.current = activeTab;
+    prevSearchQueryRef.current = searchQuery;
+    if (switchedToOptimization || (activeTab === 'optimization' && searchChanged)) {
+      setOptimizationDisplayLimit(20);
+    }
+  }, [activeTab, searchQuery]);
+
+  // For display, use filtered products or paginated optimization list
+  const displayedProducts = activeTab === 'optimization' ? displayedOptimizationProducts : filteredProducts;
+
+  const hasMoreOptimization = activeTab === 'optimization' && optimizationDisplayLimit < filteredOptimizationProducts.length;
+  const loadMoreOptimization = () => setOptimizationDisplayLimit(prev => prev + itemsPerPage);
+
+  // Exactly 6 columns: 4 fixed + 2 chosen (equal width for the 2 chosen)
+  const productTableColCount = 6;
+  const optimizationTableColCount = 6;
+  const productTableColCountForTab = (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 4 : productTableColCount;
+  const chosenColumnWidth = '16.67%'; // 2 columns share ~33%, 1/6 each
+  const productFixedWidths = { asin: '14%', title: '28%', issues: '18%', view: '10%' }; // 70%, chosen 2 get 15% each = 100%
+  const optimizationFixedWidths = { asin: '14%', title: '28%', recommendation: '22%', view: '10%' };
   
   // Check if there's more data to load from backend
   // Use filtered total from pagination (not summary.totalProducts which is for all products)
@@ -929,8 +1237,30 @@ const YourProducts = () => {
           )}
         </div>
 
-        {/* General Info Message about Inactive/Incomplete Products */}
-        <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r">
+        {/* General Info / Tips for user guidance */}
+        <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r space-y-3">
+          <div className="flex items-start gap-2">
+            <Info className="text-blue-400 flex-shrink-0 mt-0.5" size={16} />
+            <div>
+              <h3 className="text-xs font-semibold text-blue-300 mb-0.5">
+                Customize table columns
+              </h3>
+              <p className="text-xs text-blue-400">
+                Use the <strong>Columns</strong> dropdown next to the search bar (on Active and Optimization tabs) to choose up to 2 extra columns—e.g. Price, Ratings, A+ Content, or Reviews—so the table shows the fields you care about.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <Info className="text-blue-400 flex-shrink-0 mt-0.5" size={16} />
+            <div>
+              <h3 className="text-xs font-semibold text-blue-300 mb-0.5">
+                View button
+              </h3>
+              <p className="text-xs text-blue-400">
+                Click <strong>View</strong> in any row to open that product’s detail page, where you can see full metrics, performance trends, recommendations, and issues for that product.
+              </p>
+            </div>
+          </div>
           <div className="flex items-start gap-2">
             <Info className="text-blue-400 flex-shrink-0 mt-0.5" size={16} />
             <div>
@@ -946,7 +1276,7 @@ const YourProducts = () => {
 
         {/* Search and Filters */}
         <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
-          <div className="flex flex-col md:flex-row gap-2">
+          <div className="flex flex-col md:flex-row gap-2 md:items-center">
             {/* Search */}
             <div className="relative flex-1">
               <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
@@ -958,6 +1288,78 @@ const YourProducts = () => {
                 className="w-full pl-8 pr-3 py-1.5 bg-[#21262d] border border-[#30363d] rounded text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
               />
             </div>
+            {/* Column selection - single dropdown, choose at most 2 columns */}
+            {['active', 'optimization'].includes(activeTab) && (
+              <div className="relative flex-shrink-0" ref={columnDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setColumnDropdownOpen(prev => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] border border-[#30363d] rounded text-sm text-gray-300 hover:bg-[#30363d] hover:border-[#484f58] transition-colors"
+                >
+                  <Box size={16} className="text-gray-400" />
+                  Columns
+                  <ChevronDown size={14} className={`text-gray-400 transition-transform ${columnDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {columnDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-[#21262d] border border-[#30363d] rounded shadow-lg py-3 px-3">
+                    <p className="text-xs text-gray-400 mb-3">Choose up to 2 columns for the table.</p>
+                    {activeTab === 'optimization' ? (
+                      <div className="space-y-2">
+                        <label className="block text-xs text-gray-400">Column 5</label>
+                        <select
+                          value={selectedOptimizationColumns[0]}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSelectedOptimizationColumns(prev => [v, prev[1] === v ? OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id !== v)?.id ?? prev[1] : prev[1]]);
+                          }}
+                          className="w-full px-2 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-sm text-gray-200 focus:ring-1 focus:ring-blue-500"
+                        >
+                          {OPTIMIZATION_SELECTABLE_COLUMNS.map(({ id, label }) => (
+                            <option key={id} value={id}>{label}</option>
+                          ))}
+                        </select>
+                        <label className="block text-xs text-gray-400 mt-2">Column 6</label>
+                        <select
+                          value={selectedOptimizationColumns[1]}
+                          onChange={(e) => setSelectedOptimizationColumns(prev => [prev[0], e.target.value])}
+                          className="w-full px-2 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-sm text-gray-200 focus:ring-1 focus:ring-blue-500"
+                        >
+                          {OPTIMIZATION_SELECTABLE_COLUMNS.filter(c => c.id !== selectedOptimizationColumns[0]).map(({ id, label }) => (
+                            <option key={id} value={id}>{label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="block text-xs text-gray-400">Column 5</label>
+                        <select
+                          value={selectedProductColumns[0]}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSelectedProductColumns(prev => [v, prev[1] === v ? PRODUCT_SELECTABLE_COLUMNS.find(c => c.id !== v)?.id ?? prev[1] : prev[1]]);
+                          }}
+                          className="w-full px-2 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-sm text-gray-200 focus:ring-1 focus:ring-blue-500"
+                        >
+                          {PRODUCT_SELECTABLE_COLUMNS.map(({ id, label }) => (
+                            <option key={id} value={id}>{label}</option>
+                          ))}
+                        </select>
+                        <label className="block text-xs text-gray-400 mt-2">Column 6</label>
+                        <select
+                          value={selectedProductColumns[1]}
+                          onChange={(e) => setSelectedProductColumns(prev => [prev[0], e.target.value])}
+                          className="w-full px-2 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-sm text-gray-200 focus:ring-1 focus:ring-blue-500"
+                        >
+                          {PRODUCT_SELECTABLE_COLUMNS.filter(c => c.id !== selectedProductColumns[0]).map(({ id, label }) => (
+                            <option key={id} value={id}>{label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -965,10 +1367,11 @@ const YourProducts = () => {
         <div className="bg-[#161b22] rounded-t border border-b-0 border-[#30363d] px-2 flex gap-1 overflow-x-auto">
           {[
             { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
-            { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
-            { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 },
+            { key: 'optimization', label: 'Optimization', count: optimizationProducts.length },
             { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus ?? (summary.totalProducts != null ? (summary.totalProducts - (summary.productsWithAPlus || 0)) : 0) },
-            { key: 'notTargetedInAds', label: 'Not Targeted to Ads', count: products.filter(p => !p.isTargetedInAds).length }
+            { key: 'notTargetedInAds', label: 'Not Targeted to Ads', count: products.filter(p => !p.isTargetedInAds).length },
+            { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
+            { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 }
           ].map(tab => (
             <button
               key={tab.key}
@@ -986,8 +1389,8 @@ const YourProducts = () => {
 
         {/* Products Table */}
         <div className="bg-[#161b22] rounded-b border border-[#30363d] relative" style={{ overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
-          {/* When loading with no data yet, show skeleton rows instead of full-page or overlay spinner */}
-          {loading && !yourProductsData ? (
+          {/* Skeleton when current tab's data is loading (initial load or tab switch) */}
+          {showTableSkeleton ? (
             <div className="p-2">
               <SkeletonTableBody rows={10} />
             </div>
@@ -997,7 +1400,17 @@ const YourProducts = () => {
               <thead className="bg-[#21262d]">
                 <tr>
                   {/* Show different columns based on tab */}
-                  {(activeTab === 'inactive' || activeTab === 'incomplete') ? (
+                  {activeTab === 'optimization' ? (
+                    <>
+                      {/* Optimization: 6 columns = ASIN/SKU, Title, [chosen1], [chosen2], Recommendation, View */}
+                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: optimizationFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: optimizationFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[0])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[0])?.label ?? selectedOptimizationColumns[0]} {sortConfig.key === selectedOptimizationColumns[0] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[1])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[1])?.label ?? selectedOptimizationColumns[1]} {sortConfig.key === selectedOptimizationColumns[1] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.recommendation }}>Recommendation</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.view }}>View</th>
+                    </>
+                  ) : (activeTab === 'inactive' || activeTab === 'incomplete') ? (
                     <>
                       {/* Simplified columns for inactive/incomplete tabs: ASIN/SKU, Title, B2B Pricing, Issues */}
                       <th 
@@ -1021,98 +1434,31 @@ const YourProducts = () => {
                         Issues
                       </th>
                     </>
+                  ) : activeTab === 'active' ? (
+                    <>
+                      {/* Active tab: 6 columns = ASIN/SKU, Title, Issues, [chosen1], [chosen2], View */}
+                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.issues }} onClick={() => handleSort('totalIssues')}>Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => { const k = selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0]; if (['price','quantity','numRatings','starRatings'].includes(k)) handleSort(k); }}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[0])?.label ?? selectedProductColumns[0]} {sortConfig.key === (selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => { const k = selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1]; if (['price','quantity','numRatings','starRatings'].includes(k)) handleSort(k); }}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[1])?.label ?? selectedProductColumns[1]} {sortConfig.key === (selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: productFixedWidths.view }}>View</th>
+                    </>
+                  ) : activeTab === 'withoutAPlus' ? (
+                    <>
+                      {/* Without A+: 4 columns = ASIN/SKU, Title, Status, A+ (mandatory) */}
+                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.issues }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '12%' }}>A+</th>
+                    </>
                   ) : (
                     <>
-                      {/* Full columns for other tabs */}
-                      <th 
-                        className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '10%' : '9%' }}
-                        onClick={() => handleSort('asin')}
-                      >
-                        ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '24%' : '22%' }}
-                        onClick={() => handleSort('title')}
-                      >
-                        Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
-                        onClick={() => handleSort('price')}
-                      >
-                        Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      {/* Total Issues column - shown for all tabs except inactive/incomplete */}
-                      {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                        <th 
-                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                          style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
-                          onClick={() => handleSort('totalIssues')}
-                        >
-                          Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                        </th>
-                      )}
-                      {/* Quantity column - shown for all, active, withoutAPlus, and notTargetedInAds tabs */}
-                      {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                        <th 
-                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                          style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
-                          onClick={() => handleSort('quantity')}
-                        >
-                          Available Stocks {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                        </th>
-                      )}
-                      {/* Status column - hidden in 'active', 'withoutAPlus', and 'notTargetedInAds' tabs */}
-                      {activeTab !== 'active' && activeTab !== 'withoutAPlus' && activeTab !== 'notTargetedInAds' && (
-                        <th 
-                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                          style={{ width: '7%' }}
-                          onClick={() => handleSort('status')}
-                        >
-                          Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                        </th>
-                      )}
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}>
-                        A+
-                      </th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}>
-                        Videos
-                      </th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '7%' : '6%' }}>
-                        B2B
-                      </th>
-                      {/* Targeted In Ads column - shown for active, withoutAPlus, and notTargetedInAds tabs */}
-                      {(activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') && (
-                        <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
-                          Ads
-                        </th>
-                      )}
-                      <th 
-                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '7%' : '6%' }}
-                        onClick={() => handleSort('numRatings')}
-                      >
-                        Reviews {sortConfig.key === 'numRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                        style={{ width: (activeTab === 'active' || activeTab === 'notTargetedInAds') ? '8%' : '7%' }}
-                        onClick={() => handleSort('starRatings')}
-                      >
-                        Ratings {sortConfig.key === 'starRatings' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                      </th>
-                      {/* Issues column - shown only for inactive/incomplete tabs */}
-                      {(activeTab === 'inactive' || activeTab === 'incomplete') && (
-                        <th 
-                          className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300"
-                          onClick={() => handleSort('totalIssues')}
-                        >
-                          Issues {sortConfig.key === 'totalIssues' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                        </th>
-                      )}
+                      {/* Not Targeted to Ads: 4 columns = ASIN/SKU, Title, Status, Targeted in Ads (mandatory) */}
+                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.issues }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '12%' }}>Targeted in Ads</th>
                     </>
                   )}
                 </tr>
@@ -1121,6 +1467,68 @@ const YourProducts = () => {
                 {displayedProducts.length > 0 ? (
                   displayedProducts.map((product, index) => {
                     const statusBadge = getStatusBadge(product.status);
+                    
+                    // Optimization tab: ASIN-wise performance + recommendation
+                    if (activeTab === 'optimization') {
+                      const perf = product.performance || {};
+                      const rec = product.primaryRecommendation;
+                      return (
+                        <tr
+                          key={`opt-${product.asin}-${index}`}
+                          onClick={() => navigate(`/seller-central-checker/${product.asin}`)}
+                          className="border-b border-[#30363d] hover:bg-[#21262d] cursor-pointer transition-colors"
+                        >
+                          <td className="px-1.5 py-2 text-left align-top">
+                            <div className="flex flex-col gap-1">
+                              <code className="text-xs font-mono text-blue-400 break-all">{product.asin || '—'}</code>
+                              <span className="text-xs text-gray-400 break-words">{product.sku || '—'}</span>
+                            </div>
+                          </td>
+                          <td className="pl-1 pr-2 py-2 text-left align-top">
+                            <span className="text-xs text-gray-100 break-words line-clamp-2" title={product.name || product.title}>{product.name || product.title || '—'}</span>
+                          </td>
+                          <td className="px-2 py-2 text-center align-top text-xs text-gray-100">
+                            {selectedOptimizationColumns[0] === 'sessions' && (perf.sessions ?? 0).toLocaleString()}
+                            {selectedOptimizationColumns[0] === 'pageViews' && (perf.pageViews ?? 0).toLocaleString()}
+                            {selectedOptimizationColumns[0] === 'conversionRate' && `${(perf.conversionRate ?? 0).toFixed(1)}%`}
+                            {selectedOptimizationColumns[0] === 'sales' && (perf.sales != null ? formatCurrencyWithLocale(perf.sales, currency, 2) : '—')}
+                            {selectedOptimizationColumns[0] === 'ppcSpend' && (perf.ppcSpend != null ? formatCurrencyWithLocale(perf.ppcSpend, currency, 2) : '—')}
+                            {selectedOptimizationColumns[0] === 'acos' && (perf.acos != null ? `${Number(perf.acos).toFixed(1)}%` : '—')}
+                          </td>
+                          <td className="px-2 py-2 text-center align-top text-xs text-gray-100">
+                            {selectedOptimizationColumns[1] === 'sessions' && (perf.sessions ?? 0).toLocaleString()}
+                            {selectedOptimizationColumns[1] === 'pageViews' && (perf.pageViews ?? 0).toLocaleString()}
+                            {selectedOptimizationColumns[1] === 'conversionRate' && `${(perf.conversionRate ?? 0).toFixed(1)}%`}
+                            {selectedOptimizationColumns[1] === 'sales' && (perf.sales != null ? formatCurrencyWithLocale(perf.sales, currency, 2) : '—')}
+                            {selectedOptimizationColumns[1] === 'ppcSpend' && (perf.ppcSpend != null ? formatCurrencyWithLocale(perf.ppcSpend, currency, 2) : '—')}
+                            {selectedOptimizationColumns[1] === 'acos' && (perf.acos != null ? `${Number(perf.acos).toFixed(1)}%` : '—')}
+                          </td>
+                          <td className="px-2 py-2 text-left align-top">
+                            {rec?.shortLabel ? (
+                              <span className="flex items-center gap-1">
+                                <span className="text-xs text-amber-400 font-medium" title={rec.message}>{rec.shortLabel}</span>
+                                {product.recommendations?.length > 1 && (
+                                  <span className="text-xs text-gray-400 bg-gray-700/50 px-1.5 py-0.5 rounded" title={`${product.recommendations.length - 1} more recommendation${product.recommendations.length > 2 ? 's' : ''}`}>
+                                    +{product.recommendations.length - 1}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-2 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded transition-colors"
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
                     
                     // Render different row layout for inactive/incomplete tabs
                     if (activeTab === 'inactive' || activeTab === 'incomplete') {
@@ -1212,7 +1620,18 @@ const YourProducts = () => {
                       );
                     }
                     
-                    // Default row layout for other tabs
+                    // Default row layout for product tabs: 6 columns = ASIN/SKU, Title, Issues, [chosen1], [chosen2], View
+                    const renderProductChosenCell = (colId) => {
+                      if (colId === 'price') return <span className="text-xs font-medium text-gray-100 whitespace-nowrap">{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>;
+                      if (colId === 'quantity') return <span className="text-xs font-semibold text-gray-100 whitespace-nowrap">{product.quantity !== undefined && product.quantity !== null ? parseInt(product.quantity).toLocaleString() : '—'}</span>;
+                      if (colId === 'aPlus') return product.hasAPlus ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
+                      if (colId === 'video') return product.hasVideo ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
+                      if (colId === 'b2b') return product.has_b2b_pricing ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
+                      if (colId === 'ads') return product.isTargetedInAds ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
+                      if (colId === 'reviews') return <span className="text-xs text-gray-400 whitespace-nowrap">{product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}</span>;
+                      if (colId === 'starRating') return <span className="text-xs text-gray-100 whitespace-nowrap">{product.starRatings != null && product.starRatings !== '' ? `${typeof product.starRatings === 'number' ? product.starRatings.toFixed(1) : String(product.starRatings)} ⭐` : '—'}</span>;
+                      return '—';
+                    };
                     return (
                       <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
                         <td className="px-1.5 py-2 text-left align-top">
@@ -1227,133 +1646,56 @@ const YourProducts = () => {
                           </span>
                         </td>
                         <td className="px-2 py-2 text-center align-top">
-                          <span className="text-xs font-medium text-gray-100 whitespace-nowrap">
-                            {product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}
-                          </span>
-                        </td>
-                        {/* Total Issues column - shown for all tabs except inactive/incomplete */}
-                        {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                          <td className="px-2 py-2 text-center align-top">
-                            {product.status === 'Active' ? (() => {
-                              const totalIssues = getTotalIssues(product);
-                              const rankingIssues = countRankingIssues(product);
-                              const conversionIssues = countConversionIssues(product);
-                              const inventoryIssues = countInventoryIssues(product);
-                              const badge = getIssuesBadge(totalIssues);
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => navigate(`/seller-central-checker/issues/${product.asin}`)}
-                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border-2 ${
-                                    totalIssues > 0 
-                                      ? 'border-red-500 text-red-400' 
-                                      : 'border-green-500 text-green-400'
-                                  }`}
-                                  style={totalIssues > 0 ? {
-                                    boxShadow: '0 0 8px rgba(239, 68, 68, 0.5), 0 0 12px rgba(239, 68, 68, 0.3)'
-                                  } : {
-                                    boxShadow: '0 0 8px rgba(34, 197, 94, 0.5), 0 0 12px rgba(34, 197, 94, 0.3)'
-                                  }}
-                                  title={totalIssues > 0 ? `Ranking: ${rankingIssues}, Conversion: ${conversionIssues}, Inventory: ${inventoryIssues}` : 'No issues'}
-                                >
-                                  {totalIssues > 0 && <AlertTriangle size={12} />}
-                                  {badge.text}
-                                </button>
-                              );
-                            })() : (
-                              <span className="text-xs text-gray-400">—</span>
-                            )}
-                          </td>
-                        )}
-                        {/* Quantity column - shown for all, active, and withoutAPlus tabs */}
-                        {(activeTab !== 'inactive' && activeTab !== 'incomplete') && (
-                          <td className="px-2 py-2 text-center align-top">
-                            <span className="text-xs font-semibold text-gray-100 whitespace-nowrap">
-                              {product.quantity !== undefined && product.quantity !== null 
-                                ? parseInt(product.quantity).toLocaleString() 
-                                : '—'}
-                            </span>
-                          </td>
-                        )}
-                        {/* Status column - hidden in 'active', 'withoutAPlus', and 'notTargetedInAds' tabs */}
-                        {activeTab !== 'active' && activeTab !== 'withoutAPlus' && activeTab !== 'notTargetedInAds' && (
-                          <td className="px-2 py-2 text-center align-top">
-                            <span 
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                              style={{ backgroundColor: statusBadge.bg, color: statusBadge.color }}
+                          {(activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? (
+                            <span
+                              className={`text-xs font-medium ${product.status === 'Active' ? 'text-white' : 'text-gray-400'}`}
                             >
-                              {statusBadge.icon}
-                              {product.status}
+                              {product.status || '—'}
                             </span>
-                          </td>
+                          ) : product.status === 'Active' ? (() => {
+                            const totalIssues = getTotalIssues(product);
+                            const rankingIssues = countRankingIssues(product);
+                            const conversionIssues = countConversionIssues(product);
+                            const inventoryIssues = countInventoryIssues(product);
+                            const badge = getIssuesBadge(totalIssues);
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border-2 ${
+                                  totalIssues > 0 
+                                    ? 'border-red-500 text-red-400' 
+                                    : 'border-green-500 text-green-400'
+                                }`}
+                                title={totalIssues > 0 ? `Ranking: ${rankingIssues}, Conversion: ${conversionIssues}, Inventory: ${inventoryIssues}` : 'No issues'}
+                              >
+                                {totalIssues > 0 && <AlertTriangle size={12} />}
+                                {badge.text}
+                              </span>
+                            );
+                          })() : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-center align-top">
+                          {activeTab === 'withoutAPlus' ? (
+                            product.hasAPlus ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
+                          ) : activeTab === 'notTargetedInAds' ? (
+                            product.isTargetedInAds ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
+                          ) : (
+                            renderProductChosenCell(selectedProductColumns[0])
+                          )}
+                        </td>
+                        {activeTab === 'active' && (
+                          <td className="px-2 py-2 text-center align-top">{renderProductChosenCell(selectedProductColumns[1])}</td>
                         )}
-                        <td className="px-2 py-2 text-center align-top">
-                          {product.hasAPlus ? (
-                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
-                          ) : (
-                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
-                          )}
-                        </td>
-                        <td className="px-2 py-2 text-center align-top">
-                          {product.hasVideo ? (
-                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
-                          ) : (
-                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
-                          )}
-                        </td>
-                        <td className="px-2 py-2 text-center align-top">
-                          {product.has_b2b_pricing ? (
-                            <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
-                          ) : (
-                            <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
-                          )}
-                        </td>
-                        {/* Targeted In Ads column - shown for active, withoutAPlus, and notTargetedInAds tabs */}
-                        {(activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') && (
+                        {activeTab === 'active' && (
                           <td className="px-2 py-2 text-center align-top">
-                            {product.isTargetedInAds ? (
-                              <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} />
-                            ) : (
-                              <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
-                            )}
-                          </td>
-                        )}
-                        <td className="px-2 py-2 text-center align-top">
-                          <span className="text-xs text-gray-400 whitespace-nowrap">
-                            {product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}
-                          </span>
-                        </td>
-                        <td className="px-2 py-2 text-center align-top">
-                          <div className="flex items-center justify-center gap-1">
-                            <Star size={12} className="text-yellow-400 fill-yellow-400" />
-                            <span className="text-xs font-medium text-gray-100 whitespace-nowrap">
-                              {product.starRatings ? parseFloat(product.starRatings).toFixed(1) : '0.0'}
-                            </span>
-                          </div>
-                        </td>
-                        {/* Issues column - shown only for inactive/incomplete tabs */}
-                        {(activeTab === 'inactive' || activeTab === 'incomplete') && (
-                          <td className="px-4 py-3 text-center">
-                            {product.status === 'Active' ? (() => {
-                              const totalIssues = getTotalIssues(product);
-                              const rankingIssues = countRankingIssues(product);
-                              const conversionIssues = countConversionIssues(product);
-                              const inventoryIssues = countInventoryIssues(product);
-                              const badge = getIssuesBadge(totalIssues);
-                              // Non-clickable for inactive/incomplete tabs
-                              return (
-                                <span 
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                                  style={{ backgroundColor: badge.bg, color: badge.color }}
-                                  title={totalIssues > 0 ? `Ranking: ${rankingIssues}, Conversion: ${conversionIssues}, Inventory: ${inventoryIssues}` : 'No issues'}
-                                >
-                                  {totalIssues > 0 && <AlertTriangle size={12} />}
-                                  {badge.text}
-                                </span>
-                              );
-                            })() : (
-                              <span className="text-sm text-gray-400">—</span>
-                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-2 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded transition-colors"
+                            >
+                              View
+                            </button>
                           </td>
                         )}
                       </tr>
@@ -1362,22 +1704,23 @@ const YourProducts = () => {
                 ) : (
                   <tr>
                     <td colSpan={
+                      activeTab === 'optimization' ? optimizationTableColCount :
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 11 : 10
+                      productTableColCountForTab
                     } className="px-4 py-12 text-center text-gray-400">
-                      {products.length === 0 
-                        ? 'No products found. Please ensure your account is connected and data is synced.'
-                        : 'No products match your current filters.'}
+                      {activeTab === 'optimization'
+                        ? (optimizationProducts.length === 0 ? 'No optimization data yet. Data loads when you open this tab.' : 'No products match your current filters.')
+                        : (products.length === 0 ? 'No products found. Please ensure your account is connected and data is synced.' : 'No products match your current filters.')}
                     </td>
                   </tr>
                 )}
                 
-                {/* Loading row - shown when loading more products */}
-                {loadingMore && displayedProducts.length > 0 && (
+                {/* Loading row - shown when loading more products (not for optimization tab) */}
+                {loadingMore && displayedProducts.length > 0 && activeTab !== 'optimization' && (
                   <tr>
                     <td colSpan={
                       (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : 
-                      (activeTab === 'active' || activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 11 : 10
+                      productTableColCountForTab
                     } className="px-4 py-8 text-center bg-[#21262d]">
                       <div className="flex items-center justify-center gap-3">
                         <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
@@ -1391,12 +1734,9 @@ const YourProducts = () => {
           </div>
           )}
 
-          {/* Load More */}
-          {hasMoreFromBackend && !loadingMore && (
+          {/* Load More (hidden for Optimization tab - that tab shows full list from issues-by-product) */}
+          {activeTab !== 'optimization' && hasMoreFromBackend && !loadingMore && (
             <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center gap-3">
-              <span className="text-xs text-gray-400">
-                Showing {products.length} of {pagination.totalItems || products.length} products
-              </span>
               <button
                 onClick={handleLoadMoreFromBackend}
                 disabled={loadingMore}
@@ -1407,11 +1747,16 @@ const YourProducts = () => {
               </button>
             </div>
           )}
-          {!hasMoreFromBackend && products.length > 0 && (
-            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center">
-              <span className="text-xs text-gray-400">
-                Showing all {pagination.totalItems || products.length} products
-              </span>
+          {activeTab === 'optimization' && displayedProducts.length > 0 && hasMoreOptimization && (
+            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={loadMoreOptimization}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors"
+              >
+                Load More
+                <ChevronDown size={16} />
+              </button>
             </div>
           )}
         </div>

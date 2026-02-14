@@ -206,6 +206,7 @@ const getSubscription = asyncHandler(async (req, res) => {
 
 /**
  * Cancel subscription
+ * Handles both regular subscriptions and trial subscriptions
  */
 const cancelSubscription = asyncHandler(async (req, res) => {
     try {
@@ -214,11 +215,17 @@ const cancelSubscription = asyncHandler(async (req, res) => {
 
         const result = await stripeService.cancelSubscription(userId, cancelAtPeriodEnd);
 
-        const message = cancelAtPeriodEnd 
-            ? 'Subscription will be cancelled at the end of the current period'
-            : 'Subscription cancelled immediately';
+        // Generate appropriate message based on cancellation type
+        let message;
+        if (result.wasTrialing) {
+            message = 'Trial subscription cancelled successfully';
+        } else if (result.cancelAtPeriodEnd) {
+            message = 'Subscription will be cancelled at the end of the current period';
+        } else {
+            message = 'Subscription cancelled immediately';
+        }
 
-        logger.info(`Subscription cancellation requested for user: ${userId}, cancelAtPeriodEnd: ${cancelAtPeriodEnd}`);
+        logger.info(`Subscription cancellation completed for user: ${userId}, cancelAtPeriodEnd: ${result.cancelAtPeriodEnd}, wasTrialing: ${result.wasTrialing}`);
 
         return res.status(200).json(
             new ApiResponse(200, result, message)

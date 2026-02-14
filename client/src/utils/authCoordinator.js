@@ -98,6 +98,8 @@ export const clearAuthCache = () => {
   globalAuthState.lastCheckTime = 0;
   globalAuthState.authPromise = null;
   globalAuthState.isChecking = false;
+  // Also clear user access type used for super admin redirect
+  localStorage.removeItem('userAccessType');
 };
 
 /**

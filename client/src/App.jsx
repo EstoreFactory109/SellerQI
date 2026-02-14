@@ -13,7 +13,7 @@ import DashBoard from './Pages/Dashboard.jsx';
 import Issues from './Pages/Issues.jsx';
 import AccountHistory from './Pages/Account.jsx';
 import Settings from './Pages/Settings.jsx';
-import IssuesByProducts from './Pages/IssuesPerProduct.jsx';
+import ProductDetails from './Pages/ProductDetails.jsx';
 import IssuesByProduct from './Pages/IssuesByProduct.jsx';
 import Error from './Pages/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
@@ -143,7 +143,6 @@ const App = () => {
             <Route path='keyword-analysis' element={<KeywordAnalysisDashboard />} />
             <Route path='issues' element={<Issues />} />
             <Route path='issues-by-product' element={<IssuesByProduct />} />
-            <Route path='issues/:asin' element={<IssuesByProducts />} />
             <Route path='account-history' element={<AccountHistory />} />
             <Route path='settings' element={<Settings />} />
             <Route path='reimbursement-dashboard' element={<ReimbursementDashboard />} />
@@ -155,7 +154,8 @@ const App = () => {
             <Route path='notification-details/:id' element={<NotificationDetailsPage />} />
             <Route path='user-logging' element={<UserLogging />} />
             <Route path='consultation' element={<CalendlyWidget />} />
-            
+            {/* Product detail (ASIN) - must be last so fixed paths are matched first */}
+            <Route path=':asin' element={<ProductDetails />} />
           </Route>
         </Route>
         <Route path='/error/:status' element={<Error />} />
