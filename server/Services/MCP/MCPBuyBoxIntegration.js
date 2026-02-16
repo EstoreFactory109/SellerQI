@@ -14,6 +14,7 @@ const {
 const { calculateBuyBoxMetrics } = require('../Calculations/BuyBoxCalculation.js');
 const { saveBuyBoxData, getLatestBuyBoxData } = require('./BuyBoxService.js');
 const logger = require('../../utils/Logger.js');
+const LoggingHelper = require('../../utils/LoggingHelper.js');
 
 /**
  * Fetch buybox data from MCP Data Kiosk API and store in database
@@ -94,6 +95,7 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             queryId = queryResult.queryId || queryResult.data?.queryId || queryResult.id;
 
             if (!queryId) {
+                const errorMsg = 'Query created but no queryId returned in response';
                 logger.error('Query created but no queryId found in response', {
                     queryResult: queryResult,
                     userId,
@@ -101,9 +103,21 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
                     country,
                     responseKeys: Object.keys(queryResult || {})
                 });
+                
+                // Log to MongoDB for tracking
+                await LoggingHelper.logStandaloneError({
+                    userId,
+                    region,
+                    country,
+                    functionName: 'fetchAndStoreBuyBoxData',
+                    error: errorMsg,
+                    source: 'MCP_BUYBOX',
+                    additionalData: { step: 'create_query_no_id' }
+                });
+                
                 return {
                     success: false,
-                    error: 'Query created but no queryId returned in response',
+                    error: errorMsg,
                     errorDetails: queryResult,
                     data: null
                 };
@@ -119,6 +133,21 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
                 queryPreview: graphqlQuery.substring(0, 200),
                 fullError: createError
             });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreBuyBoxData',
+                error: createError,
+                source: 'MCP_BUYBOX',
+                additionalData: { 
+                    step: 'create_query_exception',
+                    tokenRefreshNeeded: createError.message?.includes('refresh_token') || createError.message?.includes('invalid grant')
+                }
+            });
+            
             return {
                 success: false,
                 error: createError.message || `Exception creating query: ${createError.toString()}`,
@@ -147,6 +176,22 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
                 region,
                 country
             });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreBuyBoxData',
+                error: waitError,
+                source: 'MCP_BUYBOX',
+                additionalData: { 
+                    step: 'wait_query_completion',
+                    queryId,
+                    tokenRefreshNeeded: waitError.message?.includes('refresh_token') || waitError.message?.includes('invalid grant')
+                }
+            });
+            
             return {
                 success: false,
                 error: waitError.message || 'Query failed or timed out',
@@ -199,15 +244,28 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
         }
 
         if (!waitResult) {
+            const errorMsg = 'Query wait returned no result';
             logger.error('BuyBox query wait returned null/undefined', {
                 queryId,
                 userId,
                 region,
                 country
             });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreBuyBoxData',
+                error: errorMsg,
+                source: 'MCP_BUYBOX',
+                additionalData: { step: 'wait_result_null', queryId }
+            });
+            
             return {
                 success: false,
-                error: 'Query wait returned no result',
+                error: errorMsg,
                 data: null,
                 queryId
             };
@@ -238,14 +296,27 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
         const documentUrl = waitResult.url || waitResult.documentUrl;
 
         if (!documentUrl) {
+            const errorMsg = 'Failed to get document URL from completed query';
             logger.error('No document URL in BuyBox query result', {
                 waitResult: waitResult,
                 documentId,
                 waitResultKeys: Object.keys(waitResult || {})
             });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreBuyBoxData',
+                error: errorMsg,
+                source: 'MCP_BUYBOX',
+                additionalData: { step: 'get_document_url', queryId, documentId }
+            });
+            
             return {
                 success: false,
-                error: 'Failed to get document URL from completed query',
+                error: errorMsg,
                 errorDetails: waitResult,
                 data: null,
                 queryId,
@@ -351,6 +422,21 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             error: error.message,
             stack: error.stack
         });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region,
+            country,
+            functionName: 'fetchAndStoreBuyBoxData',
+            error,
+            source: 'MCP_BUYBOX',
+            additionalData: { 
+                step: 'unexpected_error',
+                tokenRefreshNeeded: error.message?.includes('refresh_token') || error.message?.includes('invalid grant')
+            }
+        });
+        
         return {
             success: false,
             error: error.message || 'Unknown error occurred',
@@ -377,6 +463,18 @@ async function getBuyBoxData(userId, region, country) {
             country,
             error: error.message
         });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region,
+            country,
+            functionName: 'getBuyBoxData',
+            error,
+            source: 'MCP_BUYBOX',
+            additionalData: { step: 'get_buybox_data' }
+        });
+        
         return null;
     }
 }

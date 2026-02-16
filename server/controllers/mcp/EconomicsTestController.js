@@ -9,6 +9,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
+const LoggingHelper = require('../../utils/LoggingHelper.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const {
     fetchAndStoreEconomicsData
@@ -150,6 +151,21 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
                 country: effectiveCountry,
                 error: result.error
             });
+            
+            // Log error to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region: effectiveRegion,
+                country: effectiveCountry,
+                functionName: 'fetchAndStoreEconomicsData',
+                error: result.error || 'Economics fetch failed',
+                source: 'MCP_ECONOMICS',
+                additionalData: {
+                    endpoint: '/api/test/mcp-economics/fetch',
+                    tokenRefreshNeeded: result.error?.includes('refresh_token') || result.error?.includes('invalid grant')
+                }
+            });
+            
             const error = new ApiError(500, result.error || 'Economics fetch failed');
             return res.status(500).json({
                 statusCode: error.statusCode,
@@ -178,12 +194,29 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
             )
         );
     } catch (error) {
+        const effectiveRegion = req.body.region || region;
+        const effectiveCountry = req.body.country || country;
+        
         logger.error('Error in testFetchEconomicsData', {
             userId,
-            region: req.body.region || region,
-            country: req.body.country || country,
+            region: effectiveRegion,
+            country: effectiveCountry,
             error: error.message,
             stack: error.stack
+        });
+        
+        // Log error to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region: effectiveRegion,
+            country: effectiveCountry,
+            functionName: 'testFetchEconomicsData',
+            error,
+            source: 'MCP_ECONOMICS',
+            additionalData: {
+                endpoint: '/api/test/mcp-economics/fetch',
+                errorType: 'unexpected'
+            }
         });
 
         const apiError = new ApiError(500, error.message || 'Unexpected error');

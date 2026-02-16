@@ -24,6 +24,7 @@ const { calculateEconomicsMetrics, calculateDatewiseMetrics, calculateAsinWiseDa
 const { saveEconomicsMetrics, getLatestEconomicsMetrics } = require('./EconomicsMetricsService.js');
 const { fetchSalesAndTrafficByDate } = require('./MCPSalesAndTrafficIntegration.js');
 const logger = require('../../utils/Logger.js');
+const LoggingHelper = require('../../utils/LoggingHelper.js');
 
 /**
  * Fetch economics data from MCP Data Kiosk API and store in database
@@ -48,10 +49,23 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
 
     try {
         if (!refreshToken) {
+            const errorMsg = 'Refresh token not available';
             logger.error('[MCP Economics] No refresh token provided', { userId, region, country });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreEconomicsData',
+                error: errorMsg,
+                source: 'MCP_ECONOMICS',
+                additionalData: { reason: 'missing_refresh_token' }
+            });
+            
             return {
                 success: false,
-                error: 'Refresh token not available',
+                error: errorMsg,
                 data: null
             };
         }
@@ -101,10 +115,26 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         const rangeQueryResult = await createQueryWithRefreshToken(refreshToken, region, rangeQuery);
         
         if (!rangeQueryResult || !rangeQueryResult.queryId) {
+            const errorMsg = 'Failed to create Data Kiosk RANGE query';
             logger.error('Failed to create RANGE query', { rangeQueryResult });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreEconomicsData',
+                error: errorMsg,
+                source: 'MCP_ECONOMICS',
+                additionalData: { 
+                    step: 'create_range_query',
+                    queryResult: rangeQueryResult 
+                }
+            });
+            
             return {
                 success: false,
-                error: 'Failed to create Data Kiosk RANGE query',
+                error: errorMsg,
                 data: null
             };
         }
@@ -139,13 +169,29 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
         // Download RANGE document content
         const rangeDocumentUrl = rangeDocumentDetails.documentUrl || rangeDocumentDetails.url;
         if (!rangeDocumentUrl) {
+            const errorMsg = 'Failed to get document URL from completed RANGE query';
             logger.error('No document URL in RANGE query result', { rangeDocumentDetails });
-                return {
-                    success: false,
-                error: 'Failed to get document URL from completed RANGE query',
-                    data: null
-                };
-            }
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region,
+                country,
+                functionName: 'fetchAndStoreEconomicsData',
+                error: errorMsg,
+                source: 'MCP_ECONOMICS',
+                additionalData: { 
+                    step: 'get_document_url',
+                    rangeQueryId 
+                }
+            });
+            
+            return {
+                success: false,
+                error: errorMsg,
+                data: null
+            };
+        }
 
         logger.info('Downloading RANGE document', { hasUrl: !!rangeDocumentUrl });
         const rangeDocumentContent = await downloadDocument(rangeDocumentUrl);
@@ -442,6 +488,20 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             error: error.message,
             stack: error.stack
         });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region,
+            country,
+            functionName: 'fetchAndStoreEconomicsData',
+            error,
+            source: 'MCP_ECONOMICS',
+            additionalData: { 
+                step: 'unexpected_error',
+                tokenRefreshNeeded: error.message?.includes('refresh_token') || error.message?.includes('invalid grant')
+            }
+        });
 
         // Try to get cached data as fallback
         try {
@@ -566,6 +626,18 @@ async function getEconomicsData(userId, region, country, refreshToken = null) {
             country,
             error: error.message
         });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region,
+            country,
+            functionName: 'getEconomicsData',
+            error,
+            source: 'MCP_ECONOMICS',
+            additionalData: { step: 'get_economics_data' }
+        });
+        
         return {
             success: false,
             error: error.message,

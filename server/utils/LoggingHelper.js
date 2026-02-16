@@ -490,6 +490,125 @@ class LoggingHelper {
             throw error;
         }
     }
+
+    /**
+     * Static method to log a standalone MCP/API error to MongoDB without requiring a full session.
+     * This is useful for logging errors from MCP controllers, services, and test routes
+     * that don't go through the standard Integration flow.
+     * 
+     * @param {Object} params - Error parameters
+     * @param {string} params.userId - User ID (required)
+     * @param {string} params.region - Region (e.g., 'NA', 'EU') (required)
+     * @param {string} params.country - Country code (e.g., 'US', 'UK') (required)
+     * @param {string} params.functionName - Name of the function/service that failed (required)
+     * @param {Error|string|Object} params.error - The error object or message (required)
+     * @param {Object} params.additionalData - Optional additional context data
+     * @param {string} params.source - Optional source identifier (e.g., 'MCP_ECONOMICS', 'MCP_BUYBOX', 'DATA_KIOSK')
+     * @returns {Promise<Object|null>} The saved session document or null if failed
+     */
+    static async logStandaloneError({ userId, region, country, functionName, error, additionalData = {}, source = 'MCP_API' }) {
+        // Validate required parameters
+        if (!userId || !region || !country || !functionName || !error) {
+            logger.warn('logStandaloneError: Missing required parameters', {
+                hasUserId: !!userId,
+                hasRegion: !!region,
+                hasCountry: !!country,
+                hasFunctionName: !!functionName,
+                hasError: !!error
+            });
+            return null;
+        }
+
+        try {
+            // Create a unique session ID for this standalone error
+            const sessionId = `${source}_${userId}_${region}_${country}_${Date.now()}`;
+            
+            // Handle different error types
+            let errorMessage = 'Unknown error';
+            let errorStack = null;
+            
+            if (error) {
+                if (typeof error === 'string') {
+                    errorMessage = error;
+                } else if (error instanceof Error) {
+                    errorMessage = error.message || 'Unknown error';
+                    errorStack = error.stack;
+                } else if (typeof error === 'object') {
+                    errorMessage = error.message || error.error || JSON.stringify(error) || 'Unknown error';
+                    errorStack = error.stack;
+                } else {
+                    errorMessage = String(error) || 'Unknown error';
+                }
+            }
+
+            // Create a new session specifically for this error
+            const session = await UserAccountLogs.createSession(
+                userId,
+                region,
+                country,
+                sessionId
+            );
+
+            if (!session) {
+                logger.error('logStandaloneError: Failed to create session', { userId, sessionId });
+                return null;
+            }
+
+            // Add the error log entry
+            session.addLog({
+                functionName,
+                logType: 'error',
+                status: 'failed',
+                message: `[${source}] ${functionName} failed: ${errorMessage}`,
+                errorDetails: {
+                    errorMessage,
+                    stackTrace: errorStack,
+                    httpStatus: error?.status || error?.statusCode,
+                    amazonApiError: error?.amazonApiError || additionalData?.amazonApiError || false,
+                    tokenRefreshNeeded: error?.tokenRefreshNeeded || additionalData?.tokenRefreshNeeded || false,
+                    errorCode: error?.code || additionalData?.errorCode
+                },
+                executionTime: {
+                    startTime: new Date(),
+                    endTime: new Date(),
+                    duration: 0
+                },
+                contextData: {
+                    userId,
+                    region,
+                    country
+                },
+                additionalData: {
+                    source,
+                    originalErrorType: error?.name || typeof error,
+                    ...additionalData
+                }
+            });
+
+            // End the session immediately with 'failed' status
+            session.endSession('failed');
+            await session.save();
+
+            logger.info('logStandaloneError: Error logged to MongoDB successfully', {
+                sessionId,
+                functionName,
+                source,
+                userId
+            });
+
+            return session;
+        } catch (dbError) {
+            // Don't throw - just log to console/file and continue
+            // This ensures the calling code is not affected if DB logging fails
+            logger.error('logStandaloneError: Failed to save error to MongoDB', {
+                userId,
+                functionName,
+                source,
+                dbError: dbError.message
+            });
+            return null;
+        }
+    }
 }
 
 module.exports = LoggingHelper;

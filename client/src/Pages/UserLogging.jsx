@@ -7,7 +7,6 @@ import {
   AlertCircle, 
   CheckCircle, 
   Clock, 
-  CreditCard,
   Filter,
   RefreshCw,
   Search,
@@ -23,8 +22,6 @@ import {
   BarChart3,
   AlertTriangle,
   Info,
-  Mail,
-  Send,
   XCircle,
   Play,
   Loader2
@@ -67,26 +64,13 @@ const UserLogging = () => {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState(null);
   const [errorLogs, setErrorLogs] = useState([]);
-  const [emailLogs, setEmailLogs] = useState([]);
-  const [emailStats, setEmailStats] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionDetails, setSessionDetails] = useState(null);
-  
-  // Payment logs (superadmin)
-  const [paymentLogs, setPaymentLogs] = useState([]);
-  const [paymentLogsPagination, setPaymentLogsPagination] = useState({ currentPage: 1, totalPages: 0, totalCount: 0, limit: 50 });
-  const [paymentEventFilter, setPaymentEventFilter] = useState('all');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
-  const [paymentPage, setPaymentPage] = useState(1);
   
   // Filters and pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('7');
-  
-  // Email filters
-  const [emailTypeFilter, setEmailTypeFilter] = useState('all');
-  const [emailStatusFilter, setEmailStatusFilter] = useState('all');
   const [expandedErrors, setExpandedErrors] = useState(new Set());
 
   // Integration trigger (top button – runs for current user)
@@ -243,7 +227,7 @@ const UserLogging = () => {
   // Fetch data based on active tab
   useEffect(() => {
     fetchData();
-  }, [activeTab, dateFilter, emailTypeFilter, emailStatusFilter, paymentPage, paymentEventFilter, paymentStatusFilter]);
+  }, [activeTab, dateFilter]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -271,48 +255,6 @@ const UserLogging = () => {
           setErrorLogs(errorRes?.data?.data?.errorLogs || []);
         }
         
-        if (activeTab === 'overview' || activeTab === 'emails') {
-          // Fetch email logs
-          const emailParams = new URLSearchParams({
-            limit: '50'
-          });
-          
-          if (emailTypeFilter !== 'all') {
-            emailParams.append('type', emailTypeFilter);
-          }
-          
-          if (emailStatusFilter !== 'all') {
-            emailParams.append('status', emailStatusFilter);
-          }
-          
-          const emailRes = await axiosInstance.get(`/app/analyse/logging/emails?${emailParams.toString()}`);
-          console.log("emailRes: ", emailRes);
-          setEmailLogs(emailRes?.data?.data?.emailLogs || []);
-          setEmailStats(emailRes?.data?.data?.stats || []);
-        }
-        
-        if (activeTab === 'payment-logs') {
-          // Fetch payment logs (superadmin - all logs)
-          const paymentParams = new URLSearchParams({
-            page: String(paymentPage),
-            limit: '50'
-          });
-          if (paymentEventFilter !== 'all') {
-            paymentParams.append('eventType', paymentEventFilter);
-          }
-          if (paymentStatusFilter !== 'all') {
-            paymentParams.append('status', paymentStatusFilter);
-          }
-          const paymentRes = await axiosInstance.get(`/app/auth/admin/payment-logs?${paymentParams.toString()}`);
-          const paymentData = paymentRes?.data?.data;
-          setPaymentLogs(paymentData?.logs || []);
-          setPaymentLogsPagination({
-            currentPage: paymentData?.pagination?.currentPage || 1,
-            totalPages: paymentData?.pagination?.totalPages || 0,
-            totalCount: paymentData?.pagination?.totalCount || 0,
-            limit: paymentData?.pagination?.limit || 50
-          });
-        }
     } catch (err) {
       console.error('Error fetching logging data:', err);
       setError('Failed to fetch logging data. Please try again.');
@@ -529,9 +471,7 @@ const UserLogging = () => {
             {[
               { id: 'overview', label: 'Overview', icon: BarChart3 },
               { id: 'sessions', label: 'Sessions', icon: Database },
-              { id: 'errors', label: 'Error Logs', icon: AlertCircle },
-              { id: 'emails', label: 'Email Logs', icon: Mail },
-              { id: 'payment-logs', label: 'Payment Logs', icon: CreditCard }
+              { id: 'errors', label: 'Error Logs', icon: AlertCircle }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1041,366 +981,6 @@ const UserLogging = () => {
           </div>
         )}
 
-        {/* Email Logs Tab */}
-        {activeTab === 'emails' && (
-          <div className="space-y-2">
-            {/* Email Statistics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-2">
-              {emailStats.map((stat, index) => (
-                <div key={stat._id} className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[11px] font-medium" style={{ color: '#9ca3af' }}>{stat._id.replace('_', ' ')}</p>
-                      <p className="text-[18px] font-bold mt-0.5" style={{ color: '#f3f4f6' }}>{stat.totalCount}</p>
-                    </div>
-                    <Mail className="w-4 h-4" style={{ color: '#60a5fa' }} />
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {stat.statuses.map(status => (
-                      <div key={status.status} className="flex items-center justify-between text-[10px]">
-                        <span className="flex items-center gap-1" style={{
-                          color: status.status === 'SENT' ? '#22c55e' : 
-                                 status.status === 'FAILED' ? '#f87171' : '#fbbf24'
-                        }}>
-                          {status.status === 'SENT' ? <Send className="w-3 h-3" /> : 
-                           status.status === 'FAILED' ? <XCircle className="w-3 h-3" /> : 
-                           <Clock className="w-3 h-3" />}
-                          {status.status}
-                        </span>
-                        <span className="font-medium" style={{ color: '#f3f4f6' }}>{status.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Email Filters */}
-            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Filters</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Email Type</label>
-                  <select
-                    value={emailTypeFilter}
-                    onChange={(e) => setEmailTypeFilter(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
-                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
-                  >
-                    <option value="all" style={{ background: '#21262d' }}>All Types</option>
-                    <option value="OTP" style={{ background: '#21262d' }}>OTP</option>
-                    <option value="WELCOME_LITE" style={{ background: '#21262d' }}>Welcome Lite</option>
-                    <option value="PASSWORD_RESET" style={{ background: '#21262d' }}>Password Reset</option>
-                    <option value="ANALYSIS_READY" style={{ background: '#21262d' }}>Analysis Ready</option>
-                    <option value="WEEKLY_REPORT" style={{ background: '#21262d' }}>Weekly Report</option>
-                    <option value="UPGRADE_REMINDER" style={{ background: '#21262d' }}>Upgrade Reminder</option>
-                    <option value="CONNECTION_REMINDER" style={{ background: '#21262d' }}>Connection Reminder</option>
-                    <option value="SUPPORT_MESSAGE" style={{ background: '#21262d' }}>Support Message</option>
-                    <option value="USER_REGISTERED" style={{ background: '#21262d' }}>User Registered</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
-                  <select
-                    value={emailStatusFilter}
-                    onChange={(e) => setEmailStatusFilter(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
-                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
-                  >
-                    <option value="all" style={{ background: '#21262d' }}>All Status</option>
-                    <option value="SENT" style={{ background: '#21262d' }}>Sent</option>
-                    <option value="FAILED" style={{ background: '#21262d' }}>Failed</option>
-                    <option value="PENDING" style={{ background: '#21262d' }}>Pending</option>
-                    <option value="DELIVERED" style={{ background: '#21262d' }}>Delivered</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Email Logs Table */}
-            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Email Logs</h3>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y" style={{ borderColor: '#30363d' }}>
-                  <thead style={{ background: '#21262d' }}>
-                    <tr>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
-                        Type & Status
-                      </th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
-                        Recipient
-                      </th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
-                        Subject
-                      </th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
-                        Sent Date
-                      </th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>
-                        Provider
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
-                    {emailLogs.map((email, index) => (
-                      <tr key={email.id || index} className="transition-colors" style={{ borderColor: '#30363d' }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                        <td className="px-2 py-2 whitespace-nowrap">
-                          <div className="flex flex-col">
-                            <span className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
-                              {email.emailType.replace('_', ' ')}
-                            </span>
-                            <div className="flex items-center gap-1 mt-0.5">
-                              {email.status === 'SENT' ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>
-                                  <Send className="w-2.5 h-2.5" />
-                                  Sent
-                                </span>
-                              ) : email.status === 'FAILED' ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
-                                  <XCircle className="w-2.5 h-2.5" />
-                                  Failed
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
-                                  <Clock className="w-2.5 h-2.5" />
-                                  {email.status}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 whitespace-nowrap">
-                          <div className="flex flex-col">
-                            <span className="text-[11px]" style={{ color: '#f3f4f6' }}>{email.receiverEmail}</span>
-                            {email.receiverName && email.receiverName !== 'Unknown User' && (
-                              <span className="text-[10px]" style={{ color: '#9ca3af' }}>{email.receiverName}</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-2">
-                          <span className="text-[11px] line-clamp-2" style={{ color: '#f3f4f6' }}>
-                            {email.subject || 'No subject'}
-                          </span>
-                          {email.errorMessage && (
-                            <p className="text-[10px] mt-0.5 line-clamp-1" style={{ color: '#f87171' }}>
-                              Error: {email.errorMessage}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-2 py-2 whitespace-nowrap">
-                          <div className="flex flex-col">
-                            {email.sentDate ? (
-                              <>
-                                <span className="text-[11px]" style={{ color: '#f3f4f6' }}>
-                                  {new Date(email.sentDate).toLocaleDateString()}
-                                </span>
-                                <span className="text-[10px]" style={{ color: '#9ca3af' }}>
-                                  {email.sentTime}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-[11px]" style={{ color: '#9ca3af' }}>
-                                {new Date(email.createdAt).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 whitespace-nowrap">
-                          <div className="flex flex-col">
-                            <span className="text-[11px]" style={{ color: '#f3f4f6' }}>{email.emailProvider}</span>
-                            {email.retryCount > 0 && (
-                              <span className="text-[10px]" style={{ color: '#fb923c' }}>
-                                Retries: {email.retryCount}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                
-                {emailLogs.length === 0 && (
-                  <div className="text-center py-8">
-                    <Mail className="mx-auto h-6 w-6 mb-2" style={{ color: '#6b7280' }} />
-                    <h3 className="mt-2 text-xs font-medium" style={{ color: '#f3f4f6' }}>No email logs found</h3>
-                    <p className="mt-1 text-[10px]" style={{ color: '#9ca3af' }}>
-                      No email logs match the current filters.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Payment Logs Tab (superadmin) */}
-        {activeTab === 'payment-logs' && (
-          <div className="space-y-2">
-            {/* Filters */}
-            <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Filters</h3>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1">
-                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Event Type</label>
-                  <select
-                    value={paymentEventFilter}
-                    onChange={(e) => { setPaymentEventFilter(e.target.value); setPaymentPage(1); }}
-                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
-                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
-                  >
-                    <option value="all" style={{ background: '#21262d' }}>All Events</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CREATED" style={{ background: '#21262d' }}>Razorpay Subscription Created</option>
-                    <option value="RAZORPAY_PAYMENT_SUCCESS" style={{ background: '#21262d' }}>Razorpay Payment Success</option>
-                    <option value="RAZORPAY_PAYMENT_FAILED" style={{ background: '#21262d' }}>Razorpay Payment Failed</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_AUTHENTICATED" style={{ background: '#21262d' }}>Razorpay Authenticated</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_ACTIVATED" style={{ background: '#21262d' }}>Razorpay Activated</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CHARGED" style={{ background: '#21262d' }}>Razorpay Charged</option>
-                    <option value="RAZORPAY_SUBSCRIPTION_CANCELLED" style={{ background: '#21262d' }}>Razorpay Cancelled</option>
-                    <option value="STRIPE_CHECKOUT_CREATED" style={{ background: '#21262d' }}>Stripe Checkout Created</option>
-                    <option value="STRIPE_PAYMENT_SUCCESS" style={{ background: '#21262d' }}>Stripe Payment Success</option>
-                    <option value="STRIPE_PAYMENT_FAILED" style={{ background: '#21262d' }}>Stripe Payment Failed</option>
-                    <option value="TRIAL_STARTED" style={{ background: '#21262d' }}>Trial Started</option>
-                    <option value="TRIAL_ENDED" style={{ background: '#21262d' }}>Trial Ended</option>
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[10px] font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
-                  <select
-                    value={paymentStatusFilter}
-                    onChange={(e) => { setPaymentStatusFilter(e.target.value); setPaymentPage(1); }}
-                    className="w-full px-2 py-1.5 rounded-lg text-xs transition-all"
-                    style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onBlur={(e) => e.target.style.borderColor = '#30363d'}
-                  >
-                    <option value="all" style={{ background: '#21262d' }}>All Status</option>
-                    <option value="SUCCESS" style={{ background: '#21262d' }}>Success</option>
-                    <option value="FAILED" style={{ background: '#21262d' }}>Failed</option>
-                    <option value="PENDING" style={{ background: '#21262d' }}>Pending</option>
-                    <option value="PROCESSING" style={{ background: '#21262d' }}>Processing</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Payment Logs Table */}
-            <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Payment Logs</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y" style={{ borderColor: '#30363d' }}>
-                  <thead style={{ background: '#21262d' }}>
-                    <tr>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>User</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Event</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gateway</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Amount</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Message / Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
-                    {paymentLogs.length > 0 ? (
-                      paymentLogs.map((log, index) => (
-                        <tr key={log._id || index} className="transition-colors" style={{ borderColor: '#30363d' }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
-                            {formatDate(log.createdAt)}
-                          </td>
-                          <td className="px-2 py-2 whitespace-nowrap">
-                            <div className="text-[11px]" style={{ color: '#f3f4f6' }}>
-                              {log.userId?.firstName} {log.userId?.lastName}
-                            </div>
-                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>{log.userId?.email}</div>
-                          </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
-                            {log.eventType?.replace(/_/g, ' ')}
-                          </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
-                            {log.paymentGateway}
-                          </td>
-                          <td className="px-2 py-2 whitespace-nowrap">
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style={{
-                              background: log.status === 'SUCCESS' ? 'rgba(34, 197, 94, 0.2)' :
-                                         log.status === 'FAILED' ? 'rgba(239, 68, 68, 0.2)' :
-                                         'rgba(251, 191, 36, 0.2)',
-                              color: log.status === 'SUCCESS' ? '#22c55e' :
-                                     log.status === 'FAILED' ? '#f87171' : '#fbbf24'
-                            }}>
-                              {log.status}
-                            </span>
-                          </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
-                            {log.amount != null ? `${log.currency || ''} ${log.amount}` : '—'}
-                          </td>
-                          <td className="px-2 py-2 text-[11px] max-w-xs">
-                            {log.errorMessage ? (
-                              <span style={{ color: '#f87171' }} title={log.errorDescription}>{log.errorMessage}</span>
-                            ) : (
-                              <span style={{ color: '#9ca3af' }}>{log.message || '—'}</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="7" className="px-4 py-8 text-center">
-                          <CreditCard className="w-6 h-6 mx-auto mb-2" style={{ color: '#6b7280' }} />
-                          <p className="text-xs" style={{ color: '#9ca3af' }}>No payment logs found</p>
-                          <p className="text-[10px]" style={{ color: '#6b7280' }}>Payment events will appear here</p>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                {paymentLogsPagination.totalPages > 1 && (
-                  <div className="px-3 py-2 border-t flex items-center justify-between" style={{ borderColor: '#30363d' }}>
-                    <p className="text-xs" style={{ color: '#9ca3af' }}>
-                      Page {paymentLogsPagination.currentPage} of {paymentLogsPagination.totalPages} ({paymentLogsPagination.totalCount} total)
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setPaymentPage(p => Math.max(1, p - 1))}
-                        disabled={paymentLogsPagination.currentPage <= 1}
-                        className="px-3 py-1 rounded-lg text-xs transition-all disabled:opacity-50"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                        onMouseEnter={(e) => !(paymentLogsPagination.currentPage <= 1) && (e.target.style.borderColor = '#3b82f6')}
-                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
-                      >
-                        Previous
-                      </button>
-                      <button
-                        onClick={() => setPaymentPage(p => p + 1)}
-                        disabled={paymentLogsPagination.currentPage >= paymentLogsPagination.totalPages}
-                        className="px-3 py-1 rounded-lg text-xs transition-all disabled:opacity-50"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                        onMouseEnter={(e) => !(paymentLogsPagination.currentPage >= paymentLogsPagination.totalPages) && (e.target.style.borderColor = '#3b82f6')}
-                        onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       </div>
     </div>

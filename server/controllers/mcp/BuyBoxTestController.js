@@ -11,6 +11,7 @@ const { fetchAndStoreBuyBoxData, getBuyBoxData } = require('../../Services/MCP/M
 const { getBuyBoxDataByDateRange, getLatestBuyBoxData } = require('../../Services/MCP/BuyBoxService.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const logger = require('../../utils/Logger.js');
+const LoggingHelper = require('../../utils/LoggingHelper.js');
 
 /**
  * Test endpoint to fetch and store BuyBox data from MCP
@@ -72,8 +73,21 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
             const sellerDoc = await Seller.findOne({ User: userId }).lean();
 
             if (!sellerDoc) {
+                const errorMsg = 'No seller account found for this user.';
                 logger.error('Seller document not found', { userId });
-                const error = new ApiError(404, 'No seller account found for this user.');
+                
+                // Log to MongoDB for tracking
+                await LoggingHelper.logStandaloneError({
+                    userId,
+                    region: Region,
+                    country: Country,
+                    functionName: 'testFetchBuyBoxData',
+                    error: errorMsg,
+                    source: 'MCP_BUYBOX',
+                    additionalData: { endpoint: '/api/test/buybox/fetch', reason: 'seller_not_found' }
+                });
+                
+                const error = new ApiError(404, errorMsg);
                 return res.status(404).json({
                     statusCode: error.statusCode,
                     message: error.message,
@@ -113,12 +127,25 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
             }
 
             if (!matchedAccount || !matchedAccount.spiRefreshToken) {
+                const errorMsg = 'spiRefreshToken not found. Please provide refreshToken in request body or ensure seller account has spiRefreshToken.';
                 logger.error('Seller account or refresh token not found', {
                     userId,
                     region: Region,
                     country: Country
                 });
-                const error = new ApiError(404, 'spiRefreshToken not found. Please provide refreshToken in request body or ensure seller account has spiRefreshToken.');
+                
+                // Log to MongoDB for tracking
+                await LoggingHelper.logStandaloneError({
+                    userId,
+                    region: Region,
+                    country: Country,
+                    functionName: 'testFetchBuyBoxData',
+                    error: errorMsg,
+                    source: 'MCP_BUYBOX',
+                    additionalData: { endpoint: '/api/test/buybox/fetch', reason: 'refresh_token_not_found' }
+                });
+                
+                const error = new ApiError(404, errorMsg);
                 return res.status(404).json({
                     statusCode: error.statusCode,
                     message: error.message,
@@ -171,6 +198,23 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
                 queryId: result.queryId,
                 documentId: result.documentId
             });
+            
+            // Log to MongoDB for tracking
+            await LoggingHelper.logStandaloneError({
+                userId,
+                region: effectiveRegion,
+                country: effectiveCountry,
+                functionName: 'fetchAndStoreBuyBoxData',
+                error: result.error || 'Failed to fetch BuyBox data',
+                source: 'MCP_BUYBOX',
+                additionalData: { 
+                    endpoint: '/api/test/buybox/fetch',
+                    queryId: result.queryId,
+                    documentId: result.documentId,
+                    tokenRefreshNeeded: result.error?.includes('refresh_token') || result.error?.includes('invalid grant')
+                }
+            });
+            
             const error = new ApiError(500, result.error || 'Failed to fetch BuyBox data');
             return res.status(500).json({
                 statusCode: error.statusCode,
@@ -217,12 +261,26 @@ const testFetchBuyBoxData = asyncHandler(async (req, res) => {
         );
 
     } catch (error) {
+        const errRegion = typeof effectiveRegion !== 'undefined' ? effectiveRegion : Region;
+        const errCountry = typeof effectiveCountry !== 'undefined' ? effectiveCountry : Country;
+        
         logger.error('Error in testFetchBuyBoxData', {
             userId,
-            region: effectiveRegion || Region,
-            country: effectiveCountry || Country,
+            region: errRegion,
+            country: errCountry,
             error: error.message,
             stack: error.stack
+        });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region: errRegion,
+            country: errCountry,
+            functionName: 'testFetchBuyBoxData',
+            error,
+            source: 'MCP_BUYBOX',
+            additionalData: { endpoint: '/api/test/buybox/fetch', errorType: 'unexpected' }
         });
 
         const apiError = new ApiError(500, `Error fetching BuyBox data: ${error.message}`);
@@ -317,6 +375,17 @@ const testGetBuyBoxData = asyncHandler(async (req, res) => {
             error: error.message,
             stack: error.stack
         });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region: Region,
+            country: Country,
+            functionName: 'testGetBuyBoxData',
+            error,
+            source: 'MCP_BUYBOX',
+            additionalData: { endpoint: '/api/test/buybox/get', errorType: 'unexpected' }
+        });
 
         const apiError = new ApiError(500, `Error retrieving BuyBox data: ${error.message}`);
         return res.status(500).json({
@@ -406,6 +475,17 @@ const testGetBuyBoxSummary = asyncHandler(async (req, res) => {
             country: Country,
             error: error.message,
             stack: error.stack
+        });
+        
+        // Log to MongoDB for tracking
+        await LoggingHelper.logStandaloneError({
+            userId,
+            region: Region,
+            country: Country,
+            functionName: 'testGetBuyBoxSummary',
+            error,
+            source: 'MCP_BUYBOX',
+            additionalData: { endpoint: '/api/test/buybox/summary', errorType: 'unexpected' }
         });
 
         const apiError = new ApiError(500, `Error retrieving BuyBox summary: ${error.message}`);
