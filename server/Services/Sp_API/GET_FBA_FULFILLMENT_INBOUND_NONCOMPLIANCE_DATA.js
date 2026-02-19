@@ -3,6 +3,7 @@ const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../../models/inventory/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
@@ -11,14 +12,23 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours before now (1 day delay for data accuracy)
         const StartTime = new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000); // 6 months before now
+        const reportType = "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds,
+            dataStartTime: StartTime.toISOString(),
+            dataEndTime: EndTime.toISOString(),
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA",
-                marketplaceIds: marketplaceIds, // Use dynamic marketplaceIds instead of hardcoded
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime: EndTime.toISOString(),
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,
@@ -217,7 +227,7 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         const records = parse(tsv, {
-            columns: true,
+            columns: true,  // Keep original headers - this report's data access relies on exact header names
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,

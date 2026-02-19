@@ -1,11 +1,11 @@
 import React, { useState,useEffect } from 'react';
-import { Info, TrendingUp, LineChart, Search, Box } from 'lucide-react';
+import { Info, TrendingUp, LineChart, Search, Box, Loader2 } from 'lucide-react';
 import Chart from 'react-apexcharts';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 
-const ProductChecker = () => {
+const ProductChecker = ({ loading = false }) => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
    console.log(info)
    const navigate = useNavigate()
@@ -157,6 +157,9 @@ const ProductChecker = () => {
         <div className='flex items-center gap-1'>
           <LineChart className='w-3 h-3 text-blue-400' />
           <h2 className='text-xs font-semibold text-gray-100'>Product Issues</h2>
+          {loading && (
+            <Loader2 className='w-3 h-3 text-blue-400 animate-spin' />
+          )}
           <div className='relative'>
             <Info 
               className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors' 

@@ -39,6 +39,47 @@ export const SkeletonChart = ({ height = 256 }) => (
 );
 
 /**
+ * Campaign Analysis section skeleton - title, tab row, and table.
+ * Matches PPCDashboard Campaign Analysis card layout (dark theme).
+ */
+export const CampaignAnalysisSkeleton = () => (
+  <div className="bg-[#161b22] rounded border border-[#30363d] transition-all duration-300 overflow-hidden mb-2" aria-hidden>
+    <div className="p-2 border-b border-[#30363d]">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <SkeletonBar height="0.875rem" width="10rem" className="mb-1.5" />
+          <SkeletonBar height="0.75rem" width="14rem" />
+        </div>
+      </div>
+      {/* Tab row */}
+      <div className="flex gap-6 mt-2">
+        {[1, 2, 3, 4].map((i) => (
+          <SkeletonBar key={i} height="0.75rem" width={i === 1 ? '6rem' : '5rem'} />
+        ))}
+      </div>
+    </div>
+    <div className="p-2" style={{ minHeight: '300px' }}>
+      <div className="mb-2 flex gap-2">
+        <SkeletonBar height="0.875rem" width="35%" />
+        <SkeletonBar height="0.875rem" width="15%" />
+        <SkeletonBar height="0.875rem" width="15%" />
+        <SkeletonBar height="0.875rem" width="12%" />
+      </div>
+      <div className="divide-y divide-[#30363d]">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="py-2 flex gap-2 items-center">
+            <SkeletonBar height="0.75rem" width="40%" />
+            <SkeletonBar height="0.75rem" width="12%" />
+            <SkeletonBar height="0.75rem" width="12%" />
+            <SkeletonBar height="0.75rem" width="10%" />
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/**
  * Dashboard CONTENT ONLY - no headings. Use when page already rendered header + section titles.
  * Renders: 4 stat value placeholders, 3 card bodies, 1 table body.
  */
@@ -155,6 +196,237 @@ export const ChartAndTableSkeleton = () => (
       </div>
     </div>
     <TablePageSkeleton rows={6} />
+  </div>
+);
+
+/**
+ * Issues table skeleton rows - for Category page tables (4 columns: ASIN/SKU, Title, Issue Details, Solution)
+ * Use inside <tbody> when loading.
+ */
+export const IssuesTableRowsSkeleton = ({ rows = 5 }) => (
+  <>
+    {Array.from({ length: rows }).map((_, i) => (
+      <tr key={i} className="animate-pulse">
+        <td className="py-2 px-2"><div className="h-4 bg-[#30363d] rounded w-24" aria-hidden /></td>
+        <td className="py-2 px-2"><div className="h-4 bg-[#30363d] rounded w-32" aria-hidden /></td>
+        <td className="py-2 px-2"><div className="h-4 bg-[#30363d] rounded w-48" aria-hidden /></td>
+        <td className="py-2 px-2"><div className="h-4 bg-[#30363d] rounded w-40" aria-hidden /></td>
+      </tr>
+    ))}
+  </>
+);
+
+/**
+ * Full Issues by Category page skeleton (dark theme)
+ */
+export const IssuesCategoryPageSkeleton = () => (
+  <div className="min-h-screen bg-[#1a1a1a] animate-in fade-in duration-300" aria-hidden>
+    <div className="bg-[#161b22] border border-[#30363d] rounded mb-2">
+      <div className="px-2 py-2">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+          <div>
+            <div className="h-5 bg-[#30363d] rounded w-32 mb-1.5 animate-pulse" />
+            <div className="h-3 bg-[#30363d] rounded w-48 animate-pulse" />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="h-6 w-12 bg-[#30363d] rounded animate-pulse" />
+            <div className="w-10 h-10 bg-[#30363d] rounded animate-pulse" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <div className="px-2 py-2">
+      <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
+        <div className="h-4 bg-[#30363d] rounded w-24 mb-1 animate-pulse" />
+        <div className="h-3 bg-[#30363d] rounded w-40 animate-pulse" />
+        <div className="mt-2 h-8 bg-[#30363d] rounded w-[140px] animate-pulse" />
+      </div>
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden mb-2">
+          <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+            <div className="h-4 bg-[#30363d] rounded w-40 mb-1 animate-pulse" />
+            <div className="h-3 bg-[#30363d] rounded w-56 animate-pulse" />
+          </div>
+          <div className="p-2">
+            <div className="flex gap-2 mb-2">
+              {[1, 2, 3, 4].map((j) => (
+                <div key={j} className="h-3 bg-[#30363d] rounded flex-1 animate-pulse" />
+              ))}
+            </div>
+            <div className="divide-y divide-[#30363d]">
+              {Array.from({ length: 4 }).map((_, k) => (
+                <div key={k} className="py-2 flex gap-2">
+                  <div className="h-4 bg-[#30363d] rounded w-24 animate-pulse" />
+                  <div className="h-4 bg-[#30363d] rounded w-32 animate-pulse" />
+                  <div className="h-4 bg-[#30363d] rounded flex-1 animate-pulse" />
+                  <div className="h-4 bg-[#30363d] rounded w-40 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+/**
+ * Single product card skeleton for Issues by Product page (dark theme)
+ */
+export const IssuesProductCardSkeleton = () => (
+  <div className="bg-[#161b22] rounded border border-[#30363d] p-2 animate-pulse" aria-hidden>
+    <div className="flex items-center justify-between border-b border-[#30363d] pb-2">
+      <div className="flex space-x-2">
+        <div className="w-12 h-12 rounded bg-[#30363d]" />
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="h-4 bg-[#30363d] rounded w-3/4" />
+          <div className="flex gap-2">
+            <div className="h-3 bg-[#30363d] rounded w-20" />
+            <div className="h-3 bg-[#30363d] rounded w-16" />
+          </div>
+          <div className="h-5 bg-[#30363d] rounded w-24 mt-1.5" />
+        </div>
+      </div>
+    </div>
+    <div className="pt-2 flex gap-2 flex-wrap">
+      <div className="h-6 bg-[#30363d] rounded w-16" />
+      <div className="h-6 bg-[#30363d] rounded w-20" />
+      <div className="h-6 bg-[#30363d] rounded w-14" />
+    </div>
+  </div>
+);
+
+/**
+ * Full Issues by Product page skeleton (dark theme)
+ */
+export const IssuesByProductPageSkeleton = () => (
+  <div className="space-y-2 animate-in fade-in duration-300" aria-hidden>
+    <div className="bg-[#161b22] border border-[#30363d] rounded p-2">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+        <div className="space-y-1">
+          <div className="h-5 bg-[#30363d] rounded w-36 mb-1 animate-pulse" />
+          <div className="h-3 bg-[#30363d] rounded w-52 animate-pulse" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-[#21262d] border border-[#30363d] rounded p-2 h-14 animate-pulse" />
+          <div className="bg-[#21262d] border border-[#30363d] rounded p-2 h-14 animate-pulse" />
+        </div>
+      </div>
+    </div>
+    <div className="bg-[#161b22] border border-[#30363d] rounded p-2">
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="h-8 bg-[#30363d] rounded w-40 animate-pulse" />
+        <div className="h-8 bg-[#30363d] rounded w-28 animate-pulse" />
+        <div className="h-8 bg-[#30363d] rounded w-24 animate-pulse" />
+      </div>
+    </div>
+    <div className="space-y-2">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <IssuesProductCardSkeleton key={i} />
+      ))}
+    </div>
+  </div>
+);
+
+/**
+ * Product Details page skeleton (dark theme)
+ * Matches layout: header, product card (image + details grid), performance card, issues section placeholders
+ */
+export const ProductDetailsPageSkeleton = () => (
+  <div className="product-details-page bg-[#1a1a1a] lg:mt-0 mt-[10vh] h-screen overflow-y-auto animate-in fade-in duration-300" aria-hidden>
+    <div className="p-2">
+      {/* Page header */}
+      <div className="bg-[#161b22] border border-[#30363d] rounded mb-2">
+        <div className="px-2 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded bg-[#30363d] shrink-0 animate-pulse" />
+            <div>
+              <div className="h-5 bg-[#30363d] rounded w-32 mb-1 animate-pulse" />
+              <div className="h-3 bg-[#30363d] rounded w-48 animate-pulse" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-3 bg-[#30363d] rounded w-10 animate-pulse" />
+            <div className="h-7 bg-[#30363d] rounded w-24 animate-pulse" />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 pb-1">
+        {/* Section 1: Product details card */}
+        <div className="bg-[#161b22] border border-[#30363d] rounded">
+          <div className="bg-[#21262d] border-b border-[#30363d] px-3 py-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-[#30363d] animate-pulse" />
+              <div className="h-4 bg-[#30363d] rounded w-28 animate-pulse" />
+            </div>
+            <div className="flex gap-2">
+              <div className="h-8 bg-[#30363d] rounded w-20 animate-pulse" />
+              <div className="h-8 bg-[#30363d] rounded w-24 animate-pulse" />
+            </div>
+          </div>
+          <div className="p-3">
+            <div className="flex flex-col md:flex-row md:items-start gap-4">
+              <div className="w-20 h-20 bg-[#30363d] rounded shrink-0 animate-pulse" />
+              <div className="flex-1 min-w-0 space-y-3">
+                <div>
+                  <div className="h-3 bg-[#30363d] rounded w-12 mb-1.5 animate-pulse" />
+                  <div className="h-4 bg-[#30363d] rounded w-full max-w-md animate-pulse" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <div key={i}>
+                      <div className="h-3 bg-[#30363d] rounded w-10 mb-1 animate-pulse" />
+                      <div className="h-7 bg-[#30363d] rounded w-20 animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 2: Performance card */}
+        <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+          <div className="bg-[#21262d] border-b border-[#30363d] px-3 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-[#30363d] animate-pulse" />
+              <div className="h-4 bg-[#30363d] rounded w-24 animate-pulse" />
+            </div>
+            <div className="h-8 bg-[#30363d] rounded w-32 animate-pulse" />
+          </div>
+          <div className="p-3 border-b border-[#30363d]">
+            <div className="h-3 bg-[#30363d] rounded w-36 mb-2 animate-pulse" />
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="bg-[#21262d] rounded border border-[#30363d] p-2 h-16 animate-pulse" />
+              ))}
+            </div>
+          </div>
+          <div className="p-3">
+            <div className="h-3 bg-[#30363d] rounded w-28 mb-2 animate-pulse" />
+            <div className="h-56 bg-[#21262d] rounded border border-[#30363d] animate-pulse" />
+          </div>
+        </div>
+
+        {/* Section 3 & 4: Issue sections placeholders */}
+        {[1, 2].map((i) => (
+          <div key={i} className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+            <div className="bg-[#21262d] border-b border-[#30363d] px-3 py-2">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-[#30363d] animate-pulse" />
+                <div className="h-4 bg-[#30363d] rounded w-32 animate-pulse" />
+              </div>
+            </div>
+            <div className="p-3 space-y-2">
+              <div className="h-4 bg-[#30363d] rounded w-full animate-pulse" />
+              <div className="h-4 bg-[#30363d] rounded w-4/5 animate-pulse" />
+              <div className="h-4 bg-[#30363d] rounded w-3/4 animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   </div>
 );
 

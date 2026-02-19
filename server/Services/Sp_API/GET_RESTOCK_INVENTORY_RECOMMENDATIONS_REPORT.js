@@ -4,6 +4,7 @@ const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js'); 
 const UserModel = require('../../models/user-auth/userModel.js');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     // console.log(marketplaceIds);
@@ -11,14 +12,23 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
         const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const reportType = "GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds, 
+            dataStartTime: StartTime.toISOString(),
+            dataEndTime: EndTime.toISOString(),
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT",
-                marketplaceIds: marketplaceIds, 
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime: EndTime.toISOString() ,
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,
@@ -255,7 +265,7 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         const records = parse(tsv, {
-            columns: true,
+            columns: true,  // Keep original headers - this report's data access relies on exact header names
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,

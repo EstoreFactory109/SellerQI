@@ -279,26 +279,36 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
             
             const sponsoredAdsData=[];
 
-            reportJson.forEach(item=>{
-                sponsoredAdsData.push({
-                    date: item.date,
-                    asin: item.advertisedAsin,
-                    spend: item.cost,
-                    salesIn7Days: item.sales7d,
-                    salesIn14Days: item.sales14d,
-                    salesIn30Days: item.sales30d,
-                    campaignId: item.campaignId,
-                    campaignName: item.campaignName,
-                    adGroupId: item.adGroupId,
-                    adGroupName: item.adGroupName,
-                    impressions: item.impressions,
-                    adGroupId: item.adGroupId,
-                    clicks: item.clicks,
-                    purchasedIn7Days: item.purchases7d,
-                    purchasedIn14Days: item.purchases14d,
-                    purchasedIn30Days: item.purchases30d,
-                })
-            })
+            // Process in chunks to yield to the event loop and allow lock renewal
+            const CHUNK_SIZE = 500;
+            for (let i = 0; i < reportJson.length; i += CHUNK_SIZE) {
+                const chunk = reportJson.slice(i, i + CHUNK_SIZE);
+                
+                for (const item of chunk) {
+                    sponsoredAdsData.push({
+                        date: item.date,
+                        asin: item.advertisedAsin,
+                        spend: item.cost,
+                        salesIn7Days: item.sales7d,
+                        salesIn14Days: item.sales14d,
+                        salesIn30Days: item.sales30d,
+                        campaignId: item.campaignId,
+                        campaignName: item.campaignName,
+                        adGroupId: item.adGroupId,
+                        adGroupName: item.adGroupName,
+                        impressions: item.impressions,
+                        clicks: item.clicks,
+                        purchasedIn7Days: item.purchases7d,
+                        purchasedIn14Days: item.purchases14d,
+                        purchasedIn30Days: item.purchases30d,
+                    });
+                }
+                
+                // Yield to event loop after each chunk to allow lock renewal
+                if (i + CHUNK_SIZE < reportJson.length) {
+                    await new Promise(resolve => setImmediate(resolve));
+                }
+            }
             
             return sponsoredAdsData;
 

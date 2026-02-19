@@ -300,8 +300,9 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
 /**
  * Process report data and aggregate metrics
+ * Uses chunked processing with yields to prevent blocking the event loop
  */
-function processReportData(reportData, campaignType) {
+async function processReportData(reportData, campaignType) {
     const config = CAMPAIGN_TYPES[campaignType];
     const salesMetric = config.salesMetric;
     
@@ -318,50 +319,61 @@ function processReportData(reportData, campaignType) {
         return metrics;
     }
 
-    reportData.forEach(row => {
-        // Get sales from the appropriate column based on campaign type
-        // SP uses sales30d, SB/SD use 'sales' (which is 14-day by default)
-        const sales = parseFloat(row[salesMetric] || row.sales30d || row.sales || 0);
-        const spend = parseFloat(row.cost || 0);
-        const impressions = parseInt(row.impressions || 0);
-        const clicks = parseInt(row.clicks || 0);
-        const date = row.date;
+    // Process in chunks to yield to the event loop and allow lock renewal
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < reportData.length; i += CHUNK_SIZE) {
+        const chunk = reportData.slice(i, i + CHUNK_SIZE);
+        
+        for (const row of chunk) {
+            // Get sales from the appropriate column based on campaign type
+            // SP uses sales30d, SB/SD use 'sales' (which is 14-day by default)
+            const sales = parseFloat(row[salesMetric] || row.sales30d || row.sales || 0);
+            const spend = parseFloat(row.cost || 0);
+            const impressions = parseInt(row.impressions || 0);
+            const clicks = parseInt(row.clicks || 0);
+            const date = row.date;
 
-        metrics.totalSales += sales;
-        metrics.totalSpend += spend;
-        metrics.totalImpressions += impressions;
-        metrics.totalClicks += clicks;
+            metrics.totalSales += sales;
+            metrics.totalSpend += spend;
+            metrics.totalImpressions += impressions;
+            metrics.totalClicks += clicks;
 
-        // Date-wise aggregation
-        if (date) {
-            if (!metrics.dateWiseData[date]) {
-                metrics.dateWiseData[date] = {
-                    sales: 0,
-                    spend: 0,
-                    impressions: 0,
-                    clicks: 0
-                };
+            // Date-wise aggregation
+            if (date) {
+                if (!metrics.dateWiseData[date]) {
+                    metrics.dateWiseData[date] = {
+                        sales: 0,
+                        spend: 0,
+                        impressions: 0,
+                        clicks: 0
+                    };
+                }
+                
+                metrics.dateWiseData[date].sales += sales;
+                metrics.dateWiseData[date].spend += spend;
+                metrics.dateWiseData[date].impressions += impressions;
+                metrics.dateWiseData[date].clicks += clicks;
             }
-            
-            metrics.dateWiseData[date].sales += sales;
-            metrics.dateWiseData[date].spend += spend;
-            metrics.dateWiseData[date].impressions += impressions;
-            metrics.dateWiseData[date].clicks += clicks;
-        }
 
-        // Campaign-level data
-        if (row.campaignId) {
-            metrics.campaigns.push({
-                campaignId: row.campaignId,
-                campaignName: row.campaignName,
-                campaignStatus: row.campaignStatus,
-                sales: sales,
-                spend: spend,
-                impressions: impressions,
-                clicks: clicks
-            });
+            // Campaign-level data
+            if (row.campaignId) {
+                metrics.campaigns.push({
+                    campaignId: row.campaignId,
+                    campaignName: row.campaignName,
+                    campaignStatus: row.campaignStatus,
+                    sales: sales,
+                    spend: spend,
+                    impressions: impressions,
+                    clicks: clicks
+                });
+            }
         }
-    });
+        
+        // Yield to event loop after each chunk to allow lock renewal
+        if (i + CHUNK_SIZE < reportData.length) {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
 
     return metrics;
 }
@@ -587,7 +599,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                     );
 
                     // Process the report data
-                    const metrics = processReportData(reportData, reportResult.campaignType);
+                    const metrics = await processReportData(reportData, reportResult.campaignType);
                     
                     reportResults.push({
                         campaignType: reportResult.campaignType,

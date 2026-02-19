@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, TrendingDown, LineChart, ArrowRight, Download, Calendar, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, TrendingDown, LineChart, ArrowRight, Download, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { IssuesByProductPageSkeleton, IssuesProductCardSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import noImage from '../assets/Icons/no-image.png';
-import { fetchIssuesByProductData } from '../redux/slices/PageDataSlice.js';
+import { fetchProductsWithIssues, fetchIssuesSummary } from '../redux/slices/PageDataSlice.js';
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -75,13 +76,13 @@ const FormattedMessage = ({ message }) => {
 };
 
 // Table component for ranking issues
-const RankingIssuesTable = ({ product, info }) => {
+const RankingIssuesTable = ({ product }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
     
     const extractRankingErrors = (product) => {
-        // Find the corresponding ranking data from info.rankingProductWiseErrors
-        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
+        // Use the ranking details from the enriched product (from backend)
+        const rankingData = product.rankingDetails;
         if (!rankingData?.data) return [];
         
         const rankingErrors = rankingData.data;
@@ -182,7 +183,7 @@ const RankingIssuesTable = ({ product, info }) => {
 };
 
 // Table component for conversion issues (now includes buybox issues)
-const ConversionIssuesTable = ({ product, buyBoxData }) => {
+const ConversionIssuesTable = ({ product }) => {
     const [page, setPage] = useState(1);
     const itemsPerPage = 5;
     
@@ -210,43 +211,21 @@ const ConversionIssuesTable = ({ product, buyBoxData }) => {
             });
         }
         
-        // Also extract buybox errors from buyBoxData (now part of conversion)
-        if (buyBoxData?.asinBuyBoxData && Array.isArray(buyBoxData.asinBuyBoxData)) {
-            // Try multiple matching strategies to handle type/format mismatches
-            let productBuyBox = buyBoxData.asinBuyBoxData.find(
-                i => i.childAsin === product.asin || i.parentAsin === product.asin
-            );
-            
-            if (!productBuyBox) {
-                const productAsinStr = String(product.asin || '').trim();
-                productBuyBox = buyBoxData.asinBuyBoxData.find(
-                    i => String(i.childAsin || '').trim() === productAsinStr || 
-                         String(i.parentAsin || '').trim() === productAsinStr
-                );
-            }
-            
-            if (!productBuyBox) {
-                const productAsinLower = String(product.asin || '').trim().toLowerCase();
-                productBuyBox = buyBoxData.asinBuyBoxData.find(
-                    i => String(i.childAsin || '').trim().toLowerCase() === productAsinLower || 
-                         String(i.parentAsin || '').trim().toLowerCase() === productAsinLower
-                );
-            }
-            
-            if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
-                if (productBuyBox.buyBoxPercentage === 0) {
-                    errorRows.push({
-                        issueHeading: 'Buy Box | No Buy Box',
-                        message: `This product has 0% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`,
-                        solution: 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.'
-                    });
-                } else {
-                    errorRows.push({
-                        issueHeading: 'Buy Box | Low Buy Box Percentage',
-                        message: `This product has only ${productBuyBox.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`,
-                        solution: 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.'
-                    });
-                }
+        // Extract buybox errors from product.buyBoxDetails (enriched from backend)
+        const productBuyBox = product.buyBoxDetails;
+        if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
+            if (productBuyBox.buyBoxPercentage === 0) {
+                errorRows.push({
+                    issueHeading: 'Buy Box | No Buy Box',
+                    message: `This product has 0% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`,
+                    solution: 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.'
+                });
+            } else {
+                errorRows.push({
+                    issueHeading: 'Buy Box | Low Buy Box Percentage',
+                    message: `This product has only ${productBuyBox.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`,
+                    solution: 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.'
+                });
             }
         }
         
@@ -487,30 +466,57 @@ const ChangeIndicator = ({ percentChange, delta, positiveIsGood = true, isPercen
 
 const IssuesByProduct = () => {
     const dispatch = useDispatch();
-    const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const currency = useSelector(state => state.currency?.currency) || '$';
-    const pageDataState = useSelector((state) => state.pageData?.issuesByProduct);
     const navigate = useNavigate();
-    // Enhanced state management
-    const [currentPage, setCurrentPage] = useState(0);
+    
+    // Get paginated state from Redux
+    const paginatedState = useSelector((state) => state.pageData?.issuesByProductPaginated);
+    const summaryState = useSelector((state) => state.pageData?.issuesPaginated?.summary);
+    
+    // Local UI state
     const [productTabs, setProductTabs] = useState({});
     const [prevProductTabs, setPrevProductTabs] = useState({});
     const [hasInteracted, setHasInteracted] = useState({});
     const [visibleSolutions, setVisibleSolutions] = useState({});
     
-    // New filter and search states
+    // Filter and search states (sent to backend)
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedPriority, setSelectedPriority] = useState('all');
     const [sortBy, setSortBy] = useState('issues');
-    const [showFilters, setShowFilters] = useState(false);
-    const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
+    const [sortOrder, setSortOrder] = useState('desc');
     
-    // Comparison state for WoW/MoM
-    const [comparisonType, setComparisonType] = useState('none');
-    const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+    // Debounced search to avoid too many API calls
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const searchTimeoutRef = useRef(null);
     
+    const ITEMS_PER_PAGE = 6;
     
-    const ITEMS_PER_PAGE = 6; // Reduced for better layout
+    // Build lookup maps for detailed error tables
+    const products = paginatedState?.data || [];
+    const pagination = paginatedState?.pagination;
+    const loading = paginatedState?.loading;
+    
+    // Build lookup maps from product data for child components
+    const lookupMaps = useMemo(() => {
+        const rankingMap = new Map();
+        const buyboxMap = new Map();
+        const totalProductMap = new Map();
+        const productWiseErrorMap = new Map();
+        
+        products.forEach(product => {
+            if (product.asin) {
+                productWiseErrorMap.set(product.asin, product);
+                if (product.rankingDetails) {
+                    rankingMap.set(product.asin, product.rankingDetails);
+                }
+                if (product.buyBoxDetails) {
+                    buyboxMap.set(product.asin, product.buyBoxDetails);
+                }
+            }
+        });
+        
+        return { rankingMap, buyboxMap, totalProductMap, productWiseErrorMap };
+    }, [products]);
     
     // Filter and sort options
     const priorityOptions = [
@@ -531,30 +537,76 @@ const IssuesByProduct = () => {
         { value: 'price', label: 'Price' }
     ];
     
-    // Comparison options for period-over-period analysis
-    const comparisonOptions = [
-        { value: 'none', label: 'Day Over Day', shortLabel: 'DOD' },
-        { value: 'wow', label: 'Week Over Week', shortLabel: 'WoW' },
-        { value: 'mom', label: 'Month Over Month', shortLabel: 'MoM' }
-    ];
+    // Track if initial mount has completed
+    const isInitialMount = useRef(true);
     
-    // Handle comparison type change
-    const handleComparisonChange = useCallback(async (newType) => {
-        if (newType === comparisonType) return;
-        setComparisonType(newType);
-        setIsLoadingComparison(true);
-        try {
-            await dispatch(fetchIssuesByProductData({ comparison: newType, forceRefresh: true })).unwrap();
-        } catch (error) {
-            console.error('Error fetching comparison data:', error);
-        } finally {
-            setIsLoadingComparison(false);
+    // Fetch summary on mount only
+    useEffect(() => {
+        dispatch(fetchIssuesSummary());
+    }, [dispatch]);
+    
+    // Fetch initial products data on mount only
+    useEffect(() => {
+        dispatch(fetchProductsWithIssues({
+            page: 1,
+            limit: ITEMS_PER_PAGE,
+            sort: sortBy,
+            sortOrder,
+            priority: selectedPriority === 'all' ? null : selectedPriority,
+            search: null,
+            append: false
+        }));
+    }, [dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+    
+    // Debounce search input
+    useEffect(() => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
         }
-    }, [dispatch, comparisonType]);
+        searchTimeoutRef.current = setTimeout(() => {
+            setDebouncedSearch(searchQuery);
+        }, 300);
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
+    }, [searchQuery]);
     
-    // Check if product has any ranking issues
-    const hasAnyRankingIssues = (product) => {
-        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
+    // Re-fetch when filters change (skip initial mount)
+    useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+        dispatch(fetchProductsWithIssues({
+            page: 1,
+            limit: ITEMS_PER_PAGE,
+            sort: sortBy,
+            sortOrder,
+            priority: selectedPriority === 'all' ? null : selectedPriority,
+            search: debouncedSearch || null,
+            append: false
+        }));
+    }, [dispatch, debouncedSearch, selectedPriority, sortBy, sortOrder, ITEMS_PER_PAGE]);
+    
+    // Handle load more
+    const handleLoadMore = useCallback(() => {
+        const nextPage = (pagination?.page || 1) + 1;
+        dispatch(fetchProductsWithIssues({
+            page: nextPage,
+            limit: ITEMS_PER_PAGE,
+            sort: sortBy,
+            sortOrder,
+            priority: selectedPriority === 'all' ? null : selectedPriority,
+            search: debouncedSearch || null,
+            append: true
+        }));
+    }, [dispatch, pagination?.page, sortBy, sortOrder, selectedPriority, debouncedSearch, ITEMS_PER_PAGE]);
+    
+    // Check if product has any ranking issues - O(1) lookup
+    const hasAnyRankingIssues = useCallback((product) => {
+        const rankingData = lookupMaps.rankingMap.get(product.asin);
         if (!rankingData?.data) return false;
         
         const rankingErrors = rankingData.data;
@@ -570,10 +622,10 @@ const IssuesByProduct = () => {
             rankingErrors.Description?.checkSpecialCharacters?.status === "Error" ||
             rankingErrors.charLim?.status === "Error"
         );
-    };
+    }, [lookupMaps.rankingMap]);
     
     // Check if product has any conversion issues
-    const hasAnyConversionIssues = (product) => {
+    const hasAnyConversionIssues = useCallback((product) => {
         const conversionErrors = product.conversionErrors;
         if (!conversionErrors) return false;
         
@@ -584,10 +636,10 @@ const IssuesByProduct = () => {
             conversionErrors.productsWithOutBuyboxErrorData?.status === "Error" ||
             conversionErrors.aplusErrorData?.status === "Error"
         );
-    };
+    }, []);
     
     // Check if product has any inventory issues
-    const hasAnyInventoryIssues = (product) => {
+    const hasAnyInventoryIssues = useCallback((product) => {
         const inventoryErrors = product.inventoryErrors;
         if (!inventoryErrors) return false;
         
@@ -597,206 +649,127 @@ const IssuesByProduct = () => {
             inventoryErrors.inboundNonComplianceErrorData ||
             inventoryErrors.replenishmentErrorData
         );
-    };
+    }, []);
     
-    // Check if product has any buybox issues - Use same matching strategy
-    const hasAnyBuyboxIssues = (product) => {
-        if (!info?.buyBoxData?.asinBuyBoxData) return false;
-        
-        // Try multiple matching strategies
-        let productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-            item => item.childAsin === product.asin || item.parentAsin === product.asin
-        );
-        
-        if (!productBuyBox) {
-            const productAsinStr = String(product.asin || '').trim();
-            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-                item => String(item.childAsin || '').trim() === productAsinStr || 
-                       String(item.parentAsin || '').trim() === productAsinStr
-            );
-        }
-        
-        if (!productBuyBox) {
-            const productAsinLower = String(product.asin || '').trim().toLowerCase();
-            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-                item => String(item.childAsin || '').trim().toLowerCase() === productAsinLower || 
-                       String(item.parentAsin || '').trim().toLowerCase() === productAsinLower
-            );
-        }
-        
+    // Check if product has any buybox issues - O(1) lookup
+    const hasAnyBuyboxIssues = useCallback((product) => {
+        const productBuyBox = lookupMaps.buyboxMap.get(product.asin);
         if (!productBuyBox) return false;
-        
-        // Use exact same condition as Category.jsx
         return productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50;
-    };
+    }, [lookupMaps.buyboxMap]);
     
-    // Get products that have any issues (must be defined after all hasAny* functions)
-    const getProductsWithIssues = () => {
-        const productsMap = new Map();
+    // Count ranking issues - O(1) lookup
+    const countRankingIssues = useCallback((product) => {
+        const rankingData = lookupMaps.rankingMap.get(product.asin);
+        if (!rankingData?.data) return 0;
         
-        // First, add all products from productWiseError that have issues
-        if (info?.productWiseError) {
-            info.productWiseError.forEach(product => {
-                const hasRankingIssues = hasAnyRankingIssues(product);
-                const hasConversionIssues = hasAnyConversionIssues(product);
-                const hasInventoryIssues = hasAnyInventoryIssues(product);
-                const hasBuyboxIssues = hasAnyBuyboxIssues(product);
-                if (hasRankingIssues || hasConversionIssues || hasInventoryIssues || hasBuyboxIssues) {
-                    productsMap.set(product.asin, product);
-                }
-            });
-        }
+        const rankingErrors = rankingData.data;
+        let count = 0;
+        const sections = ['TitleResult', 'BulletPoints', 'Description'];
+        const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
         
-        // Then, add products with buybox issues that might not be in productWiseError
-        // Use SAME condition as Category.jsx: buyBoxPercentage === 0 || buyBoxPercentage < 50
-        if (info?.buyBoxData?.asinBuyBoxData) {
-            info.buyBoxData.asinBuyBoxData.forEach(buyboxItem => {
-                const asin = buyboxItem.childAsin || buyboxItem.parentAsin;
-                const hasBuyboxIssue = buyboxItem.buyBoxPercentage === 0 || buyboxItem.buyBoxPercentage < 50;
-                
-                // If product has buybox issue and not already in map, add it
-                if (hasBuyboxIssue && asin && !productsMap.has(asin)) {
-                    // Try to find product info from TotalProduct or productWiseError
-                    const productInfo = info?.TotalProduct?.find(p => p.asin === asin) || 
-                                       info?.productWiseError?.find(p => p.asin === asin);
-                    
-                    // Create a product entry for this buybox-only issue
-                    productsMap.set(asin, {
-                        asin: asin,
-                        sku: productInfo?.sku || 'N/A',
-                        name: productInfo?.itemName || productInfo?.name || productInfo?.title || 'N/A',
-                        price: productInfo?.price || 0,
-                        MainImage: productInfo?.MainImage || null,
-                        errors: 1,
-                        rankingErrors: undefined,
-                        conversionErrors: {},
-                        inventoryErrors: {},
-                        sales: 0,
-                        quantity: 0
-                    });
-                }
-            });
-        }
-        
-        return Array.from(productsMap.values());
-    };
-    
-    // Enhanced filtered and sorted products
-    const getFilteredAndSortedProducts = () => {
-        // Get all products with issues (including buybox-only issues)
-        let products = getProductsWithIssues();
-        
-        // Apply search filter
-        if (searchQuery && searchQuery.trim()) {
-            const trimmedQuery = searchQuery.trim().toLowerCase();
-            
-            products = products.filter(product => {
-                if (!product) return false;
-                
-                // Handle null/undefined values safely and convert to strings
-                const productName = (product.name ? String(product.name) : '').trim().toLowerCase();
-                const productAsin = (product.asin ? String(product.asin) : '').trim().toLowerCase();
-                const productSku = (product.sku ? String(product.sku) : '').trim().toLowerCase();
-                
-                // Check if any field matches the search query (case-insensitive)
-                const matchesName = productName && productName.includes(trimmedQuery);
-                const matchesAsin = productAsin && (productAsin.includes(trimmedQuery) || productAsin === trimmedQuery);
-                const matchesSku = productSku && (productSku.includes(trimmedQuery) || productSku === trimmedQuery);
-                
-                return matchesName || matchesAsin || matchesSku;
-            });
-        }
-        
-        // Apply priority filter
-        // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
-        if (selectedPriority !== 'all') {
-            products = products.filter(product => {
-                const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
-                if (selectedPriority === 'high') return totalIssues >= 5;
-                if (selectedPriority === 'medium') return totalIssues >= 2 && totalIssues < 5;
-                if (selectedPriority === 'low') return totalIssues >= 1 && totalIssues < 2;
-                return true;
-            });
-        }
-        
-        // Apply sorting
-        // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
-        products.sort((a, b) => {
-            switch (sortBy) {
-                case 'issues':
-                    const aIssues = countRankingIssues(a) + countConversionIssues(a) + countInventoryIssues(a);
-                    const bIssues = countRankingIssues(b) + countConversionIssues(b) + countInventoryIssues(b);
-                    return bIssues - aIssues;
-                case 'sessions':
-                    // Sort by sessions (descending) - higher sessions first
-                    return (b.performance?.sessions || 0) - (a.performance?.sessions || 0);
-                case 'conversion':
-                    // Sort by conversion rate (descending) - higher conversion first
-                    return (b.performance?.conversionRate || 0) - (a.performance?.conversionRate || 0);
-                case 'sales':
-                    // Sort by sales (descending) - higher sales first
-                    return (b.performance?.sales || 0) - (a.performance?.sales || 0);
-                case 'acos':
-                    // Sort by ACOS (ascending) - lower ACOS first (better)
-                    // Products with 0 ACOS (no PPC) go to end
-                    const aAcos = a.performance?.acos || 0;
-                    const bAcos = b.performance?.acos || 0;
-                    if (aAcos === 0 && bAcos === 0) return 0;
-                    if (aAcos === 0) return 1;
-                    if (bAcos === 0) return -1;
-                    return aAcos - bAcos;
-                case 'name':
-                    return (a.name || '').localeCompare(b.name || '');
-                case 'asin':
-                    return (a.asin || '').localeCompare(b.asin || '');
-                case 'price':
-                    return (parseFloat(b.price) || 0) - (parseFloat(a.price) || 0);
-                default:
-                    return 0;
+        sections.forEach(section => {
+            if (rankingErrors[section]) {
+                checks.forEach(check => {
+                    if (rankingErrors[section][check]?.status === 'Error') count++;
+                });
             }
         });
         
-        return products;
-    };
-
-    const getPaginatedProducts = () => {
-        const products = getFilteredAndSortedProducts();
-        const endIndex = (currentPage + 1) * ITEMS_PER_PAGE;
-        const paginatedProducts = products.slice(0, endIndex);
-        const hasMore = endIndex < products.length;
+        if (rankingErrors.charLim?.status === "Error") count++;
+        return count;
+    }, [lookupMaps.rankingMap]);
+    
+    // Count conversion issues - O(1) lookup for TotalProduct fallback
+    const countConversionIssues = useCallback((product) => {
+        let conversionErrors = product.conversionErrors;
         
-        return { products: paginatedProducts, hasMore, total: products.length };
-    };
-
-    // Get priority level for a product
-    // Note: countConversionIssues now includes buybox, so we don't add countBuyboxIssues separately
-    const getProductPriority = (product) => {
-        const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
+        if (!conversionErrors) {
+            const productData = lookupMaps.totalProductMap.get(product.asin);
+            conversionErrors = productData?.conversionErrors;
+        }
+        
+        let count = 0;
+        
+        if (conversionErrors) {
+            const checks = [
+                conversionErrors.imageResultErrorData,
+                conversionErrors.videoResultErrorData,
+                conversionErrors.productStarRatingResultErrorData,
+                conversionErrors.productsWithOutBuyboxErrorData,
+                conversionErrors.aplusErrorData,
+                conversionErrors.brandStoryErrorData
+            ];
+            
+            checks.forEach(check => {
+                if (check?.status === 'Error') count++;
+            });
+        }
+        
+        // Also count buybox issues - O(1) lookup
+        const productBuyBox = lookupMaps.buyboxMap.get(product.asin);
+        if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
+            count++;
+        }
+        
+        return count;
+    }, [lookupMaps.totalProductMap, lookupMaps.buyboxMap]);
+    
+    // Count inventory issues - O(1) lookup for TotalProduct fallback
+    const countInventoryIssues = useCallback((product) => {
+        let inventoryErrors = product.inventoryErrors;
+        
+        if (!inventoryErrors) {
+            const productData = lookupMaps.totalProductMap.get(product.asin);
+            inventoryErrors = productData?.inventoryErrors;
+        }
+        
+        if (!inventoryErrors) return 0;
+        
+        let count = 0;
+        
+        if (inventoryErrors.inventoryPlanningErrorData) {
+            const planning = inventoryErrors.inventoryPlanningErrorData;
+            if (planning.longTermStorageFees?.status === "Error") count++;
+            if (planning.unfulfillable?.status === "Error") count++;
+        }
+        
+        if (inventoryErrors.strandedInventoryErrorData) count++;
+        if (inventoryErrors.inboundNonComplianceErrorData) count++;
+        if (inventoryErrors.replenishmentErrorData) {
+            count += Array.isArray(inventoryErrors.replenishmentErrorData) 
+                ? inventoryErrors.replenishmentErrorData.length 
+                : 1;
+        }
+        
+        return count;
+    }, [lookupMaps.totalProductMap]);
+    
+    // Get priority level for a product (uses pre-computed counts from backend)
+    const getProductPriority = useCallback((product) => {
+        const totalIssues = (product.rankingErrorCount || 0) + (product.conversionErrorCount || 0) + (product.inventoryErrorCount || 0) + (product.errors || 0);
         if (totalIssues >= 5) return { level: 'high', label: 'High', color: 'bg-red-500', textColor: 'text-red-700', bgColor: 'bg-red-50' };
         if (totalIssues >= 2) return { level: 'medium', label: 'Medium', color: 'bg-yellow-500', textColor: 'text-yellow-700', bgColor: 'bg-yellow-50' };
         return { level: 'low', label: 'Low', color: 'bg-blue-500', textColor: 'text-blue-700', bgColor: 'bg-blue-50' };
-    };
+    }, []);
 
-    // Calculate summary stats
-    // Use the same backend fields as dashboard and category page to ensure consistency
-    const calculateStats = () => {
-        const allProducts = getProductsWithIssues();
-        const totalProducts = allProducts.length;
-        
-        // Use backend fields for total issues (same as Category page and Dashboard)
-        const rankingIssues = info?.TotalRankingerrors || 0;
-        const conversionIssues = info?.totalErrorInConversion || 0;
-        const inventoryIssues = info?.totalInventoryErrors || 0;
+    // Get stats from summary endpoint
+    const stats = useMemo(() => {
+        const summary = summaryState?.data;
+        const totalProducts = pagination?.total || products.length;
+        const rankingIssues = summary?.totalRankingErrors || 0;
+        const conversionIssues = summary?.totalConversionErrors || 0;
+        const inventoryIssues = summary?.totalInventoryErrors || 0;
         const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
         
-        const highPriority = allProducts.filter(product => getProductPriority(product).level === 'high').length;
-        const criticalProducts = allProducts.filter(product => {
-            const totalIssues = countRankingIssues(product) + countConversionIssues(product) + countInventoryIssues(product);
-            return totalIssues >= 3;
+        // Calculate high priority from current products
+        const highPriority = products.filter(product => {
+            const total = (product.rankingErrorCount || 0) + (product.conversionErrorCount || 0) + (product.inventoryErrorCount || 0);
+            return total >= 5;
         }).length;
         
-        return { totalProducts, totalIssues, highPriority, criticalProducts };
-    };
+        return { totalProducts, totalIssues, highPriority };
+    }, [summaryState?.data, pagination?.total, products]);
 
     // Get active tab for a product
     const getActiveTab = (productId) => {
@@ -870,143 +843,9 @@ const IssuesByProduct = () => {
         navigate(`/seller-central-checker/${asin}`);
     };
     
-    // Count issues for each category
-    const countRankingIssues = (product) => {
-        const rankingData = info?.rankingProductWiseErrors?.find(item => item.asin === product.asin);
-        if (!rankingData?.data) return 0;
-        
-        const rankingErrors = rankingData.data;
-        let count = 0;
-        const sections = ['TitleResult', 'BulletPoints', 'Description'];
-        const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
-        
-        sections.forEach(section => {
-            if (rankingErrors[section]) {
-                checks.forEach(check => {
-                    if (rankingErrors[section][check]?.status === 'Error') count++;
-                });
-            }
-        });
-        
-        if (rankingErrors.charLim?.status === "Error") count++;
-        return count;
-    };
-    
-    const countConversionIssues = (product) => {
-        // First try to get conversionErrors from product.conversionErrors (for productWiseError products)
-        // If not found, look it up from info?.TotalProduct (same as YourProducts.jsx)
-        let conversionErrors = product.conversionErrors;
-        
-        if (!conversionErrors && info?.TotalProduct) {
-            const productData = info.TotalProduct.find(item => item.asin === product.asin);
-            conversionErrors = productData?.conversionErrors;
-        }
-        
-        let count = 0;
-        
-        if (conversionErrors) {
-            const checks = [
-                conversionErrors.imageResultErrorData,
-                conversionErrors.videoResultErrorData,
-                conversionErrors.productStarRatingResultErrorData,
-                conversionErrors.productsWithOutBuyboxErrorData,
-                conversionErrors.aplusErrorData,
-                conversionErrors.brandStoryErrorData
-            ];
-            
-            checks.forEach(check => {
-                if (check?.status === 'Error') count++;
-            });
-        }
-        
-        // Also count buybox issues from buyBoxData (part of conversion now)
-        count += countBuyboxIssues(product);
-        
-        return count;
-    };
-    
-    const countInventoryIssues = (product) => {
-        // First try to get inventoryErrors from product.inventoryErrors (for productWiseError products)
-        // If not found, look it up from info?.TotalProduct (same as YourProducts.jsx)
-        let inventoryErrors = product.inventoryErrors;
-        
-        if (!inventoryErrors && info?.TotalProduct) {
-            const productData = info.TotalProduct.find(item => item.asin === product.asin);
-            inventoryErrors = productData?.inventoryErrors;
-        }
-        
-        if (!inventoryErrors) return 0;
-        
-        let count = 0;
-        
-        if (inventoryErrors.inventoryPlanningErrorData) {
-            const planning = inventoryErrors.inventoryPlanningErrorData;
-            if (planning.longTermStorageFees?.status === "Error") count++;
-            if (planning.unfulfillable?.status === "Error") count++;
-        }
-        
-        if (inventoryErrors.strandedInventoryErrorData) count++;
-        if (inventoryErrors.inboundNonComplianceErrorData) count++;
-        if (inventoryErrors.replenishmentErrorData) {
-            count += Array.isArray(inventoryErrors.replenishmentErrorData) 
-                ? inventoryErrors.replenishmentErrorData.length 
-                : 1;
-        }
-        
-        return count;
-    };
-    
-    // Count buybox issues - Use same matching strategy as BuyboxIssuesTable
-    const countBuyboxIssues = (product) => {
-        if (!info?.buyBoxData?.asinBuyBoxData) return 0;
-        
-        // Try multiple matching strategies
-        let productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-            item => item.childAsin === product.asin || item.parentAsin === product.asin
-        );
-        
-        if (!productBuyBox) {
-            // Try string comparison
-            const productAsinStr = String(product.asin || '').trim();
-            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-                item => String(item.childAsin || '').trim() === productAsinStr || 
-                       String(item.parentAsin || '').trim() === productAsinStr
-            );
-        }
-        
-        if (!productBuyBox) {
-            // Try case-insensitive
-            const productAsinLower = String(product.asin || '').trim().toLowerCase();
-            productBuyBox = info.buyBoxData.asinBuyBoxData.find(
-                item => String(item.childAsin || '').trim().toLowerCase() === productAsinLower || 
-                       String(item.parentAsin || '').trim().toLowerCase() === productAsinLower
-            );
-        }
-        
-        if (!productBuyBox) return 0;
-        
-        // Use exact same condition as Category.jsx
-        if (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50) {
-            return 1;
-        }
-        
-        return 0;
-    };
-    
-    const { products, hasMore, total } = getPaginatedProducts();
-    const stats = calculateStats();
-
-    // Reset pagination when filters change
-    useEffect(() => {
-        setCurrentPage(0);
-    }, [searchQuery, selectedPriority, sortBy]);
-
-    // Fetch issues-by-product data on mount so this page has its own data (and comparison can be applied)
-    useEffect(() => {
-        dispatch(fetchIssuesByProductData());
-    }, [dispatch]);
-
-    // Handle clicks outside dropdown
+    // Derive hasMore and total from pagination state
+    const hasMore = pagination?.hasMore || false;
+    const total = pagination?.total || products.length;
 
     return (
         <div className="min-h-screen bg-[#1a1a1a]">
@@ -1032,7 +871,9 @@ const IssuesByProduct = () => {
             <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
                 <div className='px-2 lg:px-3 py-1.5 pb-1 space-y-2'>
 
-            {!info?.productWiseError || info.productWiseError.length === 0 ? (
+            {loading && products.length === 0 ? (
+                <IssuesByProductPageSkeleton />
+            ) : !products || products.length === 0 ? (
                 <motion.div 
                     className="bg-[#161b22] rounded border border-[#30363d] p-4 text-center"
                     initial={{ opacity: 0, y: 20 }}
@@ -1066,30 +907,6 @@ const IssuesByProduct = () => {
                                                 <span>{stats.totalProducts} products need attention</span>
                                             </div>
                                         )}
-                                        {/* Compare to: WoW / MoM - prominent in banner so always visible */}
-                                        <div className="flex items-center gap-2 mt-3 flex-wrap">
-                                            <span className="text-xs font-medium text-gray-400">Compare to:</span>
-                                            <div className="flex items-center gap-1.5">
-                                                <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                                <select
-                                                    value={comparisonType}
-                                                    onChange={(e) => handleComparisonChange(e.target.value)}
-                                                    disabled={isLoadingComparison}
-                                                    className="px-2.5 py-1.5 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-[#1a1a1a] disabled:opacity-50 min-w-[160px]"
-                                                    title="Show week-on-week or month-on-month change vs previous period"
-                                                >
-                                                    {comparisonOptions.map(option => (
-                                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                                    ))}
-                                                </select>
-                                                {isLoadingComparison && (
-                                                    <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                                                )}
-                                                {comparisonType !== 'none' && !isLoadingComparison && info?.comparisonMeta?.hasComparison && (
-                                                    <span className="text-xs text-green-400 font-medium">{comparisonType === 'wow' ? 'WoW active' : 'MoM active'}</span>
-                                                )}
-                                            </div>
-                                        </div>
                                     </div>
                                     
                                     {/* Stats Cards */}
@@ -1168,20 +985,6 @@ const IssuesByProduct = () => {
                                 </div>
                             </div>
                             
-                            {/* Message when comparison is selected (Compare control is in banner above) */}
-                            {comparisonType !== 'none' && !isLoadingComparison && (
-                                <div className="mt-2 px-2">
-                                    {info?.comparisonMeta?.hasComparison ? (
-                                        <p className="text-xs text-gray-400">
-                                            Showing <span className="text-blue-400 font-medium">{comparisonType === 'wow' ? 'Week-on-Week' : 'Month-on-Month'}</span> comparison. Change % appears next to Sessions, Conv %, Sales, and ACOS on each product.
-                                        </p>
-                                    ) : (
-                                        <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
-                                            No previous period data available for comparison. Comparison needs at least two data snapshots (e.g. run analysis again next week for Week-on-Week).
-                                        </p>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -1496,10 +1299,10 @@ const IssuesByProduct = () => {
                                                     className="w-full"
                                                 >
                                                             {activeTab === 'ranking' && (
-                                                        <RankingIssuesTable product={product} info={info} />
+                                                        <RankingIssuesTable product={product} />
                                                     )}
                                                     {activeTab === 'conversion' && (
-                                                        <ConversionIssuesTable product={product} buyBoxData={info?.buyBoxData} />
+                                                        <ConversionIssuesTable product={product} />
                                                     )}
                                                     {activeTab === 'inventory' && (
                                                         <InventoryIssuesTable product={product} />
@@ -1510,6 +1313,13 @@ const IssuesByProduct = () => {
                                     </motion.div>
                                 );
                             })}
+                            {loading && products.length > 0 && (
+                                <>
+                                    {[1, 2].map((i) => (
+                                        <IssuesProductCardSkeleton key={`skeleton-${i}`} />
+                                    ))}
+                                </>
+                            )}
                         </div>
                         
                         {/* Enhanced View More Button */}
@@ -1525,11 +1335,12 @@ const IssuesByProduct = () => {
                                 }}
                             >
                                 <button
-                                    className="px-4 py-2 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-all flex items-center gap-1 mx-auto"
-                                    onClick={() => setCurrentPage(prev => prev + 1)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-all flex items-center gap-1 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={handleLoadMore}
+                                    disabled={loading}
                                 >
-                                    <ArrowRight className="w-3 h-3" />
-                                    Load More Products
+                                    {loading ? null : <ArrowRight className="w-3 h-3" />}
+                                    {loading ? 'Loading...' : 'Load More Products'}
                                 </button>
                                 <p className="text-xs text-gray-500 mt-1.5">
                                     {total - products.length} more products available

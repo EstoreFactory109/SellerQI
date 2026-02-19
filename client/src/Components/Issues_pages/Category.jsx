@@ -1,41 +1,48 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useSelector } from "react-redux";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { AlertTriangle, TrendingUp, Box, Filter, ChevronDown, Search, Activity, LineChart, Search as SearchIcon, Layers, ShoppingBag } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Box, Filter, ChevronDown, Activity, LineChart, Layers, ShoppingBag } from 'lucide-react';
+import { IssuesTableRowsSkeleton, IssuesCategoryPageSkeleton } from '../Skeleton/PageSkeletons.jsx';
+import {
+  fetchIssuesSummary,
+  fetchRankingIssues,
+  fetchConversionIssues,
+  fetchInventoryIssues,
+  fetchAccountIssues
+} from '../../redux/slices/PageDataSlice';
 
-// Helper function to format messages with important details highlighted on separate line
+/**
+ * Build a Map from ASIN to product info for O(1) lookups.
+ * @param {Array} productList - TotalProduct or productWiseError array
+ * @returns {Map<string, object>}
+ */
+const buildProductInfoMap = (productList) => {
+  const map = new Map();
+  if (Array.isArray(productList)) {
+    productList.forEach(p => {
+      if (p?.asin) map.set(p.asin, p);
+    });
+  }
+  return map;
+};
+
 const formatMessageWithHighlight = (message) => {
   if (!message) return { mainText: '', highlightedText: '' };
   
-  // Patterns to extract and highlight on a separate line
-  // These patterns match the exact formats from the backend
   const patterns = [
-    // Ranking - Restricted words patterns (exact backend formats)
-    /^(.*?)(The Characters used are:\s*.+)$/i,  // Title - restricted words
-    /^(.*?)(The characters which are used:\s*.+)$/i,  // Title - special characters
-    /^(.*?)(The words Used are:\s*.+)$/,  // Bullet Points - restricted words (case sensitive 'Used')
-    /^(.*?)(The words used are:\s*.+)$/i,  // Description - restricted words
-    /^(.*?)(The special characters used are:\s*.+)$/i,  // Bullet Points & Description - special characters
-    
-    // Inventory patterns - units available
+    /^(.*?)(The Characters used are:\s*.+)$/i,
+    /^(.*?)(The characters which are used:\s*.+)$/i,
+    /^(.*?)(The words Used are:\s*.+)$/,
+    /^(.*?)(The words used are:\s*.+)$/i,
+    /^(.*?)(The special characters used are:\s*.+)$/i,
     /^(.*?)(Only \d+ units available.*)$/i,
     /^(.*?)(Currently \d+ units available.*)$/i,
     /^(.*?)(\d+ units available.*)$/i,
-    
-    // Inventory - Stranded reason
     /^(.*?)(Reason:\s*.+)$/i,
-    
-    // Inventory - Inbound non-compliance problem
     /^(.*?)(Problem:\s*.+)$/i,
-    
-    // Buy Box patterns
     /^(.*?)(With \d+ page views.+)$/i,
-    
-    // Amazon recommends pattern
     /^(.*?)(Amazon recommends replenishing \d+ units.*)$/i,
-    
-    // Unfulfillable inventory quantity
     /^(.*?)(Unfulfillable Quantity:\s*\d+\s*units)$/i,
   ];
   
@@ -52,7 +59,6 @@ const formatMessageWithHighlight = (message) => {
   return { mainText: message, highlightedText: '' };
 };
 
-// Component to render message with highlighted part
 const FormattedMessage = ({ message }) => {
   const { mainText, highlightedText } = formatMessageWithHighlight(message);
   
@@ -69,17 +75,10 @@ const FormattedMessage = ({ message }) => {
   );
 };
 
-const RankingTableSection = ({ title, data }) => {
-  console.log("data: ",data)
+const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const itemsPerPage = 10;
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const productInfo = info?.TotalProduct || info?.productWiseError || [];
 
-  const extractErrors = (item) => {
-    
-    const errorRows = [];
+  const flattenedData = useMemo(() => {
     const sections = ['TitleResult', 'BulletPoints', 'Description', 'charLim'];
     const sectionLabels = {
       TitleResult: 'Title',
@@ -94,55 +93,51 @@ const RankingTableSection = ({ title, data }) => {
       charLim: 'Character Limit'
     };
 
-    // Get SKU from productInfo
-    const productDetails = productInfo.find(p => p.asin === item.asin);
-    const sku = productDetails?.sku || item.sku || '';
+    const extractErrors = (item) => {
+      const errorRows = [];
+      const sku = item.sku || '';
 
-    sections.forEach((sectionKey) => {
-      
-      const section = item.data[sectionKey];
+      sections.forEach((sectionKey) => {
+        const section = item.data?.[sectionKey];
 
-      if (section) {
-        // charLim section has a different structure - it's a direct object with status, Message, HowTOSolve
-        if (sectionKey === 'charLim') {
-          if (section.status === 'Error') {
+        if (section) {
+          if (sectionKey === 'charLim') {
+            if (section.status === 'Error') {
               errorRows.push({
                 asin: item.asin,
                 sku: sku,
-                title: item.data?.Title || 'N/A',
+                title: item.Title || item.data?.Title || 'N/A',
                 issueHeading: `${sectionLabels[sectionKey]}`,
                 message: section.Message,
                 solution: section.HowTOSolve
               });
-          }
-        } else {
-          // For other sections (TitleResult, BulletPoints, Description), check nested properties
-          Object.keys(issueLabels).forEach((checkKey) => {
-            // Skip charLim check for non-charLim sections
-            if (checkKey === 'charLim') return;
-            
-            const check = section[checkKey];
-            if (check?.status === 'Error') {
-              errorRows.push({
-                asin: item.asin,
-                sku: sku,
-                title: item.data?.Title || 'N/A',
-                issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
-                message: check.Message,
-                solution: check.HowTOSolve
-              });
             }
-          });
+          } else {
+            Object.keys(issueLabels).forEach((checkKey) => {
+              if (checkKey === 'charLim') return;
+              const check = section[checkKey];
+              if (check?.status === 'Error') {
+                errorRows.push({
+                  asin: item.asin,
+                  sku: sku,
+                  title: item.Title || item.data?.Title || 'N/A',
+                  issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
+                  message: check.Message,
+                  solution: check.HowTOSolve
+                });
+              }
+            });
+          }
         }
-      }
-    });
+      });
 
-    return errorRows;
-  };
+      return errorRows;
+    };
 
-  const flattenedData = data.flatMap(extractErrors);
-  const displayedData = flattenedData.slice(0, page * itemsPerPage);
-  const hasMore = flattenedData.length > displayedData.length;
+    return (data ?? []).flatMap(extractErrors);
+  }, [data]);
+
+  const hasMore = pagination?.hasMore ?? false;
 
   return (
     <motion.div 
@@ -156,7 +151,7 @@ const RankingTableSection = ({ title, data }) => {
           <div className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-red-400" />
             <div>
-              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <h2 className="text-sm font-bold text-gray-100">Ranking Optimization</h2>
               <p className="text-xs text-gray-400">Optimization opportunities for better search rankings</p>
             </div>
           </div>
@@ -173,14 +168,14 @@ const RankingTableSection = ({ title, data }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#30363d]">
-              {displayedData.map((row, idx) => (
+              {flattenedData.map((row, idx) => (
                 <tr 
                   key={idx} 
                   role="button"
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
-                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d] hover:bg-[#21262d]/50"
                 >
                   <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
@@ -211,6 +206,7 @@ const RankingTableSection = ({ title, data }) => {
                   </td>
                 </tr>
               ))}
+              {loading && <IssuesTableRowsSkeleton rows={5} />}
             </tbody>
           </table>
         </div>
@@ -218,10 +214,11 @@ const RankingTableSection = ({ title, data }) => {
         {hasMore && (
           <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-red-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-red-600 transition-all"
-              onClick={() => setPage((prev) => prev + 1)}
+              className="w-full bg-red-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              onClick={onLoadMore}
+              disabled={loading}
             >
-              Load More ({flattenedData.length - displayedData.length} remaining)
+              {loading ? 'Loading...' : `Load More (${pagination?.total - data?.length || 0} remaining)`}
             </button>
           </div>
         )}
@@ -230,105 +227,78 @@ const RankingTableSection = ({ title, data }) => {
   );
 };
 
-const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
+const ConversionTableSection = ({ data, buyBoxData, pagination, loading, onLoadMore }) => {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const itemsPerPage = 10;
 
-  const getFormattedErrors = (item) => {
-    const sections = [
-      ['Images', item.imageResultErrorData],
-      ['Videos', item.videoResultErrorData],
-      ['Rating', item.productStarRatingResultErrorData],
-      ['Buy Box', item.productsWithOutBuyboxErrorData],
-      ['A Plus', item.aplusErrorData],
-      ['Brand Story', item.brandStoryErrorData]
-    ];
+  const productInfoMap = useMemo(() => buildProductInfoMap(data), [data]);
 
-    return sections
-      .filter(([_, value]) => value)
-      .map(([label, errorObj]) => ({
-        heading: label,
-        subheading: errorObj.type || 'Issue',
-        message: errorObj.Message,
-        solution: errorObj.HowToSolve
+  const flattenData = useMemo(() => {
+    const getFormattedErrors = (item) => {
+      const sections = [
+        ['Images', item.imageResultErrorData],
+        ['Videos', item.videoResultErrorData],
+        ['Rating', item.productStarRatingResultErrorData],
+        ['Buy Box', item.productsWithOutBuyboxErrorData],
+        ['A Plus', item.aplusErrorData],
+        ['Brand Story', item.brandStoryErrorData]
+      ];
+
+      return sections
+        .filter(([_, value]) => value)
+        .map(([label, errorObj]) => ({
+          heading: label,
+          subheading: errorObj.type || 'Issue',
+          message: errorObj.Message,
+          solution: errorObj.HowToSolve
+        }));
+    };
+
+    const conversionErrors = (data || []).flatMap((item) => {
+      const sku = item.sku || '';
+
+      return getFormattedErrors(item).map((err) => ({
+        asin: item.asin,
+        sku: sku,
+        title: item.Title || 'N/A',
+        issueHeading: `${err.heading} | ${err.subheading}`,
+        message: err.message,
+        solution: err.solution
       }));
-  };
-
-  // Extract buybox errors from buyBoxData (products with 0% or <50% buybox)
-  const getBuyboxErrors = () => {
-    if (!buyBoxData || !Array.isArray(buyBoxData)) return [];
-    
-    const buyboxErrors = [];
-    
-    buyBoxData.forEach((item) => {
-      // Only show products with buybox issues (0% or low buybox < 50%)
-      if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
-        const asin = item.childAsin || item.parentAsin;
-        
-        // Find product title from productInfo
-        const productDetails = productInfo?.find(p => p.asin === asin);
-        const productTitle = productDetails?.name || productDetails?.itemName || 'N/A';
-        
-        // Determine issue type and generate appropriate message/solution
-        let issueHeading, message, solution;
-        
-        if (item.buyBoxPercentage === 0) {
-          issueHeading = 'Buy Box | No Buy Box';
-          message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
-          solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.';
-        } else {
-          issueHeading = 'Buy Box | Low Buy Box Percentage';
-          message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`;
-          solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
-        }
-        
-        // Get SKU from productDetails
-        const sku = productDetails?.sku || '';
-        
-        buyboxErrors.push({
-          asin,
-          sku: sku,
-          title: productTitle,
-          issueHeading,
-          message,
-          solution
-        });
-      }
     });
-    
-    return buyboxErrors;
-  };
 
-  // Get conversion errors from data
-  const conversionErrors = data.flatMap((item) => {
-    // Get SKU from productInfo
-    const productDetails = productInfo?.find(p => p.asin === item.asin);
-    const sku = productDetails?.sku || item.sku || '';
-    
-    return getFormattedErrors(item).map((err) => ({
-      asin: item.asin,
-      sku: sku,
-      title: item.Title || 'N/A',
-      issueHeading: `${err.heading} | ${err.subheading}`,
-      message: err.message,
-      solution: err.solution
-    }));
-  });
+    const buyboxErrors = [];
+    if (Array.isArray(buyBoxData)) {
+      buyBoxData.forEach((item) => {
+        if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
+          const asin = item.childAsin || item.parentAsin;
+          const productDetails = productInfoMap.get(asin);
+          const productTitle = productDetails?.Title || productDetails?.name || 'N/A';
+          const sku = productDetails?.sku || '';
 
-  // Get buybox errors and combine with conversion errors
-  const buyboxErrors = getBuyboxErrors();
-  
-  // Filter out buybox errors from conversionErrors that are already in buyboxErrors (avoid duplicates)
-  const filteredConversionErrors = conversionErrors.filter(
-    err => !err.issueHeading.includes('Buy Box')
-  );
-  
-  // Combine conversion errors with buybox errors
-  const flattenData = [...filteredConversionErrors, ...buyboxErrors];
+          let issueHeading, message, solution;
+          if (item.buyBoxPercentage === 0) {
+            issueHeading = 'Buy Box | No Buy Box';
+            message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
+            solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics, and consider using repricing tools.';
+          } else {
+            issueHeading = 'Buy Box | Low Buy Box Percentage';
+            message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. A significant portion of potential sales are going to competitors.`;
+            solution = 'Improve your Buy Box percentage by optimizing pricing, maintaining competitive shipping, and improving seller metrics.';
+          }
 
-  const displayedData = flattenData.slice(0, page * itemsPerPage);
-  const hasMore = flattenData.length > displayedData.length;
+          buyboxErrors.push({ asin, sku, title: productTitle, issueHeading, message, solution });
+        }
+      });
+    }
+
+    const filteredConversionErrors = conversionErrors.filter(
+      err => !err.issueHeading.includes('Buy Box')
+    );
+
+    return [...filteredConversionErrors, ...buyboxErrors];
+  }, [data, buyBoxData, productInfoMap]);
+
+  const hasMore = pagination?.hasMore ?? false;
 
   return (
     <motion.div 
@@ -342,7 +312,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
           <div className="flex items-center gap-2">
             <LineChart className="w-4 h-4 text-blue-400" />
             <div>
-              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <h2 className="text-sm font-bold text-gray-100">Conversion Optimization</h2>
               <p className="text-xs text-gray-400">Enhance product appeal and customer conversion rates</p>
             </div>
           </div>
@@ -359,14 +329,14 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#30363d]">
-              {displayedData.map((row, idx) => (
+              {flattenData.map((row, idx) => (
                 <tr 
                   key={idx} 
                   role="button"
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
-                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d] hover:bg-[#21262d]/50"
                 >
                   <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
@@ -397,6 +367,7 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
                   </td>
                 </tr>
               ))}
+              {loading && <IssuesTableRowsSkeleton rows={5} />}
             </tbody>
           </table>
         </div>
@@ -404,10 +375,11 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
         {hasMore && (
           <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-blue-600 transition-all"
-              onClick={() => setPage((prev) => prev + 1)}
+              className="w-full bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              onClick={onLoadMore}
+              disabled={loading}
             >
-              Load More ({flattenData.length - displayedData.length} remaining)
+              {loading ? 'Loading...' : `Load More (${pagination?.total - data?.length || 0} remaining)`}
             </button>
           </div>
         )}
@@ -416,109 +388,95 @@ const ConversionTableSection = ({ title, data, buyBoxData, productInfo }) => {
   );
 };
 
-const InventoryTableSection = ({ title, data }) => {
+const InventoryTableSection = ({ data, pagination, loading, onLoadMore }) => {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const itemsPerPage = 10;
-  console.log("InventoryTableSection: ", data);
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const productInfo = info?.TotalProduct || info?.productWiseError || [];
-  
-  const extractInventoryErrors = (item) => {
-    console.log("extractInventoryErrors - processing item:", item);
-    const errorRows = [];
-    
-    // Get SKU from productInfo (fallback to item.sku if available)
-    const productDetails = productInfo.find(p => p.asin === item.asin);
-    const defaultSku = productDetails?.sku || item.sku || '';
 
-    // Process inventory planning errors
-    if (item.inventoryPlanningErrorData) {
-      const planning = item.inventoryPlanningErrorData;
-      if (planning.longTermStorageFees?.status === "Error") {
+  const flattenedData = useMemo(() => {
+    const extractInventoryErrors = (item) => {
+      const errorRows = [];
+      const defaultSku = item.sku || '';
+
+      if (item.inventoryPlanningErrorData) {
+        const planning = item.inventoryPlanningErrorData;
+        if (planning.longTermStorageFees?.status === "Error") {
+          errorRows.push({
+            asin: item.asin,
+            sku: defaultSku,
+            title: item.Title || 'N/A',
+            issueHeading: 'Inventory Planning | Long-Term Storage Fees',
+            message: planning.longTermStorageFees.Message,
+            solution: planning.longTermStorageFees.HowToSolve
+          });
+        }
+        if (planning.unfulfillable?.status === "Error") {
+          errorRows.push({
+            asin: item.asin,
+            sku: defaultSku,
+            title: item.Title || 'N/A',
+            issueHeading: 'Inventory Planning | Unfulfillable Inventory',
+            message: planning.unfulfillable.Message,
+            solution: planning.unfulfillable.HowToSolve
+          });
+        }
+      }
+
+      if (item.strandedInventoryErrorData) {
         errorRows.push({
           asin: item.asin,
           sku: defaultSku,
           title: item.Title || 'N/A',
-          issueHeading: 'Inventory Planning | Long-Term Storage Fees',
-          message: planning.longTermStorageFees.Message,
-          solution: planning.longTermStorageFees.HowToSolve
+          issueHeading: 'Stranded Inventory | Product Not Listed',
+          message: item.strandedInventoryErrorData.Message,
+          solution: item.strandedInventoryErrorData.HowToSolve
         });
       }
-      if (planning.unfulfillable?.status === "Error") {
+
+      if (item.inboundNonComplianceErrorData) {
         errorRows.push({
           asin: item.asin,
           sku: defaultSku,
           title: item.Title || 'N/A',
-          issueHeading: 'Inventory Planning | Unfulfillable Inventory',
-          message: planning.unfulfillable.Message,
-          solution: planning.unfulfillable.HowToSolve
+          issueHeading: 'Inbound Non-Compliance | Shipment Issue',
+          message: item.inboundNonComplianceErrorData.Message,
+          solution: item.inboundNonComplianceErrorData.HowToSolve
         });
       }
-    }
 
-    // Process stranded inventory errors
-    if (item.strandedInventoryErrorData) {
-      errorRows.push({
-        asin: item.asin,
-        sku: defaultSku,
-        title: item.Title || 'N/A',
-        issueHeading: 'Stranded Inventory | Product Not Listed',
-        message: item.strandedInventoryErrorData.Message,
-        solution: item.strandedInventoryErrorData.HowToSolve
-      });
-    }
-
-    // Process inbound non-compliance errors
-    if (item.inboundNonComplianceErrorData) {
-      errorRows.push({
-        asin: item.asin,
-        sku: defaultSku,
-        title: item.Title || 'N/A',
-        issueHeading: 'Inbound Non-Compliance | Shipment Issue',
-        message: item.inboundNonComplianceErrorData.Message,
-        solution: item.inboundNonComplianceErrorData.HowToSolve
-      });
-    }
-
-    // Process replenishment/restock errors - handles single or multiple
-    if (item.replenishmentErrorData) {
-      if (Array.isArray(item.replenishmentErrorData)) {
-        // Multiple errors for same ASIN (different SKUs)
-        item.replenishmentErrorData.forEach(error => {
-          // Use SKU from error if available, otherwise use default
-          const sku = error.sku || defaultSku;
+      if (item.replenishmentErrorData) {
+        if (Array.isArray(item.replenishmentErrorData)) {
+          item.replenishmentErrorData.forEach(error => {
+            const sku = error.sku || defaultSku;
+            errorRows.push({
+              asin: item.asin,
+              sku: sku,
+              title: item.Title || 'N/A',
+              issueHeading: `Replenishment | Low Inventory Risk`,
+              message: error.Message,
+              solution: error.HowToSolve,
+              recommendedReplenishmentQty: error.recommendedReplenishmentQty || error.data || null
+            });
+          });
+        } else {
+          const sku = item.replenishmentErrorData.sku || defaultSku;
           errorRows.push({
             asin: item.asin,
             sku: sku,
             title: item.Title || 'N/A',
-            issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
-            message: error.Message,
-            solution: error.HowToSolve,
-            recommendedReplenishmentQty: error.recommendedReplenishmentQty || error.data || null
+            issueHeading: `Replenishment | Low Inventory Risk`,
+            message: item.replenishmentErrorData.Message,
+            solution: item.replenishmentErrorData.HowToSolve,
+            recommendedReplenishmentQty: item.replenishmentErrorData.recommendedReplenishmentQty || item.replenishmentErrorData.data || null
           });
-        });
-      } else {
-        // Single error - use SKU from error data if available
-        const sku = item.replenishmentErrorData.sku || defaultSku;
-        errorRows.push({
-          asin: item.asin,
-          sku: sku,
-          title: item.Title || 'N/A',
-          issueHeading: `Replenishment | Low Inventory Risk ${item.replenishmentErrorData.sku ? `(SKU: ${item.replenishmentErrorData.sku})` : ''}`,
-          message: item.replenishmentErrorData.Message,
-          solution: item.replenishmentErrorData.HowToSolve,
-          recommendedReplenishmentQty: item.replenishmentErrorData.recommendedReplenishmentQty || item.replenishmentErrorData.data || null
-        });
+        }
       }
-    }
 
-    return errorRows;
-  };
+      return errorRows;
+    };
 
-  const flattenedData = data.flatMap(extractInventoryErrors);
-  const displayedData = flattenedData.slice(0, page * itemsPerPage);
-  const hasMore = flattenedData.length > displayedData.length;
+    return (data || []).flatMap(extractInventoryErrors);
+  }, [data]);
+
+  const hasMore = pagination?.hasMore ?? false;
 
   return (
     <motion.div 
@@ -532,7 +490,7 @@ const InventoryTableSection = ({ title, data }) => {
           <div className="flex items-center gap-2">
             <Box className="w-4 h-4 text-green-400" />
             <div>
-              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
+              <h2 className="text-sm font-bold text-gray-100">Inventory Management</h2>
               <p className="text-xs text-gray-400">Manage inventory levels and warehouse operations</p>
             </div>
           </div>
@@ -549,14 +507,14 @@ const InventoryTableSection = ({ title, data }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#30363d]">
-              {displayedData.map((row, idx) => (
+              {flattenedData.map((row, idx) => (
                 <tr 
                   key={idx} 
                   role="button"
                   tabIndex={0}
                   onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
                   onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
-                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
+                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d] hover:bg-[#21262d]/50"
                 >
                   <td className="py-2 px-2 align-top w-40">
                     <div className="flex flex-col gap-1">
@@ -593,6 +551,7 @@ const InventoryTableSection = ({ title, data }) => {
                   </td>
                 </tr>
               ))}
+              {loading && <IssuesTableRowsSkeleton rows={5} />}
             </tbody>
           </table>
         </div>
@@ -600,153 +559,11 @@ const InventoryTableSection = ({ title, data }) => {
         {hasMore && (
           <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
             <button
-              className="w-full bg-green-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 transition-all"
-              onClick={() => setPage((prev) => prev + 1)}
+              className="w-full bg-green-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              onClick={onLoadMore}
+              disabled={loading}
             >
-              Load More ({flattenedData.length - displayedData.length} remaining)
-            </button>
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-};
-
-const BuyboxTableSection = ({ title, data, productInfo }) => {
-  const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const itemsPerPage = 10;
-
-  const extractBuyboxErrors = (buyboxData) => {
-    if (!buyboxData || !Array.isArray(buyboxData)) return [];
-    
-    const errorRows = [];
-    
-    buyboxData.forEach((item) => {
-      // Only show products with buybox issues (0% or low buybox < 50%)
-      if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
-        const asin = item.childAsin || item.parentAsin;
-        
-        // Find product title from productInfo
-        const productDetails = productInfo?.find(p => p.asin === asin);
-        const productTitle = productDetails?.name || productDetails?.itemName || 'N/A';
-        
-        // Determine issue type and generate appropriate message/solution
-        let issueHeading, message, solution;
-        
-        if (item.buyBoxPercentage === 0) {
-          issueHeading = 'Buy Box | No Buy Box';
-          message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
-          solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics (shipping time, order defect rate), and consider using repricing tools. Also ensure your product is Prime eligible if possible.';
-        } else {
-          issueHeading = 'Buy Box | Low Buy Box Percentage';
-          message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, a significant portion of potential sales are going to competitors.`;
-          solution = 'Improve your Buy Box percentage by optimizing your pricing, maintaining competitive shipping options, improving seller metrics (late shipment rate, cancellation rate), and ensuring inventory availability. Consider FBA if you\'re currently using FBM.';
-        }
-        
-        // Get SKU from productDetails
-        const sku = productDetails?.sku || '';
-        
-        errorRows.push({
-          asin,
-          sku: sku,
-          title: productTitle,
-          issueHeading,
-          message,
-          solution,
-          buyBoxPercentage: item.buyBoxPercentage,
-          pageViews: item.pageViews,
-          sessions: item.sessions
-        });
-      }
-    });
-    
-    // Sort by buybox percentage (lowest first)
-    return errorRows.sort((a, b) => a.buyBoxPercentage - b.buyBoxPercentage);
-  };
-
-  const flattenedData = extractBuyboxErrors(data);
-  const displayedData = flattenedData.slice(0, page * itemsPerPage);
-  const hasMore = flattenedData.length > displayedData.length;
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.3 }}
-      className="mb-2"
-    >
-      <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
-        <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
-          <div className="flex items-center gap-2">
-            <ShoppingBag className="w-4 h-4 text-purple-400" />
-            <div>
-              <h2 className="text-sm font-bold text-gray-100">{title}</h2>
-              <p className="text-xs text-gray-400">Products losing sales due to Buy Box issues</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="w-full">
-          <table className="w-full table-fixed">
-            <thead>
-              <tr className="bg-[#21262d]">
-                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-40">ASIN/SKU</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/5">Product Title</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/5">Issue Details</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/3">Solution</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#30363d]">
-              {displayedData.map((row, idx) => (
-                <tr 
-                  key={idx} 
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => row.asin && navigate(`/seller-central-checker/${row.asin}`)}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && row.asin) { e.preventDefault(); navigate(`/seller-central-checker/${row.asin}`); } }}
-                  className="text-sm text-gray-200 cursor-pointer border-b border-[#30363d]"
-                >
-                  <td className="py-2 px-2 align-top w-40">
-                    <div className="flex flex-col gap-1">
-                      <span className="font-mono text-xs bg-[#21262d] px-1.5 py-0.5 rounded block break-words text-gray-100" title={row.asin}>{row.asin}</span>
-                      {row.sku && (
-                        <span className="font-mono text-xs bg-blue-500/10 px-1.5 py-0.5 rounded block break-words text-blue-400" title={row.sku}>{row.sku}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-2 px-2 align-top">
-                    <div className="flex items-start gap-1.5">
-                      <ShoppingBag className="w-3.5 h-3.5 text-purple-400 flex-shrink-0 mt-0.5" />
-                      <span className="font-medium text-gray-100 text-xs leading-relaxed break-words">{row.title}</span>
-                    </div>
-                  </td>
-                  <td className="py-2 px-2 align-top">
-                    <div className="space-y-1.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                        {row.issueHeading}
-                      </span>
-                      <p className="text-xs text-gray-300 leading-relaxed break-words">
-                        <FormattedMessage message={row.message} />
-                      </p>
-                    </div>
-                  </td>
-                  <td className="py-2 px-2 align-top">
-                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        
-        {hasMore && (
-          <div className="bg-[#21262d] px-2 py-2 border-t border-[#30363d]">
-            <button
-              className="w-full bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-purple-600 transition-all"
-              onClick={() => setPage((prev) => prev + 1)}
-            >
-              Load More ({flattenedData.length - displayedData.length} remaining)
+              {loading ? 'Loading...' : `Load More (${pagination?.total - data?.length || 0} remaining)`}
             </button>
           </div>
         )}
@@ -756,20 +573,22 @@ const BuyboxTableSection = ({ title, data, productInfo }) => {
 };
 
 const OptimizationDashboard = () => {
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
-  console.log("info: ",info)
+  const dispatch = useDispatch();
   const [searchParams] = useSearchParams();
   const filterParam = searchParams.get('filter');
   
-  // Map URL filter values to component filter options
+  // Get paginated state from Redux
+  const summary = useSelector((state) => state.pageData?.issuesPaginated?.summary);
+  const ranking = useSelector((state) => state.pageData?.issuesPaginated?.ranking);
+  const conversion = useSelector((state) => state.pageData?.issuesPaginated?.conversion);
+  const inventory = useSelector((state) => state.pageData?.issuesPaginated?.inventory);
+  
   const getInitialFilter = () => {
     if (!filterParam) return "All";
     const filterMap = {
       'Ranking': 'Ranking',
       'Conversion': 'Conversion',
       'Inventory': 'Inventory',
-      'Profitability': 'Profitability',
-      'SponsoredAds': 'SponsoredAds'
     };
     return filterMap[filterParam] || "All";
   };
@@ -777,16 +596,43 @@ const OptimizationDashboard = () => {
   const [issuesSelectedOption, setIssuesSelectedOption] = useState(getInitialFilter());
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const categoryDropdownRef = useRef(null);
+  
+  // Track which categories have been fetched to prevent re-fetching
+  const fetchedCategoriesRef = useRef({ ranking: false, conversion: false, inventory: false });
 
-  // Update filter when URL parameter changes
+  // Fetch summary on mount
+  useEffect(() => {
+    dispatch(fetchIssuesSummary());
+  }, [dispatch]);
+
+  // Fetch category-specific data when filter changes or on mount
+  useEffect(() => {
+    if (issuesSelectedOption === 'All' || issuesSelectedOption === 'Ranking') {
+      if (!fetchedCategoriesRef.current.ranking) {
+        fetchedCategoriesRef.current.ranking = true;
+        dispatch(fetchRankingIssues({ page: 1, limit: 10 }));
+      }
+    }
+    if (issuesSelectedOption === 'All' || issuesSelectedOption === 'Conversion') {
+      if (!fetchedCategoriesRef.current.conversion) {
+        fetchedCategoriesRef.current.conversion = true;
+        dispatch(fetchConversionIssues({ page: 1, limit: 10 }));
+      }
+    }
+    if (issuesSelectedOption === 'All' || issuesSelectedOption === 'Inventory') {
+      if (!fetchedCategoriesRef.current.inventory) {
+        fetchedCategoriesRef.current.inventory = true;
+        dispatch(fetchInventoryIssues({ page: 1, limit: 10 }));
+      }
+    }
+  }, [dispatch, issuesSelectedOption]);
+
   useEffect(() => {
     if (filterParam) {
       const filterMap = {
         'Ranking': 'Ranking',
         'Conversion': 'Conversion',
         'Inventory': 'Inventory',
-        'Profitability': 'Profitability',
-        'SponsoredAds': 'SponsoredAds'
       };
       const newFilter = filterMap[filterParam] || "All";
       setIssuesSelectedOption(newFilter);
@@ -805,22 +651,33 @@ const OptimizationDashboard = () => {
     };
   }, []);
 
-  // Calculate issue counts for summary cards
-  // Use the same fields as dashboard to ensure consistency
-  const rankingIssues = info?.TotalRankingerrors || 0;
-  const conversionIssues = info?.totalErrorInConversion || 0;
-  const inventoryIssues = info?.totalInventoryErrors || 0;
-  
-  // Calculate buybox issues count (for display purposes only, already included in conversionIssues)
-  const buyboxIssues = (() => {
-    if (!info?.buyBoxData?.asinBuyBoxData) return 0;
-    return info.buyBoxData.asinBuyBoxData.filter(
-      item => item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50
-    ).length;
-  })();
-  
-  // Total issues should match dashboard: sum of ranking, conversion, and inventory
+  // Load more handlers
+  const handleLoadMoreRanking = useCallback(() => {
+    const nextPage = (ranking.pagination?.page || 1) + 1;
+    dispatch(fetchRankingIssues({ page: nextPage, limit: 10, append: true }));
+  }, [dispatch, ranking.pagination?.page]);
+
+  const handleLoadMoreConversion = useCallback(() => {
+    const nextPage = (conversion.pagination?.page || 1) + 1;
+    dispatch(fetchConversionIssues({ page: nextPage, limit: 10, append: true }));
+  }, [dispatch, conversion.pagination?.page]);
+
+  const handleLoadMoreInventory = useCallback(() => {
+    const nextPage = (inventory.pagination?.page || 1) + 1;
+    dispatch(fetchInventoryIssues({ page: nextPage, limit: 10, append: true }));
+  }, [dispatch, inventory.pagination?.page]);
+
+  // Get counts from summary
+  const rankingIssues = summary.data?.totalRankingErrors || 0;
+  const conversionIssues = summary.data?.totalConversionErrors || 0;
+  const inventoryIssues = summary.data?.totalInventoryErrors || 0;
   const totalIssues = rankingIssues + conversionIssues + inventoryIssues;
+  
+  const isInitialLoading = summary.loading && !summary.data;
+
+  if (isInitialLoading) {
+    return <IssuesCategoryPageSkeleton />;
+  }
 
   return (
     <div className="min-h-screen bg-[#1a1a1a]">
@@ -925,10 +782,32 @@ const OptimizationDashboard = () => {
         <div className="space-y-2">
           {issuesSelectedOption === "All" ? (
             <>
-              {rankingIssues > 0 && <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />}
-              {conversionIssues > 0 && <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />}
-              {inventoryIssues > 0 && <InventoryTableSection title="Inventory Management" data={info.inventoryProductWiseErrors || []} />}
-              {totalIssues === 0 && (
+              {(rankingIssues > 0 || ranking.data?.length > 0) && (
+                <RankingTableSection 
+                  data={ranking.data} 
+                  pagination={ranking.pagination}
+                  loading={ranking.loading}
+                  onLoadMore={handleLoadMoreRanking}
+                />
+              )}
+              {(conversionIssues > 0 || conversion.data?.length > 0) && (
+                <ConversionTableSection 
+                  data={conversion.data} 
+                  buyBoxData={conversion.buyBoxData}
+                  pagination={conversion.pagination}
+                  loading={conversion.loading}
+                  onLoadMore={handleLoadMoreConversion}
+                />
+              )}
+              {(inventoryIssues > 0 || inventory.data?.length > 0) && (
+                <InventoryTableSection 
+                  data={inventory.data}
+                  pagination={inventory.pagination}
+                  loading={inventory.loading}
+                  onLoadMore={handleLoadMoreInventory}
+                />
+              )}
+              {totalIssues === 0 && !isInitialLoading && (
                 <motion.div 
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -943,8 +822,13 @@ const OptimizationDashboard = () => {
               )}
             </>
           ) : issuesSelectedOption === "Ranking" ? (
-            rankingIssues > 0 ? (
-              <RankingTableSection title="Ranking Optimization" data={info.rankingProductWiseErrors} />
+            rankingIssues > 0 || ranking.data?.length > 0 ? (
+              <RankingTableSection 
+                data={ranking.data} 
+                pagination={ranking.pagination}
+                loading={ranking.loading}
+                onLoadMore={handleLoadMoreRanking}
+              />
             ) : (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -959,8 +843,14 @@ const OptimizationDashboard = () => {
               </motion.div>
             )
           ) : issuesSelectedOption === "Conversion" ? (
-            conversionIssues > 0 ? (
-              <ConversionTableSection title="Conversion Optimization (includes Buy Box)" data={info.conversionProductWiseErrors} buyBoxData={info.buyBoxData?.asinBuyBoxData || []} productInfo={info.TotalProduct || info.productWiseError || []} />
+            conversionIssues > 0 || conversion.data?.length > 0 ? (
+              <ConversionTableSection 
+                data={conversion.data} 
+                buyBoxData={conversion.buyBoxData}
+                pagination={conversion.pagination}
+                loading={conversion.loading}
+                onLoadMore={handleLoadMoreConversion}
+              />
             ) : (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -975,8 +865,13 @@ const OptimizationDashboard = () => {
               </motion.div>
             )
           ) : issuesSelectedOption === "Inventory" ? (
-            inventoryIssues > 0 ? (
-              <InventoryTableSection title="Inventory Management" data={info.inventoryProductWiseErrors || []} />
+            inventoryIssues > 0 || inventory.data?.length > 0 ? (
+              <InventoryTableSection 
+                data={inventory.data}
+                pagination={inventory.pagination}
+                loading={inventory.loading}
+                onLoadMore={handleLoadMoreInventory}
+              />
             ) : (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}

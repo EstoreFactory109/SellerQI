@@ -3,6 +3,8 @@ const logger = require("../../utils/Logger");
 const {ApiError}=require('../../utils/ApiError');
 const GET_V2_SELLER_PERFORMANCE_REPORT=require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const zlib = require('zlib');
+const { promisify } = require('util');
+const gunzip = promisify(zlib.gunzip);
 
 
 const generateReport=async(accessToken, marketplaceIds,baseuri)=> {
@@ -152,7 +154,8 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
             logger.error(new ApiError(500, "Internal server error in generating the report"));
         }
 
-       const ReportData=zlib.gunzipSync(fullReport.data).toString("utf8");
+       const decompressedBuffer = await gunzip(fullReport.data);
+       const ReportData = decompressedBuffer.toString("utf8");
        const refinedData=JSON.parse(ReportData);
 
        const User=userId;

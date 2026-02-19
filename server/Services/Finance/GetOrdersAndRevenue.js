@@ -2,17 +2,27 @@ const axios = require("axios");
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI, startTime, endTime) => {
     try {
+        const reportType = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds,
+            dataStartTime: startTime.toISOString(),
+            dataEndTime: endTime.toISOString(),
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseURI}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-                marketplaceIds: marketplaceIds,
-                dataStartTime: startTime.toISOString(),
-                dataEndTime: endTime.toISOString(),
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,

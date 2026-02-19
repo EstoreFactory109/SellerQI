@@ -1,17 +1,19 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { ChevronDown, ChevronUp, Search, Download, AlertCircle, DollarSign, Target, Filter, MoreVertical, Info } from 'lucide-react';
+import { ChevronDown, Search, Download, AlertCircle, DollarSign, Target, Info } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import {
-  setAsinsList,
+  setInitialData,
   setLoadingAsins,
-  setKeywordsForAsin,
-  setLoadingKeywordsForAsin,
-  setErrorForAsin,
+  setSelectedAsin,
+  setKeywords,
+  appendKeywords,
+  setLoadingKeywords,
+  setLoadingMoreKeywords,
+  setCurrentFilter,
   setError
 } from '../redux/slices/KeywordRecommendationsSlice.js';
-import { useKeywordAnalysisData } from '../hooks/usePageData.js';
 import { TablePageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Main Dashboard Component
@@ -20,194 +22,169 @@ const KeywordAnalysisDashboard = () => {
   const [activeTab, setActiveTab] = useState('all');
   const [selectedKeywords, setSelectedKeywords] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'keyword', direction: 'desc' });
-  const [itemsToShow, setItemsToShow] = useState(10);
-  const [selectedAsin, setSelectedAsin] = useState('');
-  const [isSwitchingAsin, setIsSwitchingAsin] = useState(false);
   const [isAsinDropdownOpen, setIsAsinDropdownOpen] = useState(false);
   const [asinSearchQuery, setAsinSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
   const asinDropdownRef = useRef(null);
-  const itemsPerLoad = 10;
-  const hasAutoSelectedRef = useRef(false);
+  const hasInitializedRef = useRef(false);
+  const searchDebounceRef = useRef(null);
 
-  // Fetch keyword analysis data using the hook (automatically fetches on mount)
-  const { data: keywordPageData, loading: keywordPageLoading, refetch: refetchKeywordData } = useKeywordAnalysisData();
-
-  // Get data from Redux
+  // Get data from Redux (optimized state - no more heavy keyword-analysis fetch)
   const asinsList = useSelector((state) => state.keywordRecommendations?.asinsList || []);
   const loadingAsins = useSelector((state) => state.keywordRecommendations?.loadingAsins || false);
-  const keywordsByAsin = useSelector((state) => state.keywordRecommendations?.keywordsByAsin || {});
+  const selectedAsin = useSelector((state) => state.keywordRecommendations?.selectedAsin || '');
+  const summary = useSelector((state) => state.keywordRecommendations?.summary || null);
+  const keywords = useSelector((state) => state.keywordRecommendations?.keywords || []);
+  const pagination = useSelector((state) => state.keywordRecommendations?.pagination || { page: 1, limit: 10, totalItems: 0, totalPages: 0, hasMore: false });
+  const loadingKeywords = useSelector((state) => state.keywordRecommendations?.loadingKeywords || false);
+  const loadingMoreKeywords = useSelector((state) => state.keywordRecommendations?.loadingMoreKeywords || false);
+  const initialLoadComplete = useSelector((state) => state.keywordRecommendations?.initialLoadComplete || false);
   const reduxError = useSelector((state) => state.keywordRecommendations?.error);
-
-  // Get product data from page-wise data if available, fall back to legacy DashboardSlice
-  // Backend returns data directly (not nested) e.g. { TotalProduct, productWiseError, ... }
-  const legacyDashboardInfo = useSelector((state) => state.Dashboard?.DashBoardInfo);
-  const dashboardInfo = keywordPageData || legacyDashboardInfo;
-  const totalProducts = dashboardInfo?.TotalProduct || [];
-  const productWiseError = dashboardInfo?.productWiseError || [];
+  
+  // Product info from the optimized initial response (name, sku for each ASIN)
+  const productInfo = useSelector((state) => state.keywordRecommendations?.productInfo || {});
 
   // Get current marketplace from Redux
   const currentCountry = useSelector((state) => state.currency?.country) || '';
-  const currentRegion = useSelector((state) => state.currency?.region) || '';
   const currency = useSelector((state) => state.currency?.currency) || '$';
 
-  // Helper function to get product name by ASIN
-  const getProductName = (asin) => {
+  // Helper function to get product name by ASIN (uses productInfo from initial response)
+  const getProductName = useCallback((asin) => {
     if (!asin) return '';
-    
-    // Try to find in TotalProduct first
-    const product = totalProducts.find(p => p.asin === asin);
-    if (product) {
-      return product.name || product.itemName || product.title || '';
-    }
-    
-    // Try to find in productWiseError
-    const productError = productWiseError.find(p => p.asin === asin);
-    if (productError) {
-      return productError.name || productError.itemName || productError.title || '';
-    }
-    
-    return '';
-  };
+    return productInfo[asin]?.name || '';
+  }, [productInfo]);
 
-  // Helper function to get product SKU by ASIN
-  const getProductSku = (asin) => {
+  // Helper function to get product SKU by ASIN (uses productInfo from initial response)
+  const getProductSku = useCallback((asin) => {
     if (!asin) return '';
-    
-    // Try to find in TotalProduct first
-    const product = totalProducts.find(p => p.asin === asin);
-    if (product && product.sku) {
-      return product.sku;
-    }
-    
-    // Try to find in productWiseError
-    const productError = productWiseError.find(p => p.asin === asin);
-    if (productError && productError.sku) {
-      return productError.sku;
-    }
-    
-    return '';
-  };
+    return productInfo[asin]?.sku || '';
+  }, [productInfo]);
 
-  // Get data for selected ASIN from Redux
-  const selectedAsinData = keywordsByAsin[selectedAsin] || null;
-  const keywordRecommendationsData = selectedAsinData?.data || null;
-  const loading = selectedAsinData?.loading || false;
-  const error = selectedAsinData?.error || reduxError;
-
-  // Fetch ASINs list (only if not in Redux)
+  // Fetch initial data on mount
   useEffect(() => {
-    const fetchAsinsList = async () => {
-      // If ASINs list already exists in Redux, use it
-      if (asinsList.length > 0) {
-        // Auto-select first ASIN if available and none selected (only once)
-        if (!selectedAsin && !hasAutoSelectedRef.current) {
-          setSelectedAsin(asinsList[0].asin);
-          hasAutoSelectedRef.current = true;
-        }
-        return;
-      }
-
-      // Reset auto-select flag when fetching new data
-      hasAutoSelectedRef.current = false;
-      
+    if (hasInitializedRef.current || initialLoadComplete) return;
+    
+    const fetchInitialData = async () => {
+      hasInitializedRef.current = true;
       dispatch(setLoadingAsins(true));
+      dispatch(setLoadingKeywords(true));
+
       try {
-        const response = await axiosInstance.get('/app/analyse/keywordRecommendations/asins');
-        
-        if (response.data && response.data.data && response.data.data.asins) {
-          const asins = response.data.data.asins;
-          dispatch(setAsinsList(asins));
-          
-          // Auto-select first ASIN if available (only once)
-          if (asins.length > 0 && !selectedAsin && !hasAutoSelectedRef.current) {
-            setSelectedAsin(asins[0].asin);
-            hasAutoSelectedRef.current = true;
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching ASINs list:', err);
-        dispatch(setError(err.response?.data?.message || 'Failed to fetch ASINs list'));
-      } finally {
-        dispatch(setLoadingAsins(false));
-      }
-    };
-
-    fetchAsinsList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asinsList.length, dispatch]); // Removed selectedAsin from dependencies to prevent infinite loop
-
-  // Use a ref to track keywordsByAsin without causing re-renders
-  const keywordsByAsinRef = useRef(keywordsByAsin);
-  useEffect(() => {
-    keywordsByAsinRef.current = keywordsByAsin;
-  }, [keywordsByAsin]);
-
-  // Fetch keyword recommendations data for selected ASIN (only if not in Redux or stale)
-  useEffect(() => {
-    // Track if the component is still mounted
-    let isMounted = true;
-
-    const fetchKeywordRecommendations = async () => {
-      if (!selectedAsin) {
-        setIsSwitchingAsin(false);
-        return;
-      }
-
-      // Check if data already exists in Redux (using ref to avoid dependency loop)
-      const existingData = keywordsByAsinRef.current[selectedAsin];
-      if (existingData && existingData.data) {
-        // Check if data is still fresh (less than 5 minutes old)
-        const fetchedAt = existingData.fetchedAt ? new Date(existingData.fetchedAt).getTime() : 0;
-        const isStale = (Date.now() - fetchedAt) > 5 * 60 * 1000; // 5 minutes
-        
-        if (!isStale) {
-          // Data is fresh, no need to fetch or show loader
-          setIsSwitchingAsin(false);
-          return;
-        }
-        // Data is stale, will refetch but don't show loader (silent refresh)
-      }
-
-      // Show loader only when we need to fetch
-      setIsSwitchingAsin(true);
-
-      // Data doesn't exist, fetch it
-      dispatch(setLoadingKeywordsForAsin({ asin: selectedAsin, loading: true }));
-      dispatch(setErrorForAsin({ asin: selectedAsin, error: null }));
-      
-      try {
-        const response = await axiosInstance.get(`/app/analyse/keywordRecommendations/byAsin?asin=${selectedAsin}`);
-        
-        if (!isMounted) return; // Don't update state if unmounted
+        const response = await axiosInstance.get('/app/analyse/keywordOpportunities/initial?limit=10');
         
         if (response.data && response.data.data) {
-          dispatch(setKeywordsForAsin({ asin: selectedAsin, data: response.data.data }));
-        } else {
-          dispatch(setErrorForAsin({ asin: selectedAsin, error: 'No data received from server' }));
+          dispatch(setInitialData(response.data.data));
         }
       } catch (err) {
-        if (!isMounted) return; // Don't update state if unmounted
-        
-        console.error('Error fetching keyword recommendations:', err);
-        dispatch(setErrorForAsin({ 
-          asin: selectedAsin, 
-          error: err.response?.data?.message || 'Failed to fetch keyword recommendations' 
-        }));
-      } finally {
-        if (isMounted) {
-          // Hide loader after data is loaded
-          setIsSwitchingAsin(false);
-        }
+        console.error('Error fetching initial keyword opportunities data:', err);
+        dispatch(setError(err.response?.data?.message || 'Failed to fetch keyword opportunities'));
+        hasInitializedRef.current = false;
       }
     };
 
-    fetchKeywordRecommendations();
+    fetchInitialData();
+  }, [dispatch, initialLoadComplete]);
 
-    // Cleanup function to prevent state updates on unmounted component
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedAsin, dispatch]); // Removed keywordsByAsin from dependencies
+  // Fetch keywords when ASIN changes (after initial load)
+  const fetchKeywordsForAsin = useCallback(async (asin, page = 1, filter = 'all', append = false) => {
+    if (!asin) return;
+
+    if (append) {
+      dispatch(setLoadingMoreKeywords(true));
+    } else {
+      dispatch(setLoadingKeywords(true));
+    }
+
+    try {
+      const response = await axiosInstance.get(`/app/analyse/keywordOpportunities/keywords?asin=${asin}&page=${page}&limit=10&filter=${filter}`);
+      
+      if (response.data && response.data.data) {
+        const { keywords: newKeywords, pagination: newPagination, summary: newSummary } = response.data.data;
+        
+        if (append) {
+          dispatch(appendKeywords({ asin, keywords: newKeywords, pagination: newPagination }));
+        } else {
+          dispatch(setKeywords({ asin, keywords: newKeywords, pagination: newPagination, summary: newSummary }));
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching keywords for ASIN:', err);
+      dispatch(setError(err.response?.data?.message || 'Failed to fetch keywords'));
+    }
+  }, [dispatch]);
+
+  // Handle ASIN selection change
+  const handleAsinSelect = useCallback((asin) => {
+    if (asin === selectedAsin) {
+      setIsAsinDropdownOpen(false);
+      setAsinSearchQuery('');
+      return;
+    }
+
+    dispatch(setSelectedAsin(asin));
+    setIsAsinDropdownOpen(false);
+    setAsinSearchQuery('');
+    setActiveTab('all');
+    
+    // Fetch keywords for new ASIN
+    fetchKeywordsForAsin(asin, 1, 'all', false);
+  }, [selectedAsin, dispatch, fetchKeywordsForAsin]);
+
+  // Handle tab change (filter)
+  const handleTabChange = useCallback((tab) => {
+    if (tab === activeTab) return;
+    
+    setActiveTab(tab);
+    dispatch(setCurrentFilter(tab));
+    
+    // Fetch keywords with new filter
+    if (selectedAsin) {
+      fetchKeywordsForAsin(selectedAsin, 1, tab, false);
+    }
+  }, [activeTab, selectedAsin, dispatch, fetchKeywordsForAsin]);
+
+  // Handle load more
+  const handleLoadMore = useCallback(() => {
+    if (!selectedAsin || loadingMoreKeywords || !pagination.hasMore) return;
+    
+    const nextPage = pagination.page + 1;
+    fetchKeywordsForAsin(selectedAsin, nextPage, activeTab, true);
+  }, [selectedAsin, loadingMoreKeywords, pagination.page, pagination.hasMore, activeTab, fetchKeywordsForAsin]);
+
+  // Search ASINs with debounce
+  const handleAsinSearch = useCallback((query) => {
+    setAsinSearchQuery(query);
+    
+    // Clear previous timeout
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    if (!query.trim()) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+
+    // Debounce search
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const response = await axiosInstance.get(`/app/analyse/keywordOpportunities/search?query=${encodeURIComponent(query)}`);
+        
+        if (response.data && response.data.data) {
+          setSearchResults(response.data.data.asinsList || []);
+        }
+      } catch (err) {
+        console.error('Error searching ASINs:', err);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+  }, []);
 
   // Handle click outside dropdown
   useEffect(() => {
@@ -215,21 +192,25 @@ const KeywordAnalysisDashboard = () => {
       if (asinDropdownRef.current && !asinDropdownRef.current.contains(event.target)) {
         setIsAsinDropdownOpen(false);
         setAsinSearchQuery('');
+        setSearchResults(null);
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filter ASINs based on search query
-  const filteredAsinsList = useMemo(() => {
+  // Get filtered ASINs for dropdown (use search results if searching, otherwise full list)
+  const displayedAsinsList = useMemo(() => {
+    if (searchResults !== null) {
+      return searchResults;
+    }
+    
     if (!asinSearchQuery.trim()) {
       return asinsList;
     }
     
+    // Local filter for fast response
     const query = asinSearchQuery.toLowerCase().trim();
     return asinsList.filter((asinItem) => {
       const asin = asinItem.asin?.toLowerCase() || '';
@@ -237,73 +218,15 @@ const KeywordAnalysisDashboard = () => {
       const productSku = getProductSku(asinItem.asin)?.toLowerCase() || '';
       return asin.includes(query) || productName.includes(query) || productSku.includes(query);
     });
-  }, [asinsList, asinSearchQuery, totalProducts, productWiseError]);
+  }, [asinsList, asinSearchQuery, searchResults, getProductName, getProductSku]);
 
-  // Transform keywordTargetList data to flat structure for table display
-  const keywords = useMemo(() => {
-    if (!keywordRecommendationsData?.keywordRecommendationData?.keywordTargetList) {
-      return [];
-    }
-
-    const keywordTargetList = keywordRecommendationsData.keywordRecommendationData.keywordTargetList;
-    const flattened = [];
-
-    keywordTargetList.forEach((keywordTarget) => {
-      // Each keywordTarget can have multiple bidInfo entries (one per match type)
-      if (keywordTarget.bidInfo && keywordTarget.bidInfo.length > 0) {
-        keywordTarget.bidInfo.forEach((bidInfo) => {
-          flattened.push({
-            id: `${keywordTarget.recId}-${bidInfo.matchType}`,
-            keyword: keywordTarget.keyword || '',
-            matchType: bidInfo.matchType || '',
-            theme: bidInfo.theme || '',
-            rank: bidInfo.rank || null,
-            bid: bidInfo.bid || 0,
-            suggestedBid: bidInfo.suggestedBid || null,
-            translation: keywordTarget.translation || '',
-            userSelectedKeyword: keywordTarget.userSelectedKeyword || false,
-            searchTermImpressionRank: keywordTarget.searchTermImpressionRank || null,
-            searchTermImpressionShare: keywordTarget.searchTermImpressionShare || null,
-            recId: keywordTarget.recId || ''
-          });
-        });
-      } else {
-        // If no bidInfo, still add the keyword with default values
-        flattened.push({
-          id: `${keywordTarget.recId}-no-bid`,
-          keyword: keywordTarget.keyword || '',
-          matchType: 'N/A',
-          theme: '',
-          rank: null,
-          bid: 0,
-          suggestedBid: null,
-          translation: keywordTarget.translation || '',
-          userSelectedKeyword: keywordTarget.userSelectedKeyword || false,
-          searchTermImpressionRank: keywordTarget.searchTermImpressionRank || null,
-          searchTermImpressionShare: keywordTarget.searchTermImpressionShare || null,
-          recId: keywordTarget.recId || ''
-        });
-      }
-    });
-
-    return flattened;
-  }, [keywordRecommendationsData]);
-
-  // Filter keywords - only show BROAD match type
-  const filteredKeywords = useMemo(() => {
-    // First filter to only BROAD match type
-    let filtered = keywords.filter(k => k.matchType === 'BROAD');
-
-    // Tab filtering
-    if (activeTab === 'highRank') {
-      filtered = filtered.filter(k => k.rank !== null && k.rank <= 10);
-    } else if (activeTab === 'highImpression') {
-      filtered = filtered.filter(k => k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50);
-    }
-
-    // Sort
+  // Sort keywords locally
+  const sortedKeywords = useMemo(() => {
+    if (!keywords || keywords.length === 0) return [];
+    
+    const sorted = [...keywords];
     if (sortConfig.key) {
-      filtered.sort((a, b) => {
+      sorted.sort((a, b) => {
         const aValue = a[sortConfig.key] || 0;
         const bValue = b[sortConfig.key] || 0;
         
@@ -314,49 +237,8 @@ const KeywordAnalysisDashboard = () => {
         }
       });
     }
-
-    return filtered;
-  }, [keywords, activeTab, sortConfig]);
-
-  // Load more items logic
-  const displayedKeywords = useMemo(() => {
-    return filteredKeywords.slice(0, itemsToShow);
-  }, [filteredKeywords, itemsToShow]);
-
-  const hasMoreItems = filteredKeywords.length > itemsToShow;
-
-  // Reset items to show when tabs or sorting changes
-  useEffect(() => {
-    setItemsToShow(itemsPerLoad);
-  }, [activeTab, sortConfig.key, selectedAsin]);
-
-  // Load more function
-  const handleLoadMore = () => {
-    setItemsToShow(prev => prev + itemsPerLoad);
-  };
-
-  // Metrics calculation - only for BROAD match type keywords
-  const metrics = useMemo(() => {
-    const broadKeywords = keywords.filter(k => k.matchType === 'BROAD');
-    const totalKeywords = broadKeywords.length;
-    const uniqueKeywords = new Set(broadKeywords.map(k => k.keyword)).size;
-    const avgBid = broadKeywords.length > 0 
-      ? (broadKeywords.reduce((sum, k) => sum + (parseFloat(k.bid) || 0), 0) / broadKeywords.length).toFixed(2)
-      : '0.00';
-    const highRankKeywords = broadKeywords.filter(k => k.rank !== null && k.rank <= 10).length;
-    const totalImpressionShare = broadKeywords.reduce((sum, k) => sum + (parseFloat(k.searchTermImpressionShare) || 0), 0);
-    const avgImpressionShare = broadKeywords.length > 0 
-      ? (totalImpressionShare / broadKeywords.length).toFixed(2)
-      : '0.00';
-    
-    return {
-      totalKeywords,
-      uniqueKeywords,
-      avgBid,
-      highRankKeywords,
-      avgImpressionShare
-    };
-  }, [keywords]);
+    return sorted;
+  }, [keywords, sortConfig]);
 
   // Handle sort
   const handleSort = (key) => {
@@ -369,7 +251,7 @@ const KeywordAnalysisDashboard = () => {
   // Select all keywords
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedKeywords(displayedKeywords.map(k => k.id));
+      setSelectedKeywords(sortedKeywords.map(k => k.id));
     } else {
       setSelectedKeywords([]);
     }
@@ -386,10 +268,8 @@ const KeywordAnalysisDashboard = () => {
 
   // Export to CSV
   const exportToCSV = () => {
-    // Get the filtered keywords (already filtered to BROAD only)
-    const dataToExport = filteredKeywords;
+    const dataToExport = sortedKeywords;
 
-    // Define CSV headers
     const headers = [
       'Keyword',
       'Relevance Rank',
@@ -400,7 +280,6 @@ const KeywordAnalysisDashboard = () => {
       'Suggested Bid Median'
     ];
 
-    // Convert data to CSV rows
     const csvRows = [
       headers.join(','),
       ...dataToExport.map(keyword => {
@@ -409,7 +288,7 @@ const KeywordAnalysisDashboard = () => {
         const suggestedBidMedian = keyword.suggestedBid ? (keyword.suggestedBid.rangeMedian / 100).toFixed(2) : '';
         
         return [
-          `"${(keyword.keyword || '').replace(/"/g, '""')}"`, // Escape quotes in keyword
+          `"${(keyword.keyword || '').replace(/"/g, '""')}"`,
           keyword.rank !== null ? keyword.rank : '',
           keyword.searchTermImpressionShare !== null ? keyword.searchTermImpressionShare.toFixed(2) : '',
           keyword.searchTermImpressionRank !== null ? keyword.searchTermImpressionRank : '',
@@ -420,10 +299,7 @@ const KeywordAnalysisDashboard = () => {
       })
     ];
 
-    // Create CSV content
     const csvContent = csvRows.join('\n');
-
-    // Create blob and download
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -437,8 +313,33 @@ const KeywordAnalysisDashboard = () => {
     document.body.removeChild(link);
   };
 
-  // Empty state only when not loading (when loading, we show header + skeleton below)
-  if (!loadingAsins && asinsList.length === 0) {
+  // Calculate metrics from summary or keywords
+  const metrics = useMemo(() => {
+    if (summary) {
+      return {
+        totalKeywords: summary.totalKeywords || 0,
+        avgBid: summary.avgBid?.toFixed(2) || '0.00',
+        highRankKeywords: summary.highRelevanceCount || 0,
+        highImpressionKeywords: summary.highImpressionCount || 0
+      };
+    }
+    
+    // Fallback calculation from keywords
+    const totalKeywords = keywords.length;
+    const avgBid = keywords.length > 0 
+      ? (keywords.reduce((sum, k) => sum + (parseFloat(k.bid) || 0), 0) / keywords.length).toFixed(2)
+      : '0.00';
+    const highRankKeywords = keywords.filter(k => k.rank !== null && k.rank <= 10).length;
+    const highImpressionKeywords = keywords.filter(k => k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50).length;
+    
+    return { totalKeywords, avgBid, highRankKeywords, highImpressionKeywords };
+  }, [summary, keywords]);
+
+  // Loading state for initial load
+  const isInitialLoading = loadingAsins && !initialLoadComplete;
+
+  // Empty state when no ASINs
+  if (!isInitialLoading && asinsList.length === 0 && !reduxError) {
     return (
       <div className="dashboard-container">
         <div className="container" style={{ padding: '10px 0' }}>
@@ -451,7 +352,7 @@ const KeywordAnalysisDashboard = () => {
     );
   }
 
-  if (error) {
+  if (reduxError) {
     return (
       <div className="dashboard-container">
         <div style={{ 
@@ -463,7 +364,7 @@ const KeywordAnalysisDashboard = () => {
           gap: '10px'
         }}>
           <AlertCircle size={32} color="#ef4444" />
-          <p style={{ color: '#ef4444', fontSize: '12px' }}>{error}</p>
+          <p style={{ color: '#ef4444', fontSize: '12px' }}>{reduxError}</p>
         </div>
       </div>
     );
@@ -822,7 +723,6 @@ const KeywordAnalysisDashboard = () => {
           transform: translateY(0);
         }
         
-        /* Adjust tooltip position for right edge (last column) */
         .tooltip-container.tooltip-last .tooltip-content {
           left: auto;
           right: 0;
@@ -893,7 +793,7 @@ const KeywordAnalysisDashboard = () => {
           </div>
         </div>
 
-        {/* Metrics Grid - boxes first like other pages */}
+        {/* Metrics Grid */}
         <div className="metrics-grid">
           <div className="metric-card">
             <div className="metric-content">
@@ -930,7 +830,7 @@ const KeywordAnalysisDashboard = () => {
           <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
             <button
               type="button"
-            className="asin-filter-select"
+              className="asin-filter-select"
               onClick={() => setIsAsinDropdownOpen(!isAsinDropdownOpen)}
               disabled={loadingAsins || asinsList.length === 0}
               style={{
@@ -1009,9 +909,9 @@ const KeywordAnalysisDashboard = () => {
                     />
                     <input
                       type="text"
-                      placeholder="Search by ASIN or product name..."
+                      placeholder="Search by ASIN, SKU, or product name..."
                       value={asinSearchQuery}
-                      onChange={(e) => setAsinSearchQuery(e.target.value)}
+                      onChange={(e) => handleAsinSearch(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       style={{
                         width: '100%',
@@ -1027,6 +927,9 @@ const KeywordAnalysisDashboard = () => {
                       onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                       onBlur={(e) => e.target.style.borderColor = '#30363d'}
                     />
+                    {isSearching && (
+                      <div className="loading" style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)' }} />
+                    )}
                   </div>
                 </div>
 
@@ -1036,17 +939,17 @@ const KeywordAnalysisDashboard = () => {
                   overflowY: 'auto',
                   padding: '2px'
                 }}>
-                  {filteredAsinsList.length === 0 ? (
+                  {displayedAsinsList.length === 0 ? (
                     <div style={{ 
                       padding: '10px', 
                       textAlign: 'center', 
                       color: '#9ca3af', 
                       fontSize: '11px' 
                     }}>
-                      No ASINs found matching "{asinSearchQuery}"
+                      {isSearching ? 'Searching...' : `No ASINs found matching "${asinSearchQuery}"`}
                     </div>
                   ) : (
-                    filteredAsinsList.map((asinItem) => {
+                    displayedAsinsList.map((asinItem) => {
                       const productName = getProductName(asinItem.asin);
                       const productSku = getProductSku(asinItem.asin);
                       const isSelected = selectedAsin === asinItem.asin;
@@ -1055,11 +958,7 @@ const KeywordAnalysisDashboard = () => {
                         <button
                           key={asinItem.asin}
                           type="button"
-                          onClick={() => {
-                            setSelectedAsin(asinItem.asin);
-                            setIsAsinDropdownOpen(false);
-                            setAsinSearchQuery('');
-                          }}
+                          onClick={() => handleAsinSelect(asinItem.asin)}
                           style={{
                             width: '100%',
                             padding: '8px 10px',
@@ -1074,14 +973,10 @@ const KeywordAnalysisDashboard = () => {
                             margin: '2px 0'
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) {
-                              e.target.style.backgroundColor = '#161b22';
-                            }
+                            if (!isSelected) e.target.style.backgroundColor = '#161b22';
                           }}
                           onMouseLeave={(e) => {
-                            if (!isSelected) {
-                              e.target.style.backgroundColor = '#21262d';
-                            }
+                            if (!isSelected) e.target.style.backgroundColor = '#21262d';
                           }}
                         >
                           <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '2px', fontSize: '11px' }}>
@@ -1101,7 +996,7 @@ const KeywordAnalysisDashboard = () => {
                               {productName}
                             </div>
                           )}
-                          {asinItem.keywordCount && (
+                          {asinItem.keywordCount !== undefined && (
                             <div style={{ 
                               fontSize: '10px', 
                               color: isSelected ? '#60a5fa' : '#9ca3af',
@@ -1120,8 +1015,8 @@ const KeywordAnalysisDashboard = () => {
           </div>
         </div>
 
-        {/* Only data-dependent content shows skeleton when loading */}
-        {(loadingAsins || (loading && selectedAsin)) ? (
+        {/* Loading state for initial load */}
+        {isInitialLoading ? (
           <div style={{ marginTop: '24px' }}>
             <TablePageSkeleton rows={10} />
           </div>
@@ -1131,27 +1026,33 @@ const KeywordAnalysisDashboard = () => {
         <div className="tabs-container">
           <div 
             className={`tab ${activeTab === 'all' ? 'active' : ''}`}
-            onClick={() => setActiveTab('all')}
+            onClick={() => handleTabChange('all')}
           >
-            All Keywords ({keywords.filter(k => k.matchType === 'BROAD').length})
+            All Keywords ({summary?.totalKeywords || pagination.totalItems || 0})
           </div>
           <div 
             className={`tab ${activeTab === 'highRank' ? 'active' : ''}`}
-            onClick={() => setActiveTab('highRank')}
+            onClick={() => handleTabChange('highRank')}
           >
-            High Relevance ({keywords.filter(k => k.matchType === 'BROAD' && k.rank !== null && k.rank <= 10).length})
+            High Relevance ({summary?.highRelevanceCount || metrics.highRankKeywords})
           </div>
           <div 
             className={`tab ${activeTab === 'highImpression' ? 'active' : ''}`}
-            onClick={() => setActiveTab('highImpression')}
+            onClick={() => handleTabChange('highImpression')}
           >
-            High Impression ({keywords.filter(k => k.matchType === 'BROAD' && k.searchTermImpressionShare !== null && k.searchTermImpressionShare >= 50).length})
+            High Impression ({summary?.highImpressionCount || metrics.highImpressionKeywords})
           </div>
         </div>
 
         {/* Keywords Table */}
         <div className="table-container-wrapper">
           <div className="table-container">
+          {loadingKeywords ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <div className="loading" style={{ margin: '0 auto' }} />
+              <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '10px' }}>Loading keywords...</p>
+            </div>
+          ) : (
           <table>
             <thead>
               <tr>
@@ -1209,8 +1110,8 @@ const KeywordAnalysisDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {displayedKeywords.length > 0 ? (
-                displayedKeywords.map(keyword => {
+              {sortedKeywords.length > 0 ? (
+                sortedKeywords.map(keyword => {
                   return (
                     <tr key={keyword.id}>
                       <td>
@@ -1254,9 +1155,10 @@ const KeywordAnalysisDashboard = () => {
               )}
             </tbody>
           </table>
+          )}
           
           {/* Load More Controls */}
-          {hasMoreItems && (
+          {pagination.hasMore && (
             <div style={{
               padding: '8px 12px',
               borderTop: '1px solid #30363d',
@@ -1266,17 +1168,18 @@ const KeywordAnalysisDashboard = () => {
               background: '#21262d'
             }}>
               <div style={{ fontSize: '11px', color: '#9ca3af', marginRight: '10px' }}>
-                Showing {displayedKeywords.length} of {filteredKeywords.length} keywords
+                Showing {sortedKeywords.length} of {pagination.totalItems} keywords
               </div>
               <button
                 onClick={handleLoadMore}
+                disabled={loadingMoreKeywords}
                 style={{
                   padding: '6px 12px',
                   border: '1px solid #3b82f6',
                   borderRadius: '4px',
-                  background: '#3b82f6',
+                  background: loadingMoreKeywords ? '#1e3a5f' : '#3b82f6',
                   color: 'white',
-                  cursor: 'pointer',
+                  cursor: loadingMoreKeywords ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
@@ -1284,15 +1187,28 @@ const KeywordAnalysisDashboard = () => {
                   fontWeight: '500',
                   transition: 'background-color 0.2s'
                 }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
+                onMouseEnter={(e) => {
+                  if (!loadingMoreKeywords) e.target.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  if (!loadingMoreKeywords) e.target.style.backgroundColor = '#3b82f6';
+                }}
               >
-                Load More
-                <ChevronDown size={12} />
+                {loadingMoreKeywords ? (
+                  <>
+                    <div className="loading" />
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    Load More
+                    <ChevronDown size={12} />
+                  </>
+                )}
               </button>
             </div>
           )}
-          {!hasMoreItems && displayedKeywords.length > itemsPerLoad && (
+          {!pagination.hasMore && sortedKeywords.length > 0 && (
             <div style={{
               padding: '8px 12px',
               borderTop: '1px solid #30363d',
@@ -1302,7 +1218,7 @@ const KeywordAnalysisDashboard = () => {
               background: '#21262d'
             }}>
               <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                Showing all {filteredKeywords.length} keywords
+                Showing all {pagination.totalItems} keywords
               </div>
             </div>
           )}

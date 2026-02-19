@@ -2,13 +2,19 @@ const getReport = require('../../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.
 const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../../Services/Sp_API/shipment.js');
 const puppeteer = require("puppeteer");
-const { generateAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+const { generateAccessToken, generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
 const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
 const { getKeywordPerformanceReport } = require('../../Services/AmazonAds/GetWastedSpendKeywords.js');
 const {getCampaign} = require('../../Services/AmazonAds/GetCampaigns.js');
-
-//const {getPPCSpendsDateWise} = require('../../Services/AmazonAds/GetDateWiseSpendKeywords.js');
+const { getPPCSpendsBySKU } = require('../../Services/AmazonAds/GetPPCProductWise.js');
+const { getPPCSpendsDateWise } = require('../../Services/AmazonAds/GetDateWiseSpendKeywords.js');
+const { getKeywords } = require('../../Services/AmazonAds/Keywords.js');
+const { getPPCMetrics } = require('../../Services/AmazonAds/GetPPCMetrics.js');
+const { getPPCUnitsSold } = require('../../Services/AmazonAds/GetPPCUnitsSold.js');
 const {getNegativeKeywords} = require('../../Services/AmazonAds/NegetiveKeywords.js');
+const tokenManager = require('../../utils/TokenManager.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const { Integration } = require('../../Services/main/Integration.js');
 const {getSearchKeywords} = require('../../Services/AmazonAds/GetSearchKeywords.js');
 const GET_FBA_INVENTORY_PLANNING_DATA = require('../../Services/Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js');
 const {getBrand} = require('../../Services/Sp_API/GetBrand.js');
@@ -2343,6 +2349,182 @@ const testPPCMetrics = async (req, res) => {
   }
 };
 
+/**
+ * Test endpoint that calls ALL Amazon Ads services in one request.
+ * Same order as Integration: PPC Spends, Keyword Performance, PPC Date Wise, PPC Metrics, PPC Units Sold,
+ * then Keywords (ads keywords), Campaign Data, Ad Groups, Negative Keywords, Search Keywords, Keyword Recommendations.
+ * Body: { userId, country, region }
+ */
+const testAllAdsServices = async (req, res) => {
+  try {
+    const { userId, country, region } = req.body;
+    if (!userId || !country || !region) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'Request body must include userId, country, and region'
+      });
+    }
+
+    const seller = await Seller.findOne({ User: userId });
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        error: 'Seller account not found',
+        message: `No seller found for userId: ${userId}`
+      });
+    }
+
+    const sellerAccount = seller.sellerAccount.find(
+      acc => acc.country === country && acc.region === region
+    );
+    if (!sellerAccount) {
+      return res.status(404).json({
+        success: false,
+        error: 'Seller account not found for location',
+        message: `No account for country=${country}, region=${region}`
+      });
+    }
+
+    const AdsRefreshToken = sellerAccount.adsRefreshToken;
+    if (!AdsRefreshToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Ads not connected',
+        message: 'Please connect Amazon Ads account first for this location.'
+      });
+    }
+
+    let adsAccessToken = await generateAdsAccessToken(AdsRefreshToken);
+    if (!adsAccessToken) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate Ads access token',
+        message: 'Refresh token may be invalid or expired. Please reconnect Amazon Ads account.'
+      });
+    }
+
+    let profileId = sellerAccount.ProfileId;
+    if (!profileId) {
+      const profiles = await getProfileById(adsAccessToken, region, country, userId);
+      if (profiles && Array.isArray(profiles) && profiles.length > 0) {
+        const countryCodeMap = {
+          'US': 'US', 'CA': 'CA', 'MX': 'MX', 'UK': 'UK', 'GB': 'UK', 'DE': 'DE', 'FR': 'FR', 'ES': 'ES', 'IT': 'IT', 'JP': 'JP', 'AU': 'AU'
+        };
+        const targetCode = countryCodeMap[country] || country;
+        const match = profiles.find(p => (p.countryCode || '').toUpperCase() === (targetCode || '').toUpperCase()) || profiles[0];
+        profileId = match.profileId?.toString();
+      }
+      if (!profileId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not resolve Amazon Ads profile ID',
+          message: 'No profile found for this account/country. Ensure you have active Advertising campaigns.'
+        });
+      }
+    }
+
+    const asinArray = Array.isArray(sellerAccount.products)
+      ? sellerAccount.products.map(p => p && p.asin).filter(Boolean)
+      : [];
+    const RefreshToken = sellerAccount.spiRefreshToken || null;
+
+    const processResult = (result, serviceName) => {
+      if (result.status === 'fulfilled') {
+        const value = result.value;
+        const isFailure = value === false || (value && typeof value === 'object' && value.success === false);
+        if (isFailure) {
+          return { success: false, error: value?.message || value?.error || 'Function returned failure', data: null };
+        }
+        return { success: true, data: value, error: null };
+      }
+      return { success: false, error: result.reason?.message || 'Unknown error', data: null };
+    };
+
+    const apiResults = {};
+
+    // First batch: PPC Spends by SKU, Keyword Performance, PPC Spends Date Wise, PPC Metrics, PPC Units Sold
+    const batch1 = await Promise.allSettled([
+      tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
+      tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
+      tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
+      getPPCMetrics(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, null, null, true),
+      getPPCUnitsSold(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, null, null, true)
+    ]);
+    apiResults.ppcSpendsBySKU = processResult(batch1[0], 'PPC Spends by SKU');
+    apiResults.adsKeywordsPerformance = processResult(batch1[1], 'Ads Keywords Performance');
+    apiResults.ppcSpendsDateWise = processResult(batch1[2], 'PPC Spends Date Wise');
+    apiResults.ppcMetrics = processResult(batch1[3], 'PPC Metrics');
+    apiResults.ppcUnitsSold = processResult(batch1[4], 'PPC Units Sold');
+
+    // Second batch: getKeywords (Ads Keywords), getCampaign
+    const batch2 = await Promise.allSettled([
+      tokenManager.wrapAdsFunction(getKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region),
+      tokenManager.wrapAdsFunction(getCampaign, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, region, userId, country)
+    ]);
+    apiResults.adsKeywords = processResult(batch2[0], 'Ads Keywords');
+    apiResults.campaignData = processResult(batch2[1], 'Campaign Data');
+
+    // Campaign and ad group IDs for negative keywords
+    const { campaignIdArray, adGroupIdArray } = await Integration.getCampaignAndAdGroupIds(
+      apiResults.ppcSpendsBySKU,
+      userId,
+      region,
+      country
+    );
+
+    let campaignIds = [];
+    if (apiResults.campaignData.success && apiResults.campaignData.data?.campaignData) {
+      campaignIds = (apiResults.campaignData.data.campaignData || [])
+        .filter(item => item && item.campaignId)
+        .map(item => item.campaignId);
+    }
+
+    // Third batch: Ad Groups
+    const batch3 = await Promise.allSettled([
+      tokenManager.wrapAdsFunction(getAdGroups, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, region, userId, country, campaignIds)
+    ]);
+    apiResults.adGroupsData = processResult(batch3[0], 'Ad Groups Data');
+
+    // Fourth batch: Negative Keywords, Search Keywords, Keyword Recommendations
+    const batch4Promises = [
+      tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, campaignIdArray || [], adGroupIdArray || []),
+      tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken)
+    ];
+    if (asinArray.length > 0) {
+      batch4Promises.push(
+        tokenManager.wrapAdsFunction(getKeywordRecommendations, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, asinArray)
+      );
+    }
+    const batch4 = await Promise.allSettled(batch4Promises);
+    apiResults.negativeKeywords = processResult(batch4[0], 'Negative Keywords');
+    apiResults.searchKeywords = processResult(batch4[1], 'Search Keywords');
+    apiResults.keywordRecommendations = asinArray.length > 0
+      ? processResult(batch4[2], 'Keyword Recommendations')
+      : { success: false, data: null, error: 'No ASINs available' };
+
+    const summary = {};
+    Object.keys(apiResults).forEach(key => {
+      summary[key] = apiResults[key].success ? 'ok' : (apiResults[key].error || 'failed');
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'All Ads services executed',
+      summary,
+      results: apiResults,
+      metadata: { userId, country, region, profileId, asinCount: asinArray.length }
+    });
+  } catch (error) {
+    console.error('❌ Error in testAllAdsServices:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while calling all Ads services'
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
    getReviewData, testAmazonAds,
    testGetCampaigns,testGetAdGroups,
@@ -2352,4 +2534,5 @@ module.exports = { testReport, getTotalSales,
    testPPCMetrics,
    testNumberOfProductReviews,
    getLastAdsKeywordsPerformanceDocument,
+   testAllAdsServices,
    }

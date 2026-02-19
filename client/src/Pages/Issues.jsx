@@ -4,15 +4,10 @@ import Products from "../Components/Issues_pages/Products.jsx";
 import Account from "../Components/Issues_pages/Account.jsx";
 import { AlertTriangle } from 'lucide-react';
 import { useSearchParams } from "react-router-dom";
-import { useIssuesData } from '../hooks/usePageData.js';
-import { SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx';
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'category';
-  
-  // Fetch issues data using the hook (automatically fetches on mount)
-  const { data: issuesData, loading: issuesLoading, error: issuesError, refetch: refetchIssues } = useIssuesData();
 
   const renderComponent = () => {
     switch (currentTab) {
@@ -54,17 +49,7 @@ export default function Dashboard() {
       {/* Main Content - Scrollable */}
       <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
         <div className='px-2 lg:px-3 py-1.5 pb-1'>
-          {issuesLoading ? (
-            <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
-              <div className="p-2 border-b border-[#30363d]">
-                <h3 className="text-sm font-semibold text-gray-100">Issues</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Loading issues data…</p>
-              </div>
-              <div className="p-2">
-                <SkeletonTableBody rows={8} />
-              </div>
-            </div>
-          ) : renderComponent()}
+          {renderComponent()}
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@ import tasksSlice from '../slices/TasksSlice.js'
 import reimbursementSlice from '../slices/ReimbursementSlice.js'
 import ppcMetricsSlice from '../slices/PPCMetricsSlice.js'
 import ppcUnitsSoldSlice from '../slices/PPCUnitsSoldSlice.js'
+import ppcCampaignAnalysisSlice from '../slices/PPCCampaignAnalysisSlice.js'
 
 export const store = configureStore({
   reducer: {
@@ -34,6 +35,7 @@ export const store = configureStore({
     tasks: tasksSlice,
     reimbursement: reimbursementSlice,
     ppcMetrics: ppcMetricsSlice,
-    ppcUnitsSold: ppcUnitsSoldSlice
+    ppcUnitsSold: ppcUnitsSoldSlice,
+    ppcCampaignAnalysis: ppcCampaignAnalysisSlice
   },
 });

@@ -4,6 +4,7 @@ const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const FbaInventoryPlanningData = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 const UserModel = require('../../models/user-auth/userModel.js');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     // console.log(baseuri)
@@ -11,14 +12,23 @@ const generateReport = async (accessToken, marketplaceIds, baseuri) => {
         const now = new Date();
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
         const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
+        const reportType = "GET_FBA_INVENTORY_PLANNING_DATA";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds,
+            dataStartTime: StartTime.toISOString(),
+            dataEndTime: EndTime.toISOString()
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_FBA_INVENTORY_PLANNING_DATA",
-                marketplaceIds: marketplaceIds, // Use array as-is, already passed as array from controller
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime: EndTime.toISOString()
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,
@@ -287,7 +297,7 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         const records = parse(tsv, {
-            columns: true,              // Use first row as headers
+            columns: (headers) => normalizeHeaders(headers),  // Normalize localized headers to English
             delimiter: '\t',            // TSV delimiter
             skip_empty_lines: true,     // Skip empty lines
             relax_column_count: true,   // Handle rows with different column counts

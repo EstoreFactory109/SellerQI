@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import MetricCard from '../Components/ProfitibilityDashboard/MetricCard';
 import ProfitTable from '../Components/ProfitibilityDashboard/ProfitTable';
 import SuggestionList from '../Components/ProfitibilityDashboard/SuggestionList';
 import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle } from 'lucide-react';
+import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle, Loader2 } from 'lucide-react';
 import Calender from '../Components/Calender/Calender.jsx';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import { parseLocalDate } from '../utils/dateUtils.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../redux/slices/PPCMetricsSlice.js';
-import { useProfitabilityData } from '../hooks/usePageData.js';
+import { usePhasedProfitabilityData } from '../hooks/usePageData.js';
 import { PageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
@@ -105,26 +105,71 @@ const ProfitabilityDashboard = () => {
     sessionStorage.setItem('profitability_cogs_popup_shown', 'true');
   };
 
-  // Fetch profitability data using the hook (automatically fetches on mount)
-  const { data: profitabilityPageData, loading: profitabilityLoading, refetch: refetchProfitability } = useProfitabilityData();
+  // Fetch profitability data using phased loading (4 endpoints in parallel)
+  const {
+    // Metrics (Phase 1 - KPI boxes)
+    metrics: metricsData,
+    metricsLoading,
+    isMetricsComplete,
+    
+    // Chart (Phase 2 - Graph data)
+    chartData: phasedChartData,
+    chartLoading,
+    isChartComplete,
+    
+    // Table (Phase 3 - Paginated table data)
+    tableData,
+    tablePagination,
+    tableLoading,
+    isTableComplete,
+    
+    // Issues (Phase 4 - Detailed profitability issues)
+    issuesData,
+    issuesSummary,
+    issuesPagination,
+    issuesLoading,
+    isIssuesComplete,
+    fetchNextIssuesPage,
+    fetchIssuesPage,
+    issuesTotalItems,
+    
+    // Actions
+    forceRefresh: forceRefreshAll,
+    fetchNextPage,
+    fetchPage,
+    
+    // Pagination helpers
+    hasMore,
+    currentPage,
+    totalPages,
+    totalItems,
+    
+    // Total counts across ALL data (not page-wise)
+    totalParents,
+    totalChildren,
+    totalProducts,
+    
+    // Overall state
+    isFullyLoaded
+  } = usePhasedProfitabilityData();
   
-  // Use profitability page data if available, fall back to legacy DashboardSlice data
-  // Backend returns data directly (not nested) e.g. { profitibilityData, TotalProduct, ... }
+  // Legacy DashboardSlice for calendar and backward compatibility
   const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
   
   // IMPORTANT: Always get calendar/date properties from legacyInfo (DashboardSlice)
   // because the Calendar component updates these values in DashboardSlice via UpdateDashboardInfo
-  // If we use profitabilityPageData for dates, the date filters won't work since profitabilityPageData is cached
   const info = useMemo(() => {
-    const baseInfo = profitabilityPageData || legacyInfo;
-    // Merge calendar-related properties from legacyInfo to ensure date filters work
     return {
-      ...baseInfo,
+      ...legacyInfo,
+      // Override with phased data when available
+      profitibilityData: tableData,
+      accountFinance: metricsData?.accountFinance || legacyInfo?.accountFinance,
+      TotalWeeklySale: metricsData?.totalSales || legacyInfo?.TotalWeeklySale,
       calendarMode: legacyInfo?.calendarMode,
       startDate: legacyInfo?.startDate,
       endDate: legacyInfo?.endDate,
     };
-  }, [profitabilityPageData, legacyInfo]);
+  }, [legacyInfo, metricsData, tableData]);
   
   // Get calendar mode and dates from info (now properly sourced from legacyInfo)
   const calendarMode = info?.calendarMode || 'default';
@@ -227,6 +272,23 @@ const ProfitabilityDashboard = () => {
   
   // Transform the data for the chart using filtered data when available
   const chartData = useMemo(() => {
+    // PHASED LOADING: Use pre-fetched chart data from Phase 2 endpoint when available (default calendar mode)
+    // This provides instant rendering of the chart without waiting for all data
+    const usePhaseChartData = calendarMode === 'default' && phasedChartData && phasedChartData.length > 0 && !filteredData;
+    
+    if (usePhaseChartData) {
+      return phasedChartData.map(item => {
+        const date = new Date(item.date);
+        const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return {
+          date: dateKey,
+          grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
+          totalSales: parseFloat((item.totalSales || 0).toFixed(2))
+        };
+      });
+    }
+    
+    // LEGACY LOGIC: Used for filtered data scenarios (calendar date selection)
     const useFilteredData = filteredData !== null && calendarMode !== 'default';
     
     // Use datewise chart data from filtered API response if available
@@ -361,12 +423,28 @@ const ProfitabilityDashboard = () => {
     
     // Final fallback: Return empty data with zero values
     return createEmptyProfitabilityData();
-  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode, economicsMetrics]);
+  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode, economicsMetrics, phasedChartData]);
 
   // Get COGs values from Redux store
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
   
   const metrics = useMemo(() => {
+    // PHASED LOADING: Use pre-calculated metrics from backend when available (default calendar mode)
+    // This provides instant rendering of KPI boxes without waiting for all data
+    const usePhaseMetrics = calendarMode === 'default' && metricsData && !filteredData;
+    
+    if (usePhaseMetrics) {
+      return [
+        { label: 'Total Sales', value: `${currency}${(metricsData.totalSales || 0).toFixed(2)}`, icon: 'dollar-sign' },
+        { label: 'Total PPC Sales', value: `${currency}${(metricsData.totalPpcSales || 0).toFixed(2)}`, icon: 'zap' },
+        { label: 'Total Ad Spend', value: `${currency}${(metricsData.totalAdSpend || 0).toFixed(2)}`, icon: 'dollar-sign' },
+        { label: 'ACOS%', value: `${(metricsData.acos || 0).toFixed(2)}%`, icon: 'target' },
+        { label: 'Amazon Fees', value: `${currency}${(metricsData.amazonFees || 0).toFixed(2)}`, icon: 'list' },
+        { label: 'Gross Profit', value: `${currency}${(metricsData.grossProfit || 0).toFixed(2)}`, icon: 'dollar-sign' },
+      ];
+    }
+    
+    // LEGACY LOGIC: Used for filtered data scenarios (calendar date selection)
     // Use the same Total Sales value as the Dashboard Total Sales component
     const filteredAccountFinance = info?.accountFinance || accountFinance;
     let totalOverallSpend = 0;
@@ -562,7 +640,7 @@ const ProfitabilityDashboard = () => {
       { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
       { label: 'Gross Profit', value: `${currency}${grossProfit.toFixed(2)}`, icon: 'dollar-sign' }, // Matches Total Sales component (Backend GP - PPC)
     ];
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency, metricsData]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -1376,26 +1454,34 @@ const ProfitabilityDashboard = () => {
             </div>
           </motion.div>
 
-            {/* Skeleton lazy load: show while profitability data is loading */}
-            {profitabilityLoading ? (
-              <PageSkeleton statCards={6} sections={2} />
-            ) : (
-              <>
-                      {/* Enhanced Metrics Cards */}
+            {/* PHASED LOADING: Each section loads independently as data arrives */}
+            
+            {/* Phase 1: Metrics Cards - Loads first (~50-100ms) */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
               style={{ marginBottom: '10px' }}
             >
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
-                {metrics.map((metric, index) => (
-                  <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
-                ))}
-              </div>
+              {metricsLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="animate-pulse" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>
+                      <div style={{ background: '#30363d', height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
+                      <div style={{ background: '#30363d', height: '24px', width: '80%', borderRadius: '4px' }}></div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
+                  {metrics.map((metric, index) => (
+                    <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
+                  ))}
+                </div>
+              )}
             </motion.div>
 
-                      {/* Enhanced Chart Section */}
+            {/* Phase 2: Chart Section - Loads second (~50-100ms) */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1410,6 +1496,9 @@ const ProfitabilityDashboard = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Gross Profit vs Total Sales</h3>
+                          {chartLoading && (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: '#60a5fa' }} />
+                          )}
                           <div className="relative group">
                             <HelpCircle className="w-3.5 h-3.5 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
                             <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
@@ -1435,6 +1524,14 @@ const ProfitabilityDashboard = () => {
                   </div>
                 </div>
                 <div style={{ padding: '8px' }}>
+                  {chartLoading ? (
+                    <div className="animate-pulse flex items-center justify-center" style={{ height: 280, background: '#1a1a1a', borderRadius: '8px' }}>
+                      <div className="text-center">
+                        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: '#60a5fa' }} />
+                        <span style={{ color: '#9ca3af', fontSize: '12px' }}>Loading chart data...</span>
+                      </div>
+                    </div>
+                  ) : (
                   <ResponsiveContainer width="100%" height={280}>
                     <AreaChart
                       data={chartData}
@@ -1499,18 +1596,33 @@ const ProfitabilityDashboard = () => {
                       />
                     </AreaChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             </motion.div>
 
-            {/* Enhanced Profit Table */}
+            {/* Phase 3: Profit Table - Paginated, loads third (~100-300ms) */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
               style={{ marginBottom: '10px' }}
             >
-              <ProfitTable setSuggestionsData={setSuggestionsData} />
+              <ProfitTable 
+                setSuggestionsData={setSuggestionsData} 
+                phasedTableData={tableData}
+                tablePagination={tablePagination}
+                tableLoading={tableLoading}
+                hasMore={hasMore}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                totalParents={totalParents}
+                totalChildren={totalChildren}
+                totalProducts={totalProducts}
+                onLoadMore={fetchNextPage}
+                onPageChange={fetchPage}
+              />
             </motion.div>
 
             {/* Enhanced Suggestions Section */}
@@ -1520,13 +1632,18 @@ const ProfitabilityDashboard = () => {
               transition={{ duration: 0.6, delay: 0.4 }}
               style={{ marginBottom: '10px' }}
             >
-              <SuggestionList suggestionsData={suggestionsData} />
+              <SuggestionList 
+                suggestionsData={suggestionsData}
+                issuesData={issuesData}
+                issuesSummary={issuesSummary}
+                issuesLoading={issuesLoading}
+                onLoadMore={fetchNextIssuesPage}
+                hasMore={issuesPagination?.hasMore ?? false}
+              />
             </motion.div>
 
             {/* Bottom Spacer */}
             <div style={{ width: '100%', height: '20px' }}></div>
-              </>
-            )}
           </div>
         </div>
     </div>

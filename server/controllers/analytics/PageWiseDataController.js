@@ -24,6 +24,7 @@ const APlusContent = require('../../models/seller-performance/APlusContentModel.
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const User = require('../../models/user-auth/userModel.js');
 const { getProductWiseSponsoredAdsData } = require('../../Services/amazon-ads/ProductWiseSponsoredAdsService.js');
+const ProfitabilityService = require('../../Services/Calculations/ProfitabilityService.js');
 
 /**
  * Get full dashboard data - calculates all data in backend
@@ -145,7 +146,12 @@ const getDashboardData = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get profitability dashboard data
+ * Get profitability dashboard data (OPTIMIZED VERSION)
+ * 
+ * This endpoint uses the optimized ProfitabilityService which:
+ * 1. Fetches only 5-8 collections instead of 24+ (3-4x faster)
+ * 2. Computes only profitability-related calculations
+ * 3. Returns the exact same data structure as before
  */
 const getProfitabilityData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -153,50 +159,20 @@ const getProfitabilityData = asyncHandler(async (req, res) => {
     const Country = req.country;
 
     try {
-        logger.info(`Getting profitability data for user ${userId}`);
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability data (OPTIMIZED) for user ${userId}`);
 
-        // Get raw data
-        const analyseResult = await AnalyseService.Analyse(userId, Country, Region);
+        // OPTIMIZED: Fetch only profitability-required data (5 queries instead of 24+)
+        const rawData = await ProfitabilityService.fetchProfitabilityData(userId, Country, Region);
         
-        if (analyseResult.status !== 200) {
-            return res.status(analyseResult.status).json(
-                new ApiError(analyseResult.status, analyseResult.message)
-            );
-        }
+        const fetchTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability raw data fetched in ${fetchTime}ms`);
 
-        // Calculate full dashboard data
-        const calculatedData = await analyseData(analyseResult.message, userId);
-        const dashboardData = calculatedData.dashboardData;
-
-        // Extract profitability-specific data - all data needed by ProfitabilityDashboard.jsx
-        const profitabilityData = {
-            // Core profitability data
-            profitibilityData: dashboardData.profitibilityData || [],
-            totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
-            profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
-            
-            // Product data
-            TotalProduct: dashboardData.TotalProduct || [],
-            ActiveProducts: dashboardData.ActiveProducts || [],
-            SalesByProducts: dashboardData.SalesByProducts || [],
-            
-            // Finance and sales data
-            accountFinance: dashboardData.accountFinance || {},
-            TotalWeeklySale: dashboardData.TotalWeeklySale || 0,
-            TotalSales: dashboardData.TotalSales || [],
-            economicsMetrics: dashboardData.economicsMetrics || {},
-            
-            // PPC/Ads data for profit calculation
-            ProductWiseSponsoredAdsGraphData: dashboardData.ProductWiseSponsoredAdsGraphData || {},
-            sponsoredAdsMetrics: dashboardData.sponsoredAdsMetrics || {},
-            dateWiseTotalCosts: dashboardData.dateWiseTotalCosts || [],
-            
-            // Date range
-            calendarMode: dashboardData.calendarMode || 'default',
-            Country: dashboardData.Country,
-            startDate: dashboardData.startDate,
-            endDate: dashboardData.endDate
-        };
+        // OPTIMIZED: Calculate only profitability-related data
+        const profitabilityData = await ProfitabilityService.calculateProfitabilityDashboard(rawData);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability data TOTAL time: ${totalTime}ms (optimized)`);
 
         return res.status(200).json(
             new ApiResponse(200, profitabilityData, "Profitability data retrieved successfully")
@@ -206,6 +182,213 @@ const getProfitabilityData = asyncHandler(async (req, res) => {
         logger.error("Error in getProfitabilityData:", error);
         return res.status(500).json(
             new ApiError(500, `Error getting profitability data: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get profitability summary data (PHASE 1 - FAST)
+ * Returns only metrics and chart data for instant rendering
+ * The heavy product table data can be loaded separately
+ */
+const getProfitabilitySummary = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability summary for user ${userId}`);
+
+        const summaryData = await ProfitabilityService.getProfitabilitySummary(userId, Country, Region);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability summary TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, summaryData, "Profitability summary retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilitySummary:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability summary: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * ============================================================================
+ * PHASED PROFITABILITY ENDPOINTS (for parallel loading)
+ * ============================================================================
+ * These endpoints load data in parallel for faster page rendering.
+ * Each endpoint can be called independently and cached separately.
+ */
+
+/**
+ * PHASE 1: Get profitability metrics (KPI boxes)
+ * Returns: Total Sales, Total PPC Sales, Total Ad Spend, ACOS%, Amazon Fees, Gross Profit
+ * Expected time: ~50-100ms
+ */
+const getProfitabilityMetrics = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability metrics (PHASE 1) for user ${userId}`);
+
+        const metricsData = await ProfitabilityService.getProfitabilityMetrics(userId, Country, Region);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability metrics TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, metricsData, "Profitability metrics retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilityMetrics:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability metrics: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * PHASE 2: Get profitability chart data
+ * Returns: Datewise gross profit and total sales for chart
+ * Expected time: ~50-100ms
+ */
+const getProfitabilityChart = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability chart (PHASE 2) for user ${userId}`);
+
+        const chartData = await ProfitabilityService.getProfitabilityChart(userId, Country, Region);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability chart TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, chartData, "Profitability chart retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilityChart:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability chart: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * PHASE 3: Get profitability table data (PAGINATED)
+ * Returns: Paginated ASIN-wise profitability data
+ * Expected time: ~100-300ms
+ * 
+ * Query params:
+ * - page: Page number (1-indexed, default: 1)
+ * - limit: Items per page (default: 10)
+ */
+const getProfitabilityTable = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability table (PHASE 3) for user ${userId}, page ${page}, limit ${limit}`);
+
+        const tableData = await ProfitabilityService.getProfitabilityTable(userId, Country, Region, page, limit);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability table TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, tableData, "Profitability table retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilityTable:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability table: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get profitability issues (detailed issues with recommendations)
+ * Returns: Paginated list of products with profitability issues
+ * Uses SAME logic as DashboardCalculation.calculateProfitabilityErrors
+ * 
+ * Query params:
+ * - page: Page number (1-indexed, default: 1)
+ * - limit: Items per page (default: 10)
+ */
+const getProfitabilityIssues = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability issues for user ${userId}, page ${page}, limit ${limit}`);
+
+        const ProfitabilityIssuesService = require('../../Services/Calculations/ProfitabilityIssuesService.js');
+        const issuesData = await ProfitabilityIssuesService.getProfitabilityIssues(userId, Country, Region, page, limit);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability issues TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, issuesData, "Profitability issues retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilityIssues:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability issues: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get profitability issues summary (counts only, no pagination)
+ * Fast endpoint for overview
+ */
+const getProfitabilityIssuesSummary = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        const startTime = Date.now();
+        logger.info(`[PERF] Getting profitability issues summary for user ${userId}`);
+
+        const ProfitabilityIssuesService = require('../../Services/Calculations/ProfitabilityIssuesService.js');
+        const summaryData = await ProfitabilityIssuesService.getProfitabilityIssuesSummary(userId, Country, Region);
+        
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Profitability issues summary TOTAL time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, summaryData, "Profitability issues summary retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProfitabilityIssuesSummary:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting profitability issues summary: ${error.message}`)
         );
     }
 });
@@ -287,69 +470,77 @@ const getPPCData = asyncHandler(async (req, res) => {
 
 /**
  * Get Issues page data
+ * 
+ * OPTIMIZED: Uses pre-computed data from MongoDB when available.
+ * Falls back to full calculation only when data is stale/missing.
  */
 const getIssuesData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
+    const forceRefresh = req.query.forceRefresh === 'true';
 
     try {
-        logger.info(`Getting issues data for user ${userId}`);
+        logger.info(`Getting issues data for user ${userId}`, { forceRefresh });
 
-        // Get raw data
-        const analyseResult = await AnalyseService.Analyse(userId, Country, Region);
+        // Use optimized service that reads from MongoDB when possible
+        const IssuesDataService = require('../../Services/Calculations/IssuesDataService.js');
+        const result = await IssuesDataService.getIssuesData(userId, Country, Region, forceRefresh);
         
-        if (analyseResult.status !== 200) {
-            return res.status(analyseResult.status).json(
-                new ApiError(analyseResult.status, analyseResult.message)
+        if (!result.success) {
+            logger.error("Failed to get issues data from service:", result.error);
+            
+            // Fallback to direct calculation if service fails completely
+            logger.info("Falling back to direct calculation for issues data");
+            const analyseResult = await AnalyseService.Analyse(userId, Country, Region);
+            
+            if (analyseResult.status !== 200) {
+                return res.status(analyseResult.status).json(
+                    new ApiError(analyseResult.status, analyseResult.message)
+                );
+            }
+
+            const calculatedData = await analyseData(analyseResult.message, userId);
+            const dashboardData = calculatedData.dashboardData;
+
+            const issuesData = {
+                productWiseError: dashboardData.productWiseError || [],
+                rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
+                conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
+                inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || [],
+                totalErrorInAccount: dashboardData.totalErrorInAccount || 0,
+                totalErrorInConversion: dashboardData.totalErrorInConversion || 0,
+                TotalRankingerrors: dashboardData.TotalRankingerrors || 0,
+                totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
+                totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
+                totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
+                profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
+                sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
+                AccountErrors: dashboardData.AccountErrors || {},
+                accountHealthPercentage: dashboardData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
+                buyBoxData: dashboardData.buyBoxData || { asinBuyBoxData: [] },
+                first: dashboardData.first,
+                second: dashboardData.second,
+                third: dashboardData.third,
+                fourth: dashboardData.fourth,
+                TotalProduct: dashboardData.TotalProduct || [],
+                ActiveProducts: dashboardData.ActiveProducts || [],
+                Country: dashboardData.Country
+            };
+
+            return res.status(200).json(
+                new ApiResponse(200, issuesData, "Issues data retrieved successfully (fallback)")
             );
         }
 
-        // Calculate full dashboard data
-        const calculatedData = await analyseData(analyseResult.message, userId);
-        const dashboardData = calculatedData.dashboardData;
-
-        // Extract issues-specific data - all data needed by Issues page (Category.jsx + Account.jsx)
-        const issuesData = {
-            // Product-wise error data for Category.jsx
-            productWiseError: dashboardData.productWiseError || [],
-            rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
-            conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
-            inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || [],
-            
-            // Error counts
-            totalErrorInAccount: dashboardData.totalErrorInAccount || 0,
-            totalErrorInConversion: dashboardData.totalErrorInConversion || 0,
-            TotalRankingerrors: dashboardData.TotalRankingerrors || 0,
-            totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
-            totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
-            totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
-            
-            // Error details
-            profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
-            sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
-            
-            // Account errors for Account.jsx
-            AccountErrors: dashboardData.AccountErrors || {},
-            accountHealthPercentage: dashboardData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
-            
-            // Buy Box data for Category.jsx
-            buyBoxData: dashboardData.buyBoxData || { asinBuyBoxData: [] },
-            
-            // Top error products
-            first: dashboardData.first,
-            second: dashboardData.second,
-            third: dashboardData.third,
-            fourth: dashboardData.fourth,
-            
-            // Product data for lookups
-            TotalProduct: dashboardData.TotalProduct || [],
-            ActiveProducts: dashboardData.ActiveProducts || [],
-            Country: dashboardData.Country
-        };
+        logger.info(`Issues data retrieved successfully`, {
+            source: result.source,
+            duration: result.duration,
+            productCount: result.data?.productWiseError?.length || 0
+        });
 
         return res.status(200).json(
-            new ApiResponse(200, issuesData, "Issues data retrieved successfully")
+            new ApiResponse(200, result.data, `Issues data retrieved successfully (${result.source})`)
         );
 
     } catch (error) {
@@ -1496,9 +1687,1519 @@ const getComparisonDebugInfo = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get dashboard summary data (lightweight, fast endpoint)
+ * 
+ * This endpoint is optimized for first-load performance:
+ * - Only loads data needed for dashboard quick stats, account health, total sales
+ * - Uses projections to avoid loading large arrays
+ * - Uses .lean() for all queries
+ * - Runs all queries in parallel
+ * 
+ * For full dashboard data (Product Checker, etc.), use /dashboard endpoint
+ */
+const getDashboardSummary = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        logger.error('Missing required parameters for dashboard summary');
+        return res.status(400).json(
+            new ApiError(400, 'User ID, country, and region are required')
+        );
+    }
+
+    try {
+        logger.info(`[PERF] Getting dashboard summary for user ${userId}, region ${Region}, country ${Country}`);
+
+        const { getDashboardSummary: fetchDashboardSummary } = require('../../Services/Calculations/DashboardSummaryService.js');
+        
+        const result = await fetchDashboardSummary(userId, Country, Region);
+        
+        if (!result.success) {
+            return res.status(500).json(
+                new ApiError(500, result.error || 'Failed to get dashboard summary')
+            );
+        }
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Dashboard summary total processing time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                dashboardData: result.data
+            }, "Dashboard summary retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getDashboardSummary:", {
+            message: error.message,
+            stack: error.stack
+        });
+        return res.status(500).json(
+            new ApiError(500, `Error getting dashboard summary: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get Product Checker data (Phase 2 for progressive loading)
+ * 
+ * This endpoint provides the error analysis for Product Checker component.
+ * Call this after getDashboardSummary for full dashboard experience.
+ */
+const getProductCheckerData = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, country, and region are required')
+        );
+    }
+
+    try {
+        logger.info(`[PERF] Getting Product Checker data for user ${userId}`);
+
+        // Use the existing Analyse + analyseData flow for full error analysis
+        const { AnalyseService } = require('../../Services/main/Analyse.js');
+        const { analyseData } = require('../../Services/Calculations/DashboardCalculation.js');
+        
+        const analyseResult = await AnalyseService.Analyse(userId, Country, Region, null);
+        
+        if (!analyseResult || analyseResult.status !== 200) {
+            return res.status(analyseResult?.status || 500).json(
+                new ApiError(analyseResult?.status || 500, analyseResult?.message || 'Analysis failed')
+            );
+        }
+
+        const calculatedData = await analyseData(analyseResult.message, userId);
+        const dashboardData = calculatedData.dashboardData;
+
+        // Extract only Product Checker specific data
+        const productCheckerData = {
+            // Error counts
+            totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
+            totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
+            totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
+            TotalRankingerrors: dashboardData.TotalRankingerrors || 0,
+            totalErrorInConversion: dashboardData.totalErrorInConversion || 0,
+            totalErrorInAccount: dashboardData.totalErrorInAccount || 0,
+            
+            // Error details
+            profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
+            sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
+            
+            // Top error products
+            first: dashboardData.first,
+            second: dashboardData.second,
+            third: dashboardData.third,
+            fourth: dashboardData.fourth,
+            
+            // Product-wise errors
+            productWiseError: dashboardData.productWiseError || [],
+            rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
+            conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
+            inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || []
+        };
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Product Checker data total time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, productCheckerData, "Product Checker data retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("Error in getProductCheckerData:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Product Checker data: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * OPTIMIZED Phase 2: Get top 4 products for dashboard
+ * 
+ * This is a lightweight endpoint specifically for the main dashboard's Phase 2.
+ * It ONLY returns the top 4 products (by sales with issues), nothing else.
+ * 
+ * Benefits over the full getProductCheckerData:
+ * - Does NOT run full Analyse service (no loading 20+ collections)
+ * - Does NOT run full analyseData calculation
+ * - Single optimized MongoDB aggregation + single Seller query
+ * - Returns minimal payload (~4 products vs 100KB+ payload)
+ * 
+ * Expected response time: 50-200ms vs 2-5 seconds for full endpoint
+ */
+const getTop4ProductsOptimized = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, Country, and Region are required')
+        );
+    }
+
+    try {
+        logger.info(`[PERF] Starting getTop4ProductsOptimized for user ${userId}`);
+
+        const { getProductCheckerOptimized } = require('../../Services/Calculations/DashboardSummaryService.js');
+        
+        const result = await getProductCheckerOptimized(userId, Country, Region);
+
+        if (!result.success) {
+            logger.warn('getTop4ProductsOptimized returned unsuccessful result', { error: result.error });
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    first: null,
+                    second: null,
+                    third: null,
+                    fourth: null
+                }, 'No data available')
+            );
+        }
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] getTop4ProductsOptimized completed in ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, result.data, 'Top 4 products fetched successfully')
+        );
+
+    } catch (error) {
+        logger.error('Error in getTop4ProductsOptimized:', {
+            message: error.message,
+            stack: error.stack
+        });
+        
+        return res.status(500).json(
+            new ApiError(500, `Error getting top 4 products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * =====================================================================
+ * OPTIMIZED YOUR PRODUCTS ENDPOINTS (v2)
+ * =====================================================================
+ * Single optimized endpoint for first load, lazy load for other tabs.
+ * Uses MongoDB aggregation - does NOT load full Seller document.
+ * Uses pre-calculated issueCount from Seller model.
+ */
+
+/**
+ * Get Your Products Initial Load (v2 - Optimized)
+ * 
+ * SINGLE ENDPOINT for first page load - returns everything needed:
+ * 1. Summary counts (totalProducts, activeProducts, inactiveProducts, incompleteProducts)
+ * 2. First 20 Active products (paginated, enriched)
+ * 3. Count of products without A+ and not targeted in ads
+ * 
+ * This is the ONLY call needed on first render. Other tabs fetch on demand.
+ */
+const getYourProductsInitialV2 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v2-initial] Getting Your Products Initial for user ${userId}, region ${Region}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation pipeline that returns:
+        // 1. Counts by status
+        // 2. First 20 Active products (sorted by ASIN)
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            {
+                $facet: {
+                    // Count by status
+                    counts: [
+                        {
+                            $group: {
+                                _id: '$sellerAccount.products.status',
+                                count: { $sum: 1 }
+                            }
+                        }
+                    ],
+                    // Total count
+                    total: [{ $count: 'count' }],
+                    // First 20 Active products
+                    activeProducts: [
+                        { $match: { 'sellerAccount.products.status': 'Active' } },
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issues: '$sellerAccount.products.issues',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing',
+                                updatedAt: '$sellerAccount.products.updatedAt'
+                            }
+                        }
+                    ],
+                    // Active products count (for pagination)
+                    activeCount: [
+                        { $match: { 'sellerAccount.products.status': 'Active' } },
+                        { $count: 'count' }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+
+        if (!result) {
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    summary: {
+                        totalProducts: 0,
+                        activeProducts: 0,
+                        inactiveProducts: 0,
+                        incompleteProducts: 0,
+                        productsWithAPlus: 0,
+                        productsWithoutAPlus: 0,
+                        productsNotTargetedInAds: 0
+                    },
+                    products: [],
+                    pagination: { page: 1, limit, totalItems: 0, totalPages: 0, hasMore: false },
+                    country: Country,
+                    region: Region
+                }, "Your Products Initial retrieved (no products)")
+            );
+        }
+
+        // Parse counts
+        const countsMap = {};
+        (result.counts || []).forEach(c => { countsMap[c._id] = c.count; });
+        
+        const totalProducts = result.total[0]?.count || 0;
+        const activeProductsCount = countsMap['Active'] || 0;
+        const inactiveProductsCount = countsMap['Inactive'] || 0;
+        const incompleteProductsCount = countsMap['Incomplete'] || 0;
+        const activeProducts = result.activeProducts || [];
+        const activeTotalForPagination = result.activeCount[0]?.count || 0;
+
+        // If no active products, return early with just counts
+        if (activeProducts.length === 0) {
+            const elapsed = Date.now() - startTime;
+            logger.info(`[v2-initial] Completed in ${elapsed}ms - no active products`);
+
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    summary: {
+                        totalProducts,
+                        activeProducts: activeProductsCount,
+                        inactiveProducts: inactiveProductsCount,
+                        incompleteProducts: incompleteProductsCount,
+                        productsWithAPlus: 0,
+                        productsWithoutAPlus: 0,
+                        productsNotTargetedInAds: 0
+                    },
+                    products: [],
+                    pagination: { page: 1, limit, totalItems: 0, totalPages: 0, hasMore: false },
+                    country: Country,
+                    region: Region
+                }, "Your Products Initial retrieved")
+            );
+        }
+
+        // Collect ASINs from active products for enrichment
+        const pageAsins = activeProducts.map(p => p.asin?.toUpperCase()).filter(Boolean);
+        const pageAsinSet = new Set(pageAsins);
+
+        // Fetch enrichment data in parallel (minimal fields only)
+        const [productReviews, aPlusContent, sponsoredAdsData] = await Promise.all([
+            NumberOfProductReviews.findOne({
+                User: userId,
+                $or: [{ region: Region, country: Country }, {}]
+            }).sort({ createdAt: -1 }).select('Products.asin Products.product_num_ratings Products.product_star_ratings Products.product_title Products.product_photos Products.video_url').lean(),
+            APlusContent.findOne({
+                User: userId,
+                $or: [{ region: Region, country: Country }, {}]
+            }).sort({ createdAt: -1 }).select('ApiContentDetails.Asins ApiContentDetails.status').lean(),
+            getProductWiseSponsoredAdsData(userId, Country, Region).catch(err => {
+                logger.warn('[v2-initial] Could not fetch sponsored ads data:', err.message);
+                return null;
+            })
+        ]);
+
+        // Build reviews map
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(product => {
+                const asinKey = product.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(asinKey)) {
+                    const videoUrls = product.video_url || [];
+                    reviewsMap.set(asinKey, {
+                        numRatings: product.product_num_ratings || '0',
+                        starRatings: product.product_star_ratings || '0',
+                        title: product.product_title || '',
+                        photos: product.product_photos || [],
+                        hasVideo: Array.isArray(videoUrls) && videoUrls.length > 0
+                    });
+                }
+            });
+        }
+
+        // Build A+ map and count for ALL products (not just current page)
+        const aPlusMap = new Map();
+        let productsWithAPlus = 0;
+        if (aPlusContent?.ApiContentDetails) {
+            aPlusContent.ApiContentDetails.forEach(item => {
+                const asinKey = item.Asins?.toUpperCase() || '';
+                const hasAPlus = item.status === 'APPROVED' || item.status === 'PUBLISHED';
+                aPlusMap.set(asinKey, item.status);
+                if (hasAPlus) productsWithAPlus++;
+            });
+        }
+
+        // Build targeted-in-ads set and count products NOT targeted
+        const asinsTargetedInAds = new Set();
+        if (sponsoredAdsData?.sponsoredAds && Array.isArray(sponsoredAdsData.sponsoredAds)) {
+            sponsoredAdsData.sponsoredAds.forEach(adItem => {
+                const asin = (adItem.asin || adItem.ASIN || '').toUpperCase();
+                if (asin) asinsTargetedInAds.add(asin);
+            });
+        }
+        const productsNotTargetedInAds = activeProductsCount - asinsTargetedInAds.size;
+
+        // Enrich products (use issueCount from DB - pre-calculated)
+        const enrichedProducts = activeProducts.map(product => {
+            const asinKey = product.asin?.toUpperCase() || '';
+            const reviewData = reviewsMap.get(asinKey) || {};
+            const aPlusStatus = aPlusMap.get(asinKey);
+
+            const hasAPlusContent = aPlusStatus === 'APPROVED' || aPlusStatus === 'PUBLISHED';
+            const isTargetedInAds = asinsTargetedInAds.has(asinKey);
+
+            return {
+                asin: product.asin,
+                sku: product.sku,
+                title: product.itemName || reviewData.title || '',
+                price: product.price || '0',
+                status: product.status || 'Active',
+                quantity: product.quantity ?? 0,
+                numRatings: reviewData.numRatings || '0',
+                starRatings: reviewData.starRatings || '0',
+                hasAPlus: hasAPlusContent,
+                aPlusStatus: aPlusStatus || 'Not Available',
+                hasVideo: reviewData.hasVideo || false,
+                image: reviewData.photos?.[0] || null,
+                updatedAt: product.updatedAt || null,
+                issues: product.issues || [],
+                issueCount: product.issueCount || 0, // Pre-calculated in Seller model
+                has_b2b_pricing: product.has_b2b_pricing || false,
+                isTargetedInAds
+            };
+        });
+
+        const totalPages = Math.ceil(activeTotalForPagination / limit);
+        const hasMore = activeTotalForPagination > limit;
+
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v2-initial] Completed in ${elapsed}ms - ${enrichedProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                summary: {
+                    totalProducts,
+                    activeProducts: activeProductsCount,
+                    inactiveProducts: inactiveProductsCount,
+                    incompleteProducts: incompleteProductsCount,
+                    productsWithAPlus,
+                    productsWithoutAPlus: activeProductsCount - productsWithAPlus,
+                    productsNotTargetedInAds: Math.max(0, productsNotTargetedInAds)
+                },
+                products: enrichedProducts,
+                pagination: {
+                    page: 1,
+                    limit,
+                    totalItems: activeTotalForPagination,
+                    totalPages,
+                    hasMore
+                },
+                country: Country,
+                region: Region
+            }, "Your Products Initial retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[v2-initial] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Your Products Initial: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get Your Products by Status (v2 - Optimized)
+ * Called when switching to Inactive/Incomplete tabs, or for Load More on any tab.
+ * Uses MongoDB aggregation - paginated at DB level.
+ * Uses pre-calculated issueCount from Seller model.
+ * 
+ * Query params:
+ * - status: 'Active' | 'Inactive' | 'Incomplete' (required)
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 20, max: 100)
+ */
+const getYourProductsByStatusV2 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    const status = req.query.status;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    if (!status || !['Active', 'Inactive', 'Incomplete'].includes(status)) {
+        return res.status(400).json(
+            new ApiError(400, 'status query parameter is required and must be Active, Inactive, or Incomplete')
+        );
+    }
+
+    try {
+        logger.info(`[v2] Getting Your Products (status: ${status}) for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation with $facet for count + paginated products
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            { $match: { 'sellerAccount.products.status': status } },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issues: '$sellerAccount.products.issues',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing',
+                                updatedAt: '$sellerAccount.products.updatedAt'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const rawProducts = result?.products || [];
+
+        if (rawProducts.length === 0) {
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    products: [],
+                    pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit), hasMore: false },
+                    country: Country,
+                    region: Region,
+                    status
+                }, "Your Products retrieved")
+            );
+        }
+
+        // Collect ASINs for enrichment
+        const pageAsins = rawProducts.map(p => p.asin?.toUpperCase()).filter(Boolean);
+        const pageAsinSet = new Set(pageAsins);
+
+        // Fetch enrichment data in parallel
+        const [productReviews, aPlusContent, sponsoredAdsData] = await Promise.all([
+            NumberOfProductReviews.findOne({
+                User: userId,
+                $or: [{ region: Region, country: Country }, {}]
+            }).sort({ createdAt: -1 }).select('Products.asin Products.product_num_ratings Products.product_star_ratings Products.product_title Products.product_photos Products.video_url').lean(),
+            APlusContent.findOne({
+                User: userId,
+                $or: [{ region: Region, country: Country }, {}]
+            }).sort({ createdAt: -1 }).select('ApiContentDetails.Asins ApiContentDetails.status').lean(),
+            getProductWiseSponsoredAdsData(userId, Country, Region).catch(() => null)
+        ]);
+
+        // Build maps
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, {
+                        numRatings: p.product_num_ratings || '0',
+                        starRatings: p.product_star_ratings || '0',
+                        title: p.product_title || '',
+                        photos: p.product_photos || [],
+                        hasVideo: Array.isArray(p.video_url) && p.video_url.length > 0
+                    });
+                }
+            });
+        }
+
+        const aPlusMap = new Map();
+        if (aPlusContent?.ApiContentDetails) {
+            aPlusContent.ApiContentDetails.forEach(item => {
+                const key = item.Asins?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) aPlusMap.set(key, item.status);
+            });
+        }
+
+        const asinsTargetedInAds = new Set();
+        if (sponsoredAdsData?.sponsoredAds) {
+            sponsoredAdsData.sponsoredAds.forEach(ad => {
+                const asin = (ad.asin || ad.ASIN || '').toUpperCase();
+                if (asin) asinsTargetedInAds.add(asin);
+            });
+        }
+
+        // Enrich products
+        const enrichedProducts = rawProducts.map(product => {
+            const key = product.asin?.toUpperCase() || '';
+            const reviewData = reviewsMap.get(key) || {};
+            const aPlusStatus = aPlusMap.get(key);
+            const hasAPlus = aPlusStatus === 'APPROVED' || aPlusStatus === 'PUBLISHED';
+
+            return {
+                asin: product.asin,
+                sku: product.sku,
+                title: product.itemName || reviewData.title || '',
+                price: product.price || '0',
+                status: product.status || status,
+                quantity: product.quantity ?? 0,
+                numRatings: reviewData.numRatings || '0',
+                starRatings: reviewData.starRatings || '0',
+                hasAPlus,
+                aPlusStatus: aPlusStatus || 'Not Available',
+                hasVideo: reviewData.hasVideo || false,
+                image: reviewData.photos?.[0] || null,
+                updatedAt: product.updatedAt || null,
+                issues: product.issues || [],
+                issueCount: product.issueCount || 0,
+                has_b2b_pricing: product.has_b2b_pricing || false,
+                isTargetedInAds: asinsTargetedInAds.has(key)
+            };
+        });
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v2] ${status} products completed in ${elapsed}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: enrichedProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region,
+                status
+            }, "Your Products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v2] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Your Products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * =====================================================================
+ * YOUR PRODUCTS V3 - HIGHLY OPTIMIZED ENDPOINTS
+ * =====================================================================
+ * Separate endpoints for each use case - minimal DB queries, no unnecessary data.
+ * 
+ * Endpoints:
+ * - /your-products-v3/summary - Counts only (for summary boxes)
+ * - /your-products-v3/active - Paginated Active products (no A+/Ads columns)
+ * - /your-products-v3/inactive - Paginated Inactive products
+ * - /your-products-v3/incomplete - Paginated Incomplete products
+ * - /your-products-v3/without-aplus - ASINs without A+ content
+ * - /your-products-v3/not-targeted-in-ads - ASINs not targeted in ads
+ */
+
+const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
+
+/**
+ * V3 Summary Endpoint - COUNTS ONLY
+ * Returns: totalProducts, activeProducts, inactiveProducts, incompleteProducts, 
+ *          productsWithoutAPlus, hasBrandStory
+ * 
+ * Uses efficient aggregation on Seller + count queries on APlusContent and NumberOfProductReviews
+ */
+const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    try {
+        logger.info(`[v3-summary] Getting summary for user ${userId}, region ${Region}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Run all count queries in parallel for maximum speed
+        const [
+            productCounts,
+            aPlusData,
+            brandStoryData,
+            activeProductAsins,
+            latestAdsItem
+        ] = await Promise.all([
+            // 1. Count products by status from Seller model
+            Seller.aggregate([
+                { $match: { User: userObjectId } },
+                { $unwind: '$sellerAccount' },
+                { $match: { 'sellerAccount.region': Region } },
+                { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+                {
+                    $group: {
+                        _id: '$sellerAccount.products.status',
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
+            
+            // 2. Get A+ content count - count ASINs with APPROVED/PUBLISHED status
+            APlusContent.findOne({
+                User: userObjectId,
+                country: Country,
+                region: Region
+            }).sort({ createdAt: -1 }).select('ApiContentDetails').lean(),
+            
+            // 3. Check if any product has brand story
+            NumberOfProductReviews.findOne({
+                User: userObjectId,
+                country: Country,
+                region: Region
+            }).sort({ createdAt: -1 }).select('Products.has_brandstory').lean(),
+            
+            // 4. Get all active product ASINs (for not-targeted count)
+            Seller.aggregate([
+                { $match: { User: userObjectId } },
+                { $unwind: '$sellerAccount' },
+                { $match: { 'sellerAccount.region': Region } },
+                { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+                { $match: { 'sellerAccount.products.status': { $regex: /^active$/i } } },
+                { $group: { _id: { $toUpper: '$sellerAccount.products.asin' } } },
+                { $project: { _id: 0, asin: '$_id' } }
+            ]),
+            
+            // 5. Get latest ads batch for targeted ASINs
+            ProductWiseSponsoredAdsItem.findOne({
+                userId: userObjectId,
+                country: Country,
+                region: Region
+            }).sort({ createdAt: -1 }).select('batchId').lean()
+        ]);
+
+        // Parse product counts - normalize status keys to lowercase for case-insensitive matching
+        const countsMap = {};
+        let totalProducts = 0;
+        productCounts.forEach(c => {
+            const normalizedStatus = (c._id || '').toLowerCase();
+            countsMap[normalizedStatus] = (countsMap[normalizedStatus] || 0) + c.count;
+            totalProducts += c.count;
+        });
+
+        const activeProducts = countsMap['active'] || 0;
+        const inactiveProducts = countsMap['inactive'] || 0;
+        const incompleteProducts = countsMap['incomplete'] || 0;
+
+        // Count products with A+ (APPROVED or PUBLISHED)
+        let productsWithAPlus = 0;
+        if (aPlusData?.ApiContentDetails) {
+            productsWithAPlus = aPlusData.ApiContentDetails.filter(
+                item => item.status === 'APPROVED' || item.status === 'PUBLISHED'
+            ).length;
+        }
+        const productsWithoutAPlus = totalProducts - productsWithAPlus;
+
+        // Check if any product has brand story
+        let hasBrandStory = false;
+        if (brandStoryData?.Products) {
+            hasBrandStory = brandStoryData.Products.some(p => p.has_brandstory === true);
+        }
+
+        // Calculate "Not Targeted to Ads" count
+        let productsNotTargetedInAds = 0;
+        const activeAsinsSet = new Set((activeProductAsins || []).map(p => p.asin));
+        
+        if (latestAdsItem?.batchId && activeAsinsSet.size > 0) {
+            // Get distinct ASINs targeted in ads for this batch
+            const distinctTargetedAsins = await ProductWiseSponsoredAdsItem.aggregate([
+                { $match: { batchId: latestAdsItem.batchId } },
+                { $group: { _id: { $toUpper: '$asin' } } },
+                { $project: { _id: 0, asin: '$_id' } }
+            ]);
+            const targetedAsinsSet = new Set(distinctTargetedAsins.map(item => item.asin).filter(Boolean));
+            
+            // Count active products NOT in targeted set
+            productsNotTargetedInAds = [...activeAsinsSet].filter(asin => !targetedAsinsSet.has(asin)).length;
+        } else {
+            // No ads data - all active products are "not targeted"
+            productsNotTargetedInAds = activeAsinsSet.size;
+        }
+
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-summary] Completed in ${elapsed}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                summary: {
+                    totalProducts,
+                    activeProducts,
+                    inactiveProducts,
+                    incompleteProducts,
+                    productsWithAPlus,
+                    productsWithoutAPlus,
+                    hasBrandStory,
+                    productsNotTargetedInAds
+                },
+                country: Country,
+                region: Region
+            }, "Summary retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[v3-summary] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting summary: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Active Products Endpoint
+ * Returns: Paginated Active products with ratings (NO A+ or Ads columns)
+ * 
+ * Query params: page (default 1), limit (default 20)
+ */
+const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-active] Getting Active products for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation with $facet for count + paginated products
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            { $match: { 'sellerAccount.products.status': 'Active' } },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const rawProducts = result?.products || [];
+
+        if (rawProducts.length === 0) {
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    products: [],
+                    pagination: { page, limit, totalItems, totalPages: 0, hasMore: false },
+                    country: Country,
+                    region: Region
+                }, "Active products retrieved")
+            );
+        }
+
+        // Collect ASINs for enrichment (ratings only - no A+ or Ads)
+        const pageAsins = rawProducts.map(p => p.asin?.toUpperCase()).filter(Boolean);
+        const pageAsinSet = new Set(pageAsins);
+
+        // Fetch only ratings data (minimal)
+        const productReviews = await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_num_ratings Products.product_star_ratings Products.product_title Products.product_photos').lean();
+
+        // Build reviews map
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, {
+                        numRatings: p.product_num_ratings || '0',
+                        starRatings: p.product_star_ratings || '0',
+                        title: p.product_title || '',
+                        image: p.product_photos?.[0] || null
+                    });
+                }
+            });
+        }
+
+        // Enrich products (NO A+, NO Ads)
+        const enrichedProducts = rawProducts.map(product => {
+            const key = product.asin?.toUpperCase() || '';
+            const reviewData = reviewsMap.get(key) || {};
+
+            return {
+                asin: product.asin,
+                sku: product.sku,
+                title: product.itemName || reviewData.title || '',
+                price: product.price || '0',
+                status: 'Active',
+                quantity: product.quantity ?? 0,
+                numRatings: reviewData.numRatings || '0',
+                starRatings: reviewData.starRatings || '0',
+                image: reviewData.image || null,
+                issueCount: product.issueCount || 0,
+                has_b2b_pricing: product.has_b2b_pricing || false
+            };
+        });
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-active] Completed in ${elapsed}ms - ${enrichedProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: enrichedProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region
+            }, "Active products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-active] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Active products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Inactive Products Endpoint
+ * Returns: Paginated Inactive products with issues (from Seller model only)
+ */
+const getYourProductsInactiveV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-inactive] Getting Inactive products for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation with $facet
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            { $match: { 'sellerAccount.products.status': { $regex: /^inactive$/i } } },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] },
+                                has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const products = result?.products || [];
+
+        // Map products to response format (no enrichment needed - all data from Seller)
+        const responseProducts = products.map(p => ({
+            asin: p.asin,
+            sku: p.sku,
+            title: p.itemName || '',
+            price: p.price || '0',
+            status: 'Inactive',
+            quantity: p.quantity ?? 0,
+            issues: Array.isArray(p.issues) ? p.issues : [],
+            has_b2b_pricing: p.has_b2b_pricing || false
+        }));
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-inactive] Completed in ${elapsed}ms - ${responseProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: responseProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region
+            }, "Inactive products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-inactive] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Inactive products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Incomplete Products Endpoint
+ * Returns: Paginated Incomplete products with issues (from Seller model only)
+ */
+const getYourProductsIncompleteV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-incomplete] Getting Incomplete products for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation with $facet
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            { $match: { 'sellerAccount.products.status': { $regex: /^incomplete$/i } } },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] },
+                                has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const products = result?.products || [];
+
+        // Map products to response format
+        const responseProducts = products.map(p => ({
+            asin: p.asin,
+            sku: p.sku,
+            title: p.itemName || '',
+            price: p.price || '0',
+            status: 'Incomplete',
+            quantity: p.quantity ?? 0,
+            issues: Array.isArray(p.issues) ? p.issues : [],
+            has_b2b_pricing: p.has_b2b_pricing || false
+        }));
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-incomplete] Completed in ${elapsed}ms - ${responseProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: responseProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region
+            }, "Incomplete products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-incomplete] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Incomplete products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Without A+ Content Endpoint
+ * Returns: Paginated products that DON'T have A+ content (APPROVED/PUBLISHED)
+ * 
+ * Logic: Get all ASINs from Seller, subtract ASINs with A+ from APlusContent
+ */
+const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-without-aplus] Getting products without A+ for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Get all ASINs with A+ (APPROVED or PUBLISHED)
+        const aPlusDoc = await APlusContent.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('ApiContentDetails').lean();
+
+        const asinsWithAPlus = new Set();
+        if (aPlusDoc?.ApiContentDetails) {
+            aPlusDoc.ApiContentDetails.forEach(item => {
+                if (item.status === 'APPROVED' || item.status === 'PUBLISHED') {
+                    asinsWithAPlus.add(item.Asins?.toUpperCase() || '');
+                }
+            });
+        }
+
+        // Get products that are NOT in the A+ set
+        // We use aggregation to filter products whose ASIN is NOT in the A+ set
+        const asinsWithAPlusList = Array.from(asinsWithAPlus);
+
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            // Filter out products with A+ content
+            {
+                $match: {
+                    $expr: {
+                        $not: {
+                            $in: [{ $toUpper: '$sellerAccount.products.asin' }, asinsWithAPlusList]
+                        }
+                    }
+                }
+            },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const products = result?.products || [];
+
+        // Map to response format
+        const responseProducts = products.map(p => ({
+            asin: p.asin,
+            sku: p.sku,
+            title: p.itemName || '',
+            price: p.price || '0',
+            status: p.status || 'Unknown',
+            quantity: p.quantity ?? 0,
+            hasAPlus: false
+        }));
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-without-aplus] Completed in ${elapsed}ms - ${responseProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: responseProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region
+            }, "Products without A+ retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-without-aplus] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting products without A+: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Not Targeted In Ads Endpoint
+ * Returns: Paginated products that are NOT targeted in any ads campaign
+ * 
+ * Logic: Get distinct ASINs from ProductWiseSponsoredAdsItem, subtract from all products
+ */
+const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-not-targeted] Getting products not targeted in ads for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Get distinct ASINs targeted in ads (latest batch only)
+        // First find latest batchId
+        const latestItem = await ProductWiseSponsoredAdsItem.findOne({
+            userId: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('batchId').lean();
+
+        const asinsTargetedInAds = new Set();
+        if (latestItem?.batchId) {
+            // Get distinct ASINs for this batch using aggregation
+            const distinctAsins = await ProductWiseSponsoredAdsItem.aggregate([
+                { $match: { batchId: latestItem.batchId } },
+                { $group: { _id: { $toUpper: '$asin' } } },
+                { $project: { _id: 0, asin: '$_id' } }
+            ]);
+            distinctAsins.forEach(item => {
+                if (item.asin) asinsTargetedInAds.add(item.asin);
+            });
+        }
+
+        const asinsTargetedList = Array.from(asinsTargetedInAds);
+
+        // Get products that are NOT targeted in ads
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            // Only Active products (typically you target Active products in ads)
+            { $match: { 'sellerAccount.products.status': 'Active' } },
+            // Filter out products that ARE targeted
+            {
+                $match: {
+                    $expr: {
+                        $not: {
+                            $in: [{ $toUpper: '$sellerAccount.products.asin' }, asinsTargetedList]
+                        }
+                    }
+                }
+            },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    products: [
+                        { $sort: { 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity'
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const products = result?.products || [];
+
+        // Map to response format
+        const responseProducts = products.map(p => ({
+            asin: p.asin,
+            sku: p.sku,
+            title: p.itemName || '',
+            price: p.price || '0',
+            status: p.status || 'Active',
+            quantity: p.quantity ?? 0,
+            isTargetedInAds: false
+        }));
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-not-targeted] Completed in ${elapsed}ms - ${responseProducts.length} products`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: responseProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                country: Country,
+                region: Region
+            }, "Products not targeted in ads retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-not-targeted] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting products not targeted in ads: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * V3 Optimization Products Endpoint - SELF-CONTAINED
+ * 
+ * Uses OptimizationService which is completely self-contained:
+ * - Fetches ALL active products + performance/profitability data in parallel
+ * - Generates recommendations in the backend (no frontend dependency)
+ * - Paginates after enrichment for consistent results
+ * 
+ * Performance: ~90% faster than issues-by-product endpoint
+ */
+const getOptimizationProductsV3 = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    try {
+        const { getOptimizationProducts } = require('../../Services/Calculations/OptimizationService.js');
+        
+        const result = await getOptimizationProducts(userId, Region, Country, { page, limit });
+
+        return res.status(200).json(
+            new ApiResponse(200, result, "Optimization products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-optimization] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting optimization products: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * PHASE 1: Instant data - precomputed counts (~50ms)
+ * Returns: error counts, product counts, date range
+ */
+const getDashboardPhase1 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, country, and region are required')
+        );
+    }
+
+    try {
+        const { getDashboardPhase1: fetchPhase1 } = require('../../Services/Calculations/DashboardSummaryService.js');
+        const result = await fetchPhase1(userId, Country, Region);
+        
+        if (!result.success) {
+            return res.status(500).json(
+                new ApiError(500, result.error || 'Failed to get dashboard phase 1')
+            );
+        }
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Dashboard Phase 1 total time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, { dashboardData: result.data }, "Dashboard phase 1 retrieved")
+        );
+    } catch (error) {
+        logger.error("Error in getDashboardPhase1:", { message: error.message, stack: error.stack });
+        return res.status(500).json(
+            new ApiError(500, `Error getting dashboard phase 1: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * PHASE 2: Core metrics (~150ms)
+ * Returns: sales totals, account health, finance summary, PPC summary
+ */
+const getDashboardPhase2 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, country, and region are required')
+        );
+    }
+
+    try {
+        const { getDashboardPhase2: fetchPhase2 } = require('../../Services/Calculations/DashboardSummaryService.js');
+        const result = await fetchPhase2(userId, Country, Region);
+        
+        if (!result.success) {
+            return res.status(500).json(
+                new ApiError(500, result.error || 'Failed to get dashboard phase 2')
+            );
+        }
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Dashboard Phase 2 total time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, { dashboardData: result.data }, "Dashboard phase 2 retrieved")
+        );
+    } catch (error) {
+        logger.error("Error in getDashboardPhase2:", { message: error.message, stack: error.stack });
+        return res.status(500).json(
+            new ApiError(500, `Error getting dashboard phase 2: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * PHASE 3: Charts and arrays (~200ms)
+ * Returns: datewiseSales, ppcDateWiseMetrics, orders, products, adsKeywordsData
+ */
+const getDashboardPhase3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+
+    if (!userId || !Country || !Region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, country, and region are required')
+        );
+    }
+
+    try {
+        const { getDashboardPhase3: fetchPhase3 } = require('../../Services/Calculations/DashboardSummaryService.js');
+        const result = await fetchPhase3(userId, Country, Region);
+        
+        if (!result.success) {
+            return res.status(500).json(
+                new ApiError(500, result.error || 'Failed to get dashboard phase 3')
+            );
+        }
+
+        const totalTime = Date.now() - startTime;
+        logger.info(`[PERF] Dashboard Phase 3 total time: ${totalTime}ms`);
+
+        return res.status(200).json(
+            new ApiResponse(200, { dashboardData: result.data }, "Dashboard phase 3 retrieved")
+        );
+    } catch (error) {
+        logger.error("Error in getDashboardPhase3:", { message: error.message, stack: error.stack });
+        return res.status(500).json(
+            new ApiError(500, `Error getting dashboard phase 3: ${error.message}`)
+        );
+    }
+});
+
 module.exports = {
     getDashboardData,
+    getDashboardSummary,
+    getProductCheckerData,
+    getTop4ProductsOptimized,
     getProfitabilityData,
+    getProfitabilitySummary,
     getPPCData,
     getIssuesData,
     getIssuesByProductData,
@@ -1512,6 +3213,28 @@ module.exports = {
     getNavbarData,
     getAccountHistoryData,
     getProductHistory,
-    getComparisonDebugInfo
+    getComparisonDebugInfo,
+    // v2 optimized endpoints
+    getYourProductsInitialV2,
+    getYourProductsByStatusV2,
+    // v3 highly optimized endpoints
+    getYourProductsSummaryV3,
+    getYourProductsActiveV3,
+    getYourProductsInactiveV3,
+    getYourProductsIncompleteV3,
+    getYourProductsWithoutAPlusV3,
+    getYourProductsNotTargetedInAdsV3,
+    getOptimizationProductsV3,
+    // Multi-phase dashboard endpoints
+    getDashboardPhase1,
+    getDashboardPhase2,
+    getDashboardPhase3,
+    // Phased profitability endpoints (parallel loading)
+    getProfitabilityMetrics,
+    getProfitabilityChart,
+    getProfitabilityTable,
+    // Profitability issues endpoints
+    getProfitabilityIssues,
+    getProfitabilityIssuesSummary
 };
 

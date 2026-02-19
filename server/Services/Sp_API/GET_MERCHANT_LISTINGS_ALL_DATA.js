@@ -4,6 +4,9 @@ const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const SellerModel = require('../../models/user-auth/sellerCentralModel.js');
 const zlib = require('zlib');
+const { promisify } = require('util');
+const gunzip = promisify(zlib.gunzip);
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
     try {
@@ -11,14 +14,23 @@ const generateReport = async (accessToken, marketplaceIds, baseURI) => {
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
         const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 7 days before end
             
+        const reportType = "GET_MERCHANT_LISTINGS_ALL_DATA";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds,
+            dataStartTime: StartTime.toISOString(),
+            dataEndTime: EndTime.toISOString(),
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseURI}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_MERCHANT_LISTINGS_ALL_DATA",
-                marketplaceIds: marketplaceIds,
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime:EndTime.toISOString(),
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,
@@ -148,7 +160,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             return false;
         }
 
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
 
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -157,16 +169,128 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
         const ProductData = [];
         
+        // Helper function to normalize a string for comparison (lowercase, remove special chars)
+        const normalizeKey = (str) => {
+            return str.toLowerCase()
+                .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u')
+                .replace(/é/g, 'e').replace(/è/g, 'e').replace(/ê/g, 'e')
+                .replace(/à/g, 'a').replace(/â/g, 'a')
+                .replace(/[-_\s]/g, '');
+        };
+        
+        // Helper function to find field with different possible names (handles localized headers)
+        // First tries exact match, then falls back to normalized comparison
+        const findField = (item, ...possibleNames) => {
+            // First: try exact match
+            for (const name of possibleNames) {
+                if (item[name] !== undefined && item[name] !== null && item[name] !== '') {
+                    return item[name];
+                }
+            }
+            
+            // Second: try normalized comparison against all keys
+            const normalizedTargets = possibleNames.map(normalizeKey);
+            for (const key of Object.keys(item)) {
+                const normalizedKey = normalizeKey(key);
+                if (normalizedTargets.includes(normalizedKey)) {
+                    if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
+                        return item[key];
+                    }
+                }
+            }
+            
+            // Third: try partial match (key contains or is contained by target)
+            for (const key of Object.keys(item)) {
+                const normalizedKey = normalizeKey(key);
+                for (const target of normalizedTargets) {
+                    if ((normalizedKey.includes(target) || target.includes(normalizedKey)) && 
+                        normalizedKey.length > 2 && target.length > 2) {
+                        if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
+                            return item[key];
+                        }
+                    }
+                }
+            }
+            
+            return null;
+        };
+        
+        // Log first record headers for debugging localization issues
+        if (refinedData.length > 0) {
+            logger.info('[GET_MERCHANT_LISTINGS_ALL_DATA] Sample record headers:', Object.keys(refinedData[0]).join(', '));
+        }
+        
         refinedData.forEach((data) => {
+            // Handle multiple possible header names (English, German, French, Italian, Spanish, etc.)
+            const asin = findField(data, 
+                // English variants
+                'asin1', 'ASIN1', 'asin', 'ASIN', 'product-id', 'Product-ID',
+                // German variants
+                'Produkt-ID', 'Artikelnummer', 'ASIN1',
+                // Product ID is sometimes in a different column
+                'listing-id', 'Listing-ID'
+            );
+            
+            const sku = findField(data,
+                // English variants
+                'seller-sku', 'Seller SKU', 'seller_sku', 'sku', 'SKU', 'merchant-sku',
+                // German variants (including umlaut variations)
+                'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Verkäufer-SKU', 'Verkaeufer-SKU',
+                'Angebots-SKU', 'Artikel-SKU', 'Angebotsnummer',
+                // French variants
+                'sku-vendeur', 'référence-vendeur', 'reference-vendeur', 'SKU vendeur',
+                // Italian variants
+                'SKU venditore', 'sku-venditore',
+                // Spanish variants
+                'SKU del vendedor', 'sku-vendedor'
+            );
+            
+            const itemName = findField(data,
+                // English variants
+                'item-name', 'Item Name', 'item_name', 'product-name', 'Product Name', 'title', 'Title',
+                // German variants
+                'Produktname', 'Artikelname', 'Artikelbezeichnung', 'Titel', 'Bezeichnung',
+                // French variants
+                'nom-du-produit', 'titre', 'nom-article',
+                // Italian variants
+                'nome-prodotto', 'titolo',
+                // Spanish variants
+                'nombre-producto', 'titulo'
+            ) || "Unknown Product";
+            
+            const price = findField(data,
+                'price', 'Price', 'Preis', 'prix', 'prezzo', 'precio', 'your-price', 'Your Price'
+            ) || 0;
+            
+            const status = findField(data,
+                'status', 'Status', 'listing-status', 'Listing-Status',
+                'Angebotsstatus', 'statut', 'stato', 'estado',
+                'open-date', 'Open Date' // Sometimes status is inferred from open-date presence
+            );
+            
+            const quantity = parseInt(findField(data,
+                'quantity', 'Quantity', 'quantity-available', 'fulfillable-quantity',
+                'Menge', 'Verfügbare Menge', 'Verfuegbare Menge',
+                'quantité', 'quantite', 'quantità', 'cantidad'
+            ) || 0) || 0;
 
-            ProductData.push({
-                asin: data.asin1,
-                sku: data["seller-sku"],
-                itemName:data["item-name"]|| "Unknown Product",
-                price:data.price||0,
-                status: data.status,
-                quantity: parseInt(data.quantity || data["quantity-available"] || data["fulfillable-quantity"] || 0) || 0,
-            });
+            // Only add products that have required fields (asin and sku)
+            if (asin && sku) {
+                ProductData.push({
+                    asin: asin,
+                    sku: sku,
+                    itemName: itemName,
+                    price: price,
+                    status: status || 'Active',
+                    quantity: quantity,
+                });
+            } else {
+                logger.warn('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
+                    foundAsin: asin,
+                    foundSku: sku,
+                    availableKeys: Object.keys(data).slice(0, 10).join(', ')
+                });
+            }
         });
 
        
@@ -201,13 +325,14 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 /**
  * Convert TSV buffer to JSON using csv-parse library
  * Handles gzip decompression if needed
+ * Uses async gunzip to avoid blocking the event loop
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped
+        // First try to decompress if it's gzipped (async to prevent event loop blocking)
         let decompressedData;
         try {
-            decompressedData = zlib.gunzipSync(tsvBuffer);
+            decompressedData = await gunzip(tsvBuffer);
         } catch (decompressError) {
             // If decompression fails, assume it's already plain text
             decompressedData = tsvBuffer;
@@ -221,7 +346,7 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         const records = parse(tsv, {
-            columns: true,
+            columns: true,  // Keep original headers - this report's data access relies on exact header names
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,
@@ -242,7 +367,7 @@ function convertTSVToJson(tsvBuffer) {
 
         // Fallback to legacy parsing
         try {
-            return convertTSVToJsonLegacy(tsvBuffer);
+            return await convertTSVToJsonLegacy(tsvBuffer);
         } catch (fallbackError) {
             logger.error('[GET_MERCHANT_LISTINGS_ALL_DATA] Fallback parsing also failed', { 
                 error: fallbackError.message 
@@ -252,10 +377,10 @@ function convertTSVToJson(tsvBuffer) {
     }
 }
 
-function convertTSVToJsonLegacy(tsvBuffer) {
+async function convertTSVToJsonLegacy(tsvBuffer) {
     let decompressedData;
     try {
-        decompressedData = zlib.gunzipSync(tsvBuffer);
+        decompressedData = await gunzip(tsvBuffer);
     } catch (decompressError) {
         decompressedData = tsvBuffer;
     }

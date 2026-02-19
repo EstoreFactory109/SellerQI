@@ -3,8 +3,11 @@ const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const zlib = require('zlib');
+const { promisify } = require('util');
+const gunzip = promisify(zlib.gunzip);
 // Use service layer for saving data (handles 16MB limit with separate collection)
 const { saveProductWiseFBAData } = require('../inventory/ProductWiseFBADataService');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 const generateReport = async (accessToken, marketplaceIds, baseuri) => {
     try {
@@ -12,14 +15,23 @@ const generateReport = async (accessToken, marketplaceIds, baseuri) => {
         const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
         const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days before end
 
+        const reportType = "GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA";
+        const requestBody = {
+            reportType: reportType,
+            marketplaceIds: marketplaceIds,
+            dataStartTime: StartTime.toISOString(),
+            dataEndTime: EndTime.toISOString(),
+        };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
+        
         const response = await axios.post(
             `https://${baseuri}/reports/2021-06-30/reports`,
-            {
-                reportType: "GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA",
-                marketplaceIds: marketplaceIds,
-                dataStartTime: StartTime.toISOString(),
-                dataEndTime: EndTime.toISOString(),
-            },
+            requestBody,
             {
                 headers: {
                     "x-amz-access-token": accessToken,
@@ -155,7 +167,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
             throw new ApiError(500, "Internal server error in generating the report");
         }
 
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
 
         if (refinedData.length === 0) {
             logger.info("Report completed but contains no data");
@@ -216,13 +228,14 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
 /**
  * Convert TSV buffer to JSON using csv-parse library
  * Handles gzip decompression if needed
+ * Uses async gunzip to avoid blocking the event loop
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped
+        // First try to decompress if it's gzipped (async to prevent event loop blocking)
         let decompressedData;
         try {
-            decompressedData = zlib.gunzipSync(tsvBuffer);
+            decompressedData = await gunzip(tsvBuffer);
         } catch (decompressError) {
             // If decompression fails, assume it's already plain text
             decompressedData = tsvBuffer;
@@ -236,7 +249,7 @@ function convertTSVToJson(tsvBuffer) {
         }
 
         const records = parse(tsv, {
-            columns: true,
+            columns: true,  // Keep original headers - this report preserves exact field names dynamically
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,
@@ -257,7 +270,7 @@ function convertTSVToJson(tsvBuffer) {
 
         // Fallback to legacy parsing
         try {
-            return convertTSVToJsonLegacy(tsvBuffer);
+            return await convertTSVToJsonLegacy(tsvBuffer);
         } catch (fallbackError) {
             logger.error('[GetProductWiseFBAData] Fallback parsing also failed', { 
                 error: fallbackError.message 
@@ -267,10 +280,10 @@ function convertTSVToJson(tsvBuffer) {
     }
 }
 
-function convertTSVToJsonLegacy(tsvBuffer) {
+async function convertTSVToJsonLegacy(tsvBuffer) {
     let decompressedData;
     try {
-        decompressedData = zlib.gunzipSync(tsvBuffer);
+        decompressedData = await gunzip(tsvBuffer);
     } catch (decompressError) {
         decompressedData = tsvBuffer;
     }

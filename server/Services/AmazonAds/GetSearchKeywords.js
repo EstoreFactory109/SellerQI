@@ -283,21 +283,32 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
             // 4) Format the data to match the model schema
             const sponsoredAdsData = [];
 
-            reportJson.forEach(item => {
-                sponsoredAdsData.push({
-                    date: item.date || null,
-                    campaignId: item.campaignId || '',
-                    campaignName: item.campaignName || '',
-                    adGroupId: item.adGroupId || '',
-                    adGroupName: item.adGroupName || item.adGroup || '',
-                    searchTerm: item.searchTerm || '',
-                    keyword: item.keyword || '',
-                    clicks: item.clicks || 0,
-                    sales: item.sales30d || 0,
-                    spend: item.cost || 0,
-                    impressions: item.impressions || 0
-                })
-            });
+            // Process in chunks to yield to the event loop and allow lock renewal
+            const CHUNK_SIZE = 500;
+            for (let i = 0; i < reportJson.length; i += CHUNK_SIZE) {
+                const chunk = reportJson.slice(i, i + CHUNK_SIZE);
+                
+                for (const item of chunk) {
+                    sponsoredAdsData.push({
+                        date: item.date || null,
+                        campaignId: item.campaignId || '',
+                        campaignName: item.campaignName || '',
+                        adGroupId: item.adGroupId || '',
+                        adGroupName: item.adGroupName || item.adGroup || '',
+                        searchTerm: item.searchTerm || '',
+                        keyword: item.keyword || '',
+                        clicks: item.clicks || 0,
+                        sales: item.sales30d || 0,
+                        spend: item.cost || 0,
+                        impressions: item.impressions || 0
+                    });
+                }
+                
+                // Yield to event loop after each chunk to allow lock renewal
+                if (i + CHUNK_SIZE < reportJson.length) {
+                    await new Promise(resolve => setImmediate(resolve));
+                }
+            }
 
             console.log(`Formatted ${sponsoredAdsData.length} search terms for database storage`);
             return sponsoredAdsData;

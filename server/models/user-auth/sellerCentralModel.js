@@ -39,6 +39,18 @@ const Products=new mongoose.Schema({
     required: false,
     default: undefined
   },
+  // Total issue count for this product (sum of ranking, conversion, inventory errors)
+  // Calculated by ProductIssuesService and updated during integration/scheduled jobs
+  issueCount:{
+    type: Number,
+    required: false,
+    default: 0
+  },
+  // Timestamp when issueCount was last calculated
+  issueCountUpdatedAt:{
+    type: Date,
+    required: false
+  },
   has_b2b_pricing:{
     type: Boolean,
     required: false,

@@ -6,6 +6,7 @@ const { AnalyseService } = require('../../Services/main/Analyse.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
 const { KeywordRecommendations, AsinKeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
+const KeywordOpportunitiesService = require('../../Services/Calculations/KeywordOpportunitiesService.js');
 
 // Export the Analyse function from the service for backward compatibility
 const Analyse = AnalyseService.Analyse;
@@ -743,6 +744,209 @@ const getKeywordRecommendationsByAsin = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get initial keyword opportunities page data
+ * Returns first ASIN with summary metrics and paginated keywords (10 per page)
+ * Optimized for fast initial page load
+ */
+const getKeywordOpportunitiesInitial = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    try {
+        const result = await KeywordOpportunitiesService.getInitialPageData(userId, country, region, limit);
+
+        if (!result.success) {
+            return res.status(500).json(new ApiError(500, result.error || "Failed to fetch initial data"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, result.data, "Initial keyword opportunities data fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error in getKeywordOpportunitiesInitial:", {
+            error: error.message,
+            userId,
+            country,
+            region
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch initial keyword opportunities data"));
+    }
+});
+
+/**
+ * Get paginated keywords for a specific ASIN
+ * Supports pagination (10 keywords per page by default) and filtering
+ * 
+ * Query params:
+ * - asin: ASIN to get keywords for (required)
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 10, max: 50)
+ * - filter: 'all', 'highRank', 'highImpression' (default: 'all')
+ */
+const getKeywordOpportunitiesForAsin = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { asin, filter = 'all' } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    if (!asin) {
+        logger.error("ASIN is missing from request");
+        return res.status(400).json(new ApiError(400, "ASIN is required"));
+    }
+
+    try {
+        const result = await KeywordOpportunitiesService.getKeywordsForAsin(userId, country, region, asin, page, limit, filter);
+
+        if (!result.success) {
+            return res.status(500).json(new ApiError(500, result.error || "Failed to fetch keywords"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, result.data, "Keywords fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error in getKeywordOpportunitiesForAsin:", {
+            error: error.message,
+            userId,
+            country,
+            region,
+            asin
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch keywords for ASIN"));
+    }
+});
+
+/**
+ * Search ASINs by ASIN, SKU, or product name
+ * Optimized search endpoint
+ * 
+ * Query params:
+ * - query: Search query (ASIN, SKU, or product name)
+ */
+const searchKeywordOpportunitiesAsins = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { query } = req.query;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    try {
+        // Get product data for name/SKU search if needed
+        let productData = [];
+        if (query && query.trim().length > 0) {
+            try {
+                const Seller = require('../../models/user-auth/sellerCentralModel.js');
+                const sellerData = await Seller.findOne({ User: userId }).lean();
+                
+                if (sellerData && sellerData.sellerAccount) {
+                    const account = sellerData.sellerAccount.find(acc => 
+                        acc.country === country && acc.region === region
+                    );
+                    
+                    if (account && account.products) {
+                        productData = account.products.map(p => ({
+                            asin: p.asin,
+                            sku: p.sku,
+                            name: p.itemName
+                        }));
+                    }
+                }
+            } catch (err) {
+                logger.warn("Could not fetch product data for search:", err.message);
+            }
+        }
+
+        const result = await KeywordOpportunitiesService.searchAsins(userId, country, region, query, productData);
+
+        if (!result.success) {
+            return res.status(500).json(new ApiError(500, result.error || "Failed to search ASINs"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, result.data, "Search completed successfully"));
+
+    } catch (error) {
+        logger.error("Error in searchKeywordOpportunitiesAsins:", {
+            error: error.message,
+            userId,
+            country,
+            region,
+            query
+        });
+        return res.status(500).json(new ApiError(500, "Failed to search ASINs"));
+    }
+});
+
+/**
+ * Get all ASINs summary (for dropdown population)
+ * Returns minimal data for each ASIN
+ */
+const getKeywordOpportunitiesAsinsList = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    if (!userId) {
+        logger.error("User ID is missing from request");
+        return res.status(400).json(new ApiError(400, "User id is missing"));
+    }
+
+    if (!country || !region) {
+        logger.error("Country or Region is missing from request");
+        return res.status(400).json(new ApiError(400, "Country or Region is missing"));
+    }
+
+    try {
+        const result = await KeywordOpportunitiesService.getAllAsinsSummary(userId, country, region);
+
+        if (!result.success) {
+            return res.status(500).json(new ApiError(500, result.error || "Failed to fetch ASINs list"));
+        }
+
+        return res.status(200).json(new ApiResponse(200, result.data, "ASINs list fetched successfully"));
+
+    } catch (error) {
+        logger.error("Error in getKeywordOpportunitiesAsinsList:", {
+            error: error.message,
+            userId,
+            country,
+            region
+        });
+        return res.status(500).json(new ApiError(500, "Failed to fetch ASINs list"));
+    }
+});
+
 module.exports = { 
     analysingController, 
     getDataFromDate, 
@@ -757,5 +961,10 @@ module.exports = {
     getKeywordTrackingData,
     getKeywordRecommendations,
     getKeywordRecommendationsAsins,
-    getKeywordRecommendationsByAsin
+    getKeywordRecommendationsByAsin,
+    // New optimized keyword opportunities endpoints
+    getKeywordOpportunitiesInitial,
+    getKeywordOpportunitiesForAsin,
+    searchKeywordOpportunitiesAsins,
+    getKeywordOpportunitiesAsinsList
 };

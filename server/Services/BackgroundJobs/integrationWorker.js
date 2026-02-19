@@ -231,10 +231,15 @@ async function startIntegrationWorker() {
             connection,
             prefix: 'bullmq', // Same prefix as other queues
             concurrency: WORKER_CONCURRENCY, // Process N jobs concurrently
-            // Stall detection: Set to 4 hours to accommodate long-running report API jobs
-            // Jobs can take hours waiting for report API responses, so we need a longer interval
-            stallInterval: 4 * 60 * 60 * 1000, // 4 hours in milliseconds
-            maxStalledCount: 2, // Allow 2 stalls before failing (handles worker restarts)
+            // Lock duration: How long the job lock is held before it expires
+            // Set to 2 hours to accommodate very long-running integration jobs (up to 24 hours)
+            // The worker will renew the lock every lockRenewTime (default: half of lockDuration = 1 hour)
+            // With async yields throughout the code, the event loop can process lock renewals
+            lockDuration: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
+            // Stall detection: Set to 12 hours for jobs that can run up to 24 hours
+            // Jobs can take many hours waiting for report API responses
+            stallInterval: 12 * 60 * 60 * 1000, // 12 hours in milliseconds
+            maxStalledCount: 3, // Allow 3 stalls before failing (handles worker restarts)
             limiter: {
                 // Rate limiting for API calls
                 max: 5, // Max 5 jobs
@@ -282,7 +287,11 @@ async function startIntegrationWorker() {
     });
 
     worker.on('error', (err) => {
-        logger.error(`[IntegrationWorker:${WORKER_NAME}] Worker error:`, err);
+        logger.error(`[IntegrationWorker:${WORKER_NAME}] Worker error:`, {
+            message: err?.message || 'Unknown error',
+            stack: err?.stack || 'No stack trace',
+            name: err?.name || 'Error'
+        });
     });
 
     worker.on('stalled', (jobId) => {

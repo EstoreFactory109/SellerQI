@@ -205,3 +205,20 @@ table {
   overscroll-behavior-y: auto; /* Allow normal vertical scrolling */
   overscroll-behavior-x: contain; /* Only contain horizontal overscroll */
 }
+
+/* Remove glow/outline from skeleton loaders (all pages) */
+.animate-pulse,
+[aria-hidden].animate-pulse,
+.animate-pulse * {
+  box-shadow: none !important;
+  outline: none !important;
+  --tw-ring-shadow: none !important;
+  --tw-ring-color: transparent !important;
+}
+.animate-pulse:focus,
+.animate-pulse:focus-visible,
+.animate-pulse *:focus,
+.animate-pulse *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}

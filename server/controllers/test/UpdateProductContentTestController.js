@@ -1,90 +1,139 @@
 /**
  * UpdateProductContentTestController.js
  *
- * Test controller for UpdateProductContentService (product name, bullet points, description).
+ * Single endpoint for all listing update operations (test/prototype).
+ * Supports: attribute update, analyze-only, fix-conflicts-only.
  *
- * Endpoints:
- * - GET  /api/test/update-product-content/test - Route health / available endpoints
- * - POST /api/test/update-product-content/update - Call updateProductContent service
+ * POST /api/test/update-product-content (or /update)
+ *
+ * Request body:
+ * {
+ *   "userId": "mongoose ObjectId",        // Optional if req.userId / req.user.id set (e.g. by auth)
+ *   "sku": "3in1Dermaroller",
+ *   "country": "AU",
+ *   "region": "FE",
+ *   "sellerId": "optional",
+ *   "dataToBeUpdated": "title",           // Required unless fixConflictsOnly
+ *   "valueToBeUpdated": "New Title",       // Required for updates (not for analyzeOnly/fixConflictsOnly)
+ *   "analyzeOnly": false,                  // Optional: just analyze, don't update
+ *   "fixConflictsOnly": false,             // Optional: only fix 8541 catalog conflicts
+ *   "autoFixConflicts": true              // Optional: fix conflicts + update (default: true)
+ * }
  */
 
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
-const { updateProductContent } = require('../../Services/Sp_API/UpdateProductContentService.js');
+const {
+  updateProductContent,
+  autoFixCatalogConflicts
+} = require('../../Services/Sp_API/UpdateProductContentService.js');
 
-/**
- * POST /api/test/update-product-content/update
- *
- * Request body:
- * {
- *   "userId": "mongoose ObjectId",
- *   "sku": "SKU_CODE",
- *   "sellerId": "selling_partner_id (optional if only one account for region/country)",
- *   "country": "US",
- *   "region": "NA",
- *   "dataToBeUpdated": "title" | "description" | "bulletpoints",
- *   "valueToBeUpdated": "string" (title/description), ["string", ...] (bulletpoints full replace),
- *     or { "index": 2, "value": "New 3rd bullet" } (bulletpoints partial - update one, keep rest)
- * }
- */
+const ALLOWED_UPDATE_TYPES = ['title', 'description', 'bulletpoints'];
+
+function normalizeDataToBeUpdated(value) {
+  if (value == null) return null;
+  return String(value).toLowerCase();
+}
+
+function validateBulletpointsValue(valueToBeUpdated) {
+  const isArray = Array.isArray(valueToBeUpdated);
+  const isPartial =
+    valueToBeUpdated &&
+    typeof valueToBeUpdated === 'object' &&
+    !Array.isArray(valueToBeUpdated) &&
+    typeof valueToBeUpdated.index === 'number' &&
+    valueToBeUpdated.value !== undefined;
+  return isArray || isPartial;
+}
+
 const testUpdateProductContent = asyncHandler(async (req, res) => {
-  const { userId, sku, sellerId, country, region, dataToBeUpdated, valueToBeUpdated } = req.body;
+  const {
+    sku,
+    country,
+    region,
+    sellerId,
+    dataToBeUpdated,
+    valueToBeUpdated,
+    analyzeOnly = false,
+    fixConflictsOnly = false,
+    autoFixConflicts = true
+  } = req.body;
 
-  if (!userId || !sku || !country || !region || dataToBeUpdated == null || valueToBeUpdated === undefined) {
+  const userId = req.userId || req.user?.id || req.body.userId;
+
+  if (!sku || !country || !region) {
     return res.status(400).json(
-      new ApiResponse(400, null, 'Missing required fields: userId, sku, country, region, dataToBeUpdated, valueToBeUpdated')
+      new ApiResponse(400, null, 'Missing required parameters: sku, country, region')
     );
   }
 
-  const allowedTypes = ['title', 'description', 'bulletpoints'];
-  const normalizedType = String(dataToBeUpdated).toLowerCase();
-  if (!allowedTypes.includes(normalizedType)) {
+  if (!userId) {
     return res.status(400).json(
-      new ApiResponse(400, null, `dataToBeUpdated must be one of: ${allowedTypes.join(', ')}`)
+      new ApiResponse(400, null, 'Missing userId (set via auth or request body)')
     );
   }
 
-  if (normalizedType === 'bulletpoints') {
-    const isArray = Array.isArray(valueToBeUpdated);
-    const isPartial = valueToBeUpdated && typeof valueToBeUpdated === 'object' && !Array.isArray(valueToBeUpdated) && typeof valueToBeUpdated.index === 'number' && valueToBeUpdated.value !== undefined;
-    if (!isArray && !isPartial) {
+  let result;
+
+  if (fixConflictsOnly) {
+    result = await autoFixCatalogConflicts({
+      sku,
+      userId,
+      country,
+      region,
+      sellerId: sellerId || undefined
+    });
+  } else {
+    if (dataToBeUpdated == null || dataToBeUpdated === '') {
       return res.status(400).json(
-        new ApiResponse(400, null, 'For bulletpoints use valueToBeUpdated: array of strings (full replace) or { index: number, value: string } (update one bullet, e.g. index 2 for 3rd)')
+        new ApiResponse(400, null, 'dataToBeUpdated is required when not using fixConflictsOnly')
       );
     }
-  }
 
-  try {
-    logger.info('[UpdateProductContentTest] Calling updateProductContent', {
-      userId,
+    const normalizedType = normalizeDataToBeUpdated(dataToBeUpdated);
+    if (!ALLOWED_UPDATE_TYPES.includes(normalizedType)) {
+      return res.status(400).json(
+        new ApiResponse(400, null, `dataToBeUpdated must be one of: ${ALLOWED_UPDATE_TYPES.join(', ')}`)
+      );
+    }
+
+    if (!analyzeOnly && valueToBeUpdated === undefined) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'valueToBeUpdated is required for updates')
+      );
+    }
+
+    if (normalizedType === 'bulletpoints' && !analyzeOnly && !validateBulletpointsValue(valueToBeUpdated)) {
+      return res.status(400).json(
+        new ApiResponse(
+          400,
+          null,
+          'For bulletpoints use valueToBeUpdated: array of strings (full replace) or { index: number, value: string } (update one bullet)'
+        )
+      );
+    }
+
+    result = await updateProductContent({
       sku,
+      userId,
       country,
       region,
-      dataToBeUpdated: normalizedType
-    });
-
-    const result = await updateProductContent({
-      sku,
       sellerId: sellerId || undefined,
-      userId,
-      country,
-      region,
       dataToBeUpdated: normalizedType,
-      valueToBeUpdated
+      valueToBeUpdated,
+      options: {
+        analyzeOnly,
+        autoFixConflicts
+      }
     });
-
-    return res.status(200).json(
-      new ApiResponse(200, result, 'Product content updated successfully')
-    );
-  } catch (err) {
-    const status = err.statusCode || err.status || 500;
-    const message = err.message || 'Update product content failed';
-    logger.error('[UpdateProductContentTest] Error', { error: message, userId, sku });
-    return res.status(status).json(
-      new ApiResponse(status, null, message)
-    );
   }
+
+  return res.status(200).json({
+    statusCode: 200,
+    data: result,
+    message: result.message || 'Success'
+  });
 });
 
 module.exports = {

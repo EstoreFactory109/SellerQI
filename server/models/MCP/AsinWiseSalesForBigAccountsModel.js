@@ -208,6 +208,142 @@ asinWiseSalesForBigAccountsSchema.statics.deleteByMetricsId = function(metricsId
     return this.deleteMany({ metricsId: metricsId });
 };
 
+/**
+ * OPTIMIZED: Get top ASINs by total sales for a metrics document
+ * Uses MongoDB aggregation pipeline to:
+ * 1. Match documents by metricsId
+ * 2. Unwind asinSales array
+ * 3. Group by ASIN and sum sales
+ * 4. Sort by total sales descending
+ * 5. Limit to specified count
+ * 
+ * This is much faster than fetching all data and processing in Node.js
+ * @param {ObjectId} metricsId - The EconomicsMetrics document ID
+ * @param {number} limit - Maximum number of ASINs to return (default 100)
+ * @returns {Promise<Array>} Array of { asin, totalSales, unitsSold } sorted by totalSales desc
+ */
+asinWiseSalesForBigAccountsSchema.statics.getTopAsinsBySales = async function(metricsId, limit = 100) {
+    return this.aggregate([
+        { $match: { metricsId: metricsId } },
+        { $unwind: '$asinSales' },
+        { 
+            $group: {
+                _id: '$asinSales.asin',
+                totalSales: { $sum: '$asinSales.sales.amount' },
+                unitsSold: { $sum: '$asinSales.unitsSold' },
+                parentAsin: { $first: '$asinSales.parentAsin' }
+            }
+        },
+        { $sort: { totalSales: -1 } },
+        { $limit: limit },
+        { 
+            $project: {
+                _id: 0,
+                asin: '$_id',
+                totalSales: 1,
+                unitsSold: 1,
+                parentAsin: 1
+            }
+        }
+    ]);
+};
+
+/**
+ * OPTIMIZED: Get all ASIN sales totals for a metrics document
+ * Uses MongoDB aggregation to sum sales across all dates per ASIN
+ * Returns a Map for O(1) lookup
+ * @param {ObjectId} metricsId - The EconomicsMetrics document ID
+ * @returns {Promise<Map>} Map of asin -> { totalSales, unitsSold }
+ */
+asinWiseSalesForBigAccountsSchema.statics.getAsinSalesMap = async function(metricsId) {
+    const results = await this.aggregate([
+        { $match: { metricsId: metricsId } },
+        { $unwind: '$asinSales' },
+        { 
+            $group: {
+                _id: '$asinSales.asin',
+                totalSales: { $sum: '$asinSales.sales.amount' },
+                unitsSold: { $sum: '$asinSales.unitsSold' }
+            }
+        },
+        { 
+            $project: {
+                _id: 0,
+                asin: '$_id',
+                totalSales: 1,
+                unitsSold: 1
+            }
+        }
+    ]);
+    
+    return new Map(results.map(r => [r.asin, { totalSales: r.totalSales, unitsSold: r.unitsSold }]));
+};
+
+/**
+ * OPTIMIZED: Get full profitability data per ASIN for a metrics document
+ * Uses MongoDB aggregation to sum all profitability fields across all dates per ASIN
+ * Returns a Map for O(1) lookup - includes all fields needed for recommendations
+ * 
+ * This is much faster than findByMetricsId + JS aggregation because:
+ * 1. Aggregation happens in MongoDB (no data transfer of all date docs)
+ * 2. Returns only one aggregated row per ASIN instead of many date rows
+ * 
+ * @param {ObjectId} metricsId - The EconomicsMetrics document ID
+ * @returns {Promise<Map>} Map of asin -> { sales, grossProfit, ads, amzFee, fbaFees, storageFees, totalFees, unitsSold, refunds }
+ */
+asinWiseSalesForBigAccountsSchema.statics.getProfitabilityMapByMetricsId = async function(metricsId) {
+    const results = await this.aggregate([
+        { $match: { metricsId: metricsId } },
+        { $unwind: '$asinSales' },
+        { 
+            $group: {
+                _id: '$asinSales.asin',
+                sales: { $sum: '$asinSales.sales.amount' },
+                grossProfit: { $sum: '$asinSales.grossProfit.amount' },
+                ads: { $sum: '$asinSales.ppcSpent.amount' },
+                amzFee: { $sum: '$asinSales.amazonFees.amount' },
+                fbaFees: { $sum: '$asinSales.fbaFees.amount' },
+                storageFees: { $sum: '$asinSales.storageFees.amount' },
+                totalFees: { $sum: '$asinSales.totalFees.amount' },
+                unitsSold: { $sum: '$asinSales.unitsSold' },
+                refunds: { $sum: '$asinSales.refunds.amount' }
+            }
+        },
+        { 
+            $project: {
+                _id: 0,
+                asin: '$_id',
+                sales: 1,
+                grossProfit: 1,
+                ads: 1,
+                amzFee: 1,
+                fbaFees: 1,
+                storageFees: 1,
+                totalFees: 1,
+                unitsSold: 1,
+                refunds: 1
+            }
+        }
+    ]);
+    
+    const map = new Map();
+    results.forEach(r => {
+        map.set(r.asin, {
+            asin: r.asin,
+            sales: r.sales || 0,
+            grossProfit: r.grossProfit || 0,
+            ads: r.ads || 0,
+            amzFee: r.amzFee || 0,
+            fbaFees: r.fbaFees || 0,
+            storageFees: r.storageFees || 0,
+            totalFees: r.totalFees || 0,
+            unitsSold: r.unitsSold || 0,
+            refunds: r.refunds || 0
+        });
+    });
+    return map;
+};
+
 const AsinWiseSalesForBigAccounts = mongoose.model('AsinWiseSalesForBigAccounts', asinWiseSalesForBigAccountsSchema);
 
 module.exports = AsinWiseSalesForBigAccounts;

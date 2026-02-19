@@ -13,6 +13,7 @@ import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { Box, AlertTriangle, TrendingUp, TrendingDown, LineChart as LineChartIcon, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Star, ArrowUpRight, ArrowDownRight, Minus, Eye, ShoppingCart, DollarSign } from 'lucide-react';
 import './ProductDetails.css';
+import { ProductDetailsPageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import axiosInstance from '../config/axios.config.js';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../utils/currencyUtils.js';
@@ -290,6 +291,7 @@ const generateProductRecommendations = (profitabilityProduct, comparison, perfor
 const Dashboard = () => {
     const dispatch = useDispatch();
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
+    const issuesByProductLoading = useSelector((state) => state.pageData?.issuesByProduct?.loading);
     const currency = useSelector((state) => state.currency?.currency) || '$';
     console.log("info: ",info)
     const dropdownRef = useRef(null);
@@ -522,16 +524,10 @@ const Dashboard = () => {
         }
     }, []);
 
-    // Early return for loading or missing data
-    if (!info) {
-        return (
-            <div className="flex items-center justify-center h-screen">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-300">Loading product data...</p>
-                </div>
-            </div>
-        );
+    // Show skeleton while loading issues-by-product data (first load or refresh)
+    // so we never flash "Product Not Found" before data arrives
+    if (issuesByProductLoading || !info) {
+        return <ProductDetailsPageSkeleton />;
     }
 
     if (!info.productWiseError || info.productWiseError.length === 0) {

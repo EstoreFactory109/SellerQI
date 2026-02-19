@@ -19,6 +19,32 @@ const SUNDAY_FUNCTIONS = {
         description: 'Keyword Recommendations',
         requiresAdsToken: true,
         apiDataKey: 'keywordRecommendations'
+    },
+    // Issue calculation - runs after productReview to update issue counts
+    // This calculates/updates IssueSummary and per-product issueCount
+    'issueSummary': {
+        service: require('../Calculations/IssueSummaryService.js'),
+        functionName: 'calculateAndStoreIssueSummary',
+        description: 'Issue Summary',
+        apiDataKey: 'issueSummary',
+        isCalculationService: true, // Flag to indicate this is a calculation, not API fetch
+        runOrder: 99 // Runs last after all data fetches
+    },
+    'productIssues': {
+        service: require('../Calculations/ProductIssuesService.js'),
+        functionName: 'calculateAndStoreProductIssues',
+        description: 'Product Issues',
+        apiDataKey: 'productIssues',
+        isCalculationService: true,
+        runOrder: 100 // Runs after issueSummary
+    },
+    'issuesData': {
+        service: require('../Calculations/IssuesDataService.js'),
+        functionName: 'calculateAndStoreIssuesData',
+        description: 'Issues Data (for Issues pages)',
+        apiDataKey: 'issuesData',
+        isCalculationService: true,
+        runOrder: 101 // Runs after productIssues
     }
 };
 

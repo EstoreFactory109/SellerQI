@@ -294,7 +294,7 @@ async function downloadUnitsReportData(location, accessToken, tokenRefreshCallba
 /**
  * Process units sold data from report (simplified to only 1-day attribution)
  */
-function processUnitsData(reportData, campaignType) {
+async function processUnitsData(reportData, campaignType) {
     const metrics = {
         campaignType: campaignType,
         totalUnits: 0,
@@ -306,58 +306,69 @@ function processUnitsData(reportData, campaignType) {
         return metrics;
     }
 
-    reportData.forEach(row => {
-        const date = row.date;
+    // Process in chunks to yield to the event loop and allow lock renewal
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < reportData.length; i += CHUNK_SIZE) {
+        const chunk = reportData.slice(i, i + CHUNK_SIZE);
         
-        // Initialize date if not exists
-        if (date && !metrics.dateWiseUnits[date]) {
-            metrics.dateWiseUnits[date] = {
-                date: date,
-                units: 0,
-                sales: 0,
-                spend: 0,
-                impressions: 0,
-                clicks: 0
-            };
-        }
+        for (const row of chunk) {
+            const date = row.date;
+            
+            // Initialize date if not exists
+            if (date && !metrics.dateWiseUnits[date]) {
+                metrics.dateWiseUnits[date] = {
+                    date: date,
+                    units: 0,
+                    sales: 0,
+                    spend: 0,
+                    impressions: 0,
+                    clicks: 0
+                };
+            }
 
-        // Process based on campaign type
-        // SP uses 7-day attribution for sellers, SB/SD use 14-day
-        let units = 0;
-        let sales = 0;
-        
-        if (campaignType === 'SPONSORED_PRODUCTS') {
-            // Use 7-day units to match Seller Central's attribution for sellers
-            units = parseInt(row.unitsSoldClicks7d || row.unitsSoldClicks1d || 0);
-            sales = parseFloat(row.sales7d || 0);
-        } else if (campaignType === 'SPONSORED_BRANDS') {
-            units = parseInt(row.unitsSold14d || 0);
-            sales = parseFloat(row.sales14d || 0);
-        } else if (campaignType === 'SPONSORED_DISPLAY') {
-            units = parseInt(row.unitsSold14d || 0);
-            sales = parseFloat(row.sales14d || 0);
-        }
-        
-        metrics.totalUnits += units;
-        
-        if (date) {
-            metrics.dateWiseUnits[date].units += units;
-            metrics.dateWiseUnits[date].sales += sales;
-            metrics.dateWiseUnits[date].spend += parseFloat(row.cost || 0);
-            metrics.dateWiseUnits[date].impressions += parseInt(row.impressions || 0);
-            metrics.dateWiseUnits[date].clicks += parseInt(row.clicks || 0);
-        }
+            // Process based on campaign type
+            // SP uses 7-day attribution for sellers, SB/SD use 14-day
+            let units = 0;
+            let sales = 0;
+            
+            if (campaignType === 'SPONSORED_PRODUCTS') {
+                // Use 7-day units to match Seller Central's attribution for sellers
+                units = parseInt(row.unitsSoldClicks7d || row.unitsSoldClicks1d || 0);
+                sales = parseFloat(row.sales7d || 0);
+            } else if (campaignType === 'SPONSORED_BRANDS') {
+                units = parseInt(row.unitsSold14d || 0);
+                sales = parseFloat(row.sales14d || 0);
+            } else if (campaignType === 'SPONSORED_DISPLAY') {
+                units = parseInt(row.unitsSold14d || 0);
+                sales = parseFloat(row.sales14d || 0);
+            }
+            
+            metrics.totalUnits += units;
+            
+            if (date) {
+                metrics.dateWiseUnits[date].units += units;
+                metrics.dateWiseUnits[date].sales += sales;
+                metrics.dateWiseUnits[date].spend += parseFloat(row.cost || 0);
+                metrics.dateWiseUnits[date].impressions += parseInt(row.impressions || 0);
+                metrics.dateWiseUnits[date].clicks += parseInt(row.clicks || 0);
+            }
 
-        // Collect campaign-level data
-        if (row.campaignId) {
-            metrics.campaigns.push({
-                campaignId: row.campaignId,
-                campaignName: row.campaignName,
-                date: date,
-                units: units
-            });
+            // Collect campaign-level data
+            if (row.campaignId) {
+                metrics.campaigns.push({
+                    campaignId: row.campaignId,
+                    campaignName: row.campaignName,
+                    date: date,
+                    units: units
+                });
+            }
         }
-    });
+        
+        // Yield to event loop after each chunk to allow lock renewal
+        if (i + CHUNK_SIZE < reportData.length) {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
 
     return metrics;
 }
@@ -543,7 +554,7 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
                     );
 
                     // Process the report data
-                    const metrics = processUnitsData(reportData, reportResult.campaignType);
+                    const metrics = await processUnitsData(reportData, reportResult.campaignType);
                     
                     reportResults.push({
                         campaignType: reportResult.campaignType,

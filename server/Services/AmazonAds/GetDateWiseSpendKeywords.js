@@ -276,18 +276,29 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
             
             const sponsoredAdsData=[];
 
-            reportJson.forEach(item=>{
-                sponsoredAdsData.push({
-                    date: item.date,
-                    cost: item.cost,
-                    campaignId: item.campaignId,
-                    campaignName: item.campaignName,
-                    clicks: item.clicks,
-                    impressions: item.impressions,
-                    sales7d: item.sales7d || 0,
-                    sales14d: item.sales14d || 0,
-                })
-            })
+            // Process in chunks to yield to the event loop and allow lock renewal
+            const CHUNK_SIZE = 500;
+            for (let i = 0; i < reportJson.length; i += CHUNK_SIZE) {
+                const chunk = reportJson.slice(i, i + CHUNK_SIZE);
+                
+                for (const item of chunk) {
+                    sponsoredAdsData.push({
+                        date: item.date,
+                        cost: item.cost,
+                        campaignId: item.campaignId,
+                        campaignName: item.campaignName,
+                        clicks: item.clicks,
+                        impressions: item.impressions,
+                        sales7d: item.sales7d || 0,
+                        sales14d: item.sales14d || 0,
+                    });
+                }
+                
+                // Yield to event loop after each chunk to allow lock renewal
+                if (i + CHUNK_SIZE < reportJson.length) {
+                    await new Promise(resolve => setImmediate(resolve));
+                }
+            }
             
             return sponsoredAdsData;
 

@@ -9,6 +9,8 @@ import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../../utils/dateUtils.js';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
+import { SkeletonChart } from '../../../Components/Skeleton/PageSkeletons.jsx';
+import { SkeletonContent } from '../../../Components/Skeleton/Skeleton.jsx';
 
 const formatDateWithOrdinal = (dateString) => {
   if (!dateString) return 'N/A';
@@ -301,11 +303,6 @@ const TotalSales = () => {
 
   return (
     <div className="p-1.5 h-full bg-transparent rounded relative flex flex-col">
-      {loading && (
-        <div className="absolute inset-0 bg-[#161b22]/90 flex items-center justify-center z-10 rounded">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        </div>
-      )}
       <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
         <div className="flex items-center gap-1">
           <Currency className="w-3 h-3 text-blue-400" />
@@ -335,17 +332,25 @@ const TotalSales = () => {
 
       <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
         <div className="flex flex-col">
-          <h2 className="text-xl font-bold text-gray-100">
-            {formatCurrencyWithLocale(totalSales, currency)}
-          </h2>
+          {loading ? (
+            <div className="h-8 w-32 rounded bg-[#21262d] animate-pulse" />
+          ) : (
+            <h2 className="text-xl font-bold text-gray-100">
+              {formatCurrencyWithLocale(totalSales, currency)}
+            </h2>
+          )}
           <p className="text-xs text-gray-400">
             {displayStartDate ? formatDateWithOrdinal(displayStartDate) : 'N/A'} - {displayEndDate ? formatDateWithOrdinal(displayEndDate) : 'N/A'}
           </p>
         </div>
         <div className="flex flex-col items-end">
-          <h2 className={`text-lg font-bold ${grossProfitRaw >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-            {formatCurrencyWithLocale(grossProfitRaw, currency)}
-          </h2>
+          {loading ? (
+            <div className="h-7 w-24 rounded bg-[#21262d] animate-pulse" />
+          ) : (
+            <h2 className={`text-lg font-bold ${grossProfitRaw >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+              {formatCurrencyWithLocale(grossProfitRaw, currency)}
+            </h2>
+          )}
           <p className="text-xs text-gray-400">
             {grossProfitRaw >= 0 ? 'Profit' : 'Loss'}
           </p>
@@ -353,20 +358,31 @@ const TotalSales = () => {
       </div>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-1.5 items-start min-h-0">
-        <div className="lg:col-span-2 flex justify-center items-center w-full">
-          <div className="w-full flex items-center justify-center">
-            <Chart
-              options={chartData.options}
-              series={chartData.series}
-              type="pie"
-              width="100%"
-              height={260}
-            />
-          </div>
-        </div>
+        {loading ? (
+          <>
+            <div className="lg:col-span-2 flex justify-center items-center w-full">
+              <SkeletonChart height={260} />
+            </div>
+            <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2 p-1.5">
+              <SkeletonContent rows={6} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="lg:col-span-2 flex justify-center items-center w-full">
+              <div className="w-full flex items-center justify-center">
+                <Chart
+                  options={chartData.options}
+                  series={chartData.series}
+                  type="pie"
+                  width="100%"
+                  height={260}
+                />
+              </div>
+            </div>
 
-        <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2">
-          {labelData.map((label, index) => {
+            <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2">
+              {labelData.map((label, index) => {
             const value = saleValues[index];
             const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
 
@@ -395,7 +411,9 @@ const TotalSales = () => {
               </div>
             );
           })}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

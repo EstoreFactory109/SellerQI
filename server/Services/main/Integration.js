@@ -81,6 +81,15 @@ const DataFetchTrackingService = require('../system/DataFetchTrackingService.js'
 // Redis cache clearing
 const { clearAnalyseCache } = require('../../middlewares/redisCache.js');
 
+// Issue Summary Service for precomputed dashboard issue counts
+const { storeIssueSummaryFromDashboardData } = require('../Calculations/IssueSummaryService.js');
+
+// Issues Data Service for precomputed detailed issues data (used by Issues pages)
+const { storeIssuesDataFromDashboard } = require('../Calculations/IssuesDataService.js');
+
+// Product Issues Service for per-product issue counts
+const { storeProductIssuesFromDashboardData } = require('../Calculations/ProductIssuesService.js');
+
 class Integration {
     /**
      * Main integration function to fetch all SP-API and Amazon Ads data
@@ -223,17 +232,23 @@ class Integration {
                 RefreshToken, AdsRefreshToken, loggingHelper
             );
 
+            // Yield to event loop to allow lock renewal
+            await new Promise(resolve => setImmediate(resolve));
+
             // Extract product data (active products)
-            const productData = this.extractProductData(merchantListingsData, Country, Region);
+            const productData = await this.extractProductData(merchantListingsData, Country, Region);
 
             // Extract inactive product data for issues fetching
-            const inactiveProductData = this.extractInactiveProductData(merchantListingsData, Country, Region);
+            const inactiveProductData = await this.extractInactiveProductData(merchantListingsData, Country, Region);
 
             // Prepare dataToSend object
             const dataToSend = this.prepareDataToSend(
                 Marketplace_Id, AccessToken, credentials, productData.asinArray,
                 Country, sellerId
             );
+
+            // Yield to event loop to allow lock renewal
+            await new Promise(resolve => setImmediate(resolve));
 
             // Fetch all API data in parallel batches
             const apiData = await this.fetchAllApiData({
@@ -252,6 +267,9 @@ class Integration {
                 loggingHelper
             });
 
+            // Yield to event loop to allow lock renewal
+            await new Promise(resolve => setImmediate(resolve));
+
             // Process and save data
             await this.processAndSaveData({
                 userId,
@@ -262,6 +280,9 @@ class Integration {
                 merchantListingsData,
                 loggingHelper
             });
+
+            // Yield to event loop to allow lock renewal
+            await new Promise(resolve => setImmediate(resolve));
 
             // Process inactive SKUs to fetch and store their issues
             if (inactiveProductData.inactiveSkuArray.length > 0) {
@@ -282,6 +303,9 @@ class Integration {
                     loggingHelper
                 );
             }
+
+            // Yield to event loop to allow lock renewal
+            await new Promise(resolve => setImmediate(resolve));
 
             // Clear the Redis cache after new data is saved
             // This ensures the next dashboard request gets fresh calculated data
@@ -769,8 +793,9 @@ class Integration {
 
     /**
      * Extract product data from merchant listings
+     * Uses chunked processing with yields to prevent blocking the event loop
      */
-    static extractProductData(merchantListingsData, Country, Region) {
+    static async extractProductData(merchantListingsData, Country, Region) {
         logger.info("extractProductData starting");
         
         const asinArray = [];
@@ -798,22 +823,33 @@ class Integration {
             return true;
         });
 
-        activeProducts.forEach(product => {
-            asinArray.push(product.asin.trim());
-            skuArray.push(product.sku.trim());
+        // Process in chunks to yield to the event loop and allow lock renewal
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < activeProducts.length; i += CHUNK_SIZE) {
+            const chunk = activeProducts.slice(i, i + CHUNK_SIZE);
+            
+            for (const product of chunk) {
+                asinArray.push(product.asin.trim());
+                skuArray.push(product.sku.trim());
 
-            let price = product.price;
-            if (typeof price === 'string') {
-                price = parseFloat(price.replace(/[^0-9.]/g, '')) || 0;
-            } else if (typeof price !== 'number' || isNaN(price)) {
-                price = 0;
+                let price = product.price;
+                if (typeof price === 'string') {
+                    price = parseFloat(price.replace(/[^0-9.]/g, '')) || 0;
+                } else if (typeof price !== 'number' || isNaN(price)) {
+                    price = 0;
+                }
+
+                ProductDetails.push({
+                    asin: product.asin.trim(),
+                    price: price
+                });
             }
-
-            ProductDetails.push({
-                asin: product.asin.trim(),
-                price: price
-            });
-        });
+            
+            // Yield to event loop after each chunk to allow lock renewal
+            if (i + CHUNK_SIZE < activeProducts.length) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
+        }
 
         logger.info("extractProductData ended");
         return { asinArray, skuArray, ProductDetails };
@@ -822,8 +858,9 @@ class Integration {
     /**
      * Extract inactive product data from merchant listings
      * Returns arrays of ASINs and SKUs for inactive products only
+     * Uses chunked processing with yields to prevent blocking the event loop
      */
-    static extractInactiveProductData(merchantListingsData, Country, Region) {
+    static async extractInactiveProductData(merchantListingsData, Country, Region) {
         logger.info("extractInactiveProductData starting");
         
         const inactiveAsinArray = [];
@@ -851,10 +888,21 @@ class Integration {
             return true;
         });
 
-        inactiveProducts.forEach(product => {
-            inactiveAsinArray.push(product.asin.trim());
-            inactiveSkuArray.push(product.sku.trim());
-        });
+        // Process in chunks to yield to the event loop and allow lock renewal
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < inactiveProducts.length; i += CHUNK_SIZE) {
+            const chunk = inactiveProducts.slice(i, i + CHUNK_SIZE);
+            
+            for (const product of chunk) {
+                inactiveAsinArray.push(product.asin.trim());
+                inactiveSkuArray.push(product.sku.trim());
+            }
+            
+            // Yield to event loop after each chunk to allow lock renewal
+            if (i + CHUNK_SIZE < inactiveProducts.length) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
+        }
 
         logger.info("extractInactiveProductData ended", { 
             inactiveCount: inactiveAsinArray.length 
@@ -1960,6 +2008,115 @@ class Integration {
 
             if (!addAccountHistoryData) {
                 throw new Error('Failed to add account history - null result');
+            }
+
+            // Store issue summary for quick dashboard access
+            // This uses the already-calculated dashboardData to avoid re-fetching
+            try {
+                const issueSummaryResult = await storeIssueSummaryFromDashboardData(
+                    userId,
+                    country,
+                    region,
+                    dashboardData,
+                    'integration'
+                );
+                
+                if (issueSummaryResult.success) {
+                    logger.info("Issue summary stored successfully", { 
+                        userId, 
+                        country, 
+                        region,
+                        totalIssues: issueSummaryResult.data?.totalIssues 
+                    });
+                } else {
+                    logger.warn("Failed to store issue summary", {
+                        userId,
+                        country,
+                        region,
+                        error: issueSummaryResult.error
+                    });
+                }
+            } catch (issueSummaryError) {
+                // Don't fail the entire process if issue summary storage fails
+                logger.error("Error storing issue summary", {
+                    error: issueSummaryError.message,
+                    userId,
+                    country,
+                    region
+                });
+            }
+
+            // Store detailed issues data for Issues pages (Category.jsx, IssuesByProduct.jsx)
+            // This enables fast loading of Issues pages without full recalculation
+            try {
+                const issuesDataResult = await storeIssuesDataFromDashboard(
+                    userId,
+                    country,
+                    region,
+                    dashboardData,
+                    'integration'
+                );
+                
+                if (issuesDataResult.success) {
+                    logger.info("Issues data stored successfully", { 
+                        userId, 
+                        country, 
+                        region,
+                        productCount: dashboardData.productWiseError?.length || 0
+                    });
+                } else {
+                    logger.warn("Failed to store issues data", {
+                        userId,
+                        country,
+                        region,
+                        error: issuesDataResult.error
+                    });
+                }
+            } catch (issuesDataError) {
+                // Don't fail the entire process if issues data storage fails
+                logger.error("Error storing issues data", {
+                    error: issuesDataError.message,
+                    userId,
+                    country,
+                    region
+                });
+            }
+
+            // Store per-product issue counts
+            // This uses the productWiseError from dashboardData
+            try {
+                const productIssuesResult = await storeProductIssuesFromDashboardData(
+                    userId,
+                    country,
+                    region,
+                    dashboardData,
+                    'integration'
+                );
+                
+                if (productIssuesResult.success) {
+                    logger.info("Product issues stored successfully", { 
+                        userId, 
+                        country, 
+                        region,
+                        updatedCount: productIssuesResult.data?.updatedCount,
+                        productsWithIssues: productIssuesResult.data?.productsWithIssues
+                    });
+                } else {
+                    logger.warn("Failed to store product issues", {
+                        userId,
+                        country,
+                        region,
+                        error: productIssuesResult.error
+                    });
+                }
+            } catch (productIssuesError) {
+                // Don't fail the entire process if product issues storage fails
+                logger.error("Error storing product issues", {
+                    error: productIssuesError.message,
+                    userId,
+                    country,
+                    region
+                });
             }
 
             logger.info("addNewAccountHistory completed successfully", { userId, country, region });

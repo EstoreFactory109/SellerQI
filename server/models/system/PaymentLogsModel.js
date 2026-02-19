@@ -208,7 +208,7 @@ PaymentLogsSchema.index({ status: 1, createdAt: -1 });
 PaymentLogsSchema.index({ eventType: 1, createdAt: -1 });
 PaymentLogsSchema.index({ paymentGateway: 1, createdAt: -1 });
 PaymentLogsSchema.index({ subscriptionId: 1, createdAt: -1 });
-PaymentLogsSchema.index({ paymentId: 1 });
+// Note: paymentId index is already created via field-level "index: true" in schema definition
 // Sparse unique index on webhookEventId to detect duplicate webhooks
 // Sparse allows multiple null values (for non-webhook events)
 PaymentLogsSchema.index({ webhookEventId: 1 }, { unique: true, sparse: true });

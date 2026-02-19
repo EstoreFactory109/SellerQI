@@ -15,6 +15,8 @@ const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultData
 const CreateTaskService = require('./CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 
 /**
  * Get PPC sales from EconomicsMetrics for ACOS/TACOS calculations
@@ -172,6 +174,79 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
         totalGrossProfit,
         asinPpcSales 
     };
+};
+
+/**
+ * OPTIMIZED: Get top 4 products sorted by highest issues
+ * 
+ * Simple and fast - single query to Seller model:
+ * 1. Get products from Seller.sellerAccount[].products for (region, country)
+ * 2. Filter to Active products with issueCount > 0
+ * 3. Sort by issueCount descending (highest issues first)
+ * 4. Return top 4
+ * 
+ * @param {string} userId - User ID
+ * @param {string} region - Region (NA, EU, FE)
+ * @param {string} country - Country code
+ * @returns {Promise<Object>} Top 4 products { first, second, third, fourth }
+ */
+const getTop4ProductsByIssuesOptimized = async (userId, region, country) => {
+    const startTime = Date.now();
+    
+    try {
+        const sellerData = await Seller.findOne(
+            { User: userId },
+            { 
+                'sellerAccount': {
+                    $elemMatch: { region, country }
+                }
+            }
+        ).lean();
+
+        if (!sellerData?.sellerAccount?.[0]?.products) {
+            logger.debug('No seller products found for top 4 calculation', { userId, region, country });
+            return { first: null, second: null, third: null, fourth: null };
+        }
+
+        const products = sellerData.sellerAccount[0].products;
+
+        const productsWithIssues = products
+            .filter(p => p.status === 'Active' && (p.issueCount || 0) > 0)
+            .sort((a, b) => (b.issueCount || 0) - (a.issueCount || 0))
+            .slice(0, 4)
+            .map(p => ({
+                asin: p.asin,
+                name: p.itemName || 'N/A',
+                errors: p.issueCount || 0
+            }));
+
+        const elapsed = Date.now() - startTime;
+        logger.info('getTop4ProductsByIssuesOptimized completed', {
+            userId,
+            region,
+            country,
+            totalProducts: products.length,
+            productsWithIssues: productsWithIssues.length,
+            elapsedMs: elapsed
+        });
+
+        return {
+            first: productsWithIssues[0] || null,
+            second: productsWithIssues[1] || null,
+            third: productsWithIssues[2] || null,
+            fourth: productsWithIssues[3] || null
+        };
+
+    } catch (error) {
+        logger.error('Error in getTop4ProductsByIssuesOptimized', {
+            userId,
+            region,
+            country,
+            error: error.message,
+            stack: error.stack
+        });
+        return { first: null, second: null, third: null, fourth: null };
+    }
 };
 
 /**
@@ -569,11 +644,25 @@ const analyseData = async (data, userId = null) => {
 
     logger.info("Valid data found, proceeding with analysis");
     
-    // Get PPC and sales data from EconomicsMetrics for ACOS/TACOS calculations
-    // Note: This is now async to handle big accounts fetching from separate collection
+    // Extract region from AllSellerAccounts based on Country
+    const country = data.Country || 'US';
+    let region = 'NA'; // Default to NA
+    if (Array.isArray(data.AllSellerAccounts)) {
+        const matchingAccount = data.AllSellerAccounts.find(acc => acc.country === country);
+        if (matchingAccount?.region) {
+            region = matchingAccount.region;
+        }
+    }
+    
+    // OPTIMIZATION: Start async operations in parallel
+    // 1. Get PPC and sales data from EconomicsMetrics
+    // 2. Get optimized top 4 products (uses MongoDB aggregation - much faster)
     let stepStart = Date.now();
-    const economicsData = await getPpcSalesFromEconomics(data.EconomicsMetrics);
-    logger.info(`[PERF] getPpcSalesFromEconomics completed in ${Date.now() - stepStart}ms`);
+    const [economicsData, optimizedTop4] = await Promise.all([
+        getPpcSalesFromEconomics(data.EconomicsMetrics),
+        userId ? getTop4ProductsByIssuesOptimized(userId, region, country) : Promise.resolve(null)
+    ]);
+    logger.info(`[PERF] getPpcSalesFromEconomics + getTop4ProductsByIssuesOptimized completed in ${Date.now() - stepStart}ms`);
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
         totalSales: economicsData.totalSales,
@@ -1210,24 +1299,50 @@ const analyseData = async (data, userId = null) => {
     }
 
   
-    // Top ranking error products
-    const UniqueProductWisError = Array.from(
-        new Map(productWiseError.map(obj => [obj.asin, obj])).values()
-    ).sort((a, b) => b.errors - a.errors);
+    // Top priority products with issues
+    // OPTIMIZED: Use getTop4ProductsByIssuesOptimized() which fetches sales from 
+    // AsinWiseSalesForBigAccounts (last 30 days Economics data) and issue counts from 
+    // Seller model products using MongoDB aggregation for maximum speed.
+    // Falls back to legacy calculation if optimized query returns no data.
+    
+    let first, second, third, fourth;
+    
+    // Use optimized results if available (calculated at start of function in parallel)
+    if (optimizedTop4 && (optimizedTop4.first || optimizedTop4.second || optimizedTop4.third || optimizedTop4.fourth)) {
+        first = optimizedTop4.first;
+        second = optimizedTop4.second;
+        third = optimizedTop4.third;
+        fourth = optimizedTop4.fourth;
+        logger.info('Using optimized top 4 products from Economics + Seller aggregation');
+    } else {
+        // FALLBACK: Legacy calculation using productWiseError from SalesByProducts
+        logger.info('Fallback to legacy top 4 calculation (optimized query returned no data)');
+        
+        const UniqueProductWisError = Array.from(
+            new Map(productWiseError.map(obj => [obj.asin, obj])).values()
+        )
+            .filter(product => product.errors > 0)
+            .sort((a, b) => {
+                const salesDiff = (b.sales || 0) - (a.sales || 0);
+                if (salesDiff !== 0) return salesDiff;
+                return (b.errors || 0) - (a.errors || 0);
+            });
 
-    const getTopErrorProduct = (errorData, index) =>
-        errorData[index]
-            ? {
-                asin: errorData[index].asin,
-                name: errorData[index].name || "N/A",
-                errors: errorData[index].errors,
-            }
-            : null;
+        const getTopErrorProduct = (errorData, index) =>
+            errorData[index]
+                ? {
+                    asin: errorData[index].asin,
+                    name: errorData[index].name || "N/A",
+                    errors: errorData[index].errors,
+                    sales: errorData[index].sales || 0,
+                }
+                : null;
 
-    const first = getTopErrorProduct(UniqueProductWisError, 0);
-    const second = getTopErrorProduct(UniqueProductWisError, 1);
-    const third = getTopErrorProduct(UniqueProductWisError, 2);
-    const fourth = getTopErrorProduct(UniqueProductWisError, 3);
+        first = getTopErrorProduct(UniqueProductWisError, 0);
+        second = getTopErrorProduct(UniqueProductWisError, 1);
+        third = getTopErrorProduct(UniqueProductWisError, 2);
+        fourth = getTopErrorProduct(UniqueProductWisError, 3);
+    }
 
     // Add backend keyword errors to top 4 if applicable (only for active products) with safe data access
     const uniqueBackendKeywordData = Array.isArray(backendKeywordResultArray) ? 
@@ -1406,6 +1521,7 @@ module.exports = {
     calculateSponsoredAdsErrors,
     getPpcSalesFromEconomics,
     calculateAcos,
-    calculateTacos
+    calculateTacos,
+    getTop4ProductsByIssuesOptimized
 };
 

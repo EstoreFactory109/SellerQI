@@ -3,10 +3,10 @@ import { Check, AlertTriangle, X, ChevronLeft, ChevronRight, ChevronDown, Chevro
 import { useSelector, useDispatch } from 'react-redux';
 import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCogsValues } from '../../redux/slices/cogsSlice';
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
-import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
 import { parseLocalDate } from '../../utils/dateUtils';
 import axiosInstance from '../../config/axios.config';
+import { SkeletonBar } from '../Skeleton/Skeleton.jsx';
 
 // Currency symbol mapping by country code
 const CURRENCY_SYMBOLS = {
@@ -34,8 +34,31 @@ const CURRENCY_SYMBOLS = {
   EG: 'E£',
 };
 
-const ProfitTable = ({ setSuggestionsData }) => {
-    const [currentPage, setCurrentPage] = useState(1);
+const ProfitTable = ({ 
+    setSuggestionsData,
+    // Phased loading props (server-side pagination)
+    phasedTableData = null,
+    tablePagination = null,
+    tableLoading = false,
+    hasMore = false,
+    currentPage: serverCurrentPage = 1,
+    totalPages: serverTotalPages = 1,
+    totalItems: serverTotalItems = 0,
+    // Total counts across ALL data (not page-wise)
+    totalParents: serverTotalParents = 0,
+    totalChildren: serverTotalChildren = 0,
+    totalProducts: serverTotalProducts = 0,
+    onLoadMore = null,
+    onPageChange = null
+}) => {
+    // Use phased loading if pagination handler is provided (indicates phased loading mode)
+    // This prevents falling back to legacy data while waiting for server response
+    const usePhasedLoading = onPageChange !== null || tablePagination !== null;
+    
+    // Check if phased data is actually loaded (not just in phased mode)
+    const hasPhasedData = phasedTableData !== null && phasedTableData.length > 0;
+    
+    const [localCurrentPage, setLocalCurrentPage] = useState(1);
     const [expandedRows, setExpandedRows] = useState(new Set());
     const dispatch = useDispatch();
     const productsPerPage = 10;
@@ -231,12 +254,74 @@ const ProfitTable = ({ setSuggestionsData }) => {
     
     /**
      * MAIN DATA PROCESSING:
+     * 
+     * PHASED LOADING (NEW):
+     * When phasedTableData is provided, use server-side processed data directly.
+     * This is pre-calculated and paginated on the backend for fast loading.
+     * 
+     * LEGACY LOADING:
      * 1. Get all asinWiseSales from economicsMetrics
      * 2. Filter by date range if selected
      * 3. Aggregate by ASIN to get totals
      * 4. Group by parentAsin - show parent first, children on expand
      */
     const processedProducts = useMemo(() => {
+        // PHASED LOADING MODE: If we're in phased loading mode, ONLY use phased data
+        // This prevents flashing legacy data while waiting for server response
+        if (usePhasedLoading) {
+            // If phased data hasn't arrived yet, return empty array (skeleton will show)
+            if (!hasPhasedData) {
+                return [];
+            }
+            
+            // Helper to transform a product (parent or child) to display format
+            const transformProduct = (product) => {
+                const cogsPerUnit = cogsValues[product.asin] || 0;
+                const quantity = product.quantity ?? 0;
+                const totalCogs = cogsPerUnit * quantity;
+                const netProfit = (product.grossProfit || 0) - totalCogs;
+                const netMargin = product.sales > 0 ? (netProfit / product.sales) * 100 : 0;
+                
+                return {
+                    ...product,
+                    name: product.itemName || product.name || `Product ${product.asin}`,
+                    units: quantity,
+                    cogsPerUnit,
+                    totalCogs,
+                    netProfit,
+                    netMargin,
+                    profitStatus: product.grossProfit >= 0 ? 'profitable' : 'unprofitable',
+                    source: product.source || 'economicsMetrics',
+                    adSpend: product.ads,
+                    fees: product.totalFees ?? product.amzFee,
+                    amazonFees: product.amazonFees ?? product.amzFee,
+                    fbaFees: product.fbaFees,
+                    storageFees: product.storageFees,
+                    status: netMargin < 0 ? 'bad' : netMargin < 10 ? 'warn' : 'good'
+                };
+            };
+            
+            // Transform server data including children
+            return phasedTableData.map(product => {
+                const transformed = transformProduct(product);
+                
+                // Transform children if present
+                if (product.children && product.children.length > 0) {
+                    transformed.children = product.children.map(child => transformProduct(child));
+                } else {
+                    transformed.children = [];
+                }
+                
+                // Preserve parent-child structure from server
+                transformed.isParent = product.isParent ?? true;
+                transformed.isExpandable = product.isExpandable ?? (transformed.children.length > 0);
+                transformed.childrenCount = product.childrenCount ?? transformed.children.length;
+                
+                return transformed;
+            });
+        }
+        
+        // LEGACY LOADING: Process data client-side (only when NOT in phased loading mode)
         // Create a map of ASIN to product details for quick lookup
         const productDetailsMap = new Map();
         totalProducts.forEach(product => {
@@ -477,7 +562,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 childrenCount: 0
             };
         }).sort((a, b) => b.sales - a.sales);
-    }, [asinWiseSalesData, profitibilityData, totalProducts, cogsValues, isDateRangeSelected, startDate, endDate]);
+    }, [asinWiseSalesData, profitibilityData, totalProducts, cogsValues, isDateRangeSelected, startDate, endDate, usePhasedLoading, hasPhasedData, phasedTableData]);
     
     // Generate suggestions based on profitability metrics
     const generateSuggestions = (product) => {
@@ -565,21 +650,40 @@ const ProfitTable = ({ setSuggestionsData }) => {
       }
     }, [processedProducts]);
     
-    // Calculate total pages
-    const totalPages = Math.ceil(processedProducts.length / productsPerPage);
+    // Calculate total pages - use server values for phased loading
+    const totalPages = usePhasedLoading 
+        ? serverTotalPages 
+        : Math.ceil(processedProducts.length / productsPerPage);
+    
+    // Current page - use server value for phased loading
+    const currentPage = usePhasedLoading ? serverCurrentPage : localCurrentPage;
+    const setCurrentPage = usePhasedLoading 
+        ? (page) => onPageChange && onPageChange(typeof page === 'function' ? page(serverCurrentPage) : page) 
+        : setLocalCurrentPage;
     
     // Calculate current products to display
-    const indexOfLastProduct = currentPage * productsPerPage;
-    const indexOfFirstProduct = indexOfLastProduct - productsPerPage;
-    const currentProducts = processedProducts.slice(indexOfFirstProduct, indexOfLastProduct);
+    // For phased loading, data is already paginated from server
+    const indexOfLastProduct = usePhasedLoading ? processedProducts.length : currentPage * productsPerPage;
+    const indexOfFirstProduct = usePhasedLoading ? 0 : indexOfLastProduct - productsPerPage;
+    const currentProducts = usePhasedLoading 
+        ? processedProducts 
+        : processedProducts.slice(indexOfFirstProduct, indexOfLastProduct);
     
     // Navigation functions
     const goToPreviousPage = () => {
-      setCurrentPage(prev => Math.max(prev - 1, 1));
+      if (usePhasedLoading && onPageChange) {
+        onPageChange(Math.max(currentPage - 1, 1));
+      } else {
+        setLocalCurrentPage(prev => Math.max(prev - 1, 1));
+      }
     };
     
     const goToNextPage = () => {
-      setCurrentPage(prev => Math.min(prev + 1, totalPages));
+      if (usePhasedLoading && onPageChange) {
+        onPageChange(Math.min(currentPage + 1, totalPages));
+      } else {
+        setLocalCurrentPage(prev => Math.min(prev + 1, totalPages));
+      }
     };
 
     // Calculate summary stats
@@ -600,24 +704,6 @@ const ProfitTable = ({ setSuggestionsData }) => {
       };
     }, [processedProducts]);
   
-    // Show loading state when fetching ASIN data for big accounts
-    if (isLoadingAsinData) {
-      return (
-        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-          <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
-            <div className="flex items-center gap-2">
-              <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
-              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
-            </div>
-          </div>
-          <div className="flex flex-col items-center justify-center py-8">
-            <Loader2 className="w-5 h-5 animate-spin mb-2" style={{ color: '#3b82f6' }} />
-            <p className="text-xs" style={{ color: '#9ca3af' }}>Loading product data...</p>
-          </div>
-        </div>
-      );
-    }
-    
     return (
       <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
         {/* Enhanced Header */}
@@ -635,24 +721,12 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="text-center">
-                <div className="text-[10px] uppercase tracking-wide" style={{ color: '#9ca3af' }}>Parent</div>
-                <div className="text-base font-bold" style={{ color: '#22c55e' }}>{processedProducts.length}</div>
-              </div>
-              <div className="w-px h-8" style={{ background: '#30363d' }}></div>
-              <div className="text-center">
-                <div className="text-[10px] uppercase tracking-wide" style={{ color: '#9ca3af' }}>Child</div>
-                <div className="text-base font-bold" style={{ color: '#3b82f6' }}>{processedProducts.reduce((sum, p) => sum + (p.childrenCount || 0), 0)}</div>
-              </div>
-            </div>
           </div>
         </div>
 
-        {/* Loading state */}
+        {/* Loading state - COGS (text only, no spinner) */}
         {cogsLoading && (
           <div className="flex items-center justify-center py-2 border-b" style={{ background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid rgba(59, 130, 246, 0.2)' }}>
-            <Loader2 className="w-4 h-4 animate-spin mr-2" style={{ color: '#60a5fa' }} />
             <span className="text-xs" style={{ color: '#60a5fa' }}>Loading saved COGS data...</span>
           </div>
         )}
@@ -675,16 +749,11 @@ const ProfitTable = ({ setSuggestionsData }) => {
               </tr>
             </thead>
             <tbody>
-              <AnimatePresence>
-                {currentProducts.length > 0 ? (
+              {currentProducts.length > 0 ? (
                   currentProducts.map((product, index) => (
                     <React.Fragment key={product.asin}>
                       {/* Product Row */}
-                      <motion.tr 
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3, delay: index * 0.05 }}
+                      <tr
                         className="transition-colors duration-200"
                         style={{ borderBottom: '1px solid #30363d', background: 'transparent' }}
                       >
@@ -724,7 +793,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                           </div>
                         </td>
                         <td className="px-2 py-2 text-center align-middle">
-                          <span className="text-[11px] font-semibold" style={{ color: '#f3f4f6' }}>{product.units.toLocaleString()}</span>
+                          <span className="text-[11px] font-semibold" style={{ color: '#f3f4f6' }}>{(product.units ?? product.quantity ?? 0).toLocaleString()}</span>
                         </td>
                         <td className="px-2 py-2 text-center align-middle">
                           {/* For parents with children: show expand button instead of COGS */}
@@ -834,19 +903,13 @@ const ProfitTable = ({ setSuggestionsData }) => {
                             </>
                           )}
                         </td>
-                      </motion.tr>
+                      </tr>
                       
                       {/* Expanded Child ASINs */}
-                      <AnimatePresence>
-                        {expandedRows.has(product.asin) && product.isExpandable && product.children && (
-                          <>
-                            {product.children.map((child, childIndex) => (
-                              <motion.tr
+                      {expandedRows.has(product.asin) && product.isExpandable && product.children && (
+                            product.children.map((child) => (
+                              <tr
                                 key={child.asin}
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -20 }}
-                                transition={{ duration: 0.2, delay: childIndex * 0.03 }}
                                 className="transition-colors"
                                 style={{ background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid #30363d' }}
                               >
@@ -935,12 +998,47 @@ const ProfitTable = ({ setSuggestionsData }) => {
                                     </span>
                                   )}
                                 </td>
-                              </motion.tr>
-                            ))}
-                          </>
-                        )}
-                      </AnimatePresence>
+                              </tr>
+                            ))
+                      )}
                     </React.Fragment>
+                  ))
+                ) : (tableLoading || isLoadingAsinData || (usePhasedLoading && !hasPhasedData)) ? (
+                  /* Skeleton loader: same columns as table - only loading indicator */
+                  Array.from({ length: 10 }).map((_, rowIndex) => (
+                    <tr key={`skeleton-${rowIndex}`} style={{ borderBottom: '1px solid #30363d', background: 'transparent' }}>
+                      <td className="px-2 py-2 align-middle text-center">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="1.25rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <SkeletonBar height="0.75rem" width="85%" className="rounded" />
+                        <SkeletonBar height="0.5rem" width="50%" className="rounded mt-1" />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <SkeletonBar height="0.875rem" width="4.5rem" className="rounded" />
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="2.5rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="1.5rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="1.25rem" width="3rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="2.5rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="2.5rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="2.5rem" className="rounded" /></div>
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle">
+                        <div className="flex justify-center"><SkeletonBar height="0.75rem" width="2.5rem" className="rounded" /></div>
+                      </td>
+                    </tr>
                   ))
                 ) : (
                   <tr>
@@ -959,34 +1057,40 @@ const ProfitTable = ({ setSuggestionsData }) => {
                     </td>
                   </tr>
                 )}
-              </AnimatePresence>
             </tbody>
           </table>
         </div>
         
         {/* Pagination Controls */}
-        {processedProducts.length > 0 && (
+        {(processedProducts.length > 0 || tableLoading || isLoadingAsinData || (usePhasedLoading && !hasPhasedData)) && (
           <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium" style={{ color: '#9ca3af' }}>
-                Showing {indexOfFirstProduct + 1} - {Math.min(indexOfLastProduct, processedProducts.length)} of {processedProducts.length}
+                {usePhasedLoading ? (
+                  <>Showing {Math.min((currentPage - 1) * productsPerPage + 1, serverTotalParents || serverTotalItems)} - {Math.min(currentPage * productsPerPage, serverTotalParents || serverTotalItems)} of {serverTotalParents || serverTotalItems} parents</>
+                ) : (
+                  <>Showing {indexOfFirstProduct + 1} - {Math.min(indexOfLastProduct, processedProducts.length)} of {processedProducts.length}</>
+                )}
               </span>
+              {usePhasedLoading && serverTotalChildren > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+                  +{serverTotalChildren} children
+                </span>
+              )}
               <span className="text-[10px] hidden sm:inline" style={{ color: '#6b7280' }}>
                 ({productsPerPage} per page)
               </span>
             </div>
             
             <div className="flex items-center gap-2">
-              {/* Previous Button */}
+              {/* Previous Button - not disabled during load so page change is immediate */}
               <button
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
                 className={`p-2 rounded-lg transition-all duration-200 ${
-                  currentPage === 1
-                    ? 'cursor-not-allowed' 
-                    : ''
+                  currentPage === 1 ? 'cursor-not-allowed' : ''
                 }`}
-                style={currentPage === 1 ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                style={(currentPage === 1) ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
                 onMouseEnter={(e) => currentPage !== 1 && (e.target.style.borderColor = '#3b82f6')}
                 onMouseLeave={(e) => currentPage !== 1 && (e.target.style.borderColor = '#30363d')}
                 aria-label="Previous page"
@@ -1027,17 +1131,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
                     }
                   }
                   
-                  // Visible pages
+                  // Visible pages - not disabled during load so page change is immediate
                   for (let i = startPage; i <= endPage; i++) {
                     pages.push(
                       <button
                         key={i}
                         onClick={() => setCurrentPage(i)}
-                        className={`w-8 h-8 text-sm font-medium rounded-lg transition-colors ${
-                          currentPage === i
-                            ? ''
-                            : ''
-                        }`}
+                        disabled={false}
+                        className="w-8 h-8 text-sm font-medium rounded-lg transition-colors"
                         style={currentPage === i ? { background: '#3b82f6', color: 'white' } : { background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
                         onMouseEnter={(e) => currentPage !== i && (e.target.style.borderColor = '#3b82f6')}
                         onMouseLeave={(e) => currentPage !== i && (e.target.style.borderColor = '#30363d')}
@@ -1058,6 +1159,7 @@ const ProfitTable = ({ setSuggestionsData }) => {
                       <button
                         key={totalPages}
                         onClick={() => setCurrentPage(totalPages)}
+                        disabled={false}
                         className="w-8 h-8 text-sm font-medium rounded-lg transition-colors"
                         style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
                         onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
@@ -1072,16 +1174,14 @@ const ProfitTable = ({ setSuggestionsData }) => {
                 })()}
               </div>
               
-              {/* Next Button */}
+              {/* Next Button - not disabled during load so page change is immediate */}
               <button
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages}
                 className={`p-2 rounded-lg transition-all duration-200 ${
-                  currentPage === totalPages
-                    ? 'cursor-not-allowed' 
-                    : ''
+                  currentPage === totalPages ? 'cursor-not-allowed' : ''
                 }`}
-                style={currentPage === totalPages ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                style={(currentPage === totalPages) ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
                 onMouseEnter={(e) => currentPage !== totalPages && (e.target.style.borderColor = '#3b82f6')}
                 onMouseLeave={(e) => currentPage !== totalPages && (e.target.style.borderColor = '#30363d')}
                 aria-label="Next page"

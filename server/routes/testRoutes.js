@@ -4,7 +4,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
@@ -45,5 +45,8 @@ router.post('/testNumberOfProductReviews', testNumberOfProductReviews)  // Fetch
 
 // Alerts - Fetches NumberOfProductReviews once; runs product content change + negative reviews (rating < 4)
 router.post('/testAlerts', testAlerts)  // Body: { userId, country, region }
+
+// All Ads Services - Calls all Amazon Ads APIs in one request (PPC Spends, Keywords Performance, Campaigns, Ad Groups, Search Keywords, etc.)
+router.post('/testAllAdsServices', testAllAdsServices)  // Body: { userId, country, region }
 
 module.exports=router

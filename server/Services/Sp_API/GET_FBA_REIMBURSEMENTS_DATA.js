@@ -1,9 +1,12 @@
 const axios = require("axios");
 const zlib = require("zlib");
+const { promisify } = require('util');
+const gunzip = promisify(zlib.gunzip);
 const { parse } = require('csv-parse/sync');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel');
+const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 /**
  * GET_FBA_REIMBURSEMENTS_DATA Report Service
@@ -33,12 +36,19 @@ const generateReport = async (accessToken, marketplaceIds, baseuri) => {
         StartTime.setMonth(StartTime.getMonth() - 9);
         StartTime.setHours(0, 0, 0, 0); // Start of 9 months ago
         
+        const reportType = "GET_FBA_REIMBURSEMENTS_DATA";
         const requestBody = {
-            reportType: "GET_FBA_REIMBURSEMENTS_DATA",
+            reportType: reportType,
             marketplaceIds: marketplaceIds,
             dataStartTime: StartTime.toISOString(),
             dataEndTime: EndTime.toISOString()
         };
+        
+        // Add reportOptions to request English headers (for non-English marketplaces)
+        const reportOptions = getReportOptions(reportType);
+        if (reportOptions) {
+            requestBody.reportOptions = reportOptions;
+        }
 
         const requestHeaders = {
             "x-amz-access-token": accessToken,
@@ -218,7 +228,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         logger.info("[GET_FBA_REIMBURSEMENTS_DATA] Converting TSV to JSON...");
         logger.info(`[GET_FBA_REIMBURSEMENTS_DATA] Raw data size: ${fullReport.data.length} bytes`);
         
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
         
         // Map field names to match schema (replace spaces/hyphens with underscores)
         const mappedData = refinedData.map(item => {
@@ -270,17 +280,18 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
 /**
  * Convert TSV buffer to JSON using csv-parse library
  * Handles gzip decompression and normalizes headers
+ * Uses async gunzip to avoid blocking the event loop
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped
+        // First try to decompress if it's gzipped (async to prevent event loop blocking)
         let decompressedData;
         
         // Check if data is gzipped by looking at magic bytes (1F 8B)
         const firstBytes = tsvBuffer.slice(0, 2);
         if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
             try {
-                decompressedData = zlib.gunzipSync(tsvBuffer);
+                decompressedData = await gunzip(tsvBuffer);
             } catch (decompressError) {
                 logger.error("[GET_FBA_REIMBURSEMENTS_DATA] Failed to decompress gzipped data:", decompressError.message);
                 throw new Error(`Failed to decompress gzipped data: ${decompressError.message}`);
@@ -302,16 +313,9 @@ function convertTSVToJson(tsvBuffer) {
             logger.info(`[GET_FBA_REIMBURSEMENTS_DATA] TSV Preview (first 500 chars): ${preview}`);
         }
 
-        // Use csv-parse with custom column transformation to normalize headers
+        // Use csv-parse with first row as headers (normalization is done after parsing)
         const records = parse(tsv, {
-            columns: (headers) => headers.map(h => {
-                let header = h.trim();
-                if (header.startsWith('"') && header.endsWith('"')) {
-                    header = header.slice(1, -1);
-                }
-                // Normalize: lowercase, replace hyphens and spaces with underscores
-                return header.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_");
-            }),
+            columns: true,
             delimiter: '\t',
             skip_empty_lines: true,
             relax_column_count: true,
@@ -333,7 +337,7 @@ function convertTSVToJson(tsvBuffer) {
 
         // Fallback to legacy parsing
         try {
-            return convertTSVToJsonLegacy(tsvBuffer);
+            return await convertTSVToJsonLegacy(tsvBuffer);
         } catch (fallbackError) {
             logger.error('[GET_FBA_REIMBURSEMENTS_DATA] Fallback parsing also failed', { 
                 error: fallbackError.message 
@@ -343,11 +347,11 @@ function convertTSVToJson(tsvBuffer) {
     }
 }
 
-function convertTSVToJsonLegacy(tsvBuffer) {
+async function convertTSVToJsonLegacy(tsvBuffer) {
     let decompressedData;
     const firstBytes = tsvBuffer.slice(0, 2);
     if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
-        decompressedData = zlib.gunzipSync(tsvBuffer);
+        decompressedData = await gunzip(tsvBuffer);
     } else {
         decompressedData = tsvBuffer;
     }

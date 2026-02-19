@@ -931,6 +931,10 @@ class ScheduledIntegration {
         const fourthBatchPromises = [];
         const fourthBatchServiceNames = [];
 
+        // Fifth batch: Calculation services (run after all API fetches complete)
+        const fifthBatchPromises = [];
+        const fifthBatchServiceNames = [];
+
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
             // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise, PPC Metrics Aggregated
@@ -951,6 +955,11 @@ class ScheduledIntegration {
             // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
             if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations'].includes(functionKey)) {
                 return 4;
+            }
+            // Batch 5: Calculation services (run after all API fetches complete)
+            // These are marked with isCalculationService: true in ScheduleConfig
+            if (['issueSummary', 'productIssues'].includes(functionKey)) {
+                return 5;
             }
             // Default to batch 2 if function key is not recognized
             logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
@@ -976,6 +985,10 @@ class ScheduledIntegration {
                 case 4:
                     fourthBatchPromises.push(promise);
                     fourthBatchServiceNames.push(description);
+                    break;
+                case 5:
+                    fifthBatchPromises.push(promise);
+                    fifthBatchServiceNames.push(description);
                     break;
             }
         };
@@ -1196,6 +1209,10 @@ class ScheduledIntegration {
                             AccessToken, marketplaceIds, userId, Base_URI, Country, Region
                         );
                     }
+                } else if (functionConfig.isCalculationService) {
+                    // Calculation services (IssueSummary, ProductIssues)
+                    // These run after all API fetches complete and use (userId, country, region, source)
+                    promise = serviceFunction(userId, Country, Region, 'schedule');
                 } else {
                     // Reimbursement functions (calculation only, no API call)
                     promise = serviceFunction(userId, Country, Region);
@@ -1377,6 +1394,42 @@ class ScheduledIntegration {
             }
         }
         logger.info("Fourth Batch Ends");
+
+        // Fifth Batch: Calculation services (run after all API fetches complete)
+        if (fifthBatchPromises.length > 0) {
+            logger.info("Fifth Batch (Calculation Services) Starts");
+            const fifthBatchResults = await Promise.allSettled(fifthBatchPromises);
+            let resultIndex = 0;
+            
+            // Process results in order
+            for (const serviceName of fifthBatchServiceNames) {
+                const functionKey = Object.keys(scheduledFunctions).find(key => 
+                    scheduledFunctions[key].description === serviceName
+                );
+                if (functionKey && resultIndex < fifthBatchResults.length) {
+                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
+                    if (!apiData[dataKey]) {
+                        // Calculation services return { success, data, error } format
+                        const result = fifthBatchResults[resultIndex];
+                        if (result.status === 'fulfilled') {
+                            const value = result.value;
+                            if (value && typeof value === 'object' && 'success' in value) {
+                                apiData[dataKey] = value;
+                            } else if (value) {
+                                apiData[dataKey] = { success: true, data: value, error: null };
+                            } else {
+                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
+                            }
+                        } else {
+                            const errorMsg = result.reason?.message || 'Promise rejected';
+                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
+                        }
+                    }
+                    resultIndex++;
+                }
+            }
+        }
+        logger.info("Fifth Batch (Calculation Services) Ends");
 
         // Process listing items if scheduled (simplified version)
         if (scheduledFunctions['GetListingItem'] && AccessToken) {
@@ -1842,6 +1895,11 @@ class ScheduledIntegration {
             if (!addAccountHistoryData) {
                 throw new Error('Failed to add account history - null result');
             }
+
+            // NOTE: IssueSummary, ProductIssues, and IssuesData are NOT updated here for scheduled runs.
+            // They are only recalculated on Sundays via ScheduleConfig (after NumberOfProductReviews runs)
+            // This avoids unnecessary daily recalculation of issue counts/data.
+            // First-time integration (Integration.js) still calculates them immediately.
 
             logger.info("addNewAccountHistory completed successfully (scheduled)", { userId, country, region });
             return addAccountHistoryData;

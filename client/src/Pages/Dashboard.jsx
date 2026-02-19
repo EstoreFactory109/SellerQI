@@ -6,7 +6,6 @@ import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.js
 import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
 import Calender from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
-import { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
 import { SkeletonStatValue, SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../Components/Skeleton/Skeleton.jsx'
 import { useSelector, useDispatch } from 'react-redux'
@@ -69,7 +68,26 @@ const Dashboard = () => {
   }, [location.pathname]) // Reset when route changes
   
   // Fetch dashboard data using the hook (automatically fetches on mount)
-  const { data: dashboardInfo, loading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardData()
+  // Now uses 4-phase progressive loading:
+  // Phase 1: Instant (~50ms) - error counts, product counts, date range
+  // Phase 2: Core (~150ms) - sales totals, account health, finance, PPC summary
+  // Phase 3: Charts (~200ms) - datewiseSales, orders, products arrays
+  // Phase 4: Top Products (~50ms) - top 4 products by issues
+  const { 
+    data: dashboardInfo, 
+    loading: dashboardLoading, 
+    loadingPhase1,
+    loadingPhase2,
+    loadingPhase3,
+    loadingTop4,
+    error: dashboardError, 
+    refetch: refetchDashboard,
+    isPhase1Complete,
+    isPhase2Complete,
+    isPhase3Complete,
+    isPhase4Complete,
+    isFullyLoaded
+  } = useDashboardData()
   
   // Get reimbursement data from Redux (cached)
   const reimbursementData = useSelector(state => state.reimbursement)
@@ -296,17 +314,9 @@ const Dashboard = () => {
     }
   }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
   
-  // Check data availability
-  const { hasAnyData, hasAllData, missingItems, availableItems } = useDataAvailability({
-    accountHealth: dashboardInfo?.accountHealthPercentage,
-    financeData: dashboardInfo?.accountFinance,
-    totalSales: dashboardInfo?.TotalWeeklySale,
-    products: dashboardInfo?.TotalProduct,
-    reimbursement: dashboardInfo?.reimbustment,
-    inventoryAnalysis: dashboardInfo?.InventoryAnalysis
-  });
-
   // Fetch reimbursement data from Redux (cached for 5 minutes)
+  // Note: Basic reimbursement summary is now included in dashboard summary
+  // This fetch is only needed for detailed reimbursement breakdown
   useEffect(() => {
     const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
     const now = Date.now();
@@ -316,22 +326,26 @@ const Dashboard = () => {
     // 2. Cache has expired (more than 5 minutes old)
     const shouldFetch = !reimbursementLastFetched || (now - reimbursementLastFetched) > CACHE_DURATION;
     
-    if (shouldFetch && !reimbursementLoading) {
+    // Defer reimbursement fetch until Phase 1 is complete (don't block initial load)
+    if (shouldFetch && !reimbursementLoading && isPhase1Complete) {
       dispatch(fetchReimbursementSummary());
     }
-  }, [dispatch, reimbursementLastFetched, reimbursementLoading])
+  }, [dispatch, reimbursementLastFetched, reimbursementLoading, isPhase1Complete])
 
   // Fetch PPC metrics from PPCMetrics model (cached for 5 minutes)
+  // Note: Basic PPC summary is now included in dashboard summary
+  // This fetch is for detailed PPC metrics if needed
   useEffect(() => {
     const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
     const now = Date.now();
     
     const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
     
-    if (shouldFetch && !ppcMetricsLoading) {
+    // Defer PPC fetch until Phase 1 is complete (don't block initial load)
+    if (shouldFetch && !ppcMetricsLoading && isPhase1Complete) {
       dispatch(fetchLatestPPCMetrics());
     }
-  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading])
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading, isPhase1Complete])
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -607,20 +621,18 @@ const Dashboard = () => {
         ref={contentRef}
         className='px-2 lg:px-3 py-1.5 pb-0'
       >
-            {hasAnyData && !hasAllData && (
-            <PartialDataNotice 
-              missingItems={missingItems} 
-              availableItems={availableItems}
-              className="mb-1.5"
-            />
-          )}
-
-          {/* Quick Stats */}
+          {/* Quick Stats - each card shows skeleton based on which phase provides its data */}
           <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 mb-1'>
             {quickStats.map((stat) => {
               const Icon = stat.icon
-              const isLoading = dashboardLoading || !hasAnyData
-              
+              // Determine loading state based on which phase provides the data
+              const isStatLoading = stat.label === 'Amazon Owes You'
+                ? (!isPhase1Complete || reimbursementLoading)
+                : stat.label === 'Money Wasted in Ads'
+                  ? !isPhase3Complete  // Money wasted comes from Phase 3 (adsKeywordsData)
+                  : stat.label === 'ACoS %'
+                    ? (!isPhase2Complete || ppcMetricsLoading)  // ACoS from Phase 2 (PPC summary)
+                    : !isPhase1Complete  // Total Issues from Phase 1
               return (
                 <motion.div
                   key={stat.label}
@@ -628,43 +640,35 @@ const Dashboard = () => {
                   animate={{ opacity: 1, y: 0 }}
                   whileHover={{ scale: 1.01 }}
                   transition={{ duration: 0.2 }}
-                  onClick={() => !isLoading && navigate(stat.link)}
+                  onClick={() => !isStatLoading && navigate(stat.link)}
                   className="rounded p-2 border border-border-dark hover:border-accent/50 transition-colors cursor-pointer"
                 >
                   <div className='flex items-center gap-2 mb-1'>
                     <Icon className="w-4 h-4 text-accent" />
                     <p className='text-xs font-medium text-gray-300'>{stat.label}</p>
                   </div>
-                  {isLoading ? <SkeletonStatValue /> : <div className='text-lg font-bold text-gray-100'>{stat.value}</div>}
+                  {isStatLoading ? <SkeletonStatValue /> : <div className='text-lg font-bold text-gray-100'>{stat.value}</div>}
                 </motion.div>
               )
             })}
           </div>
 
-          {/* Main grid */}
+          {/* Main grid - each section shows skeleton based on which phase provides its data */}
           <div className='grid grid-cols-1 lg:grid-cols-3 gap-1.5 mb-1'>
+            {/* Account Health - needs Phase 2 data (account health percentage) */}
             <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }} className='bg-[#161b22] rounded border border-[#30363d] overflow-hidden'>
-              {(dashboardLoading || !hasAnyData) ? (
-                <>
-                  <div className="p-1.5 border-b border-[#30363d]">
-                    <h3 className="text-xs font-semibold text-gray-100">Account Health</h3>
-                  </div>
-                  <SkeletonCardBody rows={3} />
-                </>
+              {!isPhase2Complete ? (
+                <SkeletonCardBody rows={3} />
               ) : (
                 <ErrorBoundary title="Account Health Unavailable" message="Unable to load account health data.">
                   <AccountHealth />
                 </ErrorBoundary>
               )}
             </motion.div>
+            {/* TotalSales - needs Phase 3 data (datewiseSales array for chart) */}
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-hidden'>
-              {(dashboardLoading || !hasAnyData) ? (
-                <>
-                  <div className="p-1.5 border-b border-[#30363d]">
-                    <h3 className="text-xs font-semibold text-gray-100">Total Sales</h3>
-                  </div>
-                  <div className="p-1"><SkeletonChart height={220} /></div>
-                </>
+              {!isPhase3Complete ? (
+                <div className="p-1"><SkeletonChart height={220} /></div>
               ) : (
                 <ErrorBoundary title="Sales Data Unavailable" message="Unable to load sales data.">
                   <TotalSales />
@@ -673,15 +677,10 @@ const Dashboard = () => {
             </motion.div>
           </div>
 
-          {/* Product Checker */}
+          {/* Product Checker - skeleton until Phase 4 (top 4 products) data is ready */}
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.06 }} className='bg-[#161b22] rounded border border-[#30363d] overflow-hidden mb-0'>
-            {(dashboardLoading || !hasAnyData) ? (
-              <>
-                <div className="p-1.5 border-b border-[#30363d]">
-                  <h3 className="text-xs font-semibold text-gray-100">Product Checker</h3>
-                </div>
-                <div className="p-1"><SkeletonTableBody rows={3} /></div>
-              </>
+            {!isPhase4Complete ? (
+              <div className="p-1"><SkeletonTableBody rows={3} /></div>
             ) : (
               <ErrorBoundary title="Product Analysis Unavailable" message="Unable to load product analysis data.">
                 <ProductChecker />
