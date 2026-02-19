@@ -18,7 +18,7 @@ const AdsGroup = require('../../models/amazon-ads/adsgroupModel');
 const Keyword = require('../../models/amazon-ads/keywordModel');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
-const logger = require('../../utils/logger');
+const logger = require('../../utils/Logger');
 
 /**
  * Helper to create pagination metadata
