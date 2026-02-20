@@ -768,21 +768,24 @@ const testAmazonAds = async (req, res) => {
         });
       }
       
-      // Extract ASINs from the seller account products
+      // Extract ASINs from ACTIVE products only
       const products = sellerAccount.products || [];
-      const asins = products
+      const activeProducts = products.filter(p => p.status === 'Active');
+      const asins = activeProducts
         .map(p => p.asin)
         .filter(asin => asin && typeof asin === 'string' && asin.trim().length > 0);
       
       if (asins.length === 0) {
         return res.status(400).json({
           success: false,
-          error: 'No ASINs found in the seller account products',
-          suggestion: 'Please ensure the seller account has products with ASINs'
+          error: 'No active products with ASINs found in the seller account',
+          suggestion: 'Please ensure the seller account has active products with ASINs',
+          totalProducts: products.length,
+          activeProducts: activeProducts.length
         });
       }
       
-      console.log(`✅ [testNumberOfProductReviews] Found ${asins.length} ASINs for processing`);
+      console.log(`✅ [testNumberOfProductReviews] Found ${asins.length} ASINs from active products (${products.length} total, ${activeProducts.length} active)`);
       console.log('🧪 [testNumberOfProductReviews] Starting product reviews fetch:', {
         userId,
         country,

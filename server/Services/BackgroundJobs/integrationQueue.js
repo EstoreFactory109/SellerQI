@@ -277,6 +277,163 @@ async function addIntegrationJob(userId, country, region) {
 }
 
 /**
+ * Add a phase job to the queue (used for chained job execution)
+ * 
+ * @param {Object} jobData - Phase job data
+ * @param {string} jobData.userId - User ID
+ * @param {string} jobData.country - Country code
+ * @param {string} jobData.region - Region code
+ * @param {string} jobData.phase - Phase name (init, batch_1_2, batch_3_4, listing_items, finalize)
+ * @param {string} jobData.parentJobId - Parent job ID for tracking
+ * @param {Object} jobData.phaseData - Data passed from previous phase
+ * @returns {Object} Job info
+ */
+async function addPhaseJob(jobData) {
+    const queue = getIntegrationQueue();
+    const { userId, country, region, phase, parentJobId, phaseData, triggeredAt } = jobData;
+    
+    // Generate phase-specific job ID
+    const phaseJobId = `${parentJobId}-${phase}`;
+    
+    // Check if this phase job already exists
+    const existingJob = await queue.getJob(phaseJobId);
+    if (existingJob) {
+        const state = await existingJob.getState();
+        if (state === 'waiting' || state === 'active' || state === 'delayed') {
+            logger.info(`[IntegrationQueue] Phase job ${phaseJobId} already in progress. State: ${state}`);
+            return {
+                jobId: phaseJobId,
+                isExisting: true,
+                state
+            };
+        }
+        
+        // Remove completed/failed phase job to create new one
+        try {
+            await existingJob.remove();
+        } catch (removeError) {
+            logger.warn(`[IntegrationQueue] Could not remove existing phase job: ${removeError.message}`);
+        }
+    }
+    
+    // Create the phase job with extended timeout for long-running phases
+    // Phases can run 6+ hours for large catalogs (5k+ products with reviews, listings)
+    const job = await queue.add(
+        'integration-phase',
+        {
+            userId,
+            country,
+            region,
+            phase,
+            parentJobId,
+            phaseData: phaseData || {},
+            triggeredAt: triggeredAt || new Date().toISOString()
+        },
+        {
+            jobId: phaseJobId,
+            priority: 1,
+            // Phase-specific settings
+            attempts: 2,
+            backoff: {
+                type: 'exponential',
+                delay: 60000 // 1 minute delay between retries
+            },
+            // Extended timeout for phases (6 hours) - handles large catalogs
+            timeout: 6 * 60 * 60 * 1000 // 6 hours
+        }
+    );
+    
+    logger.info(`[IntegrationQueue] Added phase job ${job.id} (phase: ${phase}) for user ${userId}`);
+    
+    return {
+        jobId: job.id,
+        isExisting: false,
+        state: 'waiting',
+        phase
+    };
+}
+
+/**
+ * Get aggregated job status for an integration (considering all phases)
+ * 
+ * @param {string} parentJobId - Parent job ID
+ * @returns {Object} Aggregated job status
+ */
+async function getAggregatedJobStatus(parentJobId) {
+    const { PHASES, PHASE_ORDER, getPhaseDescription } = require('./integrationPhases.js');
+    const queue = getIntegrationQueue();
+    const JobStatus = require('../../models/system/JobStatusModel.js');
+    
+    // Try to get status from database first (more reliable for phased jobs)
+    try {
+        const dbStatus = await JobStatus.findOne({ jobId: parentJobId }).lean();
+        
+        if (dbStatus) {
+            return {
+                found: true,
+                jobId: parentJobId,
+                status: dbStatus.status,
+                progress: dbStatus.progress || 0,
+                currentPhase: dbStatus.currentPhase,
+                currentPhaseDescription: dbStatus.currentPhase ? getPhaseDescription(dbStatus.currentPhase) : null,
+                metadata: dbStatus.metadata,
+                error: dbStatus.error,
+                startedAt: dbStatus.startedAt,
+                completedAt: dbStatus.completedAt,
+                failedAt: dbStatus.failedAt,
+                summary: dbStatus.metadata?.summary
+            };
+        }
+    } catch (dbError) {
+        logger.warn(`[IntegrationQueue] Error fetching job status from DB:`, dbError.message);
+    }
+    
+    // Fall back to checking the queue directly
+    const job = await queue.getJob(parentJobId);
+    
+    if (!job) {
+        // Check for any phase jobs
+        for (const phase of PHASE_ORDER) {
+            const phaseJobId = `${parentJobId}-${phase}`;
+            const phaseJob = await queue.getJob(phaseJobId);
+            if (phaseJob) {
+                const state = await phaseJob.getState();
+                return {
+                    found: true,
+                    jobId: parentJobId,
+                    status: state,
+                    currentPhase: phase,
+                    currentPhaseDescription: getPhaseDescription(phase),
+                    progress: PHASE_ORDER.indexOf(phase) * (100 / PHASE_ORDER.length)
+                };
+            }
+        }
+        
+        return {
+            found: false,
+            status: 'not_found',
+            message: 'Job not found'
+        };
+    }
+    
+    const state = await job.getState();
+    const progress = job.progress || 0;
+    
+    return {
+        found: true,
+        jobId: job.id,
+        status: state,
+        progress,
+        data: job.data,
+        returnvalue: state === 'completed' ? job.returnvalue : null,
+        failedReason: state === 'failed' ? job.failedReason : null,
+        attemptsMade: job.attemptsMade,
+        processedOn: job.processedOn,
+        finishedOn: job.finishedOn
+    };
+}
+
+/**
  * Get job status by job ID
  * @param {string} jobId - Job ID
  * @returns {Object} Job status
@@ -324,7 +481,9 @@ async function closeIntegrationQueue() {
 module.exports = {
     getIntegrationQueue,
     addIntegrationJob,
+    addPhaseJob,
     getIntegrationJobStatus,
+    getAggregatedJobStatus,
     closeIntegrationQueue,
     getCurrentAccountStatus,
     INTEGRATION_QUEUE_NAME

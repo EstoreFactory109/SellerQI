@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../middlewares/Auth/auth.js");
+const { validateSaveCogs, validateBulkSaveCogs, validateAsinParam } = require("../middlewares/validator/cogsValidate.js");
 const {
   getCogs,
   saveCogs,
@@ -13,13 +14,13 @@ const {
 router.get("/", auth, getCogs);
 
 // Save or update COGS for a specific ASIN
-router.post("/", auth, saveCogs);
+router.post("/", auth, validateSaveCogs, saveCogs);
 
 // Bulk update COGS for multiple ASINs
-router.post("/bulk", auth, bulkSaveCogs);
+router.post("/bulk", auth, validateBulkSaveCogs, bulkSaveCogs);
 
 // Delete COGS for a specific ASIN
-router.delete("/:asin", auth, deleteCogs);
+router.delete("/:asin", auth, validateAsinParam, deleteCogs);
 
 // Delete all COGS data
 router.delete("/", auth, deleteAllCogs);

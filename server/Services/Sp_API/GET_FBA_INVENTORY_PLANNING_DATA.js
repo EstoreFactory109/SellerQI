@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const FbaInventoryPlanningData = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
@@ -164,7 +164,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
             throw new ApiError(500, "Internal server error in generating the report");
         }
 
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
 
         if (!refinedData || refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -283,42 +283,29 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * More robust handling of malformed data, encoding issues, and edge cases
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        const tsv = tsvBuffer.toString("utf-8");
-        
-        // Check if buffer is empty
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('TSV buffer is empty');
-            return [];
-        }
+        const records = await parseAsync(tsvBuffer, {
+            delimiter: '\t',
+            columns: true,
+            reportType: 'GET_FBA_INVENTORY_PLANNING_DATA'
+        });
 
-        const records = parse(tsv, {
-            columns: (headers) => normalizeHeaders(headers),  // Normalize localized headers to English
-            delimiter: '\t',            // TSV delimiter
-            skip_empty_lines: true,     // Skip empty lines
-            relax_column_count: true,   // Handle rows with different column counts
-            trim: true,                 // Trim whitespace from values
-            skip_records_with_error: true,  // Skip malformed rows instead of throwing
-            on_record: (record, context) => {
-                // Log any parsing issues for debugging
-                if (context.error) {
-                    logger.warn('TSV parsing warning', { 
-                        line: context.lines, 
-                        error: context.error.message 
-                    });
+        // Apply header normalization after parsing
+        if (records.length > 0) {
+            const normalizedRecords = records.map(record => {
+                const normalized = {};
+                for (const [key, value] of Object.entries(record)) {
+                    const normalizedKey = normalizeHeaders([key])[0] || key;
+                    normalized[normalizedKey] = value;
                 }
-                return record;
-            }
-        });
-
-        logger.info('TSV parsed successfully', { 
-            totalRecords: records.length,
-            sampleHeaders: records.length > 0 ? Object.keys(records[0]).slice(0, 5) : []
-        });
+                return normalized;
+            });
+            return normalizedRecords;
+        }
 
         return records;
 
@@ -328,7 +315,7 @@ function convertTSVToJson(tsvBuffer) {
             errorCode: error.code
         });
 
-        // Fallback to legacy parsing if csv-parse fails
+        // Fallback to legacy parsing if async parse fails
         logger.info('Attempting fallback TSV parsing...');
         try {
             return convertTSVToJsonLegacy(tsvBuffer);

@@ -2,10 +2,11 @@ const express=require('express');
 const {AddAccountHistory,getAccountHistory}=require('../controllers/user-auth/AccountHistoryController.js')
 const auth=require('../middlewares/Auth/auth.js')
 const {getLocation}=require('../middlewares/Auth/getLocation.js')
+const { validateAddAccountHistory } = require('../middlewares/validator/accountHistoryValidate.js')
 const router=express.Router();
 
 
-router.post('/addAccountHistory',auth,getLocation,AddAccountHistory);
+router.post('/addAccountHistory',auth,getLocation,validateAddAccountHistory,AddAccountHistory);
 router.get('/getAccountHistory',auth,getLocation,getAccountHistory);
 
 module.exports=router

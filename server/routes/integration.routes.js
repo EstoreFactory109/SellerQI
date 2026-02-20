@@ -17,6 +17,7 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { validateJobIdParam, validateAdminTriggerBody } = require('../middlewares/validator/integrationValidate.js');
 // Rate limiters disabled except for authentication
 // const { integrationRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
@@ -33,7 +34,7 @@ const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 router.post('/trigger', auth, getLocation, triggerIntegrationJob);
 
 // Get job status by job ID (requires auth only)
-router.get('/status/:jobId', auth, getJobStatus);
+router.get('/status/:jobId', auth, validateJobIdParam, getJobStatus);
 
 // Get user's active job (requires auth + location)
 router.get('/active', auth, getLocation, getActiveJob);
@@ -42,7 +43,7 @@ router.get('/active', auth, getLocation, getActiveJob);
 router.get('/history', auth, getJobHistory);
 
 // Admin route - Trigger integration job for any user (requires super admin auth)
-router.post('/admin/trigger', superAdminAuth, adminTriggerIntegrationJob);
+router.post('/admin/trigger', superAdminAuth, validateAdminTriggerBody, adminTriggerIntegrationJob);
 
 module.exports = router;
 

@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js'); 
@@ -160,7 +160,7 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             throw new ApiError(500, "Internal server error in generating the report");
         }
 
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
         
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
@@ -252,29 +252,15 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * More robust handling of malformed data, encoding issues, and edge cases
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        const tsv = tsvBuffer.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] TSV buffer is empty');
-            return [];
-        }
-
-        const records = parse(tsv, {
-            columns: true,  // Keep original headers - this report's data access relies on exact header names
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true
-        });
-
-        logger.info('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] TSV parsed successfully', { 
-            totalRecords: records.length 
+            columns: true,
+            reportType: 'GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT'
         });
 
         return records;

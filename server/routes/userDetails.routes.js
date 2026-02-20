@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { validateGetUserQuery } = require('../middlewares/validator/userDetailsValidate.js');
 const { getAllUsers, getUserByEmailOrPhone } = require('../controllers/user-auth/GetUserDetails.js');
 
 /**
@@ -14,6 +15,6 @@ router.get('/all-users', getAllUsers);
  * Query parameters: email (optional), phone (optional)
  * At least one parameter is required
  */
-router.get('/user', getUserByEmailOrPhone);
+router.get('/user', validateGetUserQuery, getUserByEmailOrPhone);
 
 module.exports = router;

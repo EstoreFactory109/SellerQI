@@ -10,6 +10,7 @@ const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
 const { analyseDataCache } = require('../middlewares/redisCache.js');
+const { validateAsinParam, validateTaskStatusBody } = require('../middlewares/validator/pageWiseDataValidate.js');
 // Rate limiters disabled except for authentication
 // const { analyticsRateLimiter } = require('../middlewares/rateLimiting.js');
 
@@ -266,7 +267,7 @@ router.get('/issues/products', auth, getLocation, analyseDataCache(600, 'issues-
 
 // ===== PRODUCT HISTORY (for single product trend graphs) =====
 // Returns historical performance data for a specific ASIN
-router.get('/product-history/:asin', auth, getLocation, getProductHistory);
+router.get('/product-history/:asin', auth, getLocation, validateAsinParam, getProductHistory);
 
 // ===== COMPARISON DEBUG (for checking WoW/MoM data availability) =====
 // Returns counts of BuyBoxData and EconomicsMetrics documents
@@ -354,7 +355,7 @@ router.get('/account-history', auth, getLocation, analyseDataCache(3600, 'accoun
 router.get('/tasks', auth, getTasksData);
 
 // Update task status
-router.put('/tasks/status', auth, updateTaskStatus);
+router.put('/tasks/status', auth, validateTaskStatusBody, updateTaskStatus);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards

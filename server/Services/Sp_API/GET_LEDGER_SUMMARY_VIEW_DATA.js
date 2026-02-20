@@ -2,7 +2,7 @@ const axios = require("axios");
 const zlib = require("zlib");
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 // Use service layer for saving data (handles 16MB limit with separate collection)
@@ -257,92 +257,31 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * Handles gzip decompression and normalizes headers (lowercase, replace hyphens/spaces with underscores)
- * Uses async gunzip to avoid blocking the event loop
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
 async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped (async to prevent event loop blocking)
-        let decompressedData;
-        
-        // Check if data is gzipped by looking at magic bytes (1F 8B)
-        const firstBytes = tsvBuffer.slice(0, 2);
-        if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
-            try {
-                decompressedData = await gunzip(tsvBuffer);
-            } catch (decompressError) {
-                logger.error("[GET_LEDGER_SUMMARY_VIEW_DATA] Failed to decompress gzipped data:", decompressError.message);
-                throw new Error(`Failed to decompress gzipped data: ${decompressError.message}`);
-            }
-        } else {
-            decompressedData = tsvBuffer;
-        }
-        
-        const tsv = decompressedData.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV buffer is empty');
-            return [];
-        }
-
-        // Log preview for debugging
-        if (tsv.length > 0) {
-            const preview = tsv.substring(0, 500);
-            logger.info(`[GET_LEDGER_SUMMARY_VIEW_DATA] TSV Preview (first 500 chars): ${preview}`);
-        }
-
-        // Use csv-parse with custom column transformation to normalize headers
-        let originalHeaders = [];
-        const records = parse(tsv, {
-            columns: (headers) => {
-                // Store original headers for logging
-                originalHeaders = headers.map(h => {
-                    let header = h.trim();
-                    if (header.startsWith('"') && header.endsWith('"')) {
-                        header = header.slice(1, -1);
-                    }
-                    return header;
-                });
-                
-                // Log original headers to verify date column exists
-                logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Original TSV headers:', originalHeaders);
-                logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Looking for date column (case-insensitive):', 
-                    originalHeaders.filter(h => h.toLowerCase().includes('date')).join(', ') || 'NOT FOUND'
-                );
-                
-                // Normalize headers using the mapping utility (handles localized headers)
-                return normalizeHeaders(headers);
-            },
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true,
-            relax_quotes: true
+            columns: true,
+            reportType: 'GET_LEDGER_SUMMARY_VIEW_DATA'
         });
 
-        // Log normalized headers and sample record to verify date field
+        // Apply header normalization after parsing
         if (records.length > 0) {
-            const normalizedHeaders = Object.keys(records[0]);
-            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Normalized headers:', normalizedHeaders);
-            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Date field in normalized headers:', 
-                normalizedHeaders.filter(h => h.includes('date')).join(', ') || 'NOT FOUND'
-            );
+            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Sample record keys:', Object.keys(records[0]).join(', '));
             
-            // Log sample record to see actual data structure
-            const sampleRecord = records[0];
-            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Sample record keys:', Object.keys(sampleRecord).join(', '));
-            if (sampleRecord.date) {
-                logger.info(`[GET_LEDGER_SUMMARY_VIEW_DATA] ✅ Date field found! Sample date value: "${sampleRecord.date}"`);
-            } else {
-                logger.warn(`[GET_LEDGER_SUMMARY_VIEW_DATA] ⚠️ Date field NOT found in sample record. Available fields: ${Object.keys(sampleRecord).join(', ')}`);
-            }
+            const normalizedRecords = records.map(record => {
+                const normalized = {};
+                for (const [key, value] of Object.entries(record)) {
+                    const normalizedKey = normalizeHeaders([key])[0] || key;
+                    normalized[normalizedKey] = value;
+                }
+                return normalized;
+            });
+            return normalizedRecords;
         }
-
-        logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] TSV parsed successfully', { 
-            totalRecords: records.length 
-        });
 
         return records;
 

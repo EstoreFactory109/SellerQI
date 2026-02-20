@@ -216,7 +216,7 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             contentLength: rangeDocumentContent.length 
         });
 
-        const calculatedMetrics = calculateEconomicsMetrics(
+        const calculatedMetrics = await calculateEconomicsMetrics(
             rangeDocumentContent,
             startDateStr,
             endDateStr,
@@ -272,7 +272,7 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
                         
                         if (dayDocumentContent && dayDocumentContent.trim() !== '') {
                             // Calculate date-wise metrics from DAY document
-                            datewiseMetrics = calculateDatewiseMetrics(
+                            datewiseMetrics = await calculateDatewiseMetrics(
                                 dayDocumentContent,
                                 startDateStr,
                                 endDateStr,
@@ -338,7 +338,7 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
                         
                         if (asinDailyDocumentContent && asinDailyDocumentContent.trim() !== '') {
                             // Calculate ASIN-wise daily metrics using the new function
-                            asinWiseDailyMetrics = calculateAsinWiseDailyMetrics(
+                            asinWiseDailyMetrics = await calculateAsinWiseDailyMetrics(
                                 asinDailyDocumentContent,
                                 startDateStr,
                                 endDateStr,

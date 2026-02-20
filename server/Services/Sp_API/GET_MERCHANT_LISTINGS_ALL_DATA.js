@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const SellerModel = require('../../models/user-auth/sellerCentralModel.js');
@@ -220,78 +220,87 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
             logger.info('[GET_MERCHANT_LISTINGS_ALL_DATA] Sample record headers:', Object.keys(refinedData[0]).join(', '));
         }
         
-        refinedData.forEach((data) => {
-            // Handle multiple possible header names (English, German, French, Italian, Spanish, etc.)
-            const asin = findField(data, 
-                // English variants
-                'asin1', 'ASIN1', 'asin', 'ASIN', 'product-id', 'Product-ID',
-                // German variants
-                'Produkt-ID', 'Artikelnummer', 'ASIN1',
-                // Product ID is sometimes in a different column
-                'listing-id', 'Listing-ID'
-            );
+        // Process records in chunks to yield to event loop (prevents blocking lock extension)
+        const CHUNK_SIZE = 200;
+        for (let i = 0; i < refinedData.length; i += CHUNK_SIZE) {
+            const chunk = refinedData.slice(i, i + CHUNK_SIZE);
             
-            const sku = findField(data,
-                // English variants
-                'seller-sku', 'Seller SKU', 'seller_sku', 'sku', 'SKU', 'merchant-sku',
-                // German variants (including umlaut variations)
-                'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Verkäufer-SKU', 'Verkaeufer-SKU',
-                'Angebots-SKU', 'Artikel-SKU', 'Angebotsnummer',
-                // French variants
-                'sku-vendeur', 'référence-vendeur', 'reference-vendeur', 'SKU vendeur',
-                // Italian variants
-                'SKU venditore', 'sku-venditore',
-                // Spanish variants
-                'SKU del vendedor', 'sku-vendedor'
-            );
-            
-            const itemName = findField(data,
-                // English variants
-                'item-name', 'Item Name', 'item_name', 'product-name', 'Product Name', 'title', 'Title',
-                // German variants
-                'Produktname', 'Artikelname', 'Artikelbezeichnung', 'Titel', 'Bezeichnung',
-                // French variants
-                'nom-du-produit', 'titre', 'nom-article',
-                // Italian variants
-                'nome-prodotto', 'titolo',
-                // Spanish variants
-                'nombre-producto', 'titulo'
-            ) || "Unknown Product";
-            
-            const price = findField(data,
-                'price', 'Price', 'Preis', 'prix', 'prezzo', 'precio', 'your-price', 'Your Price'
-            ) || 0;
-            
-            const status = findField(data,
-                'status', 'Status', 'listing-status', 'Listing-Status',
-                'Angebotsstatus', 'statut', 'stato', 'estado',
-                'open-date', 'Open Date' // Sometimes status is inferred from open-date presence
-            );
-            
-            const quantity = parseInt(findField(data,
-                'quantity', 'Quantity', 'quantity-available', 'fulfillable-quantity',
-                'Menge', 'Verfügbare Menge', 'Verfuegbare Menge',
-                'quantité', 'quantite', 'quantità', 'cantidad'
-            ) || 0) || 0;
+            for (const data of chunk) {
+                // Handle multiple possible header names (English, German, French, Italian, Spanish, etc.)
+                const asin = findField(data, 
+                    // English variants
+                    'asin1', 'ASIN1', 'asin', 'ASIN', 'product-id', 'Product-ID',
+                    // German variants
+                    'Produkt-ID', 'Artikelnummer', 'ASIN1',
+                    // Product ID is sometimes in a different column
+                    'listing-id', 'Listing-ID'
+                );
+                
+                const sku = findField(data,
+                    // English variants
+                    'seller-sku', 'Seller SKU', 'seller_sku', 'sku', 'SKU', 'merchant-sku',
+                    // German variants (including umlaut variations)
+                    'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Verkäufer-SKU', 'Verkaeufer-SKU',
+                    'Angebots-SKU', 'Artikel-SKU', 'Angebotsnummer',
+                    // French variants
+                    'sku-vendeur', 'référence-vendeur', 'reference-vendeur', 'SKU vendeur',
+                    // Italian variants
+                    'SKU venditore', 'sku-venditore',
+                    // Spanish variants
+                    'SKU del vendedor', 'sku-vendedor'
+                );
+                
+                const itemName = findField(data,
+                    // English variants
+                    'item-name', 'Item Name', 'item_name', 'product-name', 'Product Name', 'title', 'Title',
+                    // German variants
+                    'Produktname', 'Artikelname', 'Artikelbezeichnung', 'Titel', 'Bezeichnung',
+                    // French variants
+                    'nom-du-produit', 'titre', 'nom-article',
+                    // Italian variants
+                    'nome-prodotto', 'titolo',
+                    // Spanish variants
+                    'nombre-producto', 'titulo'
+                ) || "Unknown Product";
+                
+                const price = findField(data,
+                    'price', 'Price', 'Preis', 'prix', 'prezzo', 'precio', 'your-price', 'Your Price'
+                ) || 0;
+                
+                const status = findField(data,
+                    'status', 'Status', 'listing-status', 'Listing-Status',
+                    'Angebotsstatus', 'statut', 'stato', 'estado',
+                    'open-date', 'Open Date' // Sometimes status is inferred from open-date presence
+                );
+                
+                const quantity = parseInt(findField(data,
+                    'quantity', 'Quantity', 'quantity-available', 'fulfillable-quantity',
+                    'Menge', 'Verfügbare Menge', 'Verfuegbare Menge',
+                    'quantité', 'quantite', 'quantità', 'cantidad'
+                ) || 0) || 0;
 
-            // Only add products that have required fields (asin and sku)
-            if (asin && sku) {
-                ProductData.push({
-                    asin: asin,
-                    sku: sku,
-                    itemName: itemName,
-                    price: price,
-                    status: status || 'Active',
-                    quantity: quantity,
-                });
-            } else {
-                logger.warn('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
-                    foundAsin: asin,
-                    foundSku: sku,
-                    availableKeys: Object.keys(data).slice(0, 10).join(', ')
-                });
+                // Only add products that have required fields (asin and sku)
+                if (asin && sku) {
+                    ProductData.push({
+                        asin: asin,
+                        sku: sku,
+                        itemName: itemName,
+                        price: price,
+                        status: status || 'Active',
+                        quantity: quantity,
+                    });
+                } else {
+                    logger.warn('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
+                        foundAsin: asin,
+                        foundSku: sku,
+                        availableKeys: Object.keys(data).slice(0, 10).join(', ')
+                    });
+                }
             }
-        });
+            
+            // Yield to event loop after each chunk
+            await yieldToEventLoop();
+        }
 
        
         const getSellerDetails = await SellerModel.findOne({ User: userId });
@@ -323,39 +332,15 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * Handles gzip decompression if needed
- * Uses async gunzip to avoid blocking the event loop
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
 async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped (async to prevent event loop blocking)
-        let decompressedData;
-        try {
-            decompressedData = await gunzip(tsvBuffer);
-        } catch (decompressError) {
-            // If decompression fails, assume it's already plain text
-            decompressedData = tsvBuffer;
-        }
-        
-        const tsv = decompressedData.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GET_MERCHANT_LISTINGS_ALL_DATA] TSV buffer is empty');
-            return [];
-        }
-
-        const records = parse(tsv, {
-            columns: true,  // Keep original headers - this report's data access relies on exact header names
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true
-        });
-
-        logger.info('[GET_MERCHANT_LISTINGS_ALL_DATA] TSV parsed successfully', { 
-            totalRecords: records.length 
+            columns: true,
+            reportType: 'GET_MERCHANT_LISTINGS_ALL_DATA'
         });
 
         return records;

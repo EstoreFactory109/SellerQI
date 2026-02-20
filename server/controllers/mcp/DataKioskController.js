@@ -579,7 +579,7 @@ query EconomicsQuery {
 
     // Calculate economics metrics using the calculation service
     logger.info('Calculating economics metrics from document content');
-    const metrics = calculateEconomicsMetrics(documentContent, startDate, endDate, effectiveMarketplace);
+    const metrics = await calculateEconomicsMetrics(documentContent, startDate, endDate, effectiveMarketplace);
     
     // Add region to metrics
     metrics.region = region;

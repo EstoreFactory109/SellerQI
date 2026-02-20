@@ -17,6 +17,7 @@ const LoggingHelper = require('../../utils/LoggingHelper.js');
 const axios = require('axios');
 const userModel = require('../../models/user-auth/userModel.js');
 const { markFirstAnalysisDone } = require('../User/userServices.js');
+const { yieldToEventLoop } = require('../../utils/asyncCsvParser.js');
 
 // Helper function to add timeout to promises
 const withTimeout = (promise, timeoutMs, operationName) => {
@@ -1361,22 +1362,36 @@ class Integration {
             if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
+                const SET_BUILD_CHUNK_SIZE = 500;
 
-                storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+                // Chunked iteration for large arrays to prevent event loop blocking
+                const sponsoredAds = storedSponsoredAdsData.sponsoredAds;
+                for (let i = 0; i < sponsoredAds.length; i++) {
+                    const ad = sponsoredAds[i];
                     if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
                     if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
-                });
+                    if ((i + 1) % SET_BUILD_CHUNK_SIZE === 0) {
+                        await yieldToEventLoop();
+                    }
+                }
 
                 campaignIdArray = Array.from(campaignIds);
                 adGroupIdArray = Array.from(adGroupIds);
             } else if (ppcSpendsBySKU.success && ppcSpendsBySKU.data?.sponsoredAds) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
+                const SET_BUILD_CHUNK_SIZE = 500;
 
-                ppcSpendsBySKU.data.sponsoredAds.forEach(item => {
+                // Chunked iteration for large arrays to prevent event loop blocking
+                const sponsoredAds = ppcSpendsBySKU.data.sponsoredAds;
+                for (let i = 0; i < sponsoredAds.length; i++) {
+                    const item = sponsoredAds[i];
                     if (item && item.campaignId) campaignIds.add(item.campaignId);
                     if (item && item.adGroupId) adGroupIds.add(item.adGroupId);
-                });
+                    if ((i + 1) % SET_BUILD_CHUNK_SIZE === 0) {
+                        await yieldToEventLoop();
+                    }
+                }
 
                 campaignIdArray = Array.from(campaignIds);
                 adGroupIdArray = Array.from(adGroupIds);
@@ -1646,24 +1661,36 @@ class Integration {
                 return false;
             }
 
-            // Create a map of SKU to B2B pricing for quick lookup
+            // Create a map of SKU to B2B pricing for quick lookup (chunked for large datasets)
             const b2bPricingMap = new Map();
-            b2bPricingDataArray.forEach(item => {
+            const MAP_BUILD_CHUNK_SIZE = 500;
+            for (let i = 0; i < b2bPricingDataArray.length; i++) {
+                const item = b2bPricingDataArray[i];
                 if (item && item.sku && item.has_b2b_pricing !== undefined) {
                     b2bPricingMap.set(item.sku, item.has_b2b_pricing);
                 }
-            });
+                // Yield periodically for large arrays
+                if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
+                    await yieldToEventLoop();
+                }
+            }
 
-            // Update the products array with B2B pricing
+            // Update the products array with B2B pricing (chunked to yield to event loop)
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
+            const CHUNK_SIZE = 200;
 
-            products.forEach(product => {
-                if (b2bPricingMap.has(product.sku)) {
-                    product.has_b2b_pricing = b2bPricingMap.get(product.sku);
-                    updatedCount++;
+            for (let i = 0; i < products.length; i += CHUNK_SIZE) {
+                const chunk = products.slice(i, Math.min(i + CHUNK_SIZE, products.length));
+                for (const product of chunk) {
+                    if (b2bPricingMap.has(product.sku)) {
+                        product.has_b2b_pricing = b2bPricingMap.get(product.sku);
+                        updatedCount++;
+                    }
                 }
-            });
+                // Yield to event loop to allow lock extension
+                await yieldToEventLoop();
+            }
 
             await sellerDetails.save();
 
@@ -1708,25 +1735,37 @@ class Integration {
                 return false;
             }
 
-            // Create a map of SKU to issues for quick lookup
+            // Create a map of SKU to issues for quick lookup (chunked for large datasets)
             const issuesMap = new Map();
-            issuesDataArray.forEach(item => {
+            const MAP_BUILD_CHUNK_SIZE = 500;
+            for (let i = 0; i < issuesDataArray.length; i++) {
+                const item = issuesDataArray[i];
                 if (item && item.sku && Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
                 }
-            });
+                // Yield periodically for large arrays
+                if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
+                    await yieldToEventLoop();
+                }
+            }
 
-            // Update the products array with issues
+            // Update the products array with issues (chunked to yield to event loop)
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
+            const CHUNK_SIZE = 200;
 
-            products.forEach(product => {
-                // Update issues for both Inactive and Incomplete products
-                if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
-                    product.issues = issuesMap.get(product.sku);
-                    updatedCount++;
+            for (let i = 0; i < products.length; i += CHUNK_SIZE) {
+                const chunk = products.slice(i, Math.min(i + CHUNK_SIZE, products.length));
+                for (const product of chunk) {
+                    // Update issues for both Inactive and Incomplete products
+                    if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
+                        product.issues = issuesMap.get(product.sku);
+                        updatedCount++;
+                    }
                 }
-            });
+                // Yield to event loop to allow lock extension
+                await yieldToEventLoop();
+            }
 
             await sellerDetails.save();
 
@@ -2131,6 +2170,570 @@ class Integration {
                 region
             });
             throw error; // Re-throw so caller can handle
+        }
+    }
+
+    // ========================================================================
+    // PHASE EXECUTION METHODS
+    // These methods are used by the chained job architecture to split the
+    // integration into smaller, manageable phases that won't exceed lock duration.
+    // ========================================================================
+
+    /**
+     * Execute Phase 1: Init
+     * Validates user, generates tokens, fetches merchant listings, extracts product data
+     * 
+     * @param {string} userId - User ID
+     * @param {string} Region - Region (NA, EU, FE)
+     * @param {string} Country - Country code
+     * @returns {Object} Phase result with data needed by subsequent phases
+     */
+    static async executeInitPhase(userId, Region, Country) {
+        logger.info(`[Integration:InitPhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            // Validate inputs
+            const validationResult = await this.validateInputs(userId, Region, Country);
+            if (!validationResult.success) {
+                return {
+                    success: false,
+                    error: validationResult.error,
+                    statusCode: validationResult.statusCode
+                };
+            }
+
+            // Get configuration
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) {
+                return {
+                    success: false,
+                    error: config.error,
+                    statusCode: config.statusCode
+                };
+            }
+
+            const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+            // Get seller data and tokens
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) {
+                return {
+                    success: false,
+                    error: sellerDataResult.error,
+                    statusCode: sellerDataResult.statusCode
+                };
+            }
+
+            const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+            // Generate AWS credentials
+            const credentialsResult = await this.generateCredentials(regionConfig, null);
+            if (!credentialsResult.success) {
+                return {
+                    success: false,
+                    error: credentialsResult.error,
+                    statusCode: credentialsResult.statusCode
+                };
+            }
+
+            const credentials = credentialsResult.credentials;
+
+            // Generate access tokens
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+            if (!tokenResult.success) {
+                return {
+                    success: false,
+                    error: tokenResult.error,
+                    statusCode: tokenResult.statusCode
+                };
+            }
+
+            const { AccessToken, AdsAccessToken } = tokenResult;
+
+            // Initialize TokenManager
+            tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            // Fetch merchant listings data (this stores to DB)
+            const merchantListingsData = await this.fetchMerchantListings(
+                AccessToken, marketplaceIds, userId, Country, Region, Base_URI,
+                RefreshToken, AdsRefreshToken, null
+            );
+
+            // Extract product data (active products)
+            const productData = await this.extractProductData(merchantListingsData, Country, Region);
+
+            // Extract inactive product data for issues fetching
+            const inactiveProductData = await this.extractInactiveProductData(merchantListingsData, Country, Region);
+
+            logger.info(`[Integration:InitPhase] Completed for user ${userId}`, {
+                asinCount: productData.asinArray?.length || 0,
+                skuCount: productData.skuArray?.length || 0,
+                inactiveCount: inactiveProductData.inactiveSkuArray?.length || 0
+            });
+
+            return {
+                success: true,
+                dataForNextPhase: {
+                    asinArray: productData.asinArray,
+                    skuArray: productData.skuArray,
+                    inactiveSkuArray: inactiveProductData.inactiveSkuArray,
+                    inactiveAsinArray: inactiveProductData.inactiveAsinArray,
+                    sellerId,
+                    hasAdsAccount: !!AdsRefreshToken
+                }
+            };
+
+        } catch (error) {
+            logger.error(`[Integration:InitPhase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500
+            };
+        }
+    }
+
+    /**
+     * Execute Phase 2: Batch 1 and 2
+     * Runs first two batches of API calls (performance reports, PPC, inventory, reviews)
+     * 
+     * @param {string} userId - User ID
+     * @param {string} Region - Region (NA, EU, FE)
+     * @param {string} Country - Country code
+     * @param {Object} phaseData - Data from previous phase
+     * @returns {Object} Phase result
+     */
+    static async executeBatch1And2Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[Integration:Batch1And2Phase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            // Re-fetch tokens and config (resilient to worker restarts)
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) {
+                return { success: false, error: config.error, statusCode: config.statusCode };
+            }
+
+            const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) {
+                return { success: false, error: sellerDataResult.error, statusCode: sellerDataResult.statusCode };
+            }
+
+            const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+            const credentialsResult = await this.generateCredentials(regionConfig, null);
+            if (!credentialsResult.success) {
+                return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
+            }
+
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+            if (!tokenResult.success) {
+                return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
+            }
+
+            const { AccessToken, AdsAccessToken } = tokenResult;
+            tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            // Use asinArray from phaseData or re-fetch from DB
+            const asinArray = phaseData.asinArray || [];
+            const skuArray = phaseData.skuArray || [];
+
+            const credentials = credentialsResult.credentials;
+            const dataToSend = this.prepareDataToSend(
+                Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId
+            );
+
+            const productData = { asinArray, skuArray };
+
+            // Execute first batch
+            logger.info("[Integration:Batch1And2Phase] First Batch Starts");
+            const firstBatchPromises = [];
+            const firstBatchServiceNames = [];
+
+            if (AccessToken) {
+                firstBatchPromises.push(
+                    tokenManager.wrapSpApiFunction(GET_V2_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_V1_SELLER_PERFORMANCE_REPORT, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+                );
+                firstBatchServiceNames.push("V2 Seller Performance Report", "V1 Seller Performance Report");
+            }
+
+            if (AdsAccessToken) {
+                firstBatchPromises.push(
+                    tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
+                    tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
+                    tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
+                    getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true),
+                    getPPCUnitsSold(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                );
+                firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics", "PPC Units Sold");
+            }
+
+            await Promise.allSettled(firstBatchPromises);
+            logger.info("[Integration:Batch1And2Phase] First Batch Ends");
+
+            // Execute second batch
+            logger.info("[Integration:Batch1And2Phase] Second Batch Starts");
+            const secondBatchPromises = [];
+            const secondBatchServiceNames = [];
+
+            if (AccessToken) {
+                secondBatchPromises.push(
+                    tokenManager.wrapSpApiFunction(GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_FBA_INVENTORY_PLANNING_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_STRANDED_INVENTORY_UI_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_LEDGER_SUMMARY_VIEW_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_LEDGER_DETAIL_VIEW_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_FBA_REIMBURSEMENTS_DATA, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+                );
+                secondBatchServiceNames.push(
+                    "Restock Inventory", "FBA Inventory Planning", "Stranded Inventory",
+                    "Inbound Non-Compliance", "Ledger Summary", "Ledger Detail", "FBA Reimbursements"
+                );
+            }
+
+            // Product reviews
+            secondBatchPromises.push(
+                addReviewDataTODatabase(Array.isArray(asinArray) ? asinArray : [], Country, userId, Region)
+            );
+            secondBatchServiceNames.push("Product Reviews");
+
+            if (AdsAccessToken) {
+                secondBatchPromises.push(
+                    tokenManager.wrapAdsFunction(getKeywords, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region),
+                    tokenManager.wrapAdsFunction(getCampaign, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, Region, userId, Country)
+                );
+                secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
+            }
+
+            await Promise.allSettled(secondBatchPromises);
+            logger.info("[Integration:Batch1And2Phase] Second Batch Ends");
+
+            logger.info(`[Integration:Batch1And2Phase] Completed for user ${userId}`);
+
+            return {
+                success: true,
+                dataForNextPhase: {
+                    ...phaseData
+                }
+            };
+
+        } catch (error) {
+            logger.error(`[Integration:Batch1And2Phase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500
+            };
+        }
+    }
+
+    /**
+     * Execute Phase 3: Batch 3 and 4
+     * Runs third and fourth batches (shipments, economics, keywords)
+     * 
+     * @param {string} userId - User ID
+     * @param {string} Region - Region (NA, EU, FE)
+     * @param {string} Country - Country code
+     * @param {Object} phaseData - Data from previous phases
+     * @returns {Object} Phase result
+     */
+    static async executeBatch3And4Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[Integration:Batch3And4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            // Re-fetch tokens and config
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) {
+                return { success: false, error: config.error, statusCode: config.statusCode };
+            }
+
+            const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) {
+                return { success: false, error: sellerDataResult.error, statusCode: sellerDataResult.statusCode };
+            }
+
+            const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+            const credentialsResult = await this.generateCredentials(regionConfig, null);
+            if (!credentialsResult.success) {
+                return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
+            }
+
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+            if (!tokenResult.success) {
+                return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
+            }
+
+            const { AccessToken, AdsAccessToken } = tokenResult;
+            tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            const asinArray = phaseData.asinArray || [];
+            const credentials = credentialsResult.credentials;
+            const dataToSend = this.prepareDataToSend(
+                Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId
+            );
+
+            // Get campaign and ad group IDs from stored data
+            const { campaignIdArray, adGroupIdArray } = await this.getCampaignAndAdGroupIds(
+                { success: false }, userId, Region, Country
+            );
+
+            // Third batch
+            logger.info("[Integration:Batch3And4Phase] Third Batch Starts");
+            const thirdBatchPromises = [];
+
+            if (AccessToken) {
+                thirdBatchPromises.push(
+                    tokenManager.wrapDataToSendFunction(getshipment, userId, RefreshToken, AdsRefreshToken)
+                        (dataToSend, userId, Base_URI, Country, Region),
+                    tokenManager.wrapDataToSendFunction(getBrand, userId, RefreshToken, AdsRefreshToken)
+                        (dataToSend, userId, Base_URI)
+                );
+            }
+
+            if (AdsAccessToken) {
+                thirdBatchPromises.push(
+                    tokenManager.wrapAdsFunction(getAdGroups, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, Region, userId, Country, [])
+                );
+            }
+
+            // MCP Economics
+            if (RefreshToken) {
+                thirdBatchPromises.push(
+                    fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
+                );
+            }
+
+            await Promise.allSettled(thirdBatchPromises);
+
+            // MCP BuyBox (after Economics)
+            if (RefreshToken) {
+                try {
+                    await fetchAndStoreBuyBoxData(userId, RefreshToken, Region, Country);
+                } catch (buyBoxError) {
+                    logger.warn("[Integration:Batch3And4Phase] BuyBox fetch failed:", buyBoxError.message);
+                }
+            }
+
+            logger.info("[Integration:Batch3And4Phase] Third Batch Ends");
+
+            // Fourth batch - Keywords
+            logger.info("[Integration:Batch3And4Phase] Fourth Batch Starts");
+            if (AdsAccessToken) {
+                const fourthBatchPromises = [
+                    tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region,
+                            Array.isArray(campaignIdArray) ? campaignIdArray : [],
+                            Array.isArray(adGroupIdArray) ? adGroupIdArray : []
+                        ),
+                    tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)
+                        (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
+                ];
+
+                if (asinArray.length > 0) {
+                    fourthBatchPromises.push(
+                        tokenManager.wrapAdsFunction(getKeywordRecommendations, userId, RefreshToken, AdsRefreshToken)
+                            (AdsAccessToken, ProfileId, userId, Country, Region, asinArray)
+                    );
+                }
+
+                await Promise.allSettled(fourthBatchPromises);
+            }
+            logger.info("[Integration:Batch3And4Phase] Fourth Batch Ends");
+
+            logger.info(`[Integration:Batch3And4Phase] Completed for user ${userId}`);
+
+            return {
+                success: true,
+                dataForNextPhase: {
+                    ...phaseData
+                }
+            };
+
+        } catch (error) {
+            logger.error(`[Integration:Batch3And4Phase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500
+            };
+        }
+    }
+
+    /**
+     * Execute Phase 4: Listing Items
+     * Processes individual listing items (most time-consuming part)
+     * 
+     * @param {string} userId - User ID
+     * @param {string} Region - Region (NA, EU, FE)
+     * @param {string} Country - Country code
+     * @param {Object} phaseData - Data from previous phases
+     * @returns {Object} Phase result
+     */
+    static async executeListingItemsPhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[Integration:ListingItemsPhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            // Re-fetch tokens and config
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) {
+                return { success: false, error: config.error, statusCode: config.statusCode };
+            }
+
+            const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) {
+                return { success: false, error: sellerDataResult.error, statusCode: sellerDataResult.statusCode };
+            }
+
+            const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+            const credentialsResult = await this.generateCredentials(regionConfig, null);
+            if (!credentialsResult.success) {
+                return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
+            }
+
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+            if (!tokenResult.success) {
+                return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
+            }
+
+            const { AccessToken, AdsAccessToken } = tokenResult;
+            tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            const asinArray = phaseData.asinArray || [];
+            const skuArray = phaseData.skuArray || [];
+            const inactiveSkuArray = phaseData.inactiveSkuArray || [];
+            const inactiveAsinArray = phaseData.inactiveAsinArray || [];
+
+            const credentials = credentialsResult.credentials;
+            const dataToSend = this.prepareDataToSend(
+                Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId
+            );
+
+            // Process active listing items
+            logger.info("[Integration:ListingItemsPhase] Processing active listing items");
+            const genericKeyWordArray = await this.processListingItems(
+                AccessToken, skuArray, asinArray, dataToSend,
+                userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
+            );
+
+            // Save listing items data
+            if (Array.isArray(genericKeyWordArray) && genericKeyWordArray.length > 0) {
+                try {
+                    await saveListingItemsData(userId, Country, Region, genericKeyWordArray);
+                } catch (dbError) {
+                    logger.error("[Integration:ListingItemsPhase] Failed to save listing items:", dbError.message);
+                }
+            }
+
+            // Process inactive SKUs
+            if (inactiveSkuArray.length > 0) {
+                logger.info("[Integration:ListingItemsPhase] Processing inactive SKUs", {
+                    count: inactiveSkuArray.length
+                });
+                await this.processInactiveListingItems(
+                    AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend,
+                    userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
+                );
+            }
+
+            logger.info(`[Integration:ListingItemsPhase] Completed for user ${userId}`, {
+                processedCount: genericKeyWordArray?.length || 0,
+                inactiveCount: inactiveSkuArray.length
+            });
+
+            return {
+                success: true,
+                dataForNextPhase: {
+                    ...phaseData,
+                    listingItemsProcessed: genericKeyWordArray?.length || 0
+                }
+            };
+
+        } catch (error) {
+            logger.error(`[Integration:ListingItemsPhase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500
+            };
+        }
+    }
+
+    /**
+     * Execute Phase 5: Finalize
+     * Clears cache, sends notifications, updates history
+     * 
+     * @param {string} userId - User ID
+     * @param {string} Region - Region (NA, EU, FE)
+     * @param {string} Country - Country code
+     * @param {Object} phaseData - Data from previous phases
+     * @returns {Object} Phase result with summary
+     */
+    static async executeFinalizePhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[Integration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            // Clear Redis cache
+            try {
+                await clearAnalyseCache(userId, Country, Region, null);
+                logger.info('[Integration:FinalizePhase] Redis cache cleared', { userId, Country, Region });
+            } catch (cacheError) {
+                logger.warn('[Integration:FinalizePhase] Failed to clear Redis cache:', cacheError.message);
+            }
+
+            // Handle success (send email, mark first analysis done)
+            await this.handleSuccess(userId, Country, Region);
+
+            // Add account history
+            try {
+                await this.addNewAccountHistory(userId, Country, Region);
+            } catch (historyError) {
+                logger.error("[Integration:FinalizePhase] Error adding account history:", historyError.message);
+            }
+
+            logger.info(`[Integration:FinalizePhase] Completed for user ${userId}`);
+
+            return {
+                success: true,
+                summary: {
+                    userId,
+                    country: Country,
+                    region: Region,
+                    listingItemsProcessed: phaseData.listingItemsProcessed || 0,
+                    completedAt: new Date().toISOString()
+                }
+            };
+
+        } catch (error) {
+            logger.error(`[Integration:FinalizePhase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500
+            };
         }
     }
 }

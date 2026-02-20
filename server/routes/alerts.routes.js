@@ -22,6 +22,7 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { validateUnsubscribeEmail } = require('../middlewares/validator/alertsValidate.js');
 const {
   getAlerts,
   getLatestAlerts,
@@ -45,7 +46,7 @@ router.get('/:id', auth, getAlertById);
 router.patch('/:id/viewed', auth, updateAlertViewed);
 
 // Public unsubscribe endpoint (body: { email })
-router.post('/unsubscribe', unsubscribeAlertsByEmail);
+router.post('/unsubscribe', validateUnsubscribeEmail, unsubscribeAlertsByEmail);
 
 // Test endpoints (body: userId, country, region)
 router.post('/test', testAlerts);

@@ -22,6 +22,35 @@
 
 const logger = require('../../utils/Logger');
 
+// Chunk size for yielding to event loop during large data processing
+const YIELD_CHUNK_SIZE = 500;
+
+/**
+ * Yield to event loop to allow timers (like lock extension) to fire.
+ * Critical for preventing job stalling during large JSONL processing.
+ * @returns {Promise<void>}
+ */
+async function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+/**
+ * Parse JSONL lines with periodic yields to prevent event loop blocking.
+ * @param {string[]} lines - Array of JSONL lines
+ * @returns {Promise<Array>} Parsed data array
+ */
+async function parseJSONLWithYield(lines) {
+    const data = [];
+    for (let i = 0; i < lines.length; i++) {
+        data.push(JSON.parse(lines[i]));
+        // Yield every YIELD_CHUNK_SIZE records
+        if ((i + 1) % YIELD_CHUNK_SIZE === 0) {
+            await yieldToEventLoop();
+        }
+    }
+    return data;
+}
+
 /**
  * Fee type categories for proper classification
  */
@@ -86,17 +115,17 @@ function isAmazonFee(feeTypeName) {
  * @param {string} startDate - Start date of the query
  * @param {string} endDate - End date of the query
  * @param {string} marketplace - Marketplace code
- * @returns {Object} Calculated metrics with all breakdowns
+ * @returns {Promise<Object>} Calculated metrics with all breakdowns
  */
-function calculateEconomicsMetrics(documentContent, startDate, endDate, marketplace) {
-    // Parse JSONL data
+async function calculateEconomicsMetrics(documentContent, startDate, endDate, marketplace) {
+    // Parse JSONL data with yields to prevent event loop blocking
     const lines = documentContent.trim().split('\n').filter(line => line.trim());
     logger.info(`Processing JSONL document`, {
         totalLines: lines.length,
         firstLinePreview: lines[0]?.substring(0, 200) || 'empty'
     });
     
-    const data = lines.map(line => JSON.parse(line));
+    const data = await parseJSONLWithYield(lines);
     logger.info(`Parsed ${data.length} records from JSONL`);
 
     // Initialize totals
@@ -351,17 +380,18 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
         }
     };
 
-    // Process each record
+    // Process each record with yields to prevent event loop blocking
     let processedCount = 0;
-    data.forEach((record, index) => {
+    for (let index = 0; index < data.length; index++) {
+        const record = data[index];
         // Handle nested structure (if data is wrapped)
         if (record.data?.analytics_economics_2024_03_15?.economics) {
             logger.debug(`Processing nested structure record ${index + 1}`);
             const economics = record.data.analytics_economics_2024_03_15.economics;
-            economics.forEach(item => {
+            for (const item of economics) {
                 processEconomicsItem(item);
                 processedCount++;
-            });
+            }
         } 
         // Handle direct structure (data is directly in the record)
         else if (record.sales || record.fees || record.ads) {
@@ -383,7 +413,11 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
                 hasSales: !!record.sales
             });
         }
-    });
+        // Yield to event loop periodically
+        if ((index + 1) % YIELD_CHUNK_SIZE === 0) {
+            await yieldToEventLoop();
+        }
+    }
     
     // Calculate gross profit for logging (will be recalculated properly at the end)
     const calculatedGrossProfitForLog = totalSales - totalAmazonFees - totalRefunds;
@@ -627,17 +661,17 @@ function calculateEconomicsMetrics(documentContent, startDate, endDate, marketpl
  * @param {string} startDate - Start date of the query
  * @param {string} endDate - End date of the query
  * @param {string} marketplace - Marketplace code
- * @returns {Object} Datewise metrics with breakdowns
+ * @returns {Promise<Object>} Datewise metrics with breakdowns
  */
-function calculateDatewiseMetrics(documentContent, startDate, endDate, marketplace) {
-    // Parse JSONL data
+async function calculateDatewiseMetrics(documentContent, startDate, endDate, marketplace) {
+    // Parse JSONL data with yields to prevent event loop blocking
     const lines = documentContent.trim().split('\n').filter(line => line.trim());
     logger.info(`Processing JSONL document for datewise metrics`, {
         totalLines: lines.length,
         firstLinePreview: lines[0]?.substring(0, 200) || 'empty'
     });
     
-    const data = lines.map(line => JSON.parse(line));
+    const data = await parseJSONLWithYield(lines);
     logger.info(`Parsed ${data.length} records from JSONL for datewise`);
 
     // Data structures for datewise breakdowns
@@ -736,14 +770,21 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
         }
     };
 
-    // Process each record
-    data.forEach((record, index) => {
+    // Process each record with yields to prevent event loop blocking
+    for (let index = 0; index < data.length; index++) {
+        const record = data[index];
         if (record.data?.analytics_economics_2024_03_15?.economics) {
-            record.data.analytics_economics_2024_03_15.economics.forEach(processItem);
+            for (const item of record.data.analytics_economics_2024_03_15.economics) {
+                processItem(item);
+            }
         } else if (record.sales || record.fees || record.netProceeds) {
             processItem(record);
         }
-    });
+        // Yield to event loop periodically
+        if ((index + 1) % YIELD_CHUNK_SIZE === 0) {
+            await yieldToEventLoop();
+        }
+    }
 
     // Convert to sorted arrays
     // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)
@@ -855,24 +896,29 @@ function calculateDatewiseMetrics(documentContent, startDate, endDate, marketpla
  * @param {string} startDate - Start date of the query
  * @param {string} endDate - End date of the query
  * @param {string} marketplace - Marketplace code
- * @returns {Object} ASIN-wise daily metrics
+ * @returns {Promise<Object>} ASIN-wise daily metrics
  */
-function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, marketplace) {
-    // Parse JSONL data
+async function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, marketplace) {
+    // Parse JSONL data with yields to prevent event loop blocking
     const lines = documentContent.trim().split('\n').filter(line => line.trim());
     logger.info(`Processing JSONL document for ASIN-wise daily metrics`, {
         totalLines: lines.length,
         firstLinePreview: lines[0]?.substring(0, 200) || 'empty'
     });
     
-    const data = lines.map(line => JSON.parse(line));
+    const data = await parseJSONLWithYield(lines);
     logger.info(`Parsed ${data.length} records from JSONL for ASIN-wise daily`);
     
-    // Debug: Check parent-child relationships in raw data
-    const recordsWithChildAsin = data.filter(item => item.childAsin);
-    const recordsWithParentAsin = data.filter(item => item.parentAsin);
-    const recordsWithBoth = data.filter(item => item.childAsin && item.parentAsin && item.childAsin !== item.parentAsin);
-    logger.info(`Parent-child analysis: ${recordsWithChildAsin.length} with childAsin, ${recordsWithParentAsin.length} with parentAsin, ${recordsWithBoth.length} with different parent-child pairs`);
+    // Debug: Check parent-child relationships in raw data (use chunked iteration for large datasets)
+    let recordsWithChildAsinCount = 0;
+    let recordsWithParentAsinCount = 0;
+    let recordsWithBothCount = 0;
+    for (const item of data) {
+        if (item.childAsin) recordsWithChildAsinCount++;
+        if (item.parentAsin) recordsWithParentAsinCount++;
+        if (item.childAsin && item.parentAsin && item.childAsin !== item.parentAsin) recordsWithBothCount++;
+    }
+    logger.info(`Parent-child analysis: ${recordsWithChildAsinCount} with childAsin, ${recordsWithParentAsinCount} with parentAsin, ${recordsWithBothCount} with different parent-child pairs`);
 
     // Data structure for ASIN-wise daily data
     // Key: "date|asin" for uniqueness
@@ -991,14 +1037,21 @@ function calculateAsinWiseDailyMetrics(documentContent, startDate, endDate, mark
         }
     };
 
-    // Process each record
-    data.forEach((record, index) => {
+    // Process each record with yields to prevent event loop blocking
+    for (let index = 0; index < data.length; index++) {
+        const record = data[index];
         if (record.data?.analytics_economics_2024_03_15?.economics) {
-            record.data.analytics_economics_2024_03_15.economics.forEach(processItem);
+            for (const item of record.data.analytics_economics_2024_03_15.economics) {
+                processItem(item);
+            }
         } else if (record.sales || record.fees || record.netProceeds) {
             processItem(record);
         }
-    });
+        // Yield to event loop periodically
+        if ((index + 1) % YIELD_CHUNK_SIZE === 0) {
+            await yieldToEventLoop();
+        }
+    }
 
     // Convert to sorted array format matching the schema
     // NEW FORMULA: grossProfit = sales - amazonFees - refunds (PPC subtracted in frontend)

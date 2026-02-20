@@ -30,14 +30,6 @@ const SUNDAY_FUNCTIONS = {
         isCalculationService: true, // Flag to indicate this is a calculation, not API fetch
         runOrder: 99 // Runs last after all data fetches
     },
-    'productIssues': {
-        service: require('../Calculations/ProductIssuesService.js'),
-        functionName: 'calculateAndStoreProductIssues',
-        description: 'Product Issues',
-        apiDataKey: 'productIssues',
-        isCalculationService: true,
-        runOrder: 100 // Runs after issueSummary
-    },
     'issuesData': {
         service: require('../Calculations/IssuesDataService.js'),
         functionName: 'calculateAndStoreIssuesData',
@@ -259,6 +251,15 @@ const DAILY_FUNCTIONS = {
         description: 'Brand Data',
         requiresAccessToken: true,
         apiDataKey: 'brandData'
+    },
+    // Product issues - runs daily at the end (batch 5, after all API fetches)
+    // Updates Seller model with per-product issueCount for dashboard/top issues
+    'productIssues': {
+        service: require('../Calculations/ProductIssuesService.js'),
+        functionName: 'calculateAndStoreProductIssues',
+        description: 'Product Issues',
+        apiDataKey: 'productIssues',
+        isCalculationService: true
     }
 };
 

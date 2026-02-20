@@ -51,6 +51,7 @@ const { jobScheduler } = require('../Services/BackgroundJobs/JobScheduler.js')
 const { initializeEmailReminderJob } = require('../Services/BackgroundJobs/sendEmailAfter48Hrs.js')
 const { setupDailyUpdateCron } = require('../Services/BackgroundJobs/cronProducer.js')
 const config = require('../config/config.js')
+const { globalErrorHandler } = require('../middlewares/errorHandler.js')
 // Global rate limiter disabled - only authentication rate limiters are active
 // const { globalRateLimiter } = require('../middlewares/rateLimiting.js')
 
@@ -203,6 +204,8 @@ app.get('*',(req,res,next)=>{
     });
 })
 
+// Global error handler: catches next(err) from any route, returns JSON (no stack in production)
+app.use(globalErrorHandler);
 
 // Initialize all services in proper order
 const initializeServices = async () => {

@@ -20,10 +20,8 @@ axiosRetry(axios, {
   }
 });
 
-// ✅ Delay helper
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// Concurrency: use API limit (e.g. 20 req/s). Stay slightly under to avoid 429s.
+const REVIEWS_CONCURRENCY = parseInt(process.env.NUMBER_OF_REVIEWS_CONCURRENCY || '20', 10);
 
 // ✅ Main fetch function
 const getNumberOfProductReviews = async (asin, country) => {
@@ -53,60 +51,57 @@ const getNumberOfProductReviews = async (asin, country) => {
 
     return response.data;
   } catch (error) {
-    logger.error("Error fetching product reviews:", error.message);
+    // Handle 404 as "no data available" rather than an error (common for new/delisted ASINs)
+    if (error.response?.status === 404) {
+      logger.debug(`No review data found for ASIN ${asin} (404 - product may be new or delisted)`);
+      return null;
+    }
+    
+    // Only log as error for unexpected failures (not network retries which are handled by axios-retry)
+    if (error.response?.status !== 429 && error.response?.status < 500) {
+      logger.warn(`Failed to fetch reviews for ASIN ${asin}:`, {
+        status: error.response?.status,
+        message: error.message
+      });
+    }
     return null;
   }
 };
 
 const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
-  logger.info("NumberOfProductReviews starting");
-  
+  logger.info("NumberOfProductReviews starting", {
+    asinCount: asinArray?.length,
+    concurrency: REVIEWS_CONCURRENCY
+  });
+
   if (!asinArray || !country || !userId) {
     return false;
   }
 
-  const chunkSize = Math.ceil(asinArray.length / 3);
-  const chunks = [];
-  for (let i = 0; i < asinArray.length; i += chunkSize) {
-    chunks.push(asinArray.slice(i, i + chunkSize));
-  }
+  const limit = promiseLimit(REVIEWS_CONCURRENCY);
+
+  const fetchOne = async (asin) => {
+    const data = await getNumberOfProductReviews(asin, country);
+    if (!data || !data.data) return null;
+    return {
+      asin: asin,
+      product_title: data.data.product_title || "",
+      about_product: data.data.about_product || [],
+      product_description: Array.isArray(data.data.product_description)
+        ? data.data.product_description
+        : (data.data.product_description ? [data.data.product_description] : []),
+      product_photos: data.data.product_photos || [],
+      video_url: data.data.product_videos?.map(video => video.video_url) || [],
+      product_num_ratings: String(data.data.product_num_ratings || 0),
+      product_star_ratings: String(data.data.product_star_rating || "0"),
+      aplus: data.data.has_aplus || false,
+      has_brandstory: data.data.has_brandstory || false
+    };
+  };
 
   try {
-    let allProducts = [];
-
-    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-      const chunk = chunks[chunkIndex];
-      
-      const tasks = chunk.map((asin, index) =>
-        (async () => {
-          await delay(index * 500);
-
-          const data = await getNumberOfProductReviews(asin, country);
-          if (!data || !data.data) return null;
-
-          return {
-            asin: asin,
-            product_title: data.data.product_title || "",
-            about_product: data.data.about_product || [],
-            product_description: Array.isArray(data.data.product_description) 
-              ? data.data.product_description 
-              : (data.data.product_description ? [data.data.product_description] : []),
-            product_photos: data.data.product_photos || [],
-            video_url: data.data.product_videos?.map(video => video.video_url) || [],
-            // Convert number to string for consistency with model
-            product_num_ratings: String(data.data.product_num_ratings || 0),
-            product_star_ratings: String(data.data.product_star_rating || "0"),
-            aplus: data.data.has_aplus || false,
-            has_brandstory: data.data.has_brandstory || false
-          };
-        })()
-      );
-
-      const chunkProducts = await Promise.all(tasks);
-      allProducts.push(...chunkProducts);
-    }
-
-    const products = allProducts;
+    const tasks = asinArray.map((asin) => limit(() => fetchOne(asin)));
+    const products = (await Promise.all(tasks)).filter(Boolean);
     
     // Filter out null products and products with missing required fields
     const validProducts = products.filter(product => 

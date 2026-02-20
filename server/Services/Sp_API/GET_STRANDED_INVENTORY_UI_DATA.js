@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 // Use service layer for saving data (handles 16MB limit with separate collection)
@@ -163,7 +163,7 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             throw new ApiError(500, "Internal server error in generating the report");
         }
 
-        const refinedData = convertTSVToJson(fullReport.data);
+        const refinedData = await convertTSVToJson(fullReport.data);
 
         
 
@@ -202,29 +202,15 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * More robust handling of malformed data, encoding issues, and edge cases
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
-function convertTSVToJson(tsvBuffer) {
+async function convertTSVToJson(tsvBuffer) {
     try {
-        const tsv = tsvBuffer.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GET_STRANDED_INVENTORY_UI_DATA] TSV buffer is empty');
-            return [];
-        }
-
-        const records = parse(tsv, {
-            columns: true,  // Keep original headers - this report's data access relies on exact header names
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true
-        });
-
-        logger.info('[GET_STRANDED_INVENTORY_UI_DATA] TSV parsed successfully', { 
-            totalRecords: records.length 
+            columns: true,
+            reportType: 'GET_STRANDED_INVENTORY_UI_DATA'
         });
 
         return records;

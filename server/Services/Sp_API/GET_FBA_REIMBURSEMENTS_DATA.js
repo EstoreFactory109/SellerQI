@@ -2,7 +2,7 @@ const axios = require("axios");
 const zlib = require("zlib");
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel');
@@ -278,54 +278,15 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * Handles gzip decompression and normalizes headers
- * Uses async gunzip to avoid blocking the event loop
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
 async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped (async to prevent event loop blocking)
-        let decompressedData;
-        
-        // Check if data is gzipped by looking at magic bytes (1F 8B)
-        const firstBytes = tsvBuffer.slice(0, 2);
-        if (firstBytes[0] === 0x1f && firstBytes[1] === 0x8b) {
-            try {
-                decompressedData = await gunzip(tsvBuffer);
-            } catch (decompressError) {
-                logger.error("[GET_FBA_REIMBURSEMENTS_DATA] Failed to decompress gzipped data:", decompressError.message);
-                throw new Error(`Failed to decompress gzipped data: ${decompressError.message}`);
-            }
-        } else {
-            decompressedData = tsvBuffer;
-        }
-        
-        const tsv = decompressedData.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GET_FBA_REIMBURSEMENTS_DATA] TSV buffer is empty');
-            return [];
-        }
-
-        // Log preview for debugging
-        if (tsv.length > 0) {
-            const preview = tsv.substring(0, 500);
-            logger.info(`[GET_FBA_REIMBURSEMENTS_DATA] TSV Preview (first 500 chars): ${preview}`);
-        }
-
-        // Use csv-parse with first row as headers (normalization is done after parsing)
-        const records = parse(tsv, {
-            columns: true,
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true,
-            relax_quotes: true
-        });
-
-        logger.info('[GET_FBA_REIMBURSEMENTS_DATA] TSV parsed successfully', { 
-            totalRecords: records.length 
+            columns: true,
+            reportType: 'GET_FBA_REIMBURSEMENTS_DATA'
         });
 
         return records;

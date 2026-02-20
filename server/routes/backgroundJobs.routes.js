@@ -23,6 +23,7 @@ const {
 const auth = require('../middlewares/Auth/auth.js');
 const adminAuth = require('../middlewares/Auth/adminAuth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { validateJobNameParam, validateUserIdParam } = require('../middlewares/validator/backgroundJobsValidate.js');
 
 // User routes (require authentication)
 router.get('/user/schedule', auth, getUserSchedule);
@@ -35,11 +36,11 @@ router.get('/admin/job-status', auth, adminAuth, getJobStatus);
 router.get('/admin/update-stats', auth, adminAuth, getUpdateStats);
 router.get('/admin/schedule-stats', auth, adminAuth, getScheduleStats);
 
-router.post('/admin/trigger/:jobName', auth, adminAuth, triggerJob);
+router.post('/admin/trigger/:jobName', auth, adminAuth, validateJobNameParam, triggerJob);
 router.put('/admin/control/:jobName', auth, adminAuth, controlJob);
 
 router.post('/admin/initialize-schedules', auth, adminAuth, initializeAllSchedules);
-router.post('/admin/initialize-user/:userId', auth, adminAuth, initializeUserScheduling);
+router.post('/admin/initialize-user/:userId', auth, adminAuth, validateUserIdParam, initializeUserScheduling);
 
 router.post('/admin/cleanup-cache', auth, adminAuth, cleanupCache);
 router.post('/admin/emergency-stop', auth, adminAuth, emergencyStop);

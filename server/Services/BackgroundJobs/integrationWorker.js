@@ -1,16 +1,17 @@
 /**
  * integrationWorker.js
  * 
- * BullMQ Worker for First-Time User Integration
+ * BullMQ Worker for First-Time User Integration with Chained Phases
  * 
- * This worker handles the 'user-integration' queue SEPARATELY from
- * the existing 'user-data-processing' queue and its workers.
+ * This worker handles the 'user-integration' queue and processes jobs in phases:
+ * 1. INIT - Validate user, generate tokens, fetch merchant listings
+ * 2. BATCH_1_2 - First and second batch API calls
+ * 3. BATCH_3_4 - Third and fourth batch API calls
+ * 4. LISTING_ITEMS - Process individual listing items
+ * 5. FINALIZE - Clear cache, send notifications, update history
  * 
- * IMPORTANT:
- * - This is a SEPARATE worker that only processes integration jobs
- * - It does NOT affect the existing worker.js or processUserData
- * - It can run in the same process as the existing worker (different queue)
- * - Or it can run as a completely separate process
+ * Each phase is a separate job that chains to the next, preventing lock expiry
+ * on long-running integrations.
  * 
  * Usage:
  *   node server/Services/BackgroundJobs/integrationWorker.js
@@ -24,15 +25,41 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const { Worker } = require('bullmq');
 const { getQueueRedisConnection } = require('../../config/queueRedisConn.js');
 const { Integration } = require('../main/Integration.js');
-const { INTEGRATION_QUEUE_NAME, getCurrentAccountStatus } = require('./integrationQueue.js');
+const { 
+    INTEGRATION_QUEUE_NAME, 
+    getCurrentAccountStatus,
+    addPhaseJob,
+    getIntegrationQueue 
+} = require('./integrationQueue.js');
+const {
+    PHASES,
+    PHASE_ORDER,
+    getNextPhase,
+    isFirstPhase,
+    isLastPhase,
+    calculateOverallProgress,
+    createNextPhaseJobData,
+    generatePhaseJobId,
+    parseParentJobId,
+    getPhaseDescription,
+    isValidPhase
+} = require('./integrationPhases.js');
 const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
 
 // Worker configuration
-const WORKER_CONCURRENCY = parseInt(process.env.INTEGRATION_WORKER_CONCURRENCY || '2', 10); // Process 2 jobs concurrently (API rate limits)
+const WORKER_CONCURRENCY = parseInt(process.env.INTEGRATION_WORKER_CONCURRENCY || '2', 10);
 const WORKER_NAME = process.env.INTEGRATION_WORKER_NAME || `integration-worker-${process.pid}`;
+
+// Lock configuration for long-running phases
+// Lock duration: 2 hours - phases can run longer with periodic extension
+const PHASE_LOCK_DURATION = 2 * 60 * 60 * 1000; // 2 hours
+// Lock extension interval: extend every 15 minutes to prevent stalling
+const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000; // 15 minutes
+// Lock extension amount: extend by 1 hour each time
+const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000; // 1 hour
 
 // Initialize database and cache connections
 let isInitialized = false;
@@ -43,11 +70,9 @@ async function initializeConnections() {
     }
 
     try {
-        // Connect to MongoDB (required for database queries)
         await dbConnect();
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Connected to MongoDB`);
 
-        // Connect to Redis Cloud (for cache operations)
         await connectRedis();
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Connected to Redis Cloud (for cache)`);
 
@@ -63,11 +88,6 @@ const connection = getQueueRedisConnection();
 
 /**
  * Update job status in database for tracking
- * 
- * @param {string} jobId - BullMQ job ID
- * @param {string} userId - User ID
- * @param {string} status - Job status
- * @param {Object} metadata - Additional metadata
  */
 async function updateJobStatus(jobId, userId, status, metadata = {}) {
     try {
@@ -91,107 +111,299 @@ async function updateJobStatus(jobId, userId, status, metadata = {}) {
 }
 
 /**
- * Process an integration job
- * Calls Integration.getSpApiData() to fetch all data for a user
+ * Update the parent job status based on phase progress
+ */
+async function updateParentJobStatus(parentJobId, userId, phase, phaseStatus, metadata = {}) {
+    try {
+        const progress = calculateOverallProgress(phase, phaseStatus === 'completed' ? 100 : 50);
+        
+        await JobStatus.findOneAndUpdate(
+            { jobId: parentJobId },
+            {
+                jobId: parentJobId,
+                userId,
+                status: phaseStatus === 'failed' ? 'failed' : (isLastPhase(phase) && phaseStatus === 'completed' ? 'completed' : 'running'),
+                progress,
+                currentPhase: phase,
+                currentPhaseStatus: phaseStatus,
+                ...metadata,
+                updatedAt: new Date()
+            },
+            {
+                upsert: true,
+                new: true
+            }
+        );
+    } catch (error) {
+        logger.error(`[IntegrationWorker:${WORKER_NAME}] Failed to update parent job status:`, error);
+    }
+}
+
+/**
+ * Extend job lock with retry logic for transient failures.
+ * Uses exponential backoff to handle temporary network issues.
+ * 
+ * @param {Object} job - BullMQ job object
+ * @param {number} extensionAmount - Lock extension duration in ms
+ * @param {number} maxRetries - Maximum retry attempts (default: 3)
+ * @returns {Promise<boolean>} True if extension succeeded, false otherwise
+ */
+async function extendLockWithRetry(job, extensionAmount, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            await job.extendLock(job.token, extensionAmount);
+            return true;
+        } catch (error) {
+            lastError = error;
+            if (attempt < maxRetries) {
+                // Exponential backoff: 1s, 2s, 4s
+                const delay = Math.pow(2, attempt - 1) * 1000;
+                logger.warn(`[IntegrationWorker:${WORKER_NAME}] Lock extension attempt ${attempt}/${maxRetries} failed for job ${job.id}, retrying in ${delay}ms:`, error.message);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    logger.error(`[IntegrationWorker:${WORKER_NAME}] Lock extension failed after ${maxRetries} attempts for job ${job.id}:`, lastError?.message);
+    return false;
+}
+
+/**
+ * Run an async function with periodic lock extension to prevent job stalling.
+ * This is critical for phases that can run for hours (e.g., product reviews, listing items).
+ * 
+ * @param {Object} job - BullMQ job object
+ * @param {Function} asyncFn - Async function to execute
+ * @returns {Promise} Result of the async function
+ */
+async function runWithLockExtension(job, asyncFn) {
+    let extensionCount = 0;
+    let failedExtensions = 0;
+    let isRunning = true;
+
+    const lockExtensionInterval = setInterval(async () => {
+        if (!isRunning) return;
+        
+        const success = await extendLockWithRetry(job, LOCK_EXTENSION_AMOUNT);
+        if (success) {
+            extensionCount++;
+            failedExtensions = 0; // Reset consecutive failures
+            logger.info(`[IntegrationWorker:${WORKER_NAME}] Extended lock for job ${job.id} (extension #${extensionCount})`);
+        } else {
+            failedExtensions++;
+            // Log warning if multiple consecutive failures (might indicate a bigger issue)
+            if (failedExtensions >= 2) {
+                logger.error(`[IntegrationWorker:${WORKER_NAME}] Multiple consecutive lock extension failures (${failedExtensions}) for job ${job.id} - job may be at risk of stalling`);
+            }
+        }
+    }, LOCK_EXTENSION_INTERVAL);
+
+    try {
+        return await asyncFn();
+    } finally {
+        isRunning = false;
+        clearInterval(lockExtensionInterval);
+        if (extensionCount > 0 || failedExtensions > 0) {
+            logger.info(`[IntegrationWorker:${WORKER_NAME}] Lock extension timer cleared for job ${job.id} - ${extensionCount} successful extensions, ${failedExtensions} final failures`);
+        }
+    }
+}
+
+/**
+ * Execute a specific phase
+ */
+async function executePhase(phase, userId, region, country, phaseData) {
+    logger.info(`[IntegrationWorker:${WORKER_NAME}] Executing phase ${phase} for user ${userId}`);
+
+    switch (phase) {
+        case PHASES.INIT:
+            return await Integration.executeInitPhase(userId, region, country);
+        
+        case PHASES.BATCH_1_2:
+            return await Integration.executeBatch1And2Phase(userId, region, country, phaseData);
+        
+        case PHASES.BATCH_3_4:
+            return await Integration.executeBatch3And4Phase(userId, region, country, phaseData);
+        
+        case PHASES.LISTING_ITEMS:
+            return await Integration.executeListingItemsPhase(userId, region, country, phaseData);
+        
+        case PHASES.FINALIZE:
+            return await Integration.executeFinalizePhase(userId, region, country, phaseData);
+        
+        default:
+            throw new Error(`Unknown phase: ${phase}`);
+    }
+}
+
+/**
+ * Process an integration job (supports both legacy and phased modes)
  * 
  * @param {Object} job - BullMQ job object
  * @returns {Object} Result object
  */
 async function processIntegrationJob(job) {
-    const { userId, country, region } = job.data;
+    const { userId, country, region, phase, parentJobId, phaseData, triggeredAt } = job.data;
     const jobStartTime = Date.now();
 
-    logger.info(`[IntegrationWorker:${WORKER_NAME}] Starting integration job ${job.id} for user ${userId}, ${country}-${region}`);
+    // Determine if this is a phased job or legacy job
+    const currentPhase = phase || PHASES.INIT;
+    const isLegacyJob = !phase;
+    const effectiveParentJobId = parentJobId || job.id;
 
-    // Get current account connection status to store in metadata
-    // This is critical for detecting account changes in future runs
+    logger.info(`[IntegrationWorker:${WORKER_NAME}] Starting job ${job.id}`, {
+        userId,
+        country,
+        region,
+        phase: currentPhase,
+        isLegacyJob,
+        parentJobId: effectiveParentJobId
+    });
+
+    // Get account status for metadata
     let accountStatus = { hasSpApiAccount: false, hasAdsAccount: false, tokenUpdatedAt: null };
     try {
         accountStatus = await getCurrentAccountStatus(userId, country, region);
-        logger.info(`[IntegrationWorker:${WORKER_NAME}] Account status for job ${job.id}: SP-API=${accountStatus.hasSpApiAccount}, Ads=${accountStatus.hasAdsAccount}`);
     } catch (error) {
-        logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not fetch account status for metadata:`, error.message);
+        logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not fetch account status:`, error.message);
     }
 
     try {
-        // Update job status to 'running' with account status
+        // Update job status
         await updateJobStatus(job.id, userId, 'running', {
             startedAt: new Date().toISOString(),
             workerName: WORKER_NAME,
-            metadata: { 
-                country, 
-                region, 
+            metadata: {
+                country,
+                region,
                 jobType: 'integration',
+                phase: currentPhase,
+                parentJobId: effectiveParentJobId,
                 hasSpApiAccount: accountStatus.hasSpApiAccount,
-                hasAdsAccount: accountStatus.hasAdsAccount,
-                tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
+                hasAdsAccount: accountStatus.hasAdsAccount
             }
         });
 
-        // Update job progress
-        await job.updateProgress(10);
+        // Update parent job status
+        await updateParentJobStatus(effectiveParentJobId, userId, currentPhase, 'running', {
+            workerName: WORKER_NAME,
+            metadata: { country, region }
+        });
 
-        // Call the Integration service to fetch all data
-        // This is the comprehensive first-time fetch
-        logger.info(`[IntegrationWorker:${WORKER_NAME}] Calling Integration.getSpApiData for user ${userId}`);
-        const result = await Integration.getSpApiData(userId, region, country);
+        // Calculate and update progress
+        const progress = calculateOverallProgress(currentPhase, 50);
+        await job.updateProgress(progress);
 
-        // Update job progress
-        await job.updateProgress(90);
+        // Execute the phase with lock extension to prevent stalling on long-running phases
+        const result = await runWithLockExtension(job, async () => {
+            return await executePhase(currentPhase, userId, region, country, phaseData || {});
+        });
+
+        if (!result.success) {
+            throw new Error(result.error || `Phase ${currentPhase} failed`);
+        }
 
         const duration = Date.now() - jobStartTime;
 
-        if (result.success) {
-            // Update job status to 'completed' with account status in metadata
-            // This metadata is used to detect account changes in future runs
+        // Check if there's a next phase
+        const nextPhase = getNextPhase(currentPhase);
+
+        if (nextPhase) {
+            // Enqueue the next phase
+            logger.info(`[IntegrationWorker:${WORKER_NAME}] Enqueueing next phase: ${nextPhase}`);
+            
+            const nextJobData = createNextPhaseJobData(nextPhase, {
+                userId,
+                country,
+                region,
+                parentJobId: effectiveParentJobId,
+                triggeredAt,
+                phaseData: phaseData || {}
+            }, result);
+
+            await addPhaseJob(nextJobData);
+
+            // Update current phase job as completed
             await updateJobStatus(job.id, userId, 'completed', {
                 completedAt: new Date().toISOString(),
                 duration,
                 metadata: {
                     country,
                     region,
-                    jobType: 'integration',
-                    hasSpApiAccount: accountStatus.hasSpApiAccount,
-                    hasAdsAccount: accountStatus.hasAdsAccount,
-                    tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null,
-                    successRate: result.summary?.successRate,
-                    totalServices: result.summary?.totalServices,
-                    successfulServices: result.summary?.successfulServices,
-                    failedServices: result.summary?.failedServices
+                    phase: currentPhase,
+                    nextPhase,
+                    parentJobId: effectiveParentJobId
                 }
             });
 
-            // Update final progress
-            await job.updateProgress(100);
+            // Update parent job progress
+            await updateParentJobStatus(effectiveParentJobId, userId, currentPhase, 'completed', {
+                metadata: { country, region, nextPhase }
+            });
 
-            logger.info(`[IntegrationWorker:${WORKER_NAME}] Integration job ${job.id} completed successfully for user ${userId}`, {
-                duration,
-                successRate: result.summary?.successRate,
-                hasSpApiAccount: accountStatus.hasSpApiAccount,
-                hasAdsAccount: accountStatus.hasAdsAccount
+            const finalProgress = calculateOverallProgress(currentPhase, 100);
+            await job.updateProgress(finalProgress);
+
+            logger.info(`[IntegrationWorker:${WORKER_NAME}] Phase ${currentPhase} completed, next: ${nextPhase}`, {
+                userId,
+                duration
             });
 
             return {
                 success: true,
-                duration,
-                summary: result.summary,
-                metadata: {
-                    hasSpApiAccount: accountStatus.hasSpApiAccount,
-                    hasAdsAccount: accountStatus.hasAdsAccount,
-                    tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
-                }
+                phase: currentPhase,
+                nextPhase,
+                duration
             };
+
         } else {
-            // Integration returned failure
-            throw new Error(result.error || 'Integration failed');
+            // This is the final phase - integration complete!
+            await updateJobStatus(job.id, userId, 'completed', {
+                completedAt: new Date().toISOString(),
+                duration,
+                metadata: {
+                    country,
+                    region,
+                    phase: currentPhase,
+                    parentJobId: effectiveParentJobId,
+                    summary: result.summary
+                }
+            });
+
+            await updateParentJobStatus(effectiveParentJobId, userId, currentPhase, 'completed', {
+                completedAt: new Date().toISOString(),
+                duration,
+                metadata: {
+                    country,
+                    region,
+                    summary: result.summary,
+                    hasSpApiAccount: accountStatus.hasSpApiAccount,
+                    hasAdsAccount: accountStatus.hasAdsAccount
+                }
+            });
+
+            await job.updateProgress(100);
+
+            logger.info(`[IntegrationWorker:${WORKER_NAME}] Integration completed for user ${userId}`, {
+                duration,
+                summary: result.summary
+            });
+
+            return {
+                success: true,
+                phase: currentPhase,
+                completed: true,
+                duration,
+                summary: result.summary
+            };
         }
 
     } catch (error) {
         const duration = Date.now() - jobStartTime;
 
-        logger.error(`[IntegrationWorker:${WORKER_NAME}] Integration job ${job.id} failed for user ${userId}:`, error);
+        logger.error(`[IntegrationWorker:${WORKER_NAME}] Phase ${currentPhase} failed for user ${userId}:`, error);
 
-        // Update job status to 'failed' with account status in metadata
+        // Update phase job status
         await updateJobStatus(job.id, userId, 'failed', {
             failedAt: new Date().toISOString(),
             duration,
@@ -199,17 +411,22 @@ async function processIntegrationJob(job) {
             stack: error.stack,
             attemptNumber: job.attemptsMade + 1,
             maxAttempts: job.opts.attempts,
-            metadata: { 
-                country, 
-                region, 
-                jobType: 'integration',
-                hasSpApiAccount: accountStatus.hasSpApiAccount,
-                hasAdsAccount: accountStatus.hasAdsAccount,
-                tokenUpdatedAt: accountStatus.tokenUpdatedAt ? accountStatus.tokenUpdatedAt.toISOString() : null
+            metadata: {
+                country,
+                region,
+                phase: currentPhase,
+                parentJobId: effectiveParentJobId
             }
         });
 
-        // Re-throw to trigger BullMQ retry mechanism
+        // Update parent job as failed
+        await updateParentJobStatus(effectiveParentJobId, userId, currentPhase, 'failed', {
+            failedAt: new Date().toISOString(),
+            error: error.message,
+            failedPhase: currentPhase,
+            metadata: { country, region }
+        });
+
         throw error;
     }
 }
@@ -218,10 +435,8 @@ async function processIntegrationJob(job) {
  * Initialize connections and create worker
  */
 async function startIntegrationWorker() {
-    // Initialize MongoDB and Redis connections first
     await initializeConnections();
 
-    // Create and configure the worker for the integration queue
     const worker = new Worker(
         INTEGRATION_QUEUE_NAME,
         async (job) => {
@@ -229,29 +444,23 @@ async function startIntegrationWorker() {
         },
         {
             connection,
-            prefix: 'bullmq', // Same prefix as other queues
-            concurrency: WORKER_CONCURRENCY, // Process N jobs concurrently
-            // Lock duration: How long the job lock is held before it expires
-            // Set to 2 hours to accommodate very long-running integration jobs (up to 24 hours)
-            // The worker will renew the lock every lockRenewTime (default: half of lockDuration = 1 hour)
-            // With async yields throughout the code, the event loop can process lock renewals
-            lockDuration: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
-            // Stall detection: Set to 12 hours for jobs that can run up to 24 hours
-            // Jobs can take many hours waiting for report API responses
-            stallInterval: 12 * 60 * 60 * 1000, // 12 hours in milliseconds
-            maxStalledCount: 3, // Allow 3 stalls before failing (handles worker restarts)
+            prefix: 'bullmq',
+            concurrency: WORKER_CONCURRENCY,
+            // Shorter lock duration since phases are smaller
+            lockDuration: PHASE_LOCK_DURATION,
+            // Stall interval - check for stalls every 5 minutes
+            stallInterval: 5 * 60 * 1000,
+            maxStalledCount: 3,
             limiter: {
-                // Rate limiting for API calls
-                max: 5, // Max 5 jobs
-                duration: 60000 // Per minute
+                max: 5,
+                duration: 60000
             },
-            // Job retention settings
             removeOnComplete: {
-                age: 4 * 3600, // 4 hours
-                count: 100
+                age: 4 * 3600,
+                count: 200
             },
             removeOnFail: {
-                age: 24 * 3600, // 1 day
+                age: 24 * 3600,
                 count: 500
             }
         }
@@ -259,18 +468,21 @@ async function startIntegrationWorker() {
 
     // Worker event listeners
     worker.on('active', (job) => {
+        const phase = job.data.phase || PHASES.INIT;
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Job ${job.id} is now ACTIVE`, {
             userId: job.data.userId,
             country: job.data.country,
-            region: job.data.region
+            region: job.data.region,
+            phase
         });
     });
 
     worker.on('completed', (job, result) => {
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Job ${job.id} completed`, {
             userId: job.data.userId,
-            country: job.data.country,
-            region: job.data.region,
+            phase: result?.phase,
+            nextPhase: result?.nextPhase,
+            completed: result?.completed,
             duration: result?.duration
         });
     });
@@ -278,19 +490,16 @@ async function startIntegrationWorker() {
     worker.on('failed', (job, err) => {
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Job ${job?.id || 'unknown'} failed`, {
             userId: job?.data?.userId,
-            country: job?.data?.country,
-            region: job?.data?.region,
+            phase: job?.data?.phase,
             error: err.message,
-            attemptsMade: job?.attemptsMade,
-            maxAttempts: job?.opts?.attempts
+            attemptsMade: job?.attemptsMade
         });
     });
 
     worker.on('error', (err) => {
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Worker error:`, {
             message: err?.message || 'Unknown error',
-            stack: err?.stack || 'No stack trace',
-            name: err?.name || 'Error'
+            stack: err?.stack || 'No stack trace'
         });
     });
 
@@ -311,11 +520,10 @@ async function startIntegrationWorker() {
         process.exit(0);
     });
 
-    // Log worker startup
     logger.info(`[IntegrationWorker:${WORKER_NAME}] Integration worker started with concurrency: ${WORKER_CONCURRENCY}`);
+    logger.info(`[IntegrationWorker:${WORKER_NAME}] Phase lock duration: ${PHASE_LOCK_DURATION / 60000} minutes, lock extension every ${LOCK_EXTENSION_INTERVAL / 60000} minutes`);
 
-    // Debug: Check queue status every 10 seconds
-    const { getIntegrationQueue } = require('./integrationQueue.js');
+    // Queue status monitoring
     let statusCheckCount = 0;
     setInterval(async () => {
         try {
@@ -326,7 +534,6 @@ async function startIntegrationWorker() {
             const failed = await queue.getFailedCount();
             
             statusCheckCount++;
-            // Log every 6 checks (every minute) or immediately if there are jobs
             if (waiting > 0 || active > 0 || statusCheckCount % 6 === 0) {
                 logger.info(`[IntegrationWorker:${WORKER_NAME}] Queue status - Waiting: ${waiting}, Active: ${active}, Completed: ${completed}, Failed: ${failed}`);
             }
@@ -341,11 +548,9 @@ async function startIntegrationWorker() {
 // Start the worker
 startIntegrationWorker()
     .then((worker) => {
-        // Export for testing
         module.exports = { worker };
     })
     .catch((error) => {
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Failed to start worker:`, error);
         process.exit(1);
     });
-

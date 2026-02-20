@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { parse } = require('csv-parse/sync');
+const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
 const zlib = require('zlib');
@@ -226,39 +226,15 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
 };
 
 /**
- * Convert TSV buffer to JSON using csv-parse library
- * Handles gzip decompression if needed
- * Uses async gunzip to avoid blocking the event loop
+ * Convert TSV buffer to JSON using async streaming parser.
+ * Uses async parsing to prevent blocking the event loop during large file processing.
  */
 async function convertTSVToJson(tsvBuffer) {
     try {
-        // First try to decompress if it's gzipped (async to prevent event loop blocking)
-        let decompressedData;
-        try {
-            decompressedData = await gunzip(tsvBuffer);
-        } catch (decompressError) {
-            // If decompression fails, assume it's already plain text
-            decompressedData = tsvBuffer;
-        }
-        
-        const tsv = decompressedData.toString("utf-8");
-        
-        if (!tsv || tsv.trim().length === 0) {
-            logger.warn('[GetProductWiseFBAData] TSV buffer is empty');
-            return [];
-        }
-
-        const records = parse(tsv, {
-            columns: true,  // Keep original headers - this report preserves exact field names dynamically
+        const records = await parseAsync(tsvBuffer, {
             delimiter: '\t',
-            skip_empty_lines: true,
-            relax_column_count: true,
-            trim: true,
-            skip_records_with_error: true
-        });
-
-        logger.info('[GetProductWiseFBAData] TSV parsed successfully', { 
-            totalRecords: records.length 
+            columns: true,
+            reportType: 'GetProductWiseFBAData'
         });
 
         return records;

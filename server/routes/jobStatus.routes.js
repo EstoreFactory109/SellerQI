@@ -17,14 +17,15 @@ const {
 
 const auth = require('../middlewares/Auth/auth.js');
 const adminAuth = require('../middlewares/Auth/adminAuth.js');
+const { validateUserIdParam, validateJobIdParam } = require('../middlewares/validator/jobStatusValidate.js');
 
 // User routes (require authentication)
 // Users can check their own job status
-router.get('/status/user/:userId', auth, getJobStatusByUserId);
+router.get('/status/user/:userId', auth, validateUserIdParam, getJobStatusByUserId);
 
 // Admin routes (require admin access)
 // Admins can check any job status and view queue statistics
-router.get('/status/job/:jobId', auth, adminAuth, getJobStatusByJobId);
+router.get('/status/job/:jobId', auth, adminAuth, validateJobIdParam, getJobStatusByJobId);
 router.get('/recent', auth, adminAuth, getRecentJobs);
 router.get('/queue/stats', auth, adminAuth, getQueueStatistics);
 router.get('/failed', auth, adminAuth, getFailedJobs);
