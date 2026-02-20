@@ -179,7 +179,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         };
         
         // Helper function to find field with different possible names (handles localized headers)
-        // First tries exact match, then falls back to normalized comparison
+        // Only uses exact match and normalized full-key comparison (no partial match to avoid false positives)
         const findField = (item, ...possibleNames) => {
             // First: try exact match
             for (const name of possibleNames) {
@@ -188,7 +188,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 }
             }
             
-            // Second: try normalized comparison against all keys
+            // Second: try normalized comparison against all keys (full match only)
             const normalizedTargets = possibleNames.map(normalizeKey);
             for (const key of Object.keys(item)) {
                 const normalizedKey = normalizeKey(key);
@@ -199,18 +199,8 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 }
             }
             
-            // Third: try partial match (key contains or is contained by target)
-            for (const key of Object.keys(item)) {
-                const normalizedKey = normalizeKey(key);
-                for (const target of normalizedTargets) {
-                    if ((normalizedKey.includes(target) || target.includes(normalizedKey)) && 
-                        normalizedKey.length > 2 && target.length > 2) {
-                        if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
-                            return item[key];
-                        }
-                    }
-                }
-            }
+            // Note: Removed partial match step - it caused false positives like 
+            // 'Produkt-ID-Typ' (value "4") matching target 'productid' before 'Produkt-ID' (actual ASIN)
             
             return null;
         };
@@ -230,18 +220,16 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                 const asin = findField(data, 
                     // English variants
                     'asin1', 'ASIN1', 'asin', 'ASIN', 'product-id', 'Product-ID',
-                    // German variants
-                    'Produkt-ID', 'Artikelnummer', 'ASIN1',
-                    // Product ID is sometimes in a different column
-                    'listing-id', 'Listing-ID'
+                    // German variants (ASIN 1 with space is the actual header in German reports)
+                    'ASIN 1', 'Produkt-ID'
                 );
                 
                 const sku = findField(data,
                     // English variants
                     'seller-sku', 'Seller SKU', 'seller_sku', 'sku', 'SKU', 'merchant-sku',
-                    // German variants (including umlaut variations)
+                    // German variants (Händler-SKU is the actual header in German reports)
                     'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Verkäufer-SKU', 'Verkaeufer-SKU',
-                    'Angebots-SKU', 'Artikel-SKU', 'Angebotsnummer',
+                    'Angebots-SKU', 'Artikel-SKU',
                     // French variants
                     'sku-vendeur', 'référence-vendeur', 'reference-vendeur', 'SKU vendeur',
                     // Italian variants
