@@ -234,18 +234,54 @@ async function startWorker() {
         logger.warn(`[Worker:${WORKER_NAME}] Job ${jobId} stalled`);
     });
 
-    // Graceful shutdown
-    process.on('SIGTERM', async () => {
-        logger.info(`[Worker:${WORKER_NAME}] Received SIGTERM, closing worker gracefully...`);
-        await worker.close();
-        process.exit(0);
-    });
+    // Graceful shutdown with timeout
+    // Give current job time to finish, but don't wait forever
+    const SHUTDOWN_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+    let isShuttingDown = false;
 
-    process.on('SIGINT', async () => {
-        logger.info(`[Worker:${WORKER_NAME}] Received SIGINT, closing worker gracefully...`);
-        await worker.close();
-        process.exit(0);
-    });
+    const gracefulShutdown = (signal) => {
+        if (isShuttingDown) {
+            logger.warn(`[Worker:${WORKER_NAME}] Already shutting down, ignoring ${signal}`);
+            return;
+        }
+        isShuttingDown = true;
+
+        logger.info(`[Worker:${WORKER_NAME}] Received ${signal}, closing worker gracefully (max ${SHUTDOWN_GRACE_MS / 60000} min)...`);
+
+        let hasExited = false;
+        const forceExit = () => {
+            if (!hasExited) {
+                hasExited = true;
+                logger.warn(`[Worker:${WORKER_NAME}] Shutdown timeout reached - forcing exit. Active job will be retried after lock expiry.`);
+                process.exit(1);
+            }
+        };
+
+        // Set timeout for force exit
+        const shutdownTimeout = setTimeout(forceExit, SHUTDOWN_GRACE_MS);
+
+        // Try graceful close
+        worker.close()
+            .then(() => {
+                clearTimeout(shutdownTimeout);
+                if (!hasExited) {
+                    hasExited = true;
+                    logger.info(`[Worker:${WORKER_NAME}] Worker closed gracefully`);
+                    process.exit(0);
+                }
+            })
+            .catch((err) => {
+                clearTimeout(shutdownTimeout);
+                if (!hasExited) {
+                    hasExited = true;
+                    logger.error(`[Worker:${WORKER_NAME}] Error during graceful shutdown:`, err.message);
+                    process.exit(1);
+                }
+            });
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
     // Log worker startup
     logger.info(`[Worker:${WORKER_NAME}] Worker started with concurrency: ${WORKER_CONCURRENCY}`);

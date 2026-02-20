@@ -11,6 +11,18 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const { calculateFees } = require('./ActualFeesCalculations.js');
 const logger = require('../../utils/Logger.js');
 
+// Chunk size for yielding to event loop during large data processing
+const YIELD_CHUNK_SIZE = 500;
+
+/**
+ * Yield to event loop to allow timers (like lock extension) to fire.
+ * Critical for preventing job stalling during large data processing.
+ * @returns {Promise<void>}
+ */
+async function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
 /**
  * Reimbursement Calculation Service
  * 
@@ -1454,16 +1466,22 @@ const calculateFeeReimbursement = async (userId, country, region) => {
                     const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
                     if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
                         // Flatten all ASIN sales from all date documents
-                        bigAccountAsinDocs.forEach(doc => {
+                        let processedCount = 0;
+                        for (const doc of bigAccountAsinDocs) {
                             if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                                doc.asinSales.forEach(asinSale => {
+                                for (const asinSale of doc.asinSales) {
                                     asinWiseSales.push({
                                         asin: asinSale.asin,
                                         unitsSold: asinSale.unitsSold
                                     });
-                                });
+                                    // Yield to event loop periodically to prevent blocking
+                                    processedCount++;
+                                    if (processedCount % YIELD_CHUNK_SIZE === 0) {
+                                        await yieldToEventLoop();
+                                    }
+                                }
                             }
-                        });
+                        }
                         logger.info(`Fetched ${asinWiseSales.length} ASIN-wise sales from separate collection for big account`);
                     }
                 } catch (fetchError) {

@@ -15,6 +15,10 @@ const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredential
 // API Version constant
 const API_VERSION = '2023-11-15';
 
+// Maximum timeout for query polling (30 minutes)
+// This prevents indefinite polling if Amazon's API never completes
+const MAX_POLLING_TIMEOUT_MS = 30 * 60 * 1000;
+
 /**
  * Get seller credentials and access token for a specific user
  * @param {string} userId - User ID
@@ -673,12 +677,26 @@ async function waitForQueryCompletion(userId, region, queryId, pollInterval = 10
         userId,
         region,
         queryId,
-        pollInterval: `${pollInterval / 1000}s`
+        pollInterval: `${pollInterval / 1000}s`,
+        maxTimeout: `${MAX_POLLING_TIMEOUT_MS / 60000}min`
     });
 
     while (true) {
         pollCount++;
-        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+        const elapsedMs = Date.now() - startTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+        // Check for maximum timeout to prevent indefinite polling
+        if (elapsedMs > MAX_POLLING_TIMEOUT_MS) {
+            logger.error(`Query polling timeout reached`, {
+                queryId,
+                region,
+                elapsedTime: `${elapsedSeconds}s`,
+                maxTimeout: `${MAX_POLLING_TIMEOUT_MS / 60000}min`,
+                totalPolls: pollCount
+            });
+            throw new ApiError(504, `Query polling timeout after ${Math.floor(MAX_POLLING_TIMEOUT_MS / 60000)} minutes. Query ID: ${queryId}`);
+        }
         
         logger.info(`Polling query status (attempt #${pollCount}, elapsed: ${elapsedSeconds}s)`, {
             queryId,
@@ -803,12 +821,26 @@ async function waitForQueryCompletionWithRefreshToken(refreshToken, region, quer
     logger.info(`Starting to wait for query completion (refresh token)`, {
         region,
         queryId,
-        pollInterval: `${pollInterval / 1000}s`
+        pollInterval: `${pollInterval / 1000}s`,
+        maxTimeout: `${MAX_POLLING_TIMEOUT_MS / 60000}min`
     });
 
     while (true) {
         pollCount++;
-        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+        const elapsedMs = Date.now() - startTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+        // Check for maximum timeout to prevent indefinite polling
+        if (elapsedMs > MAX_POLLING_TIMEOUT_MS) {
+            logger.error(`Query polling timeout reached`, {
+                queryId,
+                region,
+                elapsedTime: `${elapsedSeconds}s`,
+                maxTimeout: `${MAX_POLLING_TIMEOUT_MS / 60000}min`,
+                totalPolls: pollCount
+            });
+            throw new ApiError(504, `Query polling timeout after ${Math.floor(MAX_POLLING_TIMEOUT_MS / 60000)} minutes. Query ID: ${queryId}`);
+        }
         
         logger.info(`Polling query status (attempt #${pollCount}, elapsed: ${elapsedSeconds}s)`, {
             queryId,

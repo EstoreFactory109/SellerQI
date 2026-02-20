@@ -23,6 +23,18 @@ const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSpo
 const Profitability = require('./ProfitabilityCalculation.js');
 const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js');
 
+// Chunk size for yielding to event loop during large data processing
+const YIELD_CHUNK_SIZE = 500;
+
+/**
+ * Yield to event loop to allow timers (like lock extension) to fire.
+ * Critical for preventing job stalling during large data processing.
+ * @returns {Promise<void>}
+ */
+async function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
 /**
  * Fetch minimal data required for profitability dashboard
  * This is MUCH faster than the full Analyse.fetchAllDataModels (5-8 queries vs 24+)
@@ -133,9 +145,10 @@ const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
             const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
             
             if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                bigAccountAsinDocs.forEach(doc => {
+                let processedCount = 0;
+                for (const doc of bigAccountAsinDocs) {
                     if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                        doc.asinSales.forEach(item => {
+                        for (const item of doc.asinSales) {
                             if (item.asin) {
                                 const asin = item.asin;
                                 const parentAsin = item.parentAsin || asin; // Preserve parentAsin
@@ -167,15 +180,22 @@ const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
                                     };
                                 }
                             }
-                        });
+                            // Yield to event loop periodically to prevent blocking
+                            processedCount++;
+                            if (processedCount % YIELD_CHUNK_SIZE === 0) {
+                                await yieldToEventLoop();
+                            }
+                        }
                     }
-                });
+                }
             }
         } catch (error) {
             logger.error('Error fetching ASIN data for big account', { error: error.message });
         }
     } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
-        economicsMetrics.asinWiseSales.forEach(item => {
+        const asinSalesArray = economicsMetrics.asinWiseSales;
+        for (let i = 0; i < asinSalesArray.length; i++) {
+            const item = asinSalesArray[i];
             if (item.asin) {
                 const asin = item.asin;
                 const parentAsin = item.parentAsin || asin; // Preserve parentAsin
@@ -207,7 +227,11 @@ const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
                     };
                 }
             }
-        });
+            // Yield to event loop periodically to prevent blocking
+            if ((i + 1) % YIELD_CHUNK_SIZE === 0) {
+                await yieldToEventLoop();
+            }
+        }
     }
 
     return { asinPpcSales, totalSales, totalGrossProfit };

@@ -287,6 +287,17 @@ if (require.main === module) {
       await dbConnect();
       setupAlertsCron();
       logger.info('[AlertsWorker] Alerts worker is running');
+
+      // Graceful shutdown handlers
+      process.on('SIGINT', () => {
+        logger.info('[AlertsWorker] Received SIGINT. Shutting down gracefully...');
+        process.exit(0);
+      });
+
+      process.on('SIGTERM', () => {
+        logger.info('[AlertsWorker] Received SIGTERM. Shutting down gracefully...');
+        process.exit(0);
+      });
     } catch (err) {
       logger.error('[AlertsWorker] Failed to start', { error: err?.message, stack: err?.stack });
       process.exit(1);

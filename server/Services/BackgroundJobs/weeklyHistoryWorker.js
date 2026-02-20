@@ -275,21 +275,55 @@ if (require.main === module) {
             logger.info('[WeeklyHistory] Connected to database');
 
             // Setup cron job
-            setupWeeklyHistoryCron();
+            const cronJob = setupWeeklyHistoryCron();
 
             logger.info('[WeeklyHistory] Weekly history worker is running');
             logger.info('[WeeklyHistory] Next run: Sunday at 23:59 UTC');
 
-            // Keep the process alive
-            process.on('SIGINT', () => {
-                logger.info('[WeeklyHistory] Received SIGINT. Shutting down gracefully...');
-                process.exit(0);
-            });
+            // Graceful shutdown with timeout
+            const SHUTDOWN_GRACE_MS = 30 * 1000; // 30 seconds for cron-based worker
+            let isShuttingDown = false;
 
-            process.on('SIGTERM', () => {
-                logger.info('[WeeklyHistory] Received SIGTERM. Shutting down gracefully...');
-                process.exit(0);
-            });
+            const gracefulShutdown = (signal) => {
+                if (isShuttingDown) {
+                    logger.warn(`[WeeklyHistory] Already shutting down, ignoring ${signal}`);
+                    return;
+                }
+                isShuttingDown = true;
+
+                logger.info(`[WeeklyHistory] Received ${signal}, shutting down gracefully (max ${SHUTDOWN_GRACE_MS / 1000}s)...`);
+
+                // Stop the cron job from scheduling new runs
+                if (cronJob) {
+                    cronJob.stop();
+                    logger.info('[WeeklyHistory] Cron job stopped');
+                }
+
+                let hasExited = false;
+                const forceExit = () => {
+                    if (!hasExited) {
+                        hasExited = true;
+                        logger.warn('[WeeklyHistory] Shutdown timeout reached - forcing exit');
+                        process.exit(1);
+                    }
+                };
+
+                // Set timeout for force exit
+                const shutdownTimeout = setTimeout(forceExit, SHUTDOWN_GRACE_MS);
+
+                // Give a moment for any in-flight operations to complete
+                setTimeout(() => {
+                    clearTimeout(shutdownTimeout);
+                    if (!hasExited) {
+                        hasExited = true;
+                        logger.info('[WeeklyHistory] Worker shut down gracefully');
+                        process.exit(0);
+                    }
+                }, 1000);
+            };
+
+            process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+            process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
         } catch (error) {
             logger.error('[WeeklyHistory] Failed to start weekly history worker:', error);

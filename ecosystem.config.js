@@ -84,6 +84,8 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (workers may use more memory)
             max_memory_restart: '2G',
+            // Graceful shutdown timeout (5 minutes) - give worker time to finish current job
+            kill_timeout: 5 * 60 * 1000,
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -117,6 +119,8 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (integration jobs are heavier)
             max_memory_restart: '3G',
+            // Graceful shutdown timeout (5 minutes) - give worker time to finish current job
+            kill_timeout: 5 * 60 * 1000,
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -148,6 +152,8 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits
             max_memory_restart: '2G',
+            // Graceful shutdown timeout (30 seconds for cron-based worker)
+            kill_timeout: 30 * 1000,
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -178,6 +184,8 @@ module.exports = {
             max_restarts: 5,
             min_uptime: '10s',
             max_memory_restart: '768M',
+            // Graceful shutdown timeout (30 seconds for cron-based worker)
+            kill_timeout: 30 * 1000,
             watch: false,
             env_production: {
                 NODE_ENV: 'production'

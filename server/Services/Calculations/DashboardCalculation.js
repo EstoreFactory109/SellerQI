@@ -18,6 +18,18 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 
+// Chunk size for yielding to event loop during large data processing
+const YIELD_CHUNK_SIZE = 500;
+
+/**
+ * Yield to event loop to allow timers (like lock extension) to fire.
+ * Critical for preventing job stalling during large data processing.
+ * @returns {Promise<void>}
+ */
+async function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
 /**
  * Get PPC sales from EconomicsMetrics for ACOS/TACOS calculations
  * 
@@ -85,9 +97,10 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
             const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
             
             if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                bigAccountAsinDocs.forEach(doc => {
+                let processedCount = 0;
+                for (const doc of bigAccountAsinDocs) {
                     if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                        doc.asinSales.forEach(item => {
+                        for (const item of doc.asinSales) {
                             if (item.asin) {
                                 const asin = item.asin;
                                 const fbaFees = item.fbaFees?.amount || 0;
@@ -118,9 +131,14 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
                                     };
                                 }
                             }
-                        });
+                            // Yield to event loop periodically to prevent blocking
+                            processedCount++;
+                            if (processedCount % YIELD_CHUNK_SIZE === 0) {
+                                await yieldToEventLoop();
+                            }
+                        }
                     }
-                });
+                }
                 logger.debug('Aggregated ASIN PPC sales for big account', {
                     metricsId: economicsMetrics._id,
                     uniqueAsins: Object.keys(asinPpcSales).length
@@ -134,7 +152,9 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
         }
     } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
         // Normal account - process from main document
-        economicsMetrics.asinWiseSales.forEach(item => {
+        const asinSalesArray = economicsMetrics.asinWiseSales;
+        for (let i = 0; i < asinSalesArray.length; i++) {
+            const item = asinSalesArray[i];
             if (item.asin) {
                 const asin = item.asin;
                 const fbaFees = item.fbaFees?.amount || 0;
@@ -165,7 +185,11 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
                     };
                 }
             }
-        });
+            // Yield to event loop periodically to prevent blocking
+            if ((i + 1) % YIELD_CHUNK_SIZE === 0) {
+                await yieldToEventLoop();
+            }
+        }
     }
     
     return { 
