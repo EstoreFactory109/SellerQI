@@ -26,51 +26,51 @@
  */
 
 const { Queue } = require('bullmq');
-const { getQueueRedisConnection } = require('../../config/queueRedisConn.js');
+const { getSharedConnection } = require('./sharedQueueConnection.js');
 const logger = require('../../utils/Logger.js');
 const mongoose = require('mongoose');
 
 // Queue name - separate from existing 'user-data-processing' queue
 const INTEGRATION_QUEUE_NAME = 'user-integration';
 
-// Redis connection options for BullMQ
-const connection = getQueueRedisConnection();
-
 /**
- * Queue configuration for integration jobs
+ * Get queue configuration for integration jobs
+ * Connection is obtained lazily to ensure shared connection is used
  * 
  * Key settings:
  * - Longer timeout (integration can take 30-90 minutes)
  * - Higher priority (user-initiated)
  * - Separate namespace to avoid conflicts
  */
-const integrationQueueConfig = {
-    connection,
-    // Prefix all queue keys with 'bullmq:' to match existing setup
-    prefix: 'bullmq',
-    defaultJobOptions: {
-        // Remove job after completion
-        removeOnComplete: {
-            age: 4 * 3600, // 4 hours (longer for integration jobs)
-            count: 100 // Keep last 100 completed jobs
-        },
-        // Remove failed jobs after period
-        removeOnFail: {
-            age: 24 * 3600, // 1 day
-            count: 500 // Keep last 500 failed jobs
-        },
-        // Retry configuration
-        attempts: 2, // Retry up to 2 times (API calls are expensive)
-        backoff: {
-            type: 'exponential',
-            delay: 120000 // Start with 2 minute delay (API rate limits)
-        },
-        // Job timeout (2 hours for comprehensive integration)
-        timeout: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
-        // Enable job progress tracking
-        jobId: undefined // Let BullMQ generate unique IDs
-    }
-};
+function getIntegrationQueueConfig() {
+    return {
+        connection: getSharedConnection(),
+        // Prefix all queue keys with 'bullmq:' to match existing setup
+        prefix: 'bullmq',
+        defaultJobOptions: {
+            // Remove job after completion
+            removeOnComplete: {
+                age: 4 * 3600, // 4 hours (longer for integration jobs)
+                count: 100 // Keep last 100 completed jobs
+            },
+            // Remove failed jobs after period
+            removeOnFail: {
+                age: 24 * 3600, // 1 day
+                count: 500 // Keep last 500 failed jobs
+            },
+            // Retry configuration
+            attempts: 2, // Retry up to 2 times (API calls are expensive)
+            backoff: {
+                type: 'exponential',
+                delay: 120000 // Start with 2 minute delay (API rate limits)
+            },
+            // Job timeout (2 hours for comprehensive integration)
+            timeout: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
+            // Enable job progress tracking
+            jobId: undefined // Let BullMQ generate unique IDs
+        }
+    };
+}
 
 // Create the queue instance
 let integrationQueue = null;
@@ -82,7 +82,7 @@ let integrationQueue = null;
 function getIntegrationQueue() {
     if (!integrationQueue) {
         try {
-            integrationQueue = new Queue(INTEGRATION_QUEUE_NAME, integrationQueueConfig);
+            integrationQueue = new Queue(INTEGRATION_QUEUE_NAME, getIntegrationQueueConfig());
             
             // Event listeners for monitoring
             integrationQueue.on('error', (error) => {
@@ -345,10 +345,56 @@ async function addPhaseJob(jobData) {
     
     logger.info(`[IntegrationQueue] Added phase job ${job.id} (phase: ${phase}) for user ${userId}`);
     
+    // Verify the job is visible in the queue (catches Redis/connection races)
+    const verifyJob = await queue.getJob(phaseJobId);
+    const verifyState = verifyJob ? await verifyJob.getState() : 'not-found';
+    
+    if (verifyState !== 'waiting' && verifyState !== 'delayed' && verifyState !== 'active') {
+        logger.warn(`[IntegrationQueue] Phase job ${phaseJobId} state after add: ${verifyState}, retrying add once`);
+        
+        // Retry the add once
+        const retryJob = await queue.add(
+            'integration-phase',
+            {
+                userId,
+                country,
+                region,
+                phase,
+                parentJobId,
+                phaseData: phaseData || {},
+                triggeredAt: triggeredAt || new Date().toISOString()
+            },
+            {
+                jobId: phaseJobId,
+                priority: 1,
+                attempts: 2,
+                backoff: {
+                    type: 'exponential',
+                    delay: 60000
+                },
+                timeout: 6 * 60 * 60 * 1000
+            }
+        );
+        
+        const retryVerify = await queue.getJob(phaseJobId);
+        const retryState = retryVerify ? await retryVerify.getState() : 'not-found';
+        logger.info(`[IntegrationQueue] Retry add result for ${phaseJobId}: state=${retryState}`);
+        
+        return {
+            jobId: retryJob.id,
+            isExisting: false,
+            state: retryState,
+            phase,
+            wasRetried: true
+        };
+    }
+    
+    logger.info(`[IntegrationQueue] Verified phase job ${phaseJobId} state: ${verifyState}`);
+    
     return {
         jobId: job.id,
         isExisting: false,
-        state: 'waiting',
+        state: verifyState,
         phase
     };
 }

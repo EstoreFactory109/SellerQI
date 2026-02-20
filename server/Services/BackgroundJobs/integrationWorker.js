@@ -23,7 +23,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 
 const { Worker } = require('bullmq');
-const { getQueueRedisConnection } = require('../../config/queueRedisConn.js');
+const { getSharedConnection, closeSharedConnection } = require('./sharedQueueConnection.js');
 const { Integration } = require('../main/Integration.js');
 const { 
     INTEGRATION_QUEUE_NAME, 
@@ -48,6 +48,20 @@ const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
+
+// Global error handlers - prevent silent crashes that leave orphaned jobs
+process.on('uncaughtException', (error) => {
+    console.error(`[IntegrationWorker:${process.pid}] UNCAUGHT EXCEPTION - Worker crashing:`, error);
+    logger.error(`[IntegrationWorker:${process.pid}] UNCAUGHT EXCEPTION:`, error);
+    // Exit with error code - PM2 will restart, BullMQ will recover stalled jobs
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error(`[IntegrationWorker:${process.pid}] UNHANDLED REJECTION at:`, promise, 'reason:', reason);
+    logger.error(`[IntegrationWorker:${process.pid}] UNHANDLED REJECTION:`, reason);
+    // Don't exit for rejections - log and continue, but this helps diagnose issues
+});
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.INTEGRATION_WORKER_CONCURRENCY || '2', 10);
@@ -83,8 +97,9 @@ async function initializeConnections() {
     }
 }
 
-// Redis connection for worker
-const connection = getQueueRedisConnection();
+// Use shared Redis connection - same instance as the Queue
+// This ensures jobs added by Queue are immediately visible to Worker
+const connection = getSharedConnection();
 
 /**
  * Update job status in database for tracking
@@ -323,6 +338,10 @@ async function processIntegrationJob(job) {
 
             await addPhaseJob(nextJobData);
 
+            // Yield to event loop so the worker's next job fetch sees the new job in Redis
+            // This prevents a race where the handler returns before the Redis write is visible
+            await new Promise((resolve) => setImmediate(resolve));
+
             // Update current phase job as completed
             await updateJobStatus(job.id, userId, 'completed', {
                 completedAt: new Date().toISOString(),
@@ -535,16 +554,20 @@ async function startIntegrationWorker() {
 
         // Try graceful close
         worker.close()
-            .then(() => {
+            .then(async () => {
                 clearTimeout(shutdownTimeout);
+                // Also close the shared Redis connection
+                await closeSharedConnection();
                 if (!hasExited) {
                     hasExited = true;
                     logger.info(`[IntegrationWorker:${WORKER_NAME}] Worker closed gracefully`);
                     process.exit(0);
                 }
             })
-            .catch((err) => {
+            .catch(async (err) => {
                 clearTimeout(shutdownTimeout);
+                // Still try to close Redis connection
+                await closeSharedConnection();
                 if (!hasExited) {
                     hasExited = true;
                     logger.error(`[IntegrationWorker:${WORKER_NAME}] Error during graceful shutdown:`, err.message);
