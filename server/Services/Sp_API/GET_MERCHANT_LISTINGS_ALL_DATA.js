@@ -170,12 +170,14 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         const ProductData = [];
         
         // Helper function to normalize a string for comparison (lowercase, remove special chars)
+        // Also strips non-ASCII chars to handle encoding corruption (e.g. H�ndler-SKU)
         const normalizeKey = (str) => {
             return str.toLowerCase()
                 .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u')
                 .replace(/é/g, 'e').replace(/è/g, 'e').replace(/ê/g, 'e')
                 .replace(/à/g, 'a').replace(/â/g, 'a')
-                .replace(/[-_\s]/g, '');
+                .replace(/[-_\s]/g, '')
+                .replace(/[^\x00-\x7F]/g, ''); // Remove any remaining non-ASCII chars (handles encoding corruption)
         };
         
         // Helper function to find field with different possible names (handles localized headers)
@@ -224,11 +226,14 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                     'ASIN 1', 'Produkt-ID'
                 );
                 
-                const sku = findField(data,
+                // For SKU, also try to find any key ending with -SKU or containing 'SKU' as fallback
+                let sku = findField(data,
                     // English variants
                     'seller-sku', 'Seller SKU', 'seller_sku', 'sku', 'SKU', 'merchant-sku',
                     // German variants (Händler-SKU is the actual header in German reports)
-                    'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Verkäufer-SKU', 'Verkaeufer-SKU',
+                    // Include variants with and without umlauts, and ASCII-only versions
+                    'Händler-SKU', 'Haendler-SKU', 'Handler-SKU', 'Hndler-SKU',
+                    'Verkäufer-SKU', 'Verkaeufer-SKU', 'Verkaeufer-SKU',
                     'Angebots-SKU', 'Artikel-SKU',
                     // French variants
                     'sku-vendeur', 'référence-vendeur', 'reference-vendeur', 'SKU vendeur',
@@ -237,6 +242,20 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                     // Spanish variants
                     'SKU del vendedor', 'sku-vendedor'
                 );
+                
+                // Fallback: if SKU not found, try to find any key containing 'SKU' (case-insensitive)
+                // This handles encoding-corrupted headers like 'H�ndler-SKU'
+                if (!sku) {
+                    for (const key of Object.keys(data)) {
+                        if (key.toUpperCase().includes('SKU') && !key.toLowerCase().includes('fnsku')) {
+                            const val = data[key];
+                            if (val !== undefined && val !== null && val !== '') {
+                                sku = val;
+                                break;
+                            }
+                        }
+                    }
+                }
                 
                 const itemName = findField(data,
                     // English variants
