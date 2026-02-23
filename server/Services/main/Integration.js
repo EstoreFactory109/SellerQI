@@ -1506,17 +1506,22 @@ class Integration {
     /**
      * Process inactive listing items and fetch their issues from Amazon SP-API
      * Updates the Seller model with issues for each inactive SKU
+     * 
+     * MEMORY OPTIMIZATION: Instead of accumulating all results and updating at the end,
+     * we now update the Seller model per batch. This prevents holding all inactive
+     * item results in memory at once, which could cause OOM for large catalogs.
      */
     static async processInactiveListingItems(AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend, userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper) {
         logger.info("processInactiveListingItems starting", { 
             inactiveSkuCount: inactiveSkuArray?.length || 0 
         });
         
-        const issuesDataArray = [];
+        // Track total processed count for logging (don't accumulate full results)
+        let totalProcessedCount = 0;
 
         if (!AccessToken || !Array.isArray(inactiveSkuArray) || !Array.isArray(inactiveAsinArray) || inactiveSkuArray.length === 0) {
             logger.info("processInactiveListingItems ended - no inactive SKUs to process");
-            return issuesDataArray;
+            return [];
         }
 
         if (loggingHelper) {
@@ -1528,20 +1533,22 @@ class Integration {
         try {
             const MAX_CONCURRENT_ITEMS = 50;
             const BATCH_SIZE = Math.min(MAX_CONCURRENT_ITEMS, inactiveSkuArray.length);
+            const totalBatches = Math.ceil(inactiveSkuArray.length / BATCH_SIZE);
 
             logger.info("processInactiveListingItems batch processing", {
                 totalSKUs: inactiveSkuArray.length,
                 batchSize: BATCH_SIZE,
-                totalBatches: Math.ceil(inactiveSkuArray.length / BATCH_SIZE)
+                totalBatches
             });
 
             for (let batchStart = 0; batchStart < inactiveSkuArray.length; batchStart += BATCH_SIZE) {
                 const batchEnd = Math.min(batchStart + BATCH_SIZE, inactiveSkuArray.length);
                 const batchSKUs = inactiveSkuArray.slice(batchStart, batchEnd);
                 const batchASINs = inactiveAsinArray.slice(batchStart, batchEnd);
+                const batchNumber = Math.floor(batchStart / BATCH_SIZE) + 1;
 
                 logger.info("processInactiveListingItems processing batch", {
-                    batchNumber: Math.floor(batchStart / BATCH_SIZE) + 1,
+                    batchNumber,
                     batchStart: batchStart + 1,
                     batchEnd,
                     batchSize: batchSKUs.length,
@@ -1575,15 +1582,33 @@ class Integration {
 
                 const batchResults = await Promise.all(batchTasks);
                 const validResults = batchResults.filter(result => result !== null);
+                totalProcessedCount += validResults.length;
+
+                // MEMORY OPTIMIZATION: Update Seller model immediately after each batch
+                // instead of accumulating all results until the end
                 if (validResults.length > 0) {
-                    issuesDataArray.push(...validResults);
+                    // Update issues for this batch
+                    await this.updateSellerProductIssues(userId, Country, Region, validResults);
+                    
+                    // Update B2B pricing for this batch
+                    const b2bPricingData = validResults
+                        .filter(item => item && item.has_b2b_pricing !== undefined)
+                        .map(item => ({
+                            sku: item.sku,
+                            asin: item.asin,
+                            has_b2b_pricing: item.has_b2b_pricing
+                        }));
+                    
+                    if (b2bPricingData.length > 0) {
+                        await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
+                    }
                 }
 
                 logger.info("processInactiveListingItems batch completed", {
-                    batchNumber: Math.floor(batchStart / BATCH_SIZE) + 1,
+                    batchNumber,
                     batchProcessed: validResults.length,
                     batchTotal: batchSKUs.length,
-                    totalProcessed: issuesDataArray.length,
+                    totalProcessed: totalProcessedCount,
                     totalRemaining: inactiveSkuArray.length - batchEnd
                 });
 
@@ -1595,33 +1620,15 @@ class Integration {
                 }
             }
 
-            // Update Seller model with issues and B2B pricing for each inactive SKU
-            if (issuesDataArray.length > 0) {
-                await this.updateSellerProductIssues(userId, Country, Region, issuesDataArray);
-                
-                // Update B2B pricing for inactive products
-                const b2bPricingData = issuesDataArray
-                    .filter(item => item && item.has_b2b_pricing !== undefined)
-                    .map(item => ({
-                        sku: item.sku,
-                        asin: item.asin,
-                        has_b2b_pricing: item.has_b2b_pricing
-                    }));
-                
-                if (b2bPricingData.length > 0) {
-                    await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
-                }
-            }
-
             if (loggingHelper) {
-                loggingHelper.logFunctionSuccess('inactiveListingItems_processing', issuesDataArray, {
+                loggingHelper.logFunctionSuccess('inactiveListingItems_processing', { count: totalProcessedCount }, {
                     recordsProcessed: inactiveSkuArray.length,
-                    recordsSuccessful: issuesDataArray.length
+                    recordsSuccessful: totalProcessedCount
                 });
             }
             
             logger.info("processInactiveListingItems ended", {
-                processedCount: issuesDataArray.length
+                processedCount: totalProcessedCount
             });
         } catch (listingError) {
             logger.error("Error during inactive listing items processing", {
@@ -1632,7 +1639,9 @@ class Integration {
             }
         }
 
-        return issuesDataArray;
+        // Return empty array - data is already saved to DB per batch
+        // This prevents holding all results in memory
+        return [];
     }
 
     /**
@@ -2190,6 +2199,23 @@ class Integration {
      */
     static async executeInitPhase(userId, Region, Country) {
         logger.info(`[Integration:InitPhase] Starting for user ${userId}, ${Country}-${Region}`);
+        
+        // Create a logging session for the entire integration run
+        let loggingHelper = null;
+        let sessionId = null;
+        try {
+            loggingHelper = new LoggingHelper(userId, Region, Country);
+            await loggingHelper.initSession();
+            sessionId = loggingHelper.sessionId;
+            loggingHelper.logFunctionStart('Integration.InitPhase', {
+                userId,
+                region: Region,
+                country: Country
+            });
+        } catch (sessionError) {
+            // Log but don't fail - session creation is supplementary
+            logger.warn(`[Integration:InitPhase] Failed to create logging session: ${sessionError.message}`);
+        }
 
         try {
             // Validate inputs
@@ -2271,6 +2297,15 @@ class Integration {
                 inactiveCount: inactiveProductData.inactiveSkuArray?.length || 0
             });
 
+            // Log phase success (don't end session - it continues through phases)
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('Integration.InitPhase', null, {
+                    recordsProcessed: productData.asinArray?.length || 0,
+                    recordsSuccessful: productData.asinArray?.length || 0
+                });
+                await loggingHelper.saveSession();
+            }
+
             return {
                 success: true,
                 dataForNextPhase: {
@@ -2279,16 +2314,25 @@ class Integration {
                     inactiveSkuArray: inactiveProductData.inactiveSkuArray,
                     inactiveAsinArray: inactiveProductData.inactiveAsinArray,
                     sellerId,
-                    hasAdsAccount: !!AdsRefreshToken
+                    hasAdsAccount: !!AdsRefreshToken,
+                    sessionId // Pass sessionId to next phases
                 }
             };
 
         } catch (error) {
             logger.error(`[Integration:InitPhase] Failed for user ${userId}:`, error);
+            
+            // Log phase failure
+            if (loggingHelper) {
+                loggingHelper.logFunctionError('Integration.InitPhase', error);
+                await loggingHelper.saveSession();
+            }
+            
             return {
                 success: false,
                 error: error.message,
-                statusCode: 500
+                statusCode: 500,
+                sessionId // Pass sessionId even on failure for worker to end session
             };
         }
     }
@@ -2305,6 +2349,22 @@ class Integration {
      */
     static async executeBatch1And2Phase(userId, Region, Country, phaseData = {}) {
         logger.info(`[Integration:Batch1And2Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        
+        // Load existing session from previous phase (if available)
+        const sessionId = phaseData.sessionId;
+        if (sessionId) {
+            try {
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: 'Integration.Batch1And2Phase',
+                    logType: 'info',
+                    status: 'started',
+                    message: 'Integration Batch 1 & 2 Phase started',
+                    contextData: { userId, region: Region, country: Country }
+                });
+            } catch (logError) {
+                logger.warn(`[Integration:Batch1And2Phase] Failed to add log: ${logError.message}`);
+            }
+        }
 
         try {
             // Re-fetch tokens and config (resilient to worker restarts)
@@ -2427,6 +2487,21 @@ class Integration {
 
             logger.info(`[Integration:Batch1And2Phase] Completed for user ${userId}`);
 
+            // Log phase success
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.Batch1And2Phase',
+                        logType: 'success',
+                        status: 'completed',
+                        message: 'Integration Batch 1 & 2 Phase completed successfully',
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:Batch1And2Phase] Failed to add success log: ${logError.message}`);
+                }
+            }
+
             return {
                 success: true,
                 dataForNextPhase: {
@@ -2436,6 +2511,22 @@ class Integration {
 
         } catch (error) {
             logger.error(`[Integration:Batch1And2Phase] Failed for user ${userId}:`, error);
+            
+            // Log phase failure
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.Batch1And2Phase',
+                        logType: 'error',
+                        status: 'failed',
+                        message: `Integration Batch 1 & 2 Phase failed: ${error.message}`,
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:Batch1And2Phase] Failed to add error log: ${logError.message}`);
+                }
+            }
+            
             return {
                 success: false,
                 error: error.message,
@@ -2456,6 +2547,22 @@ class Integration {
      */
     static async executeBatch3And4Phase(userId, Region, Country, phaseData = {}) {
         logger.info(`[Integration:Batch3And4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        
+        // Load existing session from previous phase (if available)
+        const sessionId = phaseData.sessionId;
+        if (sessionId) {
+            try {
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: 'Integration.Batch3And4Phase',
+                    logType: 'info',
+                    status: 'started',
+                    message: 'Integration Batch 3 & 4 Phase started',
+                    contextData: { userId, region: Region, country: Country }
+                });
+            } catch (logError) {
+                logger.warn(`[Integration:Batch3And4Phase] Failed to add log: ${logError.message}`);
+            }
+        }
 
         try {
             // Re-fetch tokens and config
@@ -2563,6 +2670,21 @@ class Integration {
 
             logger.info(`[Integration:Batch3And4Phase] Completed for user ${userId}`);
 
+            // Log phase success
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.Batch3And4Phase',
+                        logType: 'success',
+                        status: 'completed',
+                        message: 'Integration Batch 3 & 4 Phase completed successfully',
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:Batch3And4Phase] Failed to add success log: ${logError.message}`);
+                }
+            }
+
             return {
                 success: true,
                 dataForNextPhase: {
@@ -2572,6 +2694,22 @@ class Integration {
 
         } catch (error) {
             logger.error(`[Integration:Batch3And4Phase] Failed for user ${userId}:`, error);
+            
+            // Log phase failure
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.Batch3And4Phase',
+                        logType: 'error',
+                        status: 'failed',
+                        message: `Integration Batch 3 & 4 Phase failed: ${error.message}`,
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:Batch3And4Phase] Failed to add error log: ${logError.message}`);
+                }
+            }
+            
             return {
                 success: false,
                 error: error.message,
@@ -2592,6 +2730,22 @@ class Integration {
      */
     static async executeListingItemsPhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[Integration:ListingItemsPhase] Starting for user ${userId}, ${Country}-${Region}`);
+        
+        // Load existing session from previous phase (if available)
+        const sessionId = phaseData.sessionId;
+        if (sessionId) {
+            try {
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: 'Integration.ListingItemsPhase',
+                    logType: 'info',
+                    status: 'started',
+                    message: 'Integration Listing Items Phase started',
+                    contextData: { userId, region: Region, country: Country }
+                });
+            } catch (logError) {
+                logger.warn(`[Integration:ListingItemsPhase] Failed to add log: ${logError.message}`);
+            }
+        }
 
         try {
             // Re-fetch tokens and config
@@ -2664,6 +2818,25 @@ class Integration {
                 inactiveCount: inactiveSkuArray.length
             });
 
+            // Log phase success
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.ListingItemsPhase',
+                        logType: 'success',
+                        status: 'completed',
+                        message: 'Integration Listing Items Phase completed successfully',
+                        dataMetrics: {
+                            recordsProcessed: genericKeyWordArray?.length || 0,
+                            recordsSuccessful: genericKeyWordArray?.length || 0
+                        },
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:ListingItemsPhase] Failed to add success log: ${logError.message}`);
+                }
+            }
+
             return {
                 success: true,
                 dataForNextPhase: {
@@ -2674,6 +2847,22 @@ class Integration {
 
         } catch (error) {
             logger.error(`[Integration:ListingItemsPhase] Failed for user ${userId}:`, error);
+            
+            // Log phase failure
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.ListingItemsPhase',
+                        logType: 'error',
+                        status: 'failed',
+                        message: `Integration Listing Items Phase failed: ${error.message}`,
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:ListingItemsPhase] Failed to add error log: ${logError.message}`);
+                }
+            }
+            
             return {
                 success: false,
                 error: error.message,
@@ -2694,6 +2883,22 @@ class Integration {
      */
     static async executeFinalizePhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[Integration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
+        
+        // Load existing session from previous phase (if available)
+        const sessionId = phaseData.sessionId;
+        if (sessionId) {
+            try {
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: 'Integration.FinalizePhase',
+                    logType: 'info',
+                    status: 'started',
+                    message: 'Integration Finalize Phase started',
+                    contextData: { userId, region: Region, country: Country }
+                });
+            } catch (logError) {
+                logger.warn(`[Integration:FinalizePhase] Failed to add log: ${logError.message}`);
+            }
+        }
 
         try {
             // Clear Redis cache
@@ -2716,6 +2921,24 @@ class Integration {
 
             logger.info(`[Integration:FinalizePhase] Completed for user ${userId}`);
 
+            // Log phase success and END the session with 'completed' status
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.FinalizePhase',
+                        logType: 'success',
+                        status: 'completed',
+                        message: 'Integration Finalize Phase completed successfully',
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                    // End the session as completed
+                    await LoggingHelper.endSessionById(sessionId, 'completed');
+                    logger.info(`[Integration:FinalizePhase] Session ended as completed: ${sessionId}`);
+                } catch (logError) {
+                    logger.warn(`[Integration:FinalizePhase] Failed to end session: ${logError.message}`);
+                }
+            }
+
             return {
                 success: true,
                 summary: {
@@ -2729,6 +2952,22 @@ class Integration {
 
         } catch (error) {
             logger.error(`[Integration:FinalizePhase] Failed for user ${userId}:`, error);
+            
+            // Log phase failure (don't end session here - worker will handle it)
+            if (sessionId) {
+                try {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: 'Integration.FinalizePhase',
+                        logType: 'error',
+                        status: 'failed',
+                        message: `Integration Finalize Phase failed: ${error.message}`,
+                        contextData: { userId, region: Region, country: Country }
+                    });
+                } catch (logError) {
+                    logger.warn(`[Integration:FinalizePhase] Failed to add error log: ${logError.message}`);
+                }
+            }
+            
             return {
                 success: false,
                 error: error.message,

@@ -143,6 +143,20 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
                 }
             }
             
+            // For PPC metrics filter endpoint - include date range in cache key
+            if (pageType === 'ppc-metrics-filter') {
+                const startDate = req.query.startDate || 'default';
+                const endDate = req.query.endDate || 'default';
+                cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:${startDate}:${endDate}`;
+            }
+            
+            // For PPC units sold filter endpoint - include date range in cache key
+            if (pageType === 'ppc-units-sold-filter') {
+                const startDate = req.query.startDate || 'default';
+                const endDate = req.query.endDate || 'default';
+                cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:${startDate}:${endDate}`;
+            }
+            
             const redisClient = getRedisClient();
             
             // Allow client to bypass cache for issues-by-product (e.g. after server deploy with recommendation text changes)
@@ -210,7 +224,7 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads'];
+        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {
@@ -324,6 +338,39 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
             }
         } catch (patternError) {
             logger.warn('Could not clear profitability-issues pattern cache:', patternError.message);
+        }
+        
+        // Clear PPC metrics filter cache entries (with date params in key)
+        const ppcMetricsFilterPattern = `analyse_data:ppc-metrics-filter:${userId}:${country}:${region}:${adminId || 'null'}:*`;
+        try {
+            const filterKeys = await redisClient.keys(ppcMetricsFilterPattern);
+            if (filterKeys && filterKeys.length > 0) {
+                await Promise.all(filterKeys.map(key => redisClient.del(key)));
+                logger.info(`Cleared ${filterKeys.length} ppc-metrics-filter cache entries for user: ${userId}`);
+            }
+        } catch (patternError) {
+            logger.warn('Could not clear ppc-metrics-filter pattern cache:', patternError.message);
+        }
+        
+        // Clear PPC units sold filter cache entries (with date params in key)
+        const ppcUnitsSoldFilterPattern = `analyse_data:ppc-units-sold-filter:${userId}:${country}:${region}:${adminId || 'null'}:*`;
+        try {
+            const filterKeys = await redisClient.keys(ppcUnitsSoldFilterPattern);
+            if (filterKeys && filterKeys.length > 0) {
+                await Promise.all(filterKeys.map(key => redisClient.del(key)));
+                logger.info(`Cleared ${filterKeys.length} ppc-units-sold-filter cache entries for user: ${userId}`);
+            }
+        } catch (patternError) {
+            logger.warn('Could not clear ppc-units-sold-filter pattern cache:', patternError.message);
+        }
+        
+        // Clear full profitability table cache (ProfitabilityService internal cache)
+        const profitabilityTableFullKey = `profitability-table-full:${userId}:${country}:${region}`;
+        try {
+            await redisClient.del(profitabilityTableFullKey);
+            logger.info(`Cleared profitability-table-full cache for user: ${userId}`);
+        } catch (profitError) {
+            logger.warn('Could not clear profitability-table-full cache:', profitError.message);
         }
         
         // Also clear the legacy cache key format for backward compatibility

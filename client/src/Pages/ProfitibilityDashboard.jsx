@@ -1463,7 +1463,8 @@ const ProfitabilityDashboard = () => {
               transition={{ duration: 0.6, delay: 0.1 }}
               style={{ marginBottom: '10px' }}
             >
-              {metricsLoading ? (
+              {/* Show skeleton when loading OR when metricsData is not yet available (initial state) */}
+              {(metricsLoading || (calendarMode === 'default' && !metricsData && !filteredData)) ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="animate-pulse" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>

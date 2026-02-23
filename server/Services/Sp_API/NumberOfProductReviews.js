@@ -23,6 +23,12 @@ axiosRetry(axios, {
 // Concurrency: use API limit (e.g. 20 req/s). Stay slightly under to avoid 429s.
 const REVIEWS_CONCURRENCY = parseInt(process.env.NUMBER_OF_REVIEWS_CONCURRENCY || '20', 10);
 
+// Request timeout to prevent hanging requests (60 seconds)
+const REQUEST_TIMEOUT_MS = 60000;
+
+// Chunk size for processing ASINs to reduce memory usage
+const ASIN_CHUNK_SIZE = parseInt(process.env.REVIEWS_CHUNK_SIZE || '100', 10);
+
 // ✅ Main fetch function
 const getNumberOfProductReviews = async (asin, country) => {
   try {
@@ -40,7 +46,8 @@ const getNumberOfProductReviews = async (asin, country) => {
       headers: {
         "x-rapidapi-key": "da4f9c009emsh1155c6b317494b6p13e477jsn370565189fee",
         "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS
     };
 
     const response = await axios.request(options);
@@ -68,9 +75,25 @@ const getNumberOfProductReviews = async (asin, country) => {
   }
 };
 
-const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
+/**
+ * Split array into chunks of specified size
+ */
+function chunkArray(array, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
+  const totalAsins = asinArray?.length || 0;
+  const totalChunks = Math.ceil(totalAsins / ASIN_CHUNK_SIZE);
+  
   logger.info("NumberOfProductReviews starting", {
-    asinCount: asinArray?.length,
+    asinCount: totalAsins,
+    chunkSize: ASIN_CHUNK_SIZE,
+    totalChunks,
     concurrency: REVIEWS_CONCURRENCY
   });
 
@@ -100,64 +123,90 @@ const addReviewDataTODatabase = async (asinArray, country, userId,region) => {
   };
 
   try {
-    const tasks = asinArray.map((asin) => limit(() => fetchOne(asin)));
-    const products = (await Promise.all(tasks)).filter(Boolean);
-    
-    // Filter out null products and products with missing required fields
-    const validProducts = products.filter(product => 
-      product !== null && 
-      product.asin && 
-      product.product_title && 
-      product.product_title.trim() !== ''
-    );
-    
-    const aplusProducts = validProducts
-      .map(product => ({
+    const asinChunks = chunkArray(asinArray, ASIN_CHUNK_SIZE);
+    let reviewDocId = null;
+    let totalProductsSaved = 0;
+    const allAplusProducts = [];
+
+    for (let chunkIndex = 0; chunkIndex < asinChunks.length; chunkIndex++) {
+      const chunk = asinChunks[chunkIndex];
+      const chunkNumber = chunkIndex + 1;
+      
+      logger.info(`📦 Processing chunk ${chunkNumber}/${totalChunks}: ${chunk.length} ASINs`);
+
+      const tasks = chunk.map((asin) => limit(() => fetchOne(asin)));
+      const chunkProducts = (await Promise.all(tasks)).filter(Boolean);
+      
+      const validProducts = chunkProducts.filter(product => 
+        product !== null && 
+        product.asin && 
+        product.product_title && 
+        product.product_title.trim() !== ''
+      );
+
+      if (validProducts.length === 0) {
+        logger.info(`Chunk ${chunkNumber}: No valid products, skipping`);
+        continue;
+      }
+
+      const chunkAplusProducts = validProducts.map(product => ({
         Asins: product.asin,
-        // Use 'APPROVED' for true, 'NOT_AVAILABLE' for false to match expected status values
         status: product.aplus ? 'APPROVED' : 'NOT_AVAILABLE'
       }));
-    const filteredProducts = validProducts;
+      allAplusProducts.push(...chunkAplusProducts);
 
-    if (filteredProducts.length === 0) {
-      return false;
-    }
+      const productsToSave = validProducts.map(({ aplus, ...rest }) => rest);
 
-    if(aplusProducts.length>0){
-      const aplusContent= await APlusContentModel.create({
-        User: userId,
-        region:region,
-        country: country,
-        ApiContentDetails: aplusProducts
-      })
+      if (reviewDocId === null) {
+        const addReview = await NumberOfProductReviews.create({
+          User: userId,
+          region: region,
+          country: country,
+          Products: productsToSave
+        });
 
-      if(!aplusContent){
-        return false;
+        if (!addReview) {
+          logger.error(`Chunk ${chunkNumber}: Failed to create review document`);
+          return false;
+        }
+
+        reviewDocId = addReview._id;
+        totalProductsSaved += productsToSave.length;
+        logger.info(`Chunk ${chunkNumber}: Created document with ${productsToSave.length} products`);
+      } else {
+        await NumberOfProductReviews.findByIdAndUpdate(
+          reviewDocId,
+          { $push: { Products: { $each: productsToSave } } }
+        );
+        totalProductsSaved += productsToSave.length;
+        logger.info(`Chunk ${chunkNumber}: Added ${productsToSave.length} products to document`);
       }
     }
 
-    const addReview = await NumberOfProductReviews.create({
-      User: userId,
-      region:region,
-      country: country,
-      Products: filteredProducts
-    });
-
-    if (!addReview) {
+    if (totalProductsSaved === 0) {
+      logger.warn("NumberOfProductReviews: No valid products found");
       return false;
+    }
+
+    if (allAplusProducts.length > 0) {
+      await APlusContentModel.create({
+        User: userId,
+        region: region,
+        country: country,
+        ApiContentDetails: allAplusProducts
+      });
     }
 
     const getUser = await User.findById(userId);
-    if (!getUser) {
-      return false;
+    if (getUser && reviewDocId) {
+      getUser.numberOfProductReviews = reviewDocId;
+      await getUser.save();
     }
 
-    getUser.numberOfProductReviews = addReview._id;
-    await getUser.save();
-
-    logger.info("Data saved successfully");
+    logger.info("Data saved successfully", { totalProductsSaved });
     logger.info("NumberOfProductReviews ended");
-    return addReview;
+
+    return await NumberOfProductReviews.findById(reviewDocId);
   } catch (error) {
     logger.error("Error saving product reviews to database:", error.message);
     return false;

@@ -4,6 +4,9 @@ const aws4 = require('aws4');
 const logger = require('../../utils/Logger.js');
 const ApiError = require('../../utils/ApiError.js'); // If you're using custom ApiError
 
+// Timeout for SP-API requests (60 seconds) - prevents indefinite hangs
+const REQUEST_TIMEOUT_MS = 60000;
+
 // ✅ Setup axios-retry globally
 axiosRetry(axios, {
   retries: 3,
@@ -95,7 +98,8 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
 
   try {
     const response = await axios.get(fullUrl, {
-      headers: request.headers
+      headers: request.headers,
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
@@ -284,7 +288,8 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
 
   try {
     const response = await axios.get(fullUrl, {
-      headers: request.headers
+      headers: request.headers,
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     // Extract issues from the response

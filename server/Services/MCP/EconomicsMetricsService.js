@@ -69,9 +69,19 @@ async function saveEconomicsMetrics(userId, region, country, metrics, queryId = 
 }
 
 /**
+ * Chunk size for processing ASIN-wise sales to reduce memory usage.
+ * Each chunk is processed and written to DB before moving to the next.
+ */
+const ASIN_CHUNK_SIZE = parseInt(process.env.ECONOMICS_ASIN_CHUNK_SIZE || '5000', 10);
+
+/**
  * Save metrics with ASIN-wise data in separate collection
  * This is now used for ALL accounts to prevent 16MB document size limit
  * ASIN-wise data is stored in a separate collection, grouped by date
+ * 
+ * MEMORY OPTIMIZATION: Processes asinWiseSales in chunks to avoid OOM for large accounts.
+ * Uses findOneAndUpdate with $push/$each and upsert to keep one document per (metricsId, date),
+ * respecting the unique index on (metricsId, date).
  */
 async function saveMetricsWithSeparateAsinData(userObjectId, region, country, metrics, queryId, documentId) {
     // Step 1: Save main document WITHOUT asinWiseSales (to avoid 16MB limit)
@@ -113,59 +123,95 @@ async function saveMetricsWithSeparateAsinData(userObjectId, region, country, me
     });
 
     // Step 2: Save ASIN-wise data in separate collection, grouped by date
+    // MEMORY OPTIMIZATION: Process in chunks to avoid holding full salesByDate/dateDocuments in memory
     const asinWiseSales = metrics.asinWiseSales || [];
+    const totalRecords = asinWiseSales.length;
     
-    if (asinWiseSales.length > 0) {
-        // Group ASIN sales by date
-        const salesByDate = {};
-        
-        asinWiseSales.forEach(asinSale => {
-            const date = asinSale.date || 'no_date';
-            
-            if (!salesByDate[date]) {
-                salesByDate[date] = [];
-            }
-            
-            // Create ASIN sales item without the date field (it's stored at document level)
-            salesByDate[date].push({
-                asin: asinSale.asin,
-                parentAsin: asinSale.parentAsin || null,
-                sales: asinSale.sales,
-                grossProfit: asinSale.grossProfit,
-                unitsSold: asinSale.unitsSold,
-                refunds: asinSale.refunds,
-                ppcSpent: asinSale.ppcSpent,
-                fbaFees: asinSale.fbaFees,
-                storageFees: asinSale.storageFees,
-                totalFees: asinSale.totalFees,
-                amazonFees: asinSale.amazonFees,
-                feeBreakdown: asinSale.feeBreakdown || []
-            });
+    if (totalRecords > 0) {
+        const totalChunks = Math.ceil(totalRecords / ASIN_CHUNK_SIZE);
+        let totalRecordsSaved = 0;
+        const datesUpdated = new Set();
+
+        logger.info('Starting chunked ASIN-wise sales save', {
+            metricsId: savedMetrics._id,
+            totalRecords,
+            chunkSize: ASIN_CHUNK_SIZE,
+            totalChunks
         });
 
-        // Save each date's ASIN sales as a separate document
-        const dateDocuments = Object.entries(salesByDate).map(([date, asinSales]) => ({
-            metricsId: savedMetrics._id,
-            User: userObjectId,
-            region: region,
-            country: country,
-            date: date,
-            asinSales: asinSales
-        }));
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const startIdx = chunkIndex * ASIN_CHUNK_SIZE;
+            const endIdx = Math.min(startIdx + ASIN_CHUNK_SIZE, totalRecords);
+            const chunk = asinWiseSales.slice(startIdx, endIdx);
+            const chunkNumber = chunkIndex + 1;
 
-        // Insert all date documents
-        if (dateDocuments.length > 0) {
-            await AsinWiseSalesForBigAccounts.insertMany(dateDocuments);
-
-            logger.info('ASIN-wise sales saved in separate collection', {
-                metricsId: savedMetrics._id,
-                userId: userObjectId.toString(),
-                region,
-                country,
-                totalDates: dateDocuments.length,
-                totalAsinRecords: asinWiseSales.length
+            // Group only this chunk by date
+            const salesByDateChunk = {};
+            
+            chunk.forEach(asinSale => {
+                const date = asinSale.date || 'no_date';
+                
+                if (!salesByDateChunk[date]) {
+                    salesByDateChunk[date] = [];
+                }
+                
+                salesByDateChunk[date].push({
+                    asin: asinSale.asin,
+                    parentAsin: asinSale.parentAsin || null,
+                    sales: asinSale.sales,
+                    grossProfit: asinSale.grossProfit,
+                    unitsSold: asinSale.unitsSold,
+                    refunds: asinSale.refunds,
+                    ppcSpent: asinSale.ppcSpent,
+                    fbaFees: asinSale.fbaFees,
+                    storageFees: asinSale.storageFees,
+                    totalFees: asinSale.totalFees,
+                    amazonFees: asinSale.amazonFees,
+                    feeBreakdown: asinSale.feeBreakdown || []
+                });
             });
+
+            // Update (or create) each date's document with $push $each
+            // This respects the unique index on (metricsId, date) by upserting
+            const updatePromises = Object.entries(salesByDateChunk).map(([date, asinSalesItems]) => {
+                datesUpdated.add(date);
+                return AsinWiseSalesForBigAccounts.findOneAndUpdate(
+                    { metricsId: savedMetrics._id, date: date },
+                    {
+                        $setOnInsert: {
+                            metricsId: savedMetrics._id,
+                            User: userObjectId,
+                            region: region,
+                            country: country,
+                            date: date
+                        },
+                        $push: { asinSales: { $each: asinSalesItems } }
+                    },
+                    { upsert: true, new: true }
+                );
+            });
+
+            await Promise.all(updatePromises);
+            totalRecordsSaved += chunk.length;
+
+            // Log progress for large runs (every 10 chunks or first/last)
+            if (totalChunks <= 5 || chunkNumber === 1 || chunkNumber === totalChunks || chunkNumber % 10 === 0) {
+                logger.info(`ASIN chunk ${chunkNumber}/${totalChunks} saved`, {
+                    metricsId: savedMetrics._id,
+                    chunkRecords: chunk.length,
+                    totalSavedSoFar: totalRecordsSaved
+                });
+            }
         }
+
+        logger.info('ASIN-wise sales saved in separate collection', {
+            metricsId: savedMetrics._id,
+            userId: userObjectId.toString(),
+            region,
+            country,
+            totalDates: datesUpdated.size,
+            totalAsinRecords: totalRecordsSaved
+        });
     }
 
     return savedMetrics;

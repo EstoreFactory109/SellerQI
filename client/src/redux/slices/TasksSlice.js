@@ -11,7 +11,8 @@ export const fetchTasks = createAsyncThunk(
       });
       
       if (response.status === 200 && response.data?.data) {
-        return response.data.data.tasks || [];
+        const { tasks = [], taskRenewalDate = null } = response.data.data;
+        return { tasks, taskRenewalDate };
       } else {
         return rejectWithValue('Failed to fetch tasks data');
       }
@@ -45,6 +46,7 @@ export const updateTaskStatus = createAsyncThunk(
 
 const initialState = {
   tasks: [],
+  taskRenewalDate: null,
   loading: false,
   error: null,
   lastFetched: null,
@@ -86,13 +88,15 @@ const TasksSlice = createSlice({
       })
       .addCase(fetchTasks.fulfilled, (state, action) => {
         state.loading = false;
-        state.tasks = action.payload;
+        const { tasks = [], taskRenewalDate = null } = action.payload;
+        state.tasks = tasks;
+        state.taskRenewalDate = taskRenewalDate;
         state.lastFetched = Date.now();
         state.error = null;
         
         // Initialize completedTasks based on task status
         const completedTaskIds = [];
-        action.payload.forEach(task => {
+        tasks.forEach(task => {
           if (task.status === 'completed') {
             completedTaskIds.push(task.taskId);
           }

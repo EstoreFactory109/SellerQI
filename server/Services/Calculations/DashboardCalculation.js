@@ -93,53 +93,31 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
     
     if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
         try {
-            // Fetch and aggregate ASIN data from separate collection for big accounts
-            const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
+            // OPTIMIZED: Use MongoDB aggregation pipeline to aggregate ASIN data directly in the database
+            // This prevents loading all date documents (potentially 163k+ ASIN records) into Node.js memory
+            // The aggregation performs the same sum operations as the previous JS loop:
+            //   - Groups by ASIN
+            //   - Sums: sales, ppcSpent, grossProfit, fbaFees, storageFees, totalFees, amazonFees, unitsSold
+            // Result is identical to the previous implementation, just computed in MongoDB
+            const profitabilityMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             
-            if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                let processedCount = 0;
-                for (const doc of bigAccountAsinDocs) {
-                    if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                        for (const item of doc.asinSales) {
-                            if (item.asin) {
-                                const asin = item.asin;
-                                const fbaFees = item.fbaFees?.amount || 0;
-                                const storageFees = item.storageFees?.amount || 0;
-                                const totalFees = item.totalFees?.amount || 0;
-                                const amazonFees = item.amazonFees?.amount || totalFees;
-                                
-                                // Aggregate values for same ASIN across dates
-                                if (asinPpcSales[asin]) {
-                                    asinPpcSales[asin].sales += item.sales?.amount || 0;
-                                    asinPpcSales[asin].ppcSpent += item.ppcSpent?.amount || 0;
-                                    asinPpcSales[asin].grossProfit += item.grossProfit?.amount || 0;
-                                    asinPpcSales[asin].fbaFees += fbaFees;
-                                    asinPpcSales[asin].storageFees += storageFees;
-                                    asinPpcSales[asin].totalFees += totalFees;
-                                    asinPpcSales[asin].amazonFees += amazonFees;
-                                    asinPpcSales[asin].unitsSold += item.unitsSold || 0;
-                                } else {
-                                    asinPpcSales[asin] = {
-                                        sales: item.sales?.amount || 0,
-                                        ppcSpent: item.ppcSpent?.amount || 0,
-                                        grossProfit: item.grossProfit?.amount || 0,
-                                        fbaFees: fbaFees,
-                                        storageFees: storageFees,
-                                        totalFees: totalFees,
-                                        amazonFees: amazonFees,
-                                        unitsSold: item.unitsSold || 0
-                                    };
-                                }
-                            }
-                            // Yield to event loop periodically to prevent blocking
-                            processedCount++;
-                            if (processedCount % YIELD_CHUNK_SIZE === 0) {
-                                await yieldToEventLoop();
-                            }
-                        }
-                    }
+            if (profitabilityMap && profitabilityMap.size > 0) {
+                // Convert the Map to the asinPpcSales object format expected by the rest of the code
+                // The aggregation returns: sales, grossProfit, ads (ppcSpent), amzFee (amazonFees), 
+                //                          fbaFees, storageFees, totalFees, unitsSold
+                for (const [asin, data] of profitabilityMap) {
+                    asinPpcSales[asin] = {
+                        sales: data.sales || 0,
+                        ppcSpent: data.ads || 0,  // aggregation returns as 'ads'
+                        grossProfit: data.grossProfit || 0,
+                        fbaFees: data.fbaFees || 0,
+                        storageFees: data.storageFees || 0,
+                        totalFees: data.totalFees || 0,
+                        amazonFees: data.amzFee || 0,  // aggregation returns as 'amzFee'
+                        unitsSold: data.unitsSold || 0
+                    };
                 }
-                logger.debug('Aggregated ASIN PPC sales for big account', {
+                logger.debug('Aggregated ASIN PPC sales for big account using MongoDB aggregation', {
                     metricsId: economicsMetrics._id,
                     uniqueAsins: Object.keys(asinPpcSales).length
                 });

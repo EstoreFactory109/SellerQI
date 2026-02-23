@@ -609,6 +609,133 @@ class LoggingHelper {
             return null;
         }
     }
+
+    /**
+     * Static method to load an existing session by sessionId.
+     * Returns a LoggingHelper instance with the session already loaded.
+     * Useful for phased integration where session is created in first phase
+     * and updated in subsequent phases.
+     * 
+     * @param {string} sessionId - The session ID to load
+     * @returns {Promise<LoggingHelper|null>} LoggingHelper instance with loaded session, or null if not found
+     */
+    static async loadSession(sessionId) {
+        try {
+            const session = await UserAccountLogs.findOne({ sessionId });
+            
+            if (!session) {
+                logger.warn('loadSession: Session not found', { sessionId });
+                return null;
+            }
+
+            // Create a LoggingHelper instance with the session's data
+            const helper = new LoggingHelper(
+                session.userId,
+                session.region,
+                session.country,
+                session.sessionId
+            );
+            helper.session = session;
+
+            logger.info('loadSession: Session loaded successfully', {
+                sessionId,
+                userId: session.userId,
+                region: session.region,
+                country: session.country,
+                sessionStatus: session.sessionStatus
+            });
+
+            return helper;
+        } catch (error) {
+            logger.error('loadSession: Failed to load session', {
+                error: error.message,
+                sessionId
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Static method to end a session by its sessionId.
+     * Useful for the integration worker to end the session on failure
+     * without needing a full LoggingHelper instance.
+     * 
+     * @param {string} sessionId - The session ID to end
+     * @param {string} status - The status to set ('completed', 'failed', 'partial')
+     * @returns {Promise<boolean>} True if successful, false otherwise
+     */
+    static async endSessionById(sessionId, status = 'failed') {
+        try {
+            const session = await UserAccountLogs.findOne({ sessionId });
+            
+            if (!session) {
+                logger.warn('endSessionById: Session not found', { sessionId });
+                return false;
+            }
+
+            // Only end if not already ended
+            if (session.sessionStatus !== 'in_progress') {
+                logger.info('endSessionById: Session already ended', {
+                    sessionId,
+                    currentStatus: session.sessionStatus
+                });
+                return true;
+            }
+
+            session.endSession(status);
+            await session.save();
+
+            logger.info('endSessionById: Session ended successfully', {
+                sessionId,
+                status,
+                duration: session.sessionDuration,
+                successRate: session.overallSummary?.successRate
+            });
+
+            return true;
+        } catch (error) {
+            logger.error('endSessionById: Failed to end session', {
+                error: error.message,
+                sessionId,
+                status
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Static method to add a log entry to an existing session.
+     * Useful for phased integration to add phase-level logs.
+     * 
+     * @param {string} sessionId - The session ID to add log to
+     * @param {Object} logData - Log data object with functionName, logType, status, message, etc.
+     * @returns {Promise<boolean>} True if successful, false otherwise
+     */
+    static async addLogToSession(sessionId, logData) {
+        try {
+            const session = await UserAccountLogs.findOne({ sessionId });
+            
+            if (!session) {
+                logger.warn('addLogToSession: Session not found', { sessionId });
+                return false;
+            }
+
+            session.addLog({
+                ...logData,
+                timestamp: new Date()
+            });
+            await session.save();
+
+            return true;
+        } catch (error) {
+            logger.error('addLogToSession: Failed to add log', {
+                error: error.message,
+                sessionId,
+                functionName: logData?.functionName
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = LoggingHelper;

@@ -48,6 +48,7 @@ const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
+const LoggingHelper = require('../../utils/LoggingHelper.js');
 
 // Global error handlers - prevent silent crashes that leave orphaned jobs
 process.on('uncaughtException', (error) => {
@@ -421,6 +422,17 @@ async function processIntegrationJob(job) {
         const duration = Date.now() - jobStartTime;
 
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Phase ${currentPhase} failed for user ${userId}:`, error);
+
+        // End the logging session as failed (if sessionId exists in phaseData)
+        const sessionId = phaseData?.sessionId;
+        if (sessionId) {
+            try {
+                await LoggingHelper.endSessionById(sessionId, 'failed');
+                logger.info(`[IntegrationWorker:${WORKER_NAME}] Session ended as failed: ${sessionId}`);
+            } catch (sessionError) {
+                logger.warn(`[IntegrationWorker:${WORKER_NAME}] Failed to end session: ${sessionError.message}`);
+            }
+        }
 
         // Update phase job status
         await updateJobStatus(job.id, userId, 'failed', {

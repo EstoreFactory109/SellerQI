@@ -289,7 +289,7 @@ asinWiseSalesForBigAccountsSchema.statics.getAsinSalesMap = async function(metri
  * 2. Returns only one aggregated row per ASIN instead of many date rows
  * 
  * @param {ObjectId} metricsId - The EconomicsMetrics document ID
- * @returns {Promise<Map>} Map of asin -> { sales, grossProfit, ads, amzFee, fbaFees, storageFees, totalFees, unitsSold, refunds }
+ * @returns {Promise<Map>} Map of asin -> { sales, grossProfit, ads, amzFee, fbaFees, storageFees, totalFees, unitsSold, refunds, parentAsin }
  */
 asinWiseSalesForBigAccountsSchema.statics.getProfitabilityMapByMetricsId = async function(metricsId) {
     const results = await this.aggregate([
@@ -298,6 +298,7 @@ asinWiseSalesForBigAccountsSchema.statics.getProfitabilityMapByMetricsId = async
         { 
             $group: {
                 _id: '$asinSales.asin',
+                parentAsin: { $first: '$asinSales.parentAsin' },
                 sales: { $sum: '$asinSales.sales.amount' },
                 grossProfit: { $sum: '$asinSales.grossProfit.amount' },
                 ads: { $sum: '$asinSales.ppcSpent.amount' },
@@ -313,6 +314,7 @@ asinWiseSalesForBigAccountsSchema.statics.getProfitabilityMapByMetricsId = async
             $project: {
                 _id: 0,
                 asin: '$_id',
+                parentAsin: 1,
                 sales: 1,
                 grossProfit: 1,
                 ads: 1,
@@ -330,6 +332,7 @@ asinWiseSalesForBigAccountsSchema.statics.getProfitabilityMapByMetricsId = async
     results.forEach(r => {
         map.set(r.asin, {
             asin: r.asin,
+            parentAsin: r.parentAsin || r.asin,
             sales: r.sales || 0,
             grossProfit: r.grossProfit || 0,
             ads: r.ads || 0,

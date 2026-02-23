@@ -174,7 +174,8 @@ router.get('/profitability/issues/summary', auth, getLocation, analyseDataCache(
 // ===== ASIN-WISE SALES DATA =====
 // Returns ASIN-wise sales data for profitability table
 // Separate endpoint to handle big accounts where data is stored in separate collection
-router.get('/asin-wise-sales', auth, getLocation, getAsinWiseSalesData);
+// Cache TTL: 1 hour
+router.get('/asin-wise-sales', auth, getLocation, analyseDataCache(3600, 'asin-wise-sales'), getAsinWiseSalesData);
 
 // ===== PPC/SPONSORED ADS DASHBOARD =====
 // Returns PPC/sponsored ads specific calculated data (LEGACY - kept for backward compatibility)
@@ -359,26 +360,35 @@ router.put('/tasks/status', auth, validateTaskStatusBody, updateTaskStatus);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards
-router.get('/ppc-metrics/latest', auth, getLocation, getLatestPPCMetrics);
+// Cache TTL: 10 minutes
+router.get('/ppc-metrics/latest', auth, getLocation, analyseDataCache(600, 'ppc-metrics-latest'), getLatestPPCMetrics);
 
 // Get PPC metrics filtered by date range
-router.get('/ppc-metrics/filter', auth, getLocation, getPPCMetricsByDateRange);
+// Note: Date range params handled via ppc-metrics-filter cache type (includes dates in key)
+// Cache TTL: 10 minutes
+router.get('/ppc-metrics/filter', auth, getLocation, analyseDataCache(600, 'ppc-metrics-filter'), getPPCMetricsByDateRange);
 
 // Get PPC metrics for graph/chart display
-router.get('/ppc-metrics/graph', auth, getLocation, getPPCMetricsForGraph);
+// Cache TTL: 10 minutes
+router.get('/ppc-metrics/graph', auth, getLocation, analyseDataCache(600, 'ppc-metrics-graph'), getPPCMetricsForGraph);
 
 // Get PPC metrics history
-router.get('/ppc-metrics/history', auth, getLocation, getPPCMetricsHistory);
+// Cache TTL: 10 minutes
+router.get('/ppc-metrics/history', auth, getLocation, analyseDataCache(600, 'ppc-metrics-history'), getPPCMetricsHistory);
 
 // ===== PPC UNITS SOLD (from PPCUnitsSold Model) =====
 // Get latest PPC units sold data (default: 30 days)
-router.get('/ppc-units-sold/latest', auth, getLocation, getLatestPPCUnitsSold);
+// Cache TTL: 10 minutes
+router.get('/ppc-units-sold/latest', auth, getLocation, analyseDataCache(600, 'ppc-units-sold-latest'), getLatestPPCUnitsSold);
 
 // Get PPC units sold filtered by date range
-router.get('/ppc-units-sold/filter', auth, getLocation, getPPCUnitsSoldByDateRange);
+// Note: Date range params handled via ppc-units-sold-filter cache type (includes dates in key)
+// Cache TTL: 10 minutes
+router.get('/ppc-units-sold/filter', auth, getLocation, analyseDataCache(600, 'ppc-units-sold-filter'), getPPCUnitsSoldByDateRange);
 
 // Get PPC units sold summary for KPI display
-router.get('/ppc-units-sold/summary', auth, getLocation, getPPCUnitsSoldSummary);
+// Cache TTL: 10 minutes
+router.get('/ppc-units-sold/summary', auth, getLocation, analyseDataCache(600, 'ppc-units-sold-summary'), getPPCUnitsSoldSummary);
 
 module.exports = router;
 

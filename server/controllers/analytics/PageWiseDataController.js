@@ -249,9 +249,9 @@ const getProfitabilityMetrics = asyncHandler(async (req, res) => {
         );
 
     } catch (error) {
-        logger.error("Error in getProfitabilityMetrics:", error);
+        logger.error("Error in getProfitabilityMetrics:", error?.message || error, error?.stack);
         return res.status(500).json(
-            new ApiError(500, `Error getting profitability metrics: ${error.message}`)
+            new ApiError(500, `Error getting profitability metrics: ${error?.message || 'Unknown error'}`)
         );
     }
 });

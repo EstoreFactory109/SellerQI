@@ -12,10 +12,14 @@
  * Fallback behavior:
  * - If pre-computed data doesn't exist in IssuesDataModel, it falls back
  *   to IssuesDataService which will calculate and store data on-the-fly
+ * 
+ * OPTIMIZED: Supports chunked storage (dataVersion >= 2) where large arrays
+ * are stored in IssuesDataChunks collection.
  */
 
 const logger = require('../../utils/Logger.js');
 const IssuesData = require('../../models/system/IssuesDataModel.js');
+const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const IssuesDataService = require('./IssuesDataService.js');
 
@@ -27,6 +31,8 @@ const PRODUCTS_PAGE_SIZE = 6;
  * Helper function to ensure issues data exists
  * Falls back to IssuesDataService if data is missing
  * 
+ * OPTIMIZED: Supports chunked storage (dataVersion >= 2)
+ * 
  * @param {string} userId 
  * @param {string} country 
  * @param {string} region 
@@ -34,10 +40,26 @@ const PRODUCTS_PAGE_SIZE = 6;
  * @returns {Promise<Object|null>} Issues data or null
  */
 async function ensureIssuesData(userId, country, region, projection = {}) {
+    // Always include dataVersion in projection to detect chunked storage
+    const projectionWithVersion = { ...projection, dataVersion: 1 };
+    
     // First try to get from MongoDB
-    let issuesData = await IssuesData.findOne({ userId, country, region }, projection).lean();
+    let issuesData = await IssuesData.findOne({ userId, country, region }, projectionWithVersion).lean();
     
     if (issuesData) {
+        // Check if using chunked storage (dataVersion >= 2)
+        if (issuesData.dataVersion >= 2) {
+            // Load required fields from chunks
+            const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
+            const chunkedFields = IssuesDataService.CHUNKED_FIELDS || [];
+            
+            for (const field of requestedFields) {
+                if (chunkedFields.includes(field)) {
+                    // Load this field from chunks
+                    issuesData[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
+                }
+            }
+        }
         return issuesData;
     }
     
@@ -57,7 +79,20 @@ async function ensureIssuesData(userId, country, region, projection = {}) {
     }
     
     // Re-fetch with projection after storing
-    issuesData = await IssuesData.findOne({ userId, country, region }, projection).lean();
+    issuesData = await IssuesData.findOne({ userId, country, region }, projectionWithVersion).lean();
+    
+    // Load chunked fields if needed
+    if (issuesData && issuesData.dataVersion >= 2) {
+        const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
+        const chunkedFields = IssuesDataService.CHUNKED_FIELDS || [];
+        
+        for (const field of requestedFields) {
+            if (chunkedFields.includes(field)) {
+                issuesData[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
+            }
+        }
+    }
+    
     return issuesData;
 }
 
@@ -78,7 +113,7 @@ async function getIssuesSummary(userId, country, region) {
         // Get pre-computed summary counts
         let summary = await IssueSummary.getIssueSummary(userId, country, region);
         
-        // Also get account health and total products from IssuesData
+        // Also get account health and counts from IssuesData (include dataVersion for chunked detection)
         let issuesData = await IssuesData.findOne(
             { userId, country, region },
             {
@@ -90,7 +125,8 @@ async function getIssuesSummary(userId, country, region) {
                 totalInventoryErrors: 1,
                 totalAccountErrors: 1,
                 totalProfitabilityErrors: 1,
-                totalSponsoredAdsErrors: 1
+                totalSponsoredAdsErrors: 1,
+                dataVersion: 1
             }
         ).lean();
         
@@ -124,9 +160,24 @@ async function getIssuesSummary(userId, country, region) {
                     totalInventoryErrors: 1,
                     totalAccountErrors: 1,
                     totalProfitabilityErrors: 1,
-                    totalSponsoredAdsErrors: 1
+                    totalSponsoredAdsErrors: 1,
+                    dataVersion: 1
                 }
             ).lean();
+        }
+        
+        // For chunked storage (dataVersion >= 2), get counts from chunk stats instead of empty arrays
+        let totalProductCount = issuesData?.TotalProduct?.length || 0;
+        let activeProductCount = issuesData?.ActiveProducts?.length || 0;
+        
+        if (issuesData?.dataVersion >= 2) {
+            // Get counts from chunk stats for chunked fields
+            const [totalProductStats, activeProductStats] = await Promise.all([
+                IssuesDataChunks.getChunkStats(userId, country, region, 'TotalProduct'),
+                IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts')
+            ]);
+            totalProductCount = totalProductStats.totalItems || 0;
+            activeProductCount = activeProductStats.totalItems || 0;
         }
         
         const duration = Date.now() - startTime;
@@ -144,10 +195,10 @@ async function getIssuesSummary(userId, country, region) {
                 (issuesData?.totalConversionErrors || 0) + 
                 (issuesData?.totalInventoryErrors || 0)
             ),
-            totalActiveProducts: summary?.totalActiveProducts || issuesData?.ActiveProducts?.length || 0,
+            totalActiveProducts: summary?.totalActiveProducts || activeProductCount,
             numberOfProductsWithIssues: summary?.numberOfProductsWithIssues || 0,
             accountHealthPercentage: issuesData?.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
-            TotalProduct: issuesData?.TotalProduct?.length || 0,
+            TotalProduct: totalProductCount,
             lastCalculatedAt: summary?.lastCalculatedAt || issuesData?.lastCalculatedAt
         };
         
@@ -218,13 +269,14 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
         });
         
         // Enrich ranking errors with product details (name, sku)
+        // Note: ranking errors have title at error.data.Title (from DashboardCalculation)
         const enrichedErrors = allErrors.map(error => {
             const product = productMap.get(error.asin);
             return {
                 ...error,
-                Title: product?.Title || product?.name || error.Title || 'Unknown Product',
+                Title: product?.Title || product?.name || error.data?.Title || error.Title || 'Unknown Product',
                 sku: product?.sku || error.sku || '',
-                MainImage: product?.MainImage || null
+                MainImage: product?.MainImage || error.data?.MainImage || null
             };
         });
         

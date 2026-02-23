@@ -4,15 +4,16 @@ import { motion } from "framer-motion";
 import { 
   AlertTriangle, 
   Search, 
-  Filter,
   Download,
   RefreshCw,
   TrendingUp,
   TrendingDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Info
 } from 'lucide-react';
 import { fetchTasks, updateTaskStatus } from '../redux/slices/TasksSlice.js';
+import { TasksPageSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
@@ -197,6 +198,7 @@ export default function Tasks() {
 
   // Get tasks data from Redux store
   const tasks = useSelector(state => state.tasks?.tasks || []);
+  const taskRenewalDate = useSelector(state => state.tasks?.taskRenewalDate);
   const loading = useSelector(state => state.tasks?.loading || false);
   const error = useSelector(state => state.tasks?.error);
   const completedTasksArray = useSelector(state => state.tasks?.completedTasks || []);
@@ -473,14 +475,7 @@ export default function Tasks() {
   }, [tasks]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen overflow-x-hidden w-full flex items-center justify-center" style={{ background: '#1a1a1a' }}>
-        <div className="flex flex-col items-center gap-2">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2" style={{ borderBottomColor: '#3b82f6' }}></div>
-          <p className="text-xs" style={{ color: '#9ca3af' }}>Loading tasks...</p>
-        </div>
-      </div>
-    );
+    return <TasksPageSkeleton rows={10} />;
   }
 
   if (error) {
@@ -510,7 +505,7 @@ export default function Tasks() {
       <div className='sticky top-0 z-40 w-full' style={{ background: '#161b22', borderBottom: '1px solid #30363d', marginBottom: '10px', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d' }}>
         <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 w-full'>
           <div className='flex items-center gap-2 min-w-0'>
-            <AlertTriangle className='w-4 h-4' style={{ color: '#fb923c' }} />
+            <AlertTriangle className='w-4 h-4 flex-shrink-0' style={{ color: '#fb923c' }} />
             <div className='min-w-0 flex-1'>
               <h1 className='text-base font-bold' style={{ color: '#f3f4f6' }}>Tasks</h1>
             </div>
@@ -559,6 +554,21 @@ export default function Tasks() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Renew date tip - always visible (same style as Your Products page) */}
+      <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r space-y-3">
+        <div className="flex items-start gap-2">
+          <Info className="text-blue-400 flex-shrink-0 mt-0.5" size={16} />
+          <div>
+            <h3 className="text-xs font-semibold text-blue-300 mb-0.5">Tasks renewal</h3>
+            <p className="text-xs text-blue-400">
+              {taskRenewalDate
+                ? <>Tasks renew on <strong>{new Date(taskRenewalDate).toLocaleDateString(undefined, { dateStyle: 'long' })}</strong>.</>
+                : 'Tasks are renewed periodically. The next renewal date will appear here once your tasks have been loaded.'}
+            </p>
           </div>
         </div>
       </div>

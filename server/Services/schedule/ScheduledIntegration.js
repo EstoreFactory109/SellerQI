@@ -1491,17 +1491,22 @@ class ScheduledIntegration {
     /**
      * Process inactive listing items and fetch their issues from Amazon SP-API (same as Integration)
      * Updates the Seller model with issues for each inactive SKU
+     * 
+     * MEMORY OPTIMIZATION: Instead of accumulating all results and updating at the end,
+     * we now update the Seller model per batch. This prevents holding all inactive
+     * item results in memory at once, which could cause OOM for large catalogs.
      */
     static async processInactiveListingItems(AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend, userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper) {
         logger.info("processInactiveListingItems starting", { 
             inactiveSkuCount: inactiveSkuArray?.length || 0 
         });
         
-        const issuesDataArray = [];
+        // Track total processed count for logging (don't accumulate full results)
+        let totalProcessedCount = 0;
 
         if (!AccessToken || !Array.isArray(inactiveSkuArray) || !Array.isArray(inactiveAsinArray) || inactiveSkuArray.length === 0) {
             logger.info("processInactiveListingItems ended - no inactive SKUs to process");
-            return issuesDataArray;
+            return [];
         }
 
         if (loggingHelper) {
@@ -1513,11 +1518,19 @@ class ScheduledIntegration {
         try {
             const MAX_CONCURRENT_ITEMS = 50;
             const BATCH_SIZE = Math.min(MAX_CONCURRENT_ITEMS, inactiveSkuArray.length);
+            const totalBatches = Math.ceil(inactiveSkuArray.length / BATCH_SIZE);
+
+            logger.info("processInactiveListingItems batch processing", {
+                totalSKUs: inactiveSkuArray.length,
+                batchSize: BATCH_SIZE,
+                totalBatches
+            });
 
             for (let batchStart = 0; batchStart < inactiveSkuArray.length; batchStart += BATCH_SIZE) {
                 const batchEnd = Math.min(batchStart + BATCH_SIZE, inactiveSkuArray.length);
                 const batchSKUs = inactiveSkuArray.slice(batchStart, batchEnd);
                 const batchASINs = inactiveAsinArray.slice(batchStart, batchEnd);
+                const batchNumber = Math.floor(batchStart / BATCH_SIZE) + 1;
 
                 const batchTasks = batchSKUs.map((sku, index) => {
                     return limit(async () => {
@@ -1546,29 +1559,36 @@ class ScheduledIntegration {
 
                 const batchResults = await Promise.all(batchTasks);
                 const validResults = batchResults.filter(result => result !== null);
+                totalProcessedCount += validResults.length;
+
+                // MEMORY OPTIMIZATION: Update Seller model immediately after each batch
+                // instead of accumulating all results until the end
                 if (validResults.length > 0) {
-                    issuesDataArray.push(...validResults);
+                    await this.updateSellerProductIssues(userId, Country, Region, validResults);
                 }
+
+                logger.info("processInactiveListingItems batch completed", {
+                    batchNumber,
+                    batchProcessed: validResults.length,
+                    batchTotal: batchSKUs.length,
+                    totalProcessed: totalProcessedCount,
+                    totalRemaining: inactiveSkuArray.length - batchEnd
+                });
 
                 if (batchEnd < inactiveSkuArray.length) {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
-            // Update Seller model with issues for each inactive SKU
-            if (issuesDataArray.length > 0) {
-                await this.updateSellerProductIssues(userId, Country, Region, issuesDataArray);
-            }
-
             if (loggingHelper) {
-                loggingHelper.logFunctionSuccess('inactiveListingItems_processing', issuesDataArray, {
+                loggingHelper.logFunctionSuccess('inactiveListingItems_processing', { count: totalProcessedCount }, {
                     recordsProcessed: inactiveSkuArray.length,
-                    recordsSuccessful: issuesDataArray.length
+                    recordsSuccessful: totalProcessedCount
                 });
             }
             
             logger.info("processInactiveListingItems ended", {
-                processedCount: issuesDataArray.length
+                processedCount: totalProcessedCount
             });
         } catch (listingError) {
             logger.error("Error during inactive listing items processing", {
@@ -1579,7 +1599,9 @@ class ScheduledIntegration {
             }
         }
 
-        return issuesDataArray;
+        // Return empty array - data is already saved to DB per batch
+        // This prevents holding all results in memory
+        return [];
     }
 
     /**

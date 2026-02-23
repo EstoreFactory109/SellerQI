@@ -217,6 +217,75 @@ export const IssuesTableRowsSkeleton = ({ rows = 5 }) => (
 );
 
 /**
+ * Tasks page skeleton (dark theme) - header, filters, table with 7 columns
+ */
+export const TasksPageSkeleton = ({ rows = 10 }) => (
+  <div className="min-h-screen overflow-x-hidden w-full animate-in fade-in duration-300" style={{ background: '#1a1a1a', padding: '10px' }} aria-hidden>
+    <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+      {/* Header */}
+      <div className="rounded-lg mb-2.5 p-2.5 border border-[#30363d] bg-[#161b22]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded bg-[#30363d] animate-pulse" />
+            <div className="h-4 bg-[#30363d] rounded w-16 animate-pulse" />
+            <div className="hidden sm:block h-5 bg-[#30363d] rounded w-32 animate-pulse" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-24 bg-[#30363d] rounded-lg animate-pulse" />
+            <div className="h-8 w-20 bg-[#30363d] rounded-lg animate-pulse" />
+          </div>
+        </div>
+      </div>
+      {/* Filters */}
+      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-2 mb-2.5">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex-1 h-8 bg-[#30363d] rounded-lg animate-pulse" />
+          <div className="sm:w-40 h-8 bg-[#30363d] rounded-lg animate-pulse" />
+          <div className="sm:w-36 h-8 bg-[#30363d] rounded-lg animate-pulse" />
+        </div>
+      </div>
+      {/* Table */}
+      <div className="rounded-lg border border-[#30363d] bg-[#161b22] overflow-hidden">
+        <table className="w-full">
+          <thead style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+            <tr>
+              <th className="px-2 py-2 w-[60px]"><div className="h-3 bg-[#30363d] rounded w-10 animate-pulse" /></th>
+              <th className="px-2 py-2 min-w-[200px]"><div className="h-3 bg-[#30363d] rounded w-24 animate-pulse" /></th>
+              <th className="px-2 py-2 min-w-[130px]"><div className="h-3 bg-[#30363d] rounded w-20 animate-pulse" /></th>
+              <th className="px-2 py-2 w-[110px]"><div className="h-3 bg-[#30363d] rounded w-24 animate-pulse" /></th>
+              <th className="px-2 py-2"><div className="h-3 bg-[#30363d] rounded w-16 animate-pulse" /></th>
+              <th className="px-2 py-2"><div className="h-3 bg-[#30363d] rounded w-24 animate-pulse" /></th>
+              <th className="px-2 py-2 w-[100px]"><div className="h-3 bg-[#30363d] rounded w-14 animate-pulse" /></th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rows }).map((_, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #30363d' }}>
+                <td className="px-2 py-2"><div className="h-4 bg-[#30363d] rounded w-8 animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="h-4 bg-[#30363d] rounded w-3/4 max-w-[200px] animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="h-4 bg-[#30363d] rounded w-24 animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="h-5 bg-[#30363d] rounded w-20 animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="h-4 bg-[#30363d] rounded w-full max-w-[180px] animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="h-4 bg-[#30363d] rounded w-full max-w-[160px] animate-pulse" /></td>
+                <td className="px-2 py-2"><div className="flex items-center gap-1.5"><div className="h-3.5 w-3.5 rounded bg-[#30363d] animate-pulse" /><div className="h-4 bg-[#30363d] rounded w-16 animate-pulse" /></div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex items-center justify-between px-3 py-2 border-t border-[#30363d] bg-[#21262d]">
+          <div className="h-4 bg-[#30363d] rounded w-48 animate-pulse" />
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-20 bg-[#30363d] rounded-lg animate-pulse" />
+            <div className="h-8 w-16 bg-[#30363d] rounded animate-pulse" />
+            <div className="h-8 w-14 bg-[#30363d] rounded-lg animate-pulse" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/**
  * Full Issues by Category page skeleton (dark theme)
  */
 export const IssuesCategoryPageSkeleton = () => (

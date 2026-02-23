@@ -2,6 +2,9 @@ const axios = require('axios');
 const logger = require('../../utils/Logger.js');
 const { AsinKeywordRecommendations, KeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
 
+// Request timeout to prevent hanging requests (60 seconds)
+const REQUEST_TIMEOUT_MS = 60000;
+
 // Base URIs for different regions (same as other Amazon Ads services)
 const BASE_URIS = {
   'NA': 'https://advertising-api.amazon.com',
@@ -98,7 +101,10 @@ async function makeKeywordRecommendationRequestForAsin(url, headers, asin, local
     maxRecommendations: '200'
   };
 
-  const response = await axios.post(url, requestBody, { headers });
+  const response = await axios.post(url, requestBody, { 
+    headers,
+    timeout: REQUEST_TIMEOUT_MS
+  });
 
   if (!response || !response.data) {
     throw new Error('Invalid response from Amazon Ads API - no data received');
@@ -230,9 +236,9 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
     // ===== PROCESS ASINS IN BATCHES OF 5 =====
     const BATCH_SIZE = 5; // Process 5 ASINs concurrently
     const BATCH_DELAY_MS = 1000; // 1 second delay between batches
+    const HEARTBEAT_INTERVAL = 50; // Log heartbeat every 50 batches
 
     const asinBatches = chunkArray(asins, BATCH_SIZE);
-    const allResults = [];
     let totalKeywordsFound = 0;
     let successCount = 0;
     let failCount = 0;
@@ -243,7 +249,10 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
       const batch = asinBatches[batchIndex];
       const batchNumber = batchIndex + 1;
       
-      logger.info(`📦 Batch ${batchNumber}/${asinBatches.length}: Processing ${batch.length} ASINs`);
+      // Log every batch for small runs, or heartbeat for large runs
+      if (asinBatches.length <= 20 || batchNumber % HEARTBEAT_INTERVAL === 0 || batchNumber === 1) {
+        logger.info(`📦 Batch ${batchNumber}/${asinBatches.length}: Processing ${batch.length} ASINs`);
+      }
 
       // Process all ASINs in this batch concurrently using Promise.all
       const batchPromises = batch.map(asin => 
@@ -253,18 +262,22 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
       try {
         const batchResults = await Promise.all(batchPromises);
         
-        // Collect results
+        // Only count - don't accumulate full results in memory
+        let batchSuccess = 0;
         for (const result of batchResults) {
-          allResults.push(result);
           if (result.success) {
             successCount++;
+            batchSuccess++;
             totalKeywordsFound += result.keywordCount;
           } else {
             failCount++;
           }
         }
 
-        logger.info(`✅ Batch ${batchNumber} completed: ${batchResults.filter(r => r.success).length}/${batch.length} successful`);
+        // Log completion for small runs or heartbeat batches
+        if (asinBatches.length <= 20 || batchNumber % HEARTBEAT_INTERVAL === 0) {
+          logger.info(`✅ Batch ${batchNumber} completed: ${batchSuccess}/${batch.length} successful`);
+        }
 
       } catch (batchError) {
         logger.error(`❌ Batch ${batchNumber} error: ${batchError.message}`);
@@ -277,18 +290,16 @@ async function getKeywordRecommendations(accessToken, profileId, userId, country
 
       // Rate limiting: wait between batches (except for the last one)
       if (batchIndex < asinBatches.length - 1) {
-        logger.info(`⏳ Waiting ${BATCH_DELAY_MS}ms before next batch...`);
         await delay(BATCH_DELAY_MS);
       }
     }
 
-    // ===== SUMMARY =====
+    // ===== SUMMARY (no full results array - saves memory) =====
     const summary = {
       totalAsins: asins.length,
       successfulAsins: successCount,
       failedAsins: failCount,
-      totalKeywordsFound: totalKeywordsFound,
-      results: allResults
+      totalKeywordsFound: totalKeywordsFound
     };
 
     logger.info(`🏁 getKeywordRecommendations completed`, {

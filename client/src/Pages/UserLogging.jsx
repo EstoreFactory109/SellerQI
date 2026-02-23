@@ -229,37 +229,44 @@ const UserLogging = () => {
     fetchData();
   }, [activeTab, dateFilter]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
-    
+  const fetchData = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
-              if (activeTab === 'overview' || activeTab === 'sessions') {
-          // Fetch sessions only - we'll calculate stats in frontend
-          const sessionsRes = await axiosInstance.get(`/app/analyse/logging/sessions?limit=20`);
-          console.log("sessionsRes: ",sessionsRes)
-          
-          const sessionsData = sessionsRes?.data?.data?.sessions || [];
-          setSessions(sessionsData);
-          
-          // Calculate stats from the sessions data
-          const calculatedStats = calculateOverallStats(sessionsData);
-          console.log("calculatedStats: ", calculatedStats);
-          setStats(calculatedStats);
-        }
-        
-        if (activeTab === 'overview' || activeTab === 'errors') {
-          // Fetch error logs
-          const errorRes = await axiosInstance.get(`/app/analyse/logging/errors?limit=50`);
-          console.log("errorRes: ",errorRes)
-          setErrorLogs(errorRes?.data?.data?.errorLogs || []);
-        }
-        
+      if (activeTab === 'overview' || activeTab === 'sessions') {
+        const sessionsRes = await axiosInstance.get(`/app/analyse/logging/sessions?limit=20`);
+        const sessionsData = sessionsRes?.data?.data?.sessions || [];
+        setSessions(sessionsData);
+        const calculatedStats = calculateOverallStats(sessionsData);
+        setStats(calculatedStats);
+      }
+      if (activeTab === 'overview' || activeTab === 'errors') {
+        const errorRes = await axiosInstance.get(`/app/analyse/logging/errors?limit=50`);
+        setErrorLogs(errorRes?.data?.data?.errorLogs || []);
+      }
     } catch (err) {
       console.error('Error fetching logging data:', err);
-      setError('Failed to fetch logging data. Please try again.');
+      if (!silent) setError('Failed to fetch logging data. Please try again.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  };
+
+  // Refetch only sessions and stats (used after Run analysis so overview + sessions update without reload)
+  const refreshSessionsAndStats = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const sessionsRes = await axiosInstance.get(`/app/analyse/logging/sessions?limit=20`);
+      const sessionsData = sessionsRes?.data?.data?.sessions || [];
+      setSessions(sessionsData);
+      setStats(calculateOverallStats(sessionsData));
+    } catch (err) {
+      console.error('Error refreshing sessions:', err);
+      if (!silent) setError('Failed to fetch sessions.');
+    } finally {
+      if (!silent) setLoading(false);
     }
   };
 
@@ -292,6 +299,13 @@ const UserLogging = () => {
           text: data?.isExisting
             ? `Integration job already in progress (Job ID: ${data.jobId})`
             : `Integration job queued successfully (Job ID: ${data.jobId})`
+        });
+        // Refresh overview and sessions so the new run appears without reloading
+        await refreshSessionsAndStats();
+        // Delayed refetches so the new session (created when worker runs INIT) appears
+        const refetchDelays = [3000, 8000, 15000];
+        refetchDelays.forEach((delay) => {
+          setTimeout(() => refreshSessionsAndStats(true), delay);
         });
       } else {
         throw new Error(response.data?.message || 'Failed to trigger integration');

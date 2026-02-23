@@ -6,10 +6,17 @@
  * 
  * Each error (including sub-errors) is created as an individual task with detailed error
  * descriptions and solutions matching the Issues by Category page format.
+ * 
+ * OPTIMIZED: Tasks are now stored in a separate TaskItem collection (one document per task)
+ * to avoid the 16MB MongoDB document limit. The Task model only stores metadata (taskRenewalDate).
  */
 
 const Task = require('../../models/MCP/TaskModel.js');
+const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const logger = require('../../utils/Logger.js');
+
+// Chunk size for bulk insert operations
+const TASK_INSERT_CHUNK_SIZE = 500;
 
 /**
  * Generate a unique ID for tasks (alternative to uuid)
@@ -35,8 +42,12 @@ const TaskStatus = {
 class CreateTaskService {
     /**
      * Main method to create tasks from all error categories
+     * 
+     * OPTIMIZED: Tasks are now stored in the TaskItem collection (one document per task)
+     * instead of embedding in the Task document. This avoids the 16MB BSON limit.
+     * 
      * @param {Object} data - Object containing userId and error arrays
-     * @returns {Object} Created/updated task document
+     * @returns {Object} Result containing task counts and metadata
      */
     async createTasksFromErrors(data) {
         try {
@@ -47,7 +58,6 @@ class CreateTaskService {
             if (Array.isArray(data.TotalProducts)) {
                 data.TotalProducts.forEach(product => {
                     if (product.asin) {
-                        // Try multiple possible name fields
                         const name = product.itemName || product.title || product.productName || product.name || null;
                         if (name) {
                             productNameMap.set(product.asin, name);
@@ -59,110 +69,97 @@ class CreateTaskService {
             // Generate tasks from all error categories
             const tasks = [];
             
-            // Add ranking error tasks
             if (data.rankingProductWiseErrors) {
                 tasks.push(...this.generateRankingTasks(data.rankingProductWiseErrors));
             }
             
-            // Add conversion error tasks
             if (data.conversionProductWiseErrors) {
                 tasks.push(...this.generateConversionTasks(data.conversionProductWiseErrors));
             }
             
-            // Add inventory error tasks
             if (data.inventoryProductWiseErrors) {
                 tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
             }
             
-            // Add profitability error tasks (with product name lookup)
             if (data.profitabilityErrorDetails) {
                 tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
             }
             
-            // Add sponsored ads error tasks (with product name lookup)
             if (data.sponsoredAdsErrorDetails) {
                 tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
             }
             
-            // Add account health error tasks
             if (data.AccountErrors) {
                 tasks.push(...this.generateAccountTasks(data.AccountErrors));
             }
             
-            // Check if user document exists
+            // Check if user metadata document exists
             let userTaskDocument = await Task.findOne({ userId });
             
             if (userTaskDocument) {
-                // Check if current date is greater than or equal to renewal date
                 const currentDate = new Date();
                 const renewalDate = new Date(userTaskDocument.taskRenewalDate);
                 
-                // Helper function to get stable task identifier
-                const getTaskIdentifier = (task) => `${task.asin}-${task.errorCategory}-${task.errorType}`;
-                
                 if (currentDate >= renewalDate) {
-                    logger.info(`Renewal period reached for user ${userId}. Clearing completed tasks and adding new ones.`);
+                    logger.info(`Renewal period reached for user ${userId}. Clearing all tasks and creating fresh set.`);
                     
-                    // Remove completed tasks, keep pending
-                    const pendingTasks = userTaskDocument.tasks.filter(task => task.status === TaskStatus.PENDING);
+                    // Delete ALL tasks from TaskItem collection (not just completed)
+                    const deleteResult = await TaskItem.deleteByUserId(userId);
+                    logger.info(`Deleted ${deleteResult.deletedCount} tasks for user ${userId}`);
                     
-                    // Get identifiers of existing pending tasks to avoid duplicates
-                    const existingPendingIdentifiers = new Set(
-                        pendingTasks.map(task => getTaskIdentifier(task))
-                    );
+                    // Insert new tasks in chunks (duplicates handled by unique index)
+                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
                     
-                    // Filter out new tasks that already exist as pending
-                    const uniqueNewTasks = tasks.filter(task => 
-                        !existingPendingIdentifiers.has(getTaskIdentifier(task))
-                    );
-                    
-                    // Combine pending tasks with only unique new tasks
-                    userTaskDocument.tasks = [...pendingTasks, ...uniqueNewTasks];
-                    
-                    // Update renewal date to 7 days from current date
+                    // Update renewal date
                     const newRenewalDate = new Date();
                     newRenewalDate.setDate(newRenewalDate.getDate() + 7);
                     userTaskDocument.taskRenewalDate = newRenewalDate;
-                    
-                    logger.info(`Renewed tasks for user ${userId}. Kept ${pendingTasks.length} pending tasks, added ${uniqueNewTasks.length} new unique tasks (${tasks.length - uniqueNewTasks.length} duplicates skipped).`);
+                    userTaskDocument.tasks = []; // Clear legacy embedded tasks
                     await userTaskDocument.save();
+                    
+                    logger.info(`Renewed tasks for user ${userId}. Inserted ${insertResult.insertedCount} fresh tasks.`);
                 } else {
-                    // Not yet renewal time, but still add new tasks that don't already exist
-                    logger.info(`Within renewal period for user ${userId}. Checking for new unique tasks to add.`);
+                    logger.info(`Within renewal period for user ${userId}. Adding new unique tasks.`);
                     
-                    // Get existing task identifiers using stable identifier (ASIN + errorCategory + errorType)
-                    const existingTaskIdentifiers = new Set(
-                        userTaskDocument.tasks.map(task => getTaskIdentifier(task))
-                    );
+                    // Insert new tasks in chunks (duplicates handled by unique index)
+                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
                     
-                    // Filter out tasks that already exist
-                    const newUniqueTasks = tasks.filter(task => 
-                        !existingTaskIdentifiers.has(getTaskIdentifier(task))
-                    );
-                    
-                    if (newUniqueTasks.length > 0) {
-                        logger.info(`Adding ${newUniqueTasks.length} new unique tasks for user ${userId}`);
-                        userTaskDocument.tasks.push(...newUniqueTasks);
+                    // Clear legacy embedded tasks if present
+                    if (userTaskDocument.tasks && userTaskDocument.tasks.length > 0) {
+                        userTaskDocument.tasks = [];
                         await userTaskDocument.save();
-                    } else {
-                        logger.info(`No new unique tasks to add for user ${userId}`);
                     }
+                    
+                    logger.info(`Added ${insertResult.insertedCount} new unique tasks for user ${userId}`);
                 }
             } else {
-                // Create new document for the user
+                // Create new metadata document
                 const renewalDate = new Date();
                 renewalDate.setDate(renewalDate.getDate() + 7);
                 
                 userTaskDocument = new Task({
                     userId,
-                    tasks,
+                    tasks: [], // No longer store tasks here
                     taskRenewalDate: renewalDate
                 });
                 await userTaskDocument.save();
-                logger.info(`Created new task document for user ${userId} with ${tasks.length} tasks`);
+                
+                // Insert tasks into TaskItem collection
+                const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
+                logger.info(`Created new task metadata for user ${userId}, inserted ${insertResult.insertedCount} tasks`);
             }
             
-            return userTaskDocument;
+            // Return task counts for compatibility
+            const taskCounts = await TaskItem.countByStatus(userId);
+            
+            return {
+                userId,
+                taskRenewalDate: userTaskDocument.taskRenewalDate,
+                taskCount: taskCounts.total,
+                pendingCount: taskCounts.pending,
+                completedCount: taskCounts.completed,
+                inProgressCount: taskCounts.in_progress
+            };
         } catch (error) {
             logger.error('Error creating tasks:', error);
             throw new Error('Failed to create tasks from error data');
@@ -739,7 +736,7 @@ class CreateTaskService {
      * Create tasks from calculate service data
      * @param {string} userId - User ID
      * @param {Object} dashboardData - Dashboard data containing error arrays
-     * @returns {Object} Created/updated task document
+     * @returns {Object} Result containing task counts and metadata
      */
     async createTasksFromCalculateServiceData(userId, dashboardData) {
         return this.createTasksFromErrors({
@@ -750,12 +747,31 @@ class CreateTaskService {
     
     /**
      * Get all tasks for a user
+     * 
+     * OPTIMIZED: Now queries TaskItem collection instead of embedded array.
+     * 
      * @param {string} userId - User ID
-     * @returns {Object|null} Task document or null
+     * @param {Object} options - Query options (limit, skip, status, sort)
+     * @returns {Object} Task data with metadata and tasks array
      */
-    async getUserTasks(userId) {
+    async getUserTasks(userId, options = {}) {
         try {
-            return await Task.findOne({ userId });
+            // Get metadata from Task document
+            const userTaskDocument = await Task.findOne({ userId }).lean();
+            
+            // Get tasks from TaskItem collection
+            const tasks = await TaskItem.findByUserId(userId, options);
+            const taskCounts = await TaskItem.countByStatus(userId);
+            
+            return {
+                userId,
+                taskRenewalDate: userTaskDocument?.taskRenewalDate || null,
+                tasks,
+                taskCount: taskCounts.total,
+                pendingCount: taskCounts.pending,
+                completedCount: taskCounts.completed,
+                inProgressCount: taskCounts.in_progress
+            };
         } catch (error) {
             logger.error('Error fetching user tasks:', error);
             throw new Error('Failed to fetch user tasks');
@@ -764,30 +780,46 @@ class CreateTaskService {
     
     /**
      * Update task status
+     * 
+     * OPTIMIZED: Now updates TaskItem document directly.
+     * 
      * @param {string} userId - User ID
      * @param {string} taskId - Task ID
      * @param {string} status - New status
-     * @returns {Object|null} Updated task document
+     * @returns {Object} Updated task
      */
     async updateTaskStatus(userId, taskId, status) {
         try {
-            const userTaskDocument = await Task.findOne({ userId });
-            if (!userTaskDocument) {
-                throw new Error('User task document not found');
-            }
+            const task = await TaskItem.findOneAndUpdate(
+                { userId, taskId },
+                { status },
+                { new: true }
+            ).lean();
             
-            const task = userTaskDocument.tasks.find(t => t.taskId === taskId);
             if (!task) {
                 throw new Error('Task not found');
             }
             
-            task.status = status;
-            await userTaskDocument.save();
-            
-            return userTaskDocument;
+            return task;
         } catch (error) {
             logger.error('Error updating task status:', error);
             throw new Error('Failed to update task status');
+        }
+    }
+    
+    /**
+     * Delete all tasks for a user
+     * @param {string} userId - User ID
+     * @returns {Object} Deletion result
+     */
+    async deleteAllUserTasks(userId) {
+        try {
+            const result = await TaskItem.deleteByUserId(userId);
+            logger.info(`Deleted ${result.deletedCount} tasks for user ${userId}`);
+            return result;
+        } catch (error) {
+            logger.error('Error deleting user tasks:', error);
+            throw new Error('Failed to delete user tasks');
         }
     }
 }

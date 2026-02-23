@@ -14,6 +14,9 @@ const ListingItems = require('../../models/products/GetListingItemsModel');
 const ListingItemsKeyword = require('../../models/products/ListingItemsKeywordModel');
 const logger = require('../../utils/Logger');
 
+// Chunk size for insertMany operations to reduce memory usage
+const INSERT_CHUNK_SIZE = 500;
+
 /**
  * Save ListingItems (GenericKeyword) data to database
  * Always uses new format (separate collection) to prevent 16MB limit
@@ -79,26 +82,48 @@ async function saveListingItemsData(userId, country, region, genericKeywordArray
             };
         }
 
-        // Save items to separate collection
-        const itemsToInsert = validItems.map(item => ({
-            User: userObjectId,
-            country,
-            region,
-            batchId,
-            asin: item.asin || '',
-            value: item.value || '',
-            marketplace_id: item.marketplace_id || ''
-        }));
+        // Save items to separate collection in chunks to reduce memory usage
+        // Process in chunks of INSERT_CHUNK_SIZE to avoid building one huge array
+        let insertedCount = 0;
+        const totalChunks = Math.ceil(validItems.length / INSERT_CHUNK_SIZE);
 
-        // Use insertMany with ordered:false for better performance
-        await ListingItemsKeyword.insertMany(itemsToInsert, { ordered: false });
+        for (let i = 0; i < validItems.length; i += INSERT_CHUNK_SIZE) {
+            const chunkItems = validItems.slice(i, i + INSERT_CHUNK_SIZE);
+            const chunkNumber = Math.floor(i / INSERT_CHUNK_SIZE) + 1;
+
+            // Map chunk to insert format
+            const itemsToInsert = chunkItems.map(item => ({
+                User: userObjectId,
+                country,
+                region,
+                batchId,
+                asin: item.asin || '',
+                value: item.value || '',
+                marketplace_id: item.marketplace_id || ''
+            }));
+
+            // Use insertMany with ordered:false for better performance
+            await ListingItemsKeyword.insertMany(itemsToInsert, { ordered: false });
+            insertedCount += chunkItems.length;
+
+            // Log progress for large datasets
+            if (totalChunks > 1 && chunkNumber % 5 === 0) {
+                logger.info('ListingItems save progress', {
+                    userId: userObjectId.toString(),
+                    chunk: `${chunkNumber}/${totalChunks}`,
+                    insertedSoFar: insertedCount,
+                    total: validItems.length
+                });
+            }
+        }
 
         logger.info('ListingItems data saved successfully', {
             userId: userObjectId.toString(),
             country,
             region,
             itemCount: validItems.length,
-            batchId: batchId.toString()
+            batchId: batchId.toString(),
+            chunks: totalChunks
         });
 
         // Clean up old batches (keep only last 3)
