@@ -921,7 +921,7 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
             User: userId,
             country: country,
             region: region
-        }).sort({ createdAt: -1 });
+        }).sort({ createdAt: -1 }).lean();
 
         if (!economicsMetrics) {
             logger.warn('No economics metrics found for ASIN-wise sales', { userId, country, region });
@@ -932,94 +932,63 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
 
         let asinWiseSales = [];
         const totalSalesAmount = economicsMetrics.totalSales?.amount || 0;
+        const isBigAccount = economicsMetrics.isBig === true || 
+            (totalSalesAmount > 5000 && (!economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0));
 
-        // Debug: Check parentAsin in stored data
-        const storedAsinData = economicsMetrics.asinWiseSales || [];
-        const recordsWithParentAsin = storedAsinData.filter(item => item.parentAsin && item.parentAsin !== item.asin);
-        
         logger.info('ASIN-wise sales endpoint - checking data source', {
             userId,
             country,
             region,
             isBig: economicsMetrics.isBig,
             totalSales: totalSalesAmount,
-            asinWiseSalesInDoc: storedAsinData.length,
-            recordsWithDifferentParentAsin: recordsWithParentAsin.length,
-            sampleRecord: storedAsinData[0] ? {
-                asin: storedAsinData[0].asin,
-                parentAsin: storedAsinData[0].parentAsin,
-                date: storedAsinData[0].date
-            } : null
+            isBigAccount
         });
 
-        // Try to fetch from separate collection if:
-        // 1. isBig is explicitly true, OR
-        // 2. totalSales > 5000 and asinWiseSales is empty (legacy data that might have been migrated)
-        const shouldTrySeparateCollection = economicsMetrics.isBig === true || 
-            (totalSalesAmount > 5000 && (!economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0));
-
-        if (shouldTrySeparateCollection) {
-            // Try fetching from separate collection for big accounts
+        if (isBigAccount) {
+            // BIG ACCOUNT: Use MongoDB aggregation to get pre-aggregated data
+            // This avoids loading all date documents into memory (which causes OOM)
             try {
-                const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
+                const profitabilityMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
                 
-                if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                    // Flatten all ASIN sales from all date documents
-                    bigAccountAsinDocs.forEach(doc => {
-                        const docDate = doc.date;
-                        if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                            doc.asinSales.forEach(asinSale => {
-                                asinWiseSales.push({
-                                    date: docDate === 'no_date' ? null : docDate,
-                                    asin: asinSale.asin,
-                                    parentAsin: asinSale.parentAsin,
-                                    sales: asinSale.sales,
-                                    grossProfit: asinSale.grossProfit,
-                                    unitsSold: asinSale.unitsSold,
-                                    refunds: asinSale.refunds,
-                                    ppcSpent: asinSale.ppcSpent,
-                                    fbaFees: asinSale.fbaFees,
-                                    storageFees: asinSale.storageFees,
-                                    amazonFees: asinSale.amazonFees,
-                                    totalFees: asinSale.totalFees,
-                                    feeBreakdown: asinSale.feeBreakdown
-                                });
-                            });
-                        }
+                if (profitabilityMap && profitabilityMap.size > 0) {
+                    // Convert Map to array format expected by frontend
+                    // Return AGGREGATED data (totals per ASIN) instead of per-date data
+                    profitabilityMap.forEach((data, asin) => {
+                        asinWiseSales.push({
+                            asin: asin,
+                            parentAsin: data.parentAsin || asin,
+                            sales: { amount: data.sales || 0 },
+                            grossProfit: { amount: data.grossProfit || 0 },
+                            unitsSold: data.unitsSold || 0,
+                            refunds: { amount: data.refunds || 0 },
+                            ppcSpent: { amount: data.ads || 0 },
+                            fbaFees: { amount: data.fbaFees || 0 },
+                            storageFees: { amount: data.storageFees || 0 },
+                            amazonFees: { amount: data.amzFee || 0 },
+                            totalFees: { amount: data.totalFees || 0 },
+                            date: null // Aggregated - no specific date
+                        });
                     });
                     
-                    // Debug: Check parentAsin in fetched data
-                    const fetchedRecordsWithParentAsin = asinWiseSales.filter(item => item.parentAsin && item.parentAsin !== item.asin);
-                    
-                    logger.info('Fetched ASIN-wise sales from separate collection for big account', {
+                    logger.info('Fetched AGGREGATED ASIN-wise sales for big account via aggregation', {
                         userId,
                         country,
                         region,
-                        totalRecords: asinWiseSales.length,
-                        totalDates: bigAccountAsinDocs.length,
-                        recordsWithDifferentParentAsin: fetchedRecordsWithParentAsin.length,
-                        sampleRecord: asinWiseSales[0] ? {
-                            asin: asinWiseSales[0].asin,
-                            parentAsin: asinWiseSales[0].parentAsin,
-                            date: asinWiseSales[0].date
-                        } : null
+                        totalAsins: asinWiseSales.length,
+                        message: 'Using aggregated data to prevent OOM'
                     });
                 } else {
-                    // No data in separate collection - fall back to main document (legacy data)
-                    logger.info('No data in separate collection, falling back to main document', {
+                    logger.info('No data in separate collection for big account', {
                         userId,
                         country,
                         region
                     });
-                    asinWiseSales = economicsMetrics.asinWiseSales || [];
                 }
             } catch (fetchError) {
-                logger.error('Error fetching ASIN data for big account, falling back to main document', {
+                logger.error('Error fetching ASIN data for big account via aggregation', {
                     metricsId: economicsMetrics._id,
                     error: fetchError.message
                 });
-                // Fallback to main document
-                asinWiseSales = economicsMetrics.asinWiseSales || [];
             }
         } else {
             // Normal account - get from main document
@@ -1035,7 +1004,8 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
         return res.status(200).json(
             new ApiResponse(200, {
                 asinWiseSales: asinWiseSales,
-                isBig: economicsMetrics.isBig || false,
+                isBig: isBigAccount,
+                isAggregated: isBigAccount, // Flag to tell frontend data is pre-aggregated
                 dateRange: economicsMetrics.dateRange,
                 metricsId: economicsMetrics._id
             }, "ASIN-wise sales data retrieved successfully")

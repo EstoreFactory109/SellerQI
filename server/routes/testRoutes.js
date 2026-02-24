@@ -4,7 +4,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
@@ -48,5 +48,8 @@ router.post('/testAlerts', testAlerts)  // Body: { userId, country, region }
 
 // All Ads Services - Calls all Amazon Ads APIs in one request (PPC Spends, Keywords Performance, Campaigns, Ad Groups, Search Keywords, etc.)
 router.post('/testAllAdsServices', testAllAdsServices)  // Body: { userId, country, region }
+
+// Issue Summary - Calculate and store issue summary for a particular user (same as integration/schedule)
+router.post('/testStoreIssueSummary', testStoreIssueSummary)  // Body: { userId, country, region }
 
 module.exports=router

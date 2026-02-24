@@ -48,6 +48,7 @@ const ProfitabilityDashboard = () => {
   const [suggestionsData, setSuggestionsData] = useState([]);
   const [openCalender, setOpenCalender] = useState(false);
   const [showCogsPopup, setShowCogsPopup] = useState(false);
+  const [profitabilityTab, setProfitabilityTab] = useState('table'); // 'table' | 'issues'
   const [filteredData, setFilteredData] = useState(null);
   const [loading, setLoading] = useState(false);
   const CalenderRef = useRef(null);
@@ -1602,45 +1603,72 @@ const ProfitabilityDashboard = () => {
               </div>
             </motion.div>
 
-            {/* Phase 3: Profit Table - Paginated, loads third (~100-300ms) */}
+            {/* Tabs: Profitability Table | Issues & AI Powered Suggestions */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
               style={{ marginBottom: '10px' }}
             >
-              <ProfitTable 
-                setSuggestionsData={setSuggestionsData} 
-                phasedTableData={tableData}
-                tablePagination={tablePagination}
-                tableLoading={tableLoading}
-                hasMore={hasMore}
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                totalParents={totalParents}
-                totalChildren={totalChildren}
-                totalProducts={totalProducts}
-                onLoadMore={fetchNextPage}
-                onPageChange={fetchPage}
-              />
-            </motion.div>
-
-            {/* Enhanced Suggestions Section */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              style={{ marginBottom: '10px' }}
-            >
-              <SuggestionList 
-                suggestionsData={suggestionsData}
-                issuesData={issuesData}
-                issuesSummary={issuesSummary}
-                issuesLoading={issuesLoading}
-                onLoadMore={fetchNextIssuesPage}
-                hasMore={issuesPagination?.hasMore ?? false}
-              />
+              <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', overflow: 'hidden' }}>
+                <div className="flex border-b border-[#30363d]" style={{ background: '#21262d' }}>
+                  <button
+                    type="button"
+                    onClick={() => setProfitabilityTab('table')}
+                    className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    style={{
+                      color: profitabilityTab === 'table' ? '#f3f4f6' : '#9ca3af',
+                      borderBottom: profitabilityTab === 'table' ? '2px solid #60a5fa' : '2px solid transparent',
+                      background: profitabilityTab === 'table' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
+                    }}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    Profitability Table
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProfitabilityTab('issues')}
+                    className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    style={{
+                      color: profitabilityTab === 'issues' ? '#f3f4f6' : '#9ca3af',
+                      borderBottom: profitabilityTab === 'issues' ? '2px solid #60a5fa' : '2px solid transparent',
+                      background: profitabilityTab === 'issues' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
+                    }}
+                  >
+                    <Target className="w-4 h-4" />
+                    Issues & AI Powered Suggestions
+                  </button>
+                </div>
+                <div className="p-0">
+                  {profitabilityTab === 'table' && (
+                    <ProfitTable 
+                      setSuggestionsData={setSuggestionsData} 
+                      phasedTableData={tableData}
+                      tablePagination={tablePagination}
+                      tableLoading={tableLoading}
+                      hasMore={hasMore}
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      totalItems={totalItems}
+                      totalParents={totalParents}
+                      totalChildren={totalChildren}
+                      totalProducts={totalProducts}
+                      onLoadMore={fetchNextPage}
+                      onPageChange={fetchPage}
+                    />
+                  )}
+                  {profitabilityTab === 'issues' && (
+                    <SuggestionList 
+                      suggestionsData={suggestionsData}
+                      issuesData={issuesData}
+                      issuesSummary={issuesSummary}
+                      issuesLoading={issuesLoading}
+                      onLoadMore={fetchNextIssuesPage}
+                      hasMore={issuesPagination?.hasMore ?? false}
+                    />
+                  )}
+                </div>
+              </div>
             </motion.div>
 
             {/* Bottom Spacer */}

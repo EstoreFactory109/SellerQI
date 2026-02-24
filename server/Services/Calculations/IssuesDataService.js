@@ -6,7 +6,7 @@
  * 1. Reading from MongoDB (pre-computed during integration/Sunday schedules)
  * 2. Falling back to full calculation only when data is missing
  * 
- * The precomputed data is stored in IssuesData model and used by:
+ * The precomputed data is stored in IssuesDataChunks model (UNIFIED) and used by:
  * - Issues by Category page (Category.jsx)
  * - Issues by Product page (IssuesByProduct.jsx)
  * 
@@ -15,38 +15,29 @@
  * - Whatever data exists in MongoDB is considered fresh
  * - First-time integration also stores issues data immediately
  * 
- * OPTIMIZED: Large arrays are now stored in IssuesDataChunks collection
- * to avoid the 16MB MongoDB document limit. The main IssuesData document
- * stores only counts and metadata.
+ * UNIFIED MODEL: All data is stored in IssuesDataChunks collection only.
+ * - _metadata chunk contains counts, metadata, small objects
+ * - Array chunks contain chunked array data
+ * - IssuesData model is DEPRECATED
  */
 
 const logger = require('../../utils/Logger.js');
-const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const { AnalyseService } = require('../main/Analyse.js');
 const { analyseData } = require('./DashboardCalculation.js');
 
-// Fields that should be stored as chunks (large arrays)
-const CHUNKED_FIELDS = [
-    'productWiseError',
-    'rankingProductWiseErrors',
-    'conversionProductWiseErrors',
-    'inventoryProductWiseErrors',
-    'profitabilityErrorDetails',
-    'sponsoredAdsErrorDetails',
-    'TotalProduct',
-    'ActiveProducts'
-];
+// Fields that are stored as chunks (exported for other services)
+const CHUNKED_FIELDS = IssuesDataChunks.ARRAY_FIELD_NAMES;
 
 /**
  * Get issues data for a user - optimized with MongoDB storage
  * 
  * Strategy:
- * 1. Try to get data from MongoDB (if exists)
+ * 1. Try to get data from IssuesDataChunks (unified model)
  * 2. If data exists, return immediately (always considered fresh - updated every Sunday)
  * 3. If data is missing, calculate and store, then return
  * 
- * OPTIMIZED: Large arrays are now stored in IssuesDataChunks and reconstructed on read.
+ * UNIFIED MODEL: All data is stored in IssuesDataChunks only.
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
@@ -58,31 +49,22 @@ async function getIssuesData(userId, country, region, forceRefresh = false) {
     const startTime = Date.now();
     
     try {
-        // Step 1: Check for data in MongoDB (unless force refresh)
+        // Step 1: Check for data in unified IssuesDataChunks (unless force refresh)
         if (!forceRefresh) {
-            const cachedData = await IssuesData.getIssuesData(userId, country, region);
+            const cachedData = await IssuesDataChunks.getIssuesData(userId, country, region);
             
             // Return cached data if it exists (always fresh - updated every Sunday)
             if (cachedData) {
-                // Check if this is chunked storage (dataVersion >= 2)
-                let responseData;
-                if (cachedData.dataVersion >= 2) {
-                    // Reconstruct data from chunks
-                    responseData = await reconstructIssuesDataFromChunks(cachedData, userId, country, region);
-                } else {
-                    // Legacy: data is stored inline
-                    responseData = formatIssuesDataForResponse(cachedData);
-                }
+                const responseData = formatIssuesDataForResponse(cachedData);
                 
                 const duration = Date.now() - startTime;
-                logger.info('[IssuesDataService] Returning data from MongoDB', {
+                logger.info('[IssuesDataService] Returning data from IssuesDataChunks', {
                     userId,
                     country,
                     region,
                     duration,
                     source: 'mongodb_cache',
-                    lastCalculatedAt: cachedData.lastCalculatedAt,
-                    isChunked: cachedData.dataVersion >= 2
+                    lastCalculatedAt: cachedData.lastCalculatedAt
                 });
                 
                 return {
@@ -134,57 +116,7 @@ async function getIssuesData(userId, country, region, forceRefresh = false) {
     }
 }
 
-/**
- * Reconstruct full issues data by loading chunks
- * @param {Object} cachedData - The IssuesData document (metadata only in v2)
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region code
- * @returns {Object} Full issues data with arrays reconstructed
- */
-async function reconstructIssuesDataFromChunks(cachedData, userId, country, region) {
-    // Get all chunked field data in one query
-    const chunkedFieldsData = await IssuesDataChunks.getAllFieldsData(userId, country, region);
-    
-    // Merge metadata with chunked data
-    return {
-        // Product-wise error data from chunks
-        productWiseError: chunkedFieldsData.productWiseError || [],
-        rankingProductWiseErrors: chunkedFieldsData.rankingProductWiseErrors || [],
-        conversionProductWiseErrors: chunkedFieldsData.conversionProductWiseErrors || [],
-        inventoryProductWiseErrors: chunkedFieldsData.inventoryProductWiseErrors || [],
-        
-        // Error counts from metadata
-        totalErrorInAccount: cachedData.totalAccountErrors || 0,
-        totalErrorInConversion: cachedData.totalConversionErrors || 0,
-        TotalRankingerrors: cachedData.totalRankingErrors || 0,
-        totalInventoryErrors: cachedData.totalInventoryErrors || 0,
-        totalProfitabilityErrors: cachedData.totalProfitabilityErrors || 0,
-        totalSponsoredAdsErrors: cachedData.totalSponsoredAdsErrors || 0,
-        
-        // Error details from chunks
-        profitabilityErrorDetails: chunkedFieldsData.profitabilityErrorDetails || [],
-        sponsoredAdsErrorDetails: chunkedFieldsData.sponsoredAdsErrorDetails || [],
-        
-        // Account errors from metadata (small object, not chunked)
-        AccountErrors: cachedData.AccountErrors || {},
-        accountHealthPercentage: cachedData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
-        
-        // Buy Box data from metadata (small object)
-        buyBoxData: cachedData.buyBoxData || { asinBuyBoxData: [] },
-        
-        // Top error products from metadata
-        first: cachedData.topErrorProducts?.first || null,
-        second: cachedData.topErrorProducts?.second || null,
-        third: cachedData.topErrorProducts?.third || null,
-        fourth: cachedData.topErrorProducts?.fourth || null,
-        
-        // Product data from chunks
-        TotalProduct: chunkedFieldsData.TotalProduct || [],
-        ActiveProducts: chunkedFieldsData.ActiveProducts || [],
-        Country: cachedData.country
-    };
-}
+// reconstructIssuesDataFromChunks is no longer needed - IssuesDataChunks.getIssuesData handles reconstruction
 
 /**
  * Calculate and store issues data in MongoDB
@@ -292,8 +224,8 @@ async function calculateAndStoreIssuesData(userId, country, region, source = 'in
 }
 
 /**
- * Store issues data with chunked arrays
- * This is the core function that handles the chunked storage strategy.
+ * Store issues data in the unified IssuesDataChunks model
+ * This is the core function that handles storage.
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
@@ -304,93 +236,43 @@ async function calculateAndStoreIssuesData(userId, country, region, source = 'in
  */
 async function storeIssuesDataWithChunks(userId, country, region, dashboardData, source) {
     try {
-        // Step 1: Prepare metadata-only document (no large arrays)
-        const metadataOnly = {
-            totalRankingErrors: dashboardData.TotalRankingerrors || dashboardData.totalRankingErrors || 0,
-            totalConversionErrors: dashboardData.totalErrorInConversion || dashboardData.totalConversionErrors || 0,
-            totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
-            totalAccountErrors: dashboardData.totalErrorInAccount || dashboardData.totalAccountErrors || 0,
-            totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
-            totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
-            
-            // Small objects kept inline
-            AccountErrors: dashboardData.AccountErrors || {},
-            accountHealthPercentage: dashboardData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
-            buyBoxData: dashboardData.buyBoxData || { asinBuyBoxData: [] },
-            topErrorProducts: {
-                first: dashboardData.first || null,
-                second: dashboardData.second || null,
-                third: dashboardData.third || null,
-                fourth: dashboardData.fourth || null
-            },
-            
-            // Large arrays will be empty - stored in chunks
-            productWiseError: [],
-            rankingProductWiseErrors: [],
-            conversionProductWiseErrors: [],
-            inventoryProductWiseErrors: [],
-            profitabilityErrorDetails: [],
-            sponsoredAdsErrorDetails: [],
-            TotalProduct: [],
-            ActiveProducts: [],
-            
-            lastCalculatedAt: new Date(),
-            calculationSource: source,
-            dataVersion: 2  // Mark as chunked storage
-        };
-        
-        // Step 2: Upsert metadata document
-        const savedData = await IssuesData.findOneAndUpdate(
-            { userId, country, region },
-            { $set: metadataOnly },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+        // Use the unified model's upsertIssuesData method
+        const result = await IssuesDataChunks.upsertIssuesData(
+            userId,
+            country,
+            region,
+            dashboardData,
+            source
         );
         
-        const issuesDataId = savedData._id;
+        // Count total chunks created
+        const totalChunksCreated = Object.values(result.chunkCounts).reduce((sum, count) => sum + count, 0) + 1; // +1 for metadata
         
-        // Step 3: Store large arrays as chunks
-        let totalChunksCreated = 0;
-        
-        for (const fieldName of CHUNKED_FIELDS) {
-            const data = dashboardData[fieldName];
-            if (data && Array.isArray(data)) {
-                const result = await IssuesDataChunks.saveAsChunks({
-                    issuesDataId,
-                    userId,
-                    country,
-                    region,
-                    fieldName,
-                    data
-                });
-                totalChunksCreated += Array.isArray(result) ? result.length : 1;
-            }
-        }
-        
-        // Step 4: Return formatted data for immediate use
+        // Return formatted data for immediate use
         const formattedData = {
             productWiseError: dashboardData.productWiseError || [],
             rankingProductWiseErrors: dashboardData.rankingProductWiseErrors || [],
             conversionProductWiseErrors: dashboardData.conversionProductWiseErrors || [],
             inventoryProductWiseErrors: dashboardData.inventoryProductWiseErrors || [],
             
-            totalErrorInAccount: metadataOnly.totalAccountErrors,
-            totalErrorInConversion: metadataOnly.totalConversionErrors,
-            TotalRankingerrors: metadataOnly.totalRankingErrors,
-            totalInventoryErrors: metadataOnly.totalInventoryErrors,
-            totalProfitabilityErrors: metadataOnly.totalProfitabilityErrors,
-            totalSponsoredAdsErrors: metadataOnly.totalSponsoredAdsErrors,
+            totalErrorInAccount: dashboardData.totalErrorInAccount || dashboardData.totalAccountErrors || 0,
+            totalErrorInConversion: dashboardData.totalErrorInConversion || dashboardData.totalConversionErrors || 0,
+            TotalRankingerrors: dashboardData.TotalRankingerrors || dashboardData.totalRankingErrors || 0,
+            totalInventoryErrors: dashboardData.totalInventoryErrors || 0,
+            totalProfitabilityErrors: dashboardData.totalProfitabilityErrors || 0,
+            totalSponsoredAdsErrors: dashboardData.totalSponsoredAdsErrors || 0,
             
             profitabilityErrorDetails: dashboardData.profitabilityErrorDetails || [],
             sponsoredAdsErrorDetails: dashboardData.sponsoredAdsErrorDetails || [],
             
-            AccountErrors: metadataOnly.AccountErrors,
-            accountHealthPercentage: metadataOnly.accountHealthPercentage,
-            buyBoxData: metadataOnly.buyBoxData,
+            AccountErrors: dashboardData.AccountErrors || {},
+            accountHealthPercentage: dashboardData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
+            buyBoxData: dashboardData.buyBoxData || { asinBuyBoxData: [] },
             
-            first: metadataOnly.topErrorProducts.first,
-            second: metadataOnly.topErrorProducts.second,
-            third: metadataOnly.topErrorProducts.third,
-            fourth: metadataOnly.topErrorProducts.fourth,
+            first: dashboardData.first || result.metadata?.topErrorProducts?.first || null,
+            second: dashboardData.second || result.metadata?.topErrorProducts?.second || null,
+            third: dashboardData.third || result.metadata?.topErrorProducts?.third || null,
+            fourth: dashboardData.fourth || result.metadata?.topErrorProducts?.fourth || null,
             
             TotalProduct: dashboardData.TotalProduct || [],
             ActiveProducts: dashboardData.ActiveProducts || [],
@@ -399,13 +281,13 @@ async function storeIssuesDataWithChunks(userId, country, region, dashboardData,
         
         return {
             success: true,
-            savedData,
+            savedData: result.metadata,
             formattedData,
             chunksCreated: totalChunksCreated
         };
         
     } catch (error) {
-        logger.error('[IssuesDataService] Error storing issues data with chunks', {
+        logger.error('[IssuesDataService] Error storing issues data', {
             error: error.message,
             stack: error.stack,
             userId,
@@ -555,6 +437,5 @@ module.exports = {
     calculateAndStoreIssuesData,
     storeIssuesDataFromDashboard,
     getPaginatedFieldData,
-    reconstructIssuesDataFromChunks,
     CHUNKED_FIELDS
 };

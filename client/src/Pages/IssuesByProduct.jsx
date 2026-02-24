@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, Filter, ChevronDown, Box, Eye, Activity, Star, TrendingUp, TrendingDown, LineChart, ArrowRight, Download, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Box, Eye, Activity, Star, TrendingUp, TrendingDown, LineChart, ArrowRight, Download, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import { IssuesByProductPageSkeleton, IssuesProductCardSkeleton } from '../Components/Skeleton/PageSkeletons.jsx';
 import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 import noImage from '../assets/Icons/no-image.png';
@@ -518,25 +518,6 @@ const IssuesByProduct = () => {
         return { rankingMap, buyboxMap, totalProductMap, productWiseErrorMap };
     }, [products]);
     
-    // Filter and sort options
-    const priorityOptions = [
-        { value: 'all', label: 'All Priorities' },
-        { value: 'high', label: 'High Priority' },
-        { value: 'medium', label: 'Medium Priority' },
-        { value: 'low', label: 'Low Priority' }
-    ];
-    
-    const sortOptions = [
-        { value: 'issues', label: 'Most Issues' },
-        { value: 'sessions', label: 'Most Sessions' },
-        { value: 'conversion', label: 'Conversion Rate' },
-        { value: 'sales', label: 'Sales' },
-        { value: 'acos', label: 'ACOS' },
-        { value: 'name', label: 'Product Name' },
-        { value: 'asin', label: 'ASIN' },
-        { value: 'price', label: 'Price' }
-    ];
-    
     // Track if initial mount has completed
     const isInitialMount = useRef(true);
     
@@ -926,65 +907,10 @@ const IssuesByProduct = () => {
                         </div>
                     </div>
 
-                    {/* Enhanced Filters and Search Section */}
+                    {/* Product count */}
                     <div className="bg-[#161b22] border border-[#30363d] rounded p-2">
-                        <div className="px-2 py-1.5">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                    <div className="text-xs text-gray-400">
-                                        Showing <span className="font-semibold text-blue-400">{products.length}</span> of <span className="font-semibold text-gray-300">{total}</span> products
-                                    </div>
-                                    {(searchQuery || selectedPriority !== 'all' || sortBy !== 'issues') && (
-                                        <button
-                                            onClick={() => {
-                                                setSearchQuery('');
-                                                setSelectedPriority('all');
-                                                setSortBy('issues');
-                                            }}
-                                            className="text-xs text-blue-400 hover:text-blue-300 underline"
-                                        >
-                                            Clear filters
-                                        </button>
-                                    )}
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                    {/* Search */}
-                                    <div className="relative">
-                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
-                                        <input
-                                            type="text"
-                                            placeholder="Search products..."
-                                            className="pl-7 pr-2 py-1 border border-[#30363d] rounded bg-[#1a1a1a] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 w-40 transition-all placeholder-gray-500"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                        />
-                                    </div>
-                                    
-                                    {/* Priority Filter */}
-                                    <select
-                                        value={selectedPriority}
-                                        onChange={(e) => setSelectedPriority(e.target.value)}
-                                        className="px-2 py-1 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 bg-[#1a1a1a]"
-                                    >
-                                        {priorityOptions.map(option => (
-                                            <option key={option.value} value={option.value}>{option.label}</option>
-                                        ))}
-                                    </select>
-                                    
-                                    {/* Sort */}
-                                    <select
-                                        value={sortBy}
-                                        onChange={(e) => setSortBy(e.target.value)}
-                                        className="px-2 py-1 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 bg-[#1a1a1a]"
-                                    >
-                                        {sortOptions.map(option => (
-                                            <option key={option.value} value={option.value}>{option.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-                            
+                        <div className="px-2 py-1.5 text-xs text-gray-400">
+                            Showing <span className="font-semibold text-blue-400">{products.length}</span> of <span className="font-semibold text-gray-300">{total}</span> products
                         </div>
                     </div>
 
@@ -1001,7 +927,7 @@ const IssuesByProduct = () => {
                             <Box className="w-6 h-6 text-gray-400" />
                         </div>
                         <p className="text-sm font-semibold text-gray-100 mb-1">No products found</p>
-                        <p className="text-xs text-gray-400">Try adjusting your search terms or filters to find what you're looking for.</p>
+                        <p className="text-xs text-gray-400">No products with issues found for this account.</p>
                     </motion.div>
                 ) : (
                     <>

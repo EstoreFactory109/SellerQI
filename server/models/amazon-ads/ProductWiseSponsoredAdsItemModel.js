@@ -159,6 +159,45 @@ productWiseSponsoredAdsItemSchema.statics.deleteOldBatches = async function(user
     return this.deleteMany({ batchId: { $in: batchIdsToDelete } });
 };
 
+// Static method to aggregate spend by ASIN for the latest batch (optimized for profitability table)
+// Returns: { adsSpendByAsin: Map<asin, totalSpend>, batchId: ObjectId, createdAt: Date }
+productWiseSponsoredAdsItemSchema.statics.aggregateSpendByAsin = async function(userId, country, region) {
+    // First find the latest batchId for this user/country/region
+    const latestItem = await this.findOne({ userId, country, region })
+        .sort({ createdAt: -1 })
+        .select('batchId createdAt')
+        .lean();
+    
+    if (!latestItem || !latestItem.batchId) {
+        return { adsSpendByAsin: new Map(), batchId: null, createdAt: null };
+    }
+    
+    // Aggregate spend by ASIN for the latest batch - this runs in MongoDB, not Node
+    const aggregationResult = await this.aggregate([
+        { $match: { batchId: latestItem.batchId } },
+        { 
+            $group: { 
+                _id: '$asin', 
+                totalSpend: { $sum: '$spend' } 
+            } 
+        }
+    ]);
+    
+    // Convert aggregation result to a Map
+    const adsSpendByAsin = new Map();
+    for (const item of aggregationResult) {
+        if (item._id) {
+            adsSpendByAsin.set(item._id, item.totalSpend);
+        }
+    }
+    
+    return { 
+        adsSpendByAsin, 
+        batchId: latestItem.batchId, 
+        createdAt: latestItem.createdAt 
+    };
+};
+
 // Create and export the model
 const ProductWiseSponsoredAdsItem = mongoose.model('ProductWiseSponsoredAdsItem', productWiseSponsoredAdsItemSchema);
 

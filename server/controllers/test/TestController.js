@@ -2528,6 +2528,54 @@ const testAllAdsServices = async (req, res) => {
   }
 };
 
+/**
+ * Test endpoint: Calculate and store Issue Summary for a particular user.
+ * Uses IssueSummaryService.calculateAndStoreIssueSummary (same as integration/schedule).
+ * POST body: { userId (required), country (required), region (required) }
+ */
+const testStoreIssueSummary = async (req, res) => {
+  try {
+    const { userId, country, region } = req.body;
+
+    if (!userId || !country || !region) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId, country, and region are required in request body'
+      });
+    }
+
+    const { calculateAndStoreIssueSummary } = require('../../Services/Calculations/IssueSummaryService.js');
+    const result = await calculateAndStoreIssueSummary(userId, country, region, 'test');
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Failed to calculate and store issue summary',
+        userId,
+        country,
+        region
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Issue summary calculated and stored successfully',
+      data: result.data,
+      duration: result.duration,
+      userId,
+      country,
+      region
+    });
+  } catch (error) {
+    console.error('Error in testStoreIssueSummary:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while storing issue summary'
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
    getReviewData, testAmazonAds,
    testGetCampaigns,testGetAdGroups,
@@ -2538,4 +2586,5 @@ module.exports = { testReport, getTotalSales,
    testNumberOfProductReviews,
    getLastAdsKeywordsPerformanceDocument,
    testAllAdsServices,
+   testStoreIssueSummary,
    }

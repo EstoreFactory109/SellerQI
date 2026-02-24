@@ -10,15 +10,15 @@
  * - Issues by Product page (paginated product list)
  * 
  * Fallback behavior:
- * - If pre-computed data doesn't exist in IssuesDataModel, it falls back
+ * - If pre-computed data doesn't exist in IssuesDataChunks, it falls back
  *   to IssuesDataService which will calculate and store data on-the-fly
  * 
- * OPTIMIZED: Supports chunked storage (dataVersion >= 2) where large arrays
- * are stored in IssuesDataChunks collection.
+ * UNIFIED MODEL: All data is stored in IssuesDataChunks collection only.
+ * - _metadata chunk contains counts, account health, etc.
+ * - Array chunks contain paginated array data
  */
 
 const logger = require('../../utils/Logger.js');
-const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const IssuesDataService = require('./IssuesDataService.js');
@@ -31,36 +31,44 @@ const PRODUCTS_PAGE_SIZE = 6;
  * Helper function to ensure issues data exists
  * Falls back to IssuesDataService if data is missing
  * 
- * OPTIMIZED: Supports chunked storage (dataVersion >= 2)
+ * UNIFIED MODEL: Reads from IssuesDataChunks only
+ * - Metadata from _metadata chunk
+ * - Arrays from respective field chunks
  * 
  * @param {string} userId 
  * @param {string} country 
  * @param {string} region 
- * @param {Object} projection - MongoDB projection for fields to retrieve
+ * @param {Object} projection - Fields to retrieve (1 = include)
  * @returns {Promise<Object|null>} Issues data or null
  */
 async function ensureIssuesData(userId, country, region, projection = {}) {
-    // Always include dataVersion in projection to detect chunked storage
-    const projectionWithVersion = { ...projection, dataVersion: 1 };
+    // Check if data exists in unified model
+    const hasData = await IssuesDataChunks.hasIssuesData(userId, country, region);
     
-    // First try to get from MongoDB
-    let issuesData = await IssuesData.findOne({ userId, country, region }, projectionWithVersion).lean();
-    
-    if (issuesData) {
-        // Check if using chunked storage (dataVersion >= 2)
-        if (issuesData.dataVersion >= 2) {
-            // Load required fields from chunks
-            const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
-            const chunkedFields = IssuesDataService.CHUNKED_FIELDS || [];
-            
-            for (const field of requestedFields) {
-                if (chunkedFields.includes(field)) {
-                    // Load this field from chunks
-                    issuesData[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
-                }
+    if (hasData) {
+        // Build result object from chunks
+        const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
+        const result = {};
+        
+        // Get metadata if any non-array fields requested
+        const { ARRAY_FIELD_NAMES } = IssuesDataChunks;
+        const needsMetadata = requestedFields.some(f => !ARRAY_FIELD_NAMES.includes(f));
+        
+        if (needsMetadata) {
+            const metadata = await IssuesDataChunks.getMetadata(userId, country, region);
+            if (metadata) {
+                Object.assign(result, metadata);
             }
         }
-        return issuesData;
+        
+        // Get requested array fields from chunks
+        for (const field of requestedFields) {
+            if (ARRAY_FIELD_NAMES.includes(field)) {
+                result[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
+            }
+        }
+        
+        return result;
     }
     
     // Data missing - calculate and store using IssuesDataService
@@ -78,27 +86,32 @@ async function ensureIssuesData(userId, country, region, projection = {}) {
         return null;
     }
     
-    // Re-fetch with projection after storing
-    issuesData = await IssuesData.findOne({ userId, country, region }, projectionWithVersion).lean();
+    // Re-fetch from chunks after storing
+    const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
+    const result = {};
     
-    // Load chunked fields if needed
-    if (issuesData && issuesData.dataVersion >= 2) {
-        const requestedFields = Object.keys(projection).filter(k => projection[k] === 1);
-        const chunkedFields = IssuesDataService.CHUNKED_FIELDS || [];
-        
-        for (const field of requestedFields) {
-            if (chunkedFields.includes(field)) {
-                issuesData[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
-            }
+    const { ARRAY_FIELD_NAMES } = IssuesDataChunks;
+    const needsMetadata = requestedFields.some(f => !ARRAY_FIELD_NAMES.includes(f));
+    
+    if (needsMetadata) {
+        const metadata = await IssuesDataChunks.getMetadata(userId, country, region);
+        if (metadata) {
+            Object.assign(result, metadata);
         }
     }
     
-    return issuesData;
+    for (const field of requestedFields) {
+        if (ARRAY_FIELD_NAMES.includes(field)) {
+            result[field] = await IssuesDataChunks.getFieldData(userId, country, region, field);
+        }
+    }
+    
+    return Object.keys(result).length > 0 ? result : null;
 }
 
 /**
  * Get issues summary (counts only) for the dashboard header
- * Uses pre-computed IssueSummary model for instant response
+ * Uses pre-computed IssueSummary or IssuesDataChunks metadata for instant response
  * Falls back to IssuesDataService if data is missing
  * 
  * @param {string} userId - User ID
@@ -110,28 +123,14 @@ async function getIssuesSummary(userId, country, region) {
     const startTime = Date.now();
     
     try {
-        // Get pre-computed summary counts
+        // Get pre-computed summary counts from IssueSummary
         let summary = await IssueSummary.getIssueSummary(userId, country, region);
         
-        // Also get account health and counts from IssuesData (include dataVersion for chunked detection)
-        let issuesData = await IssuesData.findOne(
-            { userId, country, region },
-            {
-                accountHealthPercentage: 1,
-                TotalProduct: 1,
-                ActiveProducts: 1,
-                totalRankingErrors: 1,
-                totalConversionErrors: 1,
-                totalInventoryErrors: 1,
-                totalAccountErrors: 1,
-                totalProfitabilityErrors: 1,
-                totalSponsoredAdsErrors: 1,
-                dataVersion: 1
-            }
-        ).lean();
+        // Get metadata from unified IssuesDataChunks model
+        let metadata = await IssuesDataChunks.getMetadata(userId, country, region);
         
         // If no data exists, fall back to calculating it
-        if (!summary && !issuesData) {
+        if (!summary && !metadata) {
             logger.info('[IssuesPaginationService] No summary data, calculating on-the-fly', {
                 userId, country, region
             });
@@ -149,57 +148,37 @@ async function getIssuesSummary(userId, country, region) {
             
             // Re-fetch after storing
             summary = await IssueSummary.getIssueSummary(userId, country, region);
-            issuesData = await IssuesData.findOne(
-                { userId, country, region },
-                {
-                    accountHealthPercentage: 1,
-                    TotalProduct: 1,
-                    ActiveProducts: 1,
-                    totalRankingErrors: 1,
-                    totalConversionErrors: 1,
-                    totalInventoryErrors: 1,
-                    totalAccountErrors: 1,
-                    totalProfitabilityErrors: 1,
-                    totalSponsoredAdsErrors: 1,
-                    dataVersion: 1
-                }
-            ).lean();
+            metadata = await IssuesDataChunks.getMetadata(userId, country, region);
         }
         
-        // For chunked storage (dataVersion >= 2), get counts from chunk stats instead of empty arrays
-        let totalProductCount = issuesData?.TotalProduct?.length || 0;
-        let activeProductCount = issuesData?.ActiveProducts?.length || 0;
-        
-        if (issuesData?.dataVersion >= 2) {
-            // Get counts from chunk stats for chunked fields
-            const [totalProductStats, activeProductStats] = await Promise.all([
-                IssuesDataChunks.getChunkStats(userId, country, region, 'TotalProduct'),
-                IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts')
-            ]);
-            totalProductCount = totalProductStats.totalItems || 0;
-            activeProductCount = activeProductStats.totalItems || 0;
-        }
+        // Get counts from chunk stats for array fields
+        const [totalProductStats, activeProductStats] = await Promise.all([
+            IssuesDataChunks.getChunkStats(userId, country, region, 'TotalProduct'),
+            IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts')
+        ]);
+        const totalProductCount = totalProductStats.totalItems || 0;
+        const activeProductCount = activeProductStats.totalItems || 0;
         
         const duration = Date.now() - startTime;
         
-        // Use IssueSummary if available, else fall back to IssuesData counts
+        // Use IssueSummary if available, else fall back to metadata counts
         const result = {
-            totalRankingErrors: summary?.totalRankingErrors || issuesData?.totalRankingErrors || 0,
-            totalConversionErrors: summary?.totalConversionErrors || issuesData?.totalConversionErrors || 0,
-            totalInventoryErrors: summary?.totalInventoryErrors || issuesData?.totalInventoryErrors || 0,
-            totalAccountErrors: summary?.totalAccountErrors || issuesData?.totalAccountErrors || 0,
-            totalProfitabilityErrors: summary?.totalProfitabilityErrors || issuesData?.totalProfitabilityErrors || 0,
-            totalSponsoredAdsErrors: summary?.totalSponsoredAdsErrors || issuesData?.totalSponsoredAdsErrors || 0,
+            totalRankingErrors: summary?.totalRankingErrors || metadata?.totalRankingErrors || 0,
+            totalConversionErrors: summary?.totalConversionErrors || metadata?.totalConversionErrors || 0,
+            totalInventoryErrors: summary?.totalInventoryErrors || metadata?.totalInventoryErrors || 0,
+            totalAccountErrors: summary?.totalAccountErrors || metadata?.totalAccountErrors || 0,
+            totalProfitabilityErrors: summary?.totalProfitabilityErrors || metadata?.totalProfitabilityErrors || 0,
+            totalSponsoredAdsErrors: summary?.totalSponsoredAdsErrors || metadata?.totalSponsoredAdsErrors || 0,
             totalIssues: summary?.totalIssues || (
-                (issuesData?.totalRankingErrors || 0) + 
-                (issuesData?.totalConversionErrors || 0) + 
-                (issuesData?.totalInventoryErrors || 0)
+                (metadata?.totalRankingErrors || 0) + 
+                (metadata?.totalConversionErrors || 0) + 
+                (metadata?.totalInventoryErrors || 0)
             ),
             totalActiveProducts: summary?.totalActiveProducts || activeProductCount,
-            numberOfProductsWithIssues: summary?.numberOfProductsWithIssues || 0,
-            accountHealthPercentage: issuesData?.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
+            numberOfProductsWithIssues: summary?.numberOfProductsWithIssues || metadata?.numberOfProductsWithIssues || 0,
+            accountHealthPercentage: metadata?.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
             TotalProduct: totalProductCount,
-            lastCalculatedAt: summary?.lastCalculatedAt || issuesData?.lastCalculatedAt
+            lastCalculatedAt: summary?.lastCalculatedAt || metadata?.lastCalculatedAt
         };
         
         logger.info('[IssuesPaginationService] Summary retrieved', {
@@ -207,7 +186,7 @@ async function getIssuesSummary(userId, country, region) {
             country,
             region,
             duration,
-            source: summary ? 'IssueSummary' : 'IssuesData'
+            source: summary ? 'IssueSummary' : 'IssuesDataChunks'
         });
         
         return {
@@ -270,11 +249,12 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
         
         // Enrich ranking errors with product details (name, sku)
         // Note: ranking errors have title at error.data.Title (from DashboardCalculation)
+        // TotalProduct has itemName/title, not Title
         const enrichedErrors = allErrors.map(error => {
             const product = productMap.get(error.asin);
             return {
                 ...error,
-                Title: product?.Title || product?.name || error.data?.Title || error.Title || 'Unknown Product',
+                Title: error.data?.Title || product?.itemName || product?.title || product?.name || error.Title || 'Unknown Product',
                 sku: product?.sku || error.sku || '',
                 MainImage: product?.MainImage || error.data?.MainImage || null
             };
@@ -359,11 +339,12 @@ async function getConversionIssues(userId, country, region, page = 1, limit = DE
         });
         
         // Combine conversion errors with product details
+        // conversionErrors already have Title from DashboardCalculation, TotalProduct has itemName/title
         const enrichedErrors = conversionErrors.map(error => {
             const product = productMap.get(error.asin);
             return {
                 ...error,
-                Title: error.Title || product?.Title || product?.name || 'Unknown Product',
+                Title: error.Title || product?.itemName || product?.title || product?.name || 'Unknown Product',
                 sku: product?.sku || error.sku || '',
                 MainImage: product?.MainImage || null
             };
@@ -448,11 +429,12 @@ async function getInventoryIssues(userId, country, region, page = 1, limit = DEF
         });
         
         // Enrich inventory errors with product details
+        // inventoryErrors already have Title from DashboardCalculation, TotalProduct has itemName/title
         const enrichedErrors = allErrors.map(error => {
             const product = productMap.get(error.asin);
             return {
                 ...error,
-                Title: error.Title || product?.Title || product?.name || 'Unknown Product',
+                Title: error.Title || product?.itemName || product?.title || product?.name || 'Unknown Product',
                 sku: product?.sku || error.sku || '',
                 MainImage: product?.MainImage || null
             };

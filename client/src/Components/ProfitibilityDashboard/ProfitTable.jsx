@@ -308,6 +308,18 @@ const ProfitTable = ({
                 // Transform children if present
                 if (product.children && product.children.length > 0) {
                     transformed.children = product.children.map(child => transformProduct(child));
+                    // Parent row: show Ad Spend, Amz Fees, and total fees as sum of parent + all children (like amz fees).
+                    const childAdSpend = transformed.children.reduce((sum, c) => sum + (Number(c.adSpend) || 0), 0);
+                    const childAmazonFees = transformed.children.reduce((sum, c) => sum + (Number(c.amazonFees) || 0), 0);
+                    const childFees = transformed.children.reduce((sum, c) => sum + (Number(c.fees) || 0), 0);
+                    transformed.adSpend = (Number(transformed.adSpend) || 0) + childAdSpend;
+                    transformed.amazonFees = (Number(transformed.amazonFees) || 0) + childAmazonFees;
+                    transformed.fees = (Number(transformed.fees) || 0) + childFees;
+                    // Recalculate parent gross profit: sales - fees - adSpend (totals including children)
+                    const sales = Number(transformed.sales) || 0;
+                    const fees = Number(transformed.fees) || 0;
+                    const adSpend = Number(transformed.adSpend) || 0;
+                    transformed.grossProfit = sales - fees - adSpend;
                 } else {
                     transformed.children = [];
                 }
@@ -1063,26 +1075,26 @@ const ProfitTable = ({
         
         {/* Pagination Controls */}
         {(processedProducts.length > 0 || tableLoading || isLoadingAsinData || (usePhasedLoading && !hasPhasedData)) && (
-          <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium" style={{ color: '#9ca3af' }}>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-medium truncate" style={{ color: '#9ca3af' }}>
                 {usePhasedLoading ? (
-                  <>Showing {Math.min((currentPage - 1) * productsPerPage + 1, serverTotalParents || serverTotalItems)} - {Math.min(currentPage * productsPerPage, serverTotalParents || serverTotalItems)} of {serverTotalParents || serverTotalItems} parents</>
+                  <>{Math.min((currentPage - 1) * productsPerPage + 1, serverTotalParents || serverTotalItems)}–{Math.min(currentPage * productsPerPage, serverTotalParents || serverTotalItems)} of {serverTotalParents || serverTotalItems}</>
                 ) : (
-                  <>Showing {indexOfFirstProduct + 1} - {Math.min(indexOfLastProduct, processedProducts.length)} of {processedProducts.length}</>
+                  <>{indexOfFirstProduct + 1}–{Math.min(indexOfLastProduct, processedProducts.length)} of {processedProducts.length}</>
                 )}
               </span>
               {usePhasedLoading && serverTotalChildren > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
-                  +{serverTotalChildren} children
+                <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }} title={`${serverTotalChildren} children`}>
+                  +{serverTotalChildren}
                 </span>
               )}
-              <span className="text-[10px] hidden sm:inline" style={{ color: '#6b7280' }}>
-                ({productsPerPage} per page)
+              <span className="text-[10px] shrink-0" style={{ color: '#6b7280' }}>
+                {productsPerPage}/page
               </span>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center gap-2">
               {/* Previous Button - not disabled during load so page change is immediate */}
               <button
                 onClick={goToPreviousPage}
@@ -1189,6 +1201,7 @@ const ProfitTable = ({
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+            <div aria-hidden="true" />
           </div>
         )}
       </div>

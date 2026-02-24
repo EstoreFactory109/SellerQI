@@ -5,11 +5,13 @@
  * - Negative profit (netProfit < 0)
  * - Low margin (profitMargin < 10%)
  * 
- * Uses the SAME calculation logic as DashboardCalculation.calculateProfitabilityErrors
- * but returns more detailed information for the Profitability Dashboard issues section.
+ * OPTIMIZED: Uses pre-computed profitabilityErrorDetails from IssuesDataChunks
+ * to avoid expensive real-time calculations and OOM issues.
+ * Falls back to real-time calculation only if pre-computed data is unavailable.
  */
 
 const logger = require('../../utils/Logger.js');
+const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
@@ -274,6 +276,9 @@ const getRecommendationForLowMargin = (item, profitMargin, adsSpend, amazonFees)
 /**
  * Get detailed profitability issues for a user
  * 
+ * OPTIMIZED: Uses pre-computed profitabilityErrorDetails from IssuesDataChunks
+ * with in-memory pagination. Falls back to real-time calculation only if unavailable.
+ * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region code
@@ -285,6 +290,65 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues starting for user ${userId}, page ${page}`);
 
+    // Try to get pre-computed profitability issues from IssuesDataChunks
+    const preComputedIssues = await IssuesDataChunks.getFieldData(userId, country, region, 'profitabilityErrorDetails');
+    
+    if (preComputedIssues && preComputedIssues.length > 0) {
+        // Use pre-computed data with pagination
+        const totalItems = preComputedIssues.length;
+        const totalPages = Math.ceil(totalItems / limit);
+        const startIndex = (page - 1) * limit;
+        const paginatedIssues = preComputedIssues.slice(startIndex, startIndex + limit);
+        
+        // Calculate summary from full data
+        const issuesSummary = {
+            negative_profit: 0,
+            low_margin: 0,
+            critical: 0,
+            high: 0,
+            medium: 0
+        };
+        
+        preComputedIssues.forEach(issue => {
+            if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
+            if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
+            if (issue.severity === 'critical') issuesSummary.critical++;
+            if (issue.severity === 'high') issuesSummary.high++;
+            if (issue.severity === 'medium') issuesSummary.medium++;
+        });
+        
+        const fetchTime = Date.now() - startTime;
+        logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues (pre-computed) completed in ${fetchTime}ms, found ${totalItems} issues`);
+        
+        return {
+            issues: paginatedIssues,
+            summary: {
+                totalIssues: totalItems,
+                byType: {
+                    negativeProfitProducts: issuesSummary.negative_profit,
+                    lowMarginProducts: issuesSummary.low_margin
+                },
+                bySeverity: {
+                    critical: issuesSummary.critical,
+                    high: issuesSummary.high,
+                    medium: issuesSummary.medium
+                }
+            },
+            pagination: {
+                page,
+                limit,
+                totalItems,
+                totalPages,
+                hasMore: page < totalPages
+            },
+            source: 'precomputed',
+            Country: country
+        };
+    }
+    
+    // Fallback: Real-time calculation (for cases where pre-computed data doesn't exist)
+    logger.info(`[PERF] No pre-computed profitability issues found, falling back to real-time calculation`);
+    
     // Fetch required data in parallel
     const [economicsMetricsData, sellerData, productWiseSponsoredAds] = await Promise.all([
         EconomicsMetrics.findLatest(userId, region, country),
@@ -394,7 +458,7 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
     });
 
     const fetchTime = Date.now() - startTime;
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues completed in ${fetchTime}ms, found ${totalItems} issues`);
+    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues (real-time) completed in ${fetchTime}ms, found ${totalItems} issues`);
 
     return {
         issues: paginatedIssues,
@@ -417,6 +481,7 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
             totalPages,
             hasMore: page < totalPages
         },
+        source: 'realtime',
         dateRange: processedEconomicsMetrics?.dateRange || null,
         Country: country
     };
@@ -425,11 +490,38 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
 /**
  * Get profitability issues summary (no pagination, just counts)
  * Fast endpoint for dashboard overview
+ * 
+ * OPTIMIZED: Uses pre-computed data from IssuesDataChunks metadata
  */
 const getProfitabilityIssuesSummary = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary starting for user ${userId}`);
 
+    // First try to get from pre-computed metadata
+    const metadata = await IssuesDataChunks.getMetadata(userId, country, region);
+    
+    if (metadata && metadata.totalProfitabilityErrors !== undefined) {
+        // Get active products count from chunk stats
+        const activeProductStats = await IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts');
+        
+        const fetchTime = Date.now() - startTime;
+        logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary (pre-computed) completed in ${fetchTime}ms`);
+        
+        return {
+            totalIssues: metadata.totalProfitabilityErrors || 0,
+            byType: {
+                negativeProfitProducts: 0, // Not stored separately in metadata
+                lowMarginProducts: 0
+            },
+            activeProducts: activeProductStats.totalItems || 0,
+            source: 'precomputed',
+            lastCalculatedAt: metadata.lastCalculatedAt
+        };
+    }
+    
+    // Fallback: Real-time calculation
+    logger.info(`[PERF] No pre-computed summary found, falling back to real-time calculation`);
+    
     // Fetch required data in parallel
     const [economicsMetricsData, sellerData, productWiseSponsoredAds] = await Promise.all([
         EconomicsMetrics.findLatest(userId, region, country),
@@ -498,7 +590,7 @@ const getProfitabilityIssuesSummary = async (userId, country, region) => {
     });
 
     const fetchTime = Date.now() - startTime;
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary completed in ${fetchTime}ms`);
+    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary (real-time) completed in ${fetchTime}ms`);
 
     return {
         totalIssues: totalErrors,
@@ -507,6 +599,7 @@ const getProfitabilityIssuesSummary = async (userId, country, region) => {
             lowMarginProducts: lowMarginCount
         },
         activeProducts: activeProductSet.size,
+        source: 'realtime',
         dateRange: processedEconomicsMetrics?.dateRange || null
     };
 };
