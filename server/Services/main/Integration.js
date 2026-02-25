@@ -2060,6 +2060,20 @@ class Integration {
 
             // Store issue summary for quick dashboard access
             // This uses the already-calculated dashboardData to avoid re-fetching
+            logger.info("[Integration] Starting issue storage operations", {
+                userId,
+                country,
+                region,
+                hasProductWiseError: !!dashboardData.productWiseError,
+                productWiseErrorCount: dashboardData.productWiseError?.length || 0,
+                hasRankingErrors: !!dashboardData.rankingProductWiseErrors,
+                rankingErrorsCount: dashboardData.rankingProductWiseErrors?.length || 0,
+                hasConversionErrors: !!dashboardData.conversionProductWiseErrors,
+                conversionErrorsCount: dashboardData.conversionProductWiseErrors?.length || 0,
+                hasInventoryErrors: !!dashboardData.inventoryProductWiseErrors,
+                inventoryErrorsCount: dashboardData.inventoryProductWiseErrors?.length || 0
+            });
+
             try {
                 const issueSummaryResult = await storeIssueSummaryFromDashboardData(
                     userId,

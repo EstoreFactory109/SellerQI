@@ -19,14 +19,24 @@ axiosRetry(axios, {
   }
 });
 
-const getBrand = async ( dataToReceive,UserId, baseuri,) => {
-  logger.info("GetBrand starting");
+const getBrand = async ( dataToReceive, UserId, baseuri) => {
+  logger.info("GetBrand starting", { 
+    userId: UserId, 
+    baseuri,
+    hasAsin: !!(dataToReceive?.ASIN?.length),
+    asinCount: dataToReceive?.ASIN?.length || 0
+  });
   
   const host = baseuri;
 
   if (!dataToReceive || !dataToReceive.ASIN || !Array.isArray(dataToReceive.ASIN) || dataToReceive.ASIN.length === 0) {
-    logger.error("Invalid dataToReceive or no ASINs provided for brand data");
-    return null;
+    logger.warn("GetBrand: No ASINs provided for brand data", { userId: UserId });
+    return { success: true, data: null, message: "No ASINs provided" };
+  }
+
+  if (!UserId || !baseuri) {
+    logger.error("GetBrand: Missing required parameters", { userId: UserId, baseuri });
+    return { success: false, error: "Missing required parameters" };
   }
 
   const queryParams = `marketplaceIds=${dataToReceive.marketplaceId}&includedData=attributes`
@@ -60,41 +70,48 @@ const getBrand = async ( dataToReceive,UserId, baseuri,) => {
     });
 
     if (!response.data || !response.data.attributes) {
-      return null;
+      logger.warn("GetBrand: No attributes in response", { userId: UserId, asin: dataToReceive.ASIN[0] });
+      return { success: true, data: null, message: "No attributes in catalog response" };
     }
 
     if (!response.data.attributes.brand || !Array.isArray(response.data.attributes.brand) || response.data.attributes.brand.length === 0) {
-      return null;
+      logger.warn("GetBrand: No brand attribute found", { userId: UserId, asin: dataToReceive.ASIN[0] });
+      return { success: true, data: null, message: "No brand attribute found" };
     }
 
     const brandValue = response.data.attributes.brand[0]?.value;
     if (!brandValue) {
-      return null;
+      logger.warn("GetBrand: Brand value is empty", { userId: UserId, asin: dataToReceive.ASIN[0] });
+      return { success: true, data: null, message: "Brand value is empty" };
     }
 
     const sellerCentral = await SellerCentralModel.findOne({User: UserId});
 
     if(!sellerCentral){
-      logger.error("Seller Central not found for user: " + UserId);
-      return null;
+      logger.error("GetBrand: Seller Central not found for user", { userId: UserId });
+      return { success: false, error: "Seller Central not found" };
     }
    
     sellerCentral.brand = brandValue;
     await sellerCentral.save();
 
-    logger.info("GetBrand ended");
-    return brandValue;
+    logger.info("GetBrand completed successfully", { 
+      userId: UserId, 
+      brand: brandValue,
+      asin: dataToReceive.ASIN[0]
+    });
+    return { success: true, data: brandValue };
 
   } catch (error) {
-    logger.error(`Error fetching brand for ASIN: ${dataToReceive.ASIN[0]}:`, error.response?.data || error.message);
+    logger.error("GetBrand error", {
+      error: error.message,
+      asin: dataToReceive.ASIN[0],
+      userId: UserId,
+      status: error.response?.status,
+      responseData: error.response?.data
+    });
     
-    if (error.response) {
-      logger.error(`HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`);
-    } else {
-      logger.error(`Request failed: ${error.message}`);
-    }
-    
-    return null;
+    return { success: false, error: error.message };
   }
 };
 

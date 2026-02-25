@@ -94,11 +94,20 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
     asinCount: totalAsins,
     chunkSize: ASIN_CHUNK_SIZE,
     totalChunks,
-    concurrency: REVIEWS_CONCURRENCY
+    concurrency: REVIEWS_CONCURRENCY,
+    userId,
+    country,
+    region
   });
 
-  if (!asinArray || !country || !userId) {
-    return false;
+  if (!asinArray || !Array.isArray(asinArray) || asinArray.length === 0) {
+    logger.warn("NumberOfProductReviews: No ASINs provided", { userId, country, region });
+    return { success: true, data: null, message: "No ASINs provided", productsProcessed: 0 };
+  }
+
+  if (!country || !userId) {
+    logger.error("NumberOfProductReviews: Missing required parameters", { userId, country, region });
+    return { success: false, error: "Missing required parameters" };
   }
 
   const limit = promiseLimit(REVIEWS_CONCURRENCY);
@@ -184,8 +193,14 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
     }
 
     if (totalProductsSaved === 0) {
-      logger.warn("NumberOfProductReviews: No valid products found");
-      return false;
+      logger.warn("NumberOfProductReviews: No valid products found from RapidAPI", {
+        userId,
+        country,
+        region,
+        totalAsinsAttempted: asinArray.length
+      });
+      // Return success with 0 products - this is not an error, just no data available
+      return { success: true, data: null, message: "No valid products found from API", productsProcessed: 0 };
     }
 
     if (allAplusProducts.length > 0) {
@@ -203,13 +218,26 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
       await getUser.save();
     }
 
-    logger.info("Data saved successfully", { totalProductsSaved });
-    logger.info("NumberOfProductReviews ended");
+    logger.info("NumberOfProductReviews completed successfully", { 
+      totalProductsSaved,
+      totalAsinsAttempted: asinArray.length,
+      userId,
+      country,
+      region,
+      reviewDocId: reviewDocId?.toString()
+    });
 
-    return await NumberOfProductReviews.findById(reviewDocId);
+    const savedDoc = await NumberOfProductReviews.findById(reviewDocId);
+    return { success: true, data: savedDoc, productsProcessed: totalProductsSaved };
   } catch (error) {
-    logger.error("Error saving product reviews to database:", error.message);
-    return false;
+    logger.error("Error saving product reviews to database:", {
+      error: error.message,
+      stack: error.stack,
+      userId,
+      country,
+      region
+    });
+    return { success: false, error: error.message };
   }
 };
 

@@ -2576,6 +2576,93 @@ const testStoreIssueSummary = async (req, res) => {
   }
 };
 
+/**
+ * Test endpoint: Calculate and store issues in BOTH IssueSummary and IssuesDataChunks.
+ * Same flow as Integration.addNewAccountHistory (issue summary + chunks for Issues pages).
+ * POST body: { userId (required), country (required), region (required) }
+ */
+const testStoreIssuesSummaryAndChunks = async (req, res) => {
+  try {
+    const { userId, country, region } = req.body;
+
+    if (!userId || !country || !region) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId, country, and region are required in request body'
+      });
+    }
+
+    const { AnalyseService } = require('../../Services/main/Analyse.js');
+    const { analyseData } = require('../../Services/Calculations/DashboardCalculation.js');
+    const { storeIssueSummaryFromDashboardData } = require('../../Services/Calculations/IssueSummaryService.js');
+    const { storeIssuesDataFromDashboard } = require('../../Services/Calculations/IssuesDataService.js');
+
+    const getAnalyseData = await AnalyseService.Analyse(userId, country, region);
+    if (!getAnalyseData || getAnalyseData.status !== 200) {
+      return res.status(502).json({
+        success: false,
+        message: `Failed to get analyse data: status ${getAnalyseData?.status}`,
+        userId,
+        country,
+        region
+      });
+    }
+
+    const calculationResult = await analyseData(getAnalyseData.message, userId);
+    if (!calculationResult?.dashboardData) {
+      return res.status(502).json({
+        success: false,
+        message: 'Failed to calculate dashboard data',
+        userId,
+        country,
+        region
+      });
+    }
+
+    const dashboardData = calculationResult.dashboardData;
+
+    const issueSummaryResult = await storeIssueSummaryFromDashboardData(
+      userId,
+      country,
+      region,
+      dashboardData,
+      'test'
+    );
+
+    const issuesDataResult = await storeIssuesDataFromDashboard(
+      userId,
+      country,
+      region,
+      dashboardData,
+      'test'
+    );
+
+    const summarySuccess = issueSummaryResult?.success === true;
+    const chunksSuccess = issuesDataResult?.success === true;
+
+    return res.status(200).json({
+      success: summarySuccess && chunksSuccess,
+      message: summarySuccess && chunksSuccess
+        ? 'Issue summary and issues data (chunks) stored successfully'
+        : `Summary: ${summarySuccess ? 'ok' : 'failed'}, Chunks: ${chunksSuccess ? 'ok' : 'failed'}`,
+      data: {
+        issueSummary: summarySuccess ? { stored: true, data: issueSummaryResult.data } : { stored: false, error: issueSummaryResult?.error },
+        issuesDataChunks: chunksSuccess ? { stored: true, chunksCreated: issuesDataResult?.data != null ? 'see logs' : null } : { stored: false, error: issuesDataResult?.error }
+      },
+      userId,
+      country,
+      region
+    });
+  } catch (error) {
+    console.error('Error in testStoreIssuesSummaryAndChunks:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred while storing issues summary and chunks'
+    });
+  }
+};
+
 module.exports = { testReport, getTotalSales, 
    getReviewData, testAmazonAds,
    testGetCampaigns,testGetAdGroups,
@@ -2587,4 +2674,5 @@ module.exports = { testReport, getTotalSales,
    getLastAdsKeywordsPerformanceDocument,
    testAllAdsServices,
    testStoreIssueSummary,
+   testStoreIssuesSummaryAndChunks,
    }

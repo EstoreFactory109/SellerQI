@@ -4,7 +4,7 @@ const {testReport,getTotalSales,getReviewData,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
@@ -51,5 +51,8 @@ router.post('/testAllAdsServices', testAllAdsServices)  // Body: { userId, count
 
 // Issue Summary - Calculate and store issue summary for a particular user (same as integration/schedule)
 router.post('/testStoreIssueSummary', testStoreIssueSummary)  // Body: { userId, country, region }
+
+// Issue Summary + Chunks - Store issues in BOTH IssueSummary and IssuesDataChunks (same as integration finalize)
+router.post('/testStoreIssuesSummaryAndChunks', testStoreIssuesSummaryAndChunks)  // Body: { userId, country, region }
 
 module.exports=router

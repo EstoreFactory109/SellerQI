@@ -1167,7 +1167,7 @@ const analyseData = async (data, userId = null) => {
         });
     }
 
-    // Process all active products for inventory errors that weren't captured in ranking processing
+    // Process all active products for inventory/conversion errors that weren't captured in ranking processing
     activeProducts.forEach((asin) => {
         // Skip if already processed in ranking data
         if (seenAsins.has(asin)) return;
@@ -1179,25 +1179,32 @@ const analyseData = async (data, userId = null) => {
         totalErrorInConversion += conversionErrors;
         totalInventoryErrors += inventoryErrors;
         
+        // Get product details once for use in both arrays
+        const totalProduct = totalProductsByAsinMap.get(asin);
+        const title = totalProduct?.itemName || totalProduct?.title || "N/A";
+        
+        // Add to conversionProductWiseErrors if there are conversion errors
+        if (conversionErrors > 0) {
+            conversionProductWiseErrors.push({
+                ...conversionData,
+                Title: title
+            });
+        }
+        
         if (inventoryErrors > 0) {
-            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
-            const totalProduct = totalProductsByAsinMap.get(asin);
-            const title = totalProduct?.itemName || totalProduct?.title || "N/A";
-            
             // Add to inventoryProductWiseErrors array
             inventoryProductWiseErrors.push({
                 ...inventoryData,
                 Title: title
             });
-            
-            // Also add to productWiseError array for completeness
-            const { data: conversionData, errorCount: conversionErrors } = getConversionErrors(asin);
-            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
+        }
+        
+        // Add to productWiseError if there are any errors (inventory or conversion)
+        if (inventoryErrors > 0 || conversionErrors > 0) {
             const productDetails = salesByAsinMap.get(asin);
             const sales = productDetails?.amount || 0;
             const quantity = productDetails?.quantity || 0;
             
-            // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
             const imageItem = imageResultMap.get(asin);
             productWiseError.push({
                 asin,
@@ -1251,6 +1258,22 @@ const analyseData = async (data, userId = null) => {
                     // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
                     const totalProduct = totalProductsByAsinMap.get(asin);
                     const title = totalProduct?.itemName || totalProduct?.title || "N/A";
+                    
+                    // Add to conversionProductWiseErrors if there are conversion errors
+                    if (conversionErrors > 0) {
+                        conversionProductWiseErrors.push({
+                            ...conversionData,
+                            Title: title
+                        });
+                    }
+                    
+                    // Add to inventoryProductWiseErrors if there are inventory errors
+                    if (inventoryErrors > 0) {
+                        inventoryProductWiseErrors.push({
+                            ...inventoryData,
+                            Title: title
+                        });
+                    }
                     
                     // OPTIMIZED: O(1) Map lookup instead of O(n) array.find()
                     const imageItem = imageResultMap.get(asin);
