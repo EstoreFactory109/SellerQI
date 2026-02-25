@@ -964,17 +964,42 @@ export const fetchRankingIssues = createAsyncThunk(
             const result = response.data.data;
             
             // If appending (Load More), merge with existing
+            // Merge by ASIN and combine error fields (a product's errors may span multiple pages)
             if (append && existing?.data?.length > 0) {
-                const existingAsins = new Set(existing.data.map(item => item.asin));
-                const uniqueNewItems = (result.data || []).filter(item => !existingAsins.has(item.asin));
-                const mergedData = [...existing.data, ...uniqueNewItems];
+                const rankingMap = new Map();
+                existing.data.forEach(item => {
+                    rankingMap.set(item.asin, JSON.parse(JSON.stringify(item)));
+                });
+                (result.data || []).forEach(item => {
+                    if (rankingMap.has(item.asin)) {
+                        // Merge data fields into existing product
+                        const existingItem = rankingMap.get(item.asin);
+                        const mergedData = { ...existingItem.data };
+                        if (item.data) {
+                            // Merge each section (TitleResult, BulletPoints, Description, charLim)
+                            Object.keys(item.data).forEach(key => {
+                                if (key === 'Title') {
+                                    mergedData.Title = item.data.Title;
+                                } else if (typeof item.data[key] === 'object' && item.data[key] !== null) {
+                                    mergedData[key] = { ...(mergedData[key] || {}), ...item.data[key] };
+                                } else {
+                                    mergedData[key] = item.data[key];
+                                }
+                            });
+                        }
+                        rankingMap.set(item.asin, { ...existingItem, ...item, data: mergedData });
+                    } else {
+                        rankingMap.set(item.asin, JSON.parse(JSON.stringify(item)));
+                    }
+                });
+                const mergedData = Array.from(rankingMap.values());
                 
                 return {
                     data: mergedData,
                     pagination: {
                         ...result.pagination,
                         page,
-                        hasMore: mergedData.length < (result.pagination?.total || 0)
+                        hasMore: result.pagination?.hasMore ?? false
                     },
                     fromCache: false,
                     append: true
@@ -1006,18 +1031,36 @@ export const fetchConversionIssues = createAsyncThunk(
             const response = await axiosInstance.get(`/api/pagewise/issues/conversion?page=${page}&limit=${limit}`);
             const result = response.data.data;
             
-            if (append && existing?.data?.length > 0) {
-                const existingAsins = new Set(existing.data.map(item => item.asin));
-                const uniqueNewItems = (result.data || []).filter(item => !existingAsins.has(item.asin));
-                const mergedData = [...existing.data, ...uniqueNewItems];
+            if (append && (existing?.data?.length > 0 || existing?.buyBoxData?.length > 0)) {
+                // Merge conversion errors by ASIN - combine error fields from same product
+                // (A product's errors may span multiple pages, so we merge rather than dedupe)
+                const conversionMap = new Map();
+                existing.data.forEach(item => {
+                    conversionMap.set(item.asin, { ...item });
+                });
+                (result.data || []).forEach(item => {
+                    if (conversionMap.has(item.asin)) {
+                        // Merge error fields into existing product
+                        const existing = conversionMap.get(item.asin);
+                        conversionMap.set(item.asin, { ...existing, ...item });
+                    } else {
+                        conversionMap.set(item.asin, { ...item });
+                    }
+                });
+                const mergedConversionData = Array.from(conversionMap.values());
+                
+                // Merge buybox data (dedupe by ASIN - each ASIN has one buybox status)
+                const existingBuyboxAsins = new Set((existing.buyBoxData || []).map(item => item.asin));
+                const uniqueNewBuyboxItems = (result.buyBoxData || []).filter(item => !existingBuyboxAsins.has(item.asin));
+                const mergedBuyboxData = [...(existing.buyBoxData || []), ...uniqueNewBuyboxItems];
                 
                 return {
-                    data: mergedData,
-                    buyBoxData: result.buyBoxData || existing.buyBoxData || [],
+                    data: mergedConversionData,
+                    buyBoxData: mergedBuyboxData,
                     pagination: {
                         ...result.pagination,
                         page,
-                        hasMore: mergedData.length < (result.pagination?.total || 0)
+                        hasMore: result.pagination?.hasMore ?? false
                     },
                     fromCache: false,
                     append: true
@@ -1049,23 +1092,60 @@ export const fetchInventoryIssues = createAsyncThunk(
             const response = await axiosInstance.get(`/api/pagewise/issues/inventory?page=${page}&limit=${limit}`);
             const result = response.data.data;
             
+            // If appending (Load More), merge with existing
+            // Merge by ASIN and combine error fields (a product's errors may span multiple pages)
             if (append && existing?.data?.length > 0) {
-                const existingAsins = new Set(existing.data.map(item => item.asin));
-                const uniqueNewItems = (result.data || []).filter(item => !existingAsins.has(item.asin));
-                const mergedData = [...existing.data, ...uniqueNewItems];
-                
+                const inventoryMap = new Map();
+                existing.data.forEach(item => {
+                    inventoryMap.set(item.asin, JSON.parse(JSON.stringify(item)));
+                });
+                (result.data || []).forEach(item => {
+                    if (inventoryMap.has(item.asin)) {
+                        // Merge error fields into existing product
+                        const existingItem = inventoryMap.get(item.asin);
+                        const merged = { ...existingItem };
+                        
+                        // Merge inventoryPlanningErrorData
+                        if (item.inventoryPlanningErrorData) {
+                            merged.inventoryPlanningErrorData = {
+                                ...(merged.inventoryPlanningErrorData || {}),
+                                ...item.inventoryPlanningErrorData
+                            };
+                        }
+                        // Merge stranded
+                        if (item.strandedInventoryErrorData) {
+                            merged.strandedInventoryErrorData = item.strandedInventoryErrorData;
+                        }
+                        // Merge compliance
+                        if (item.inboundNonComplianceErrorData) {
+                            merged.inboundNonComplianceErrorData = item.inboundNonComplianceErrorData;
+                        }
+                        // Merge replenishment (combine arrays)
+                        if (item.replenishmentErrorData) {
+                            const existingRep = merged.replenishmentErrorData || [];
+                            const newRep = Array.isArray(item.replenishmentErrorData) ? item.replenishmentErrorData : [item.replenishmentErrorData];
+                            merged.replenishmentErrorData = [...existingRep, ...newRep];
+                        }
+                        
+                        inventoryMap.set(item.asin, merged);
+                    } else {
+                        inventoryMap.set(item.asin, JSON.parse(JSON.stringify(item)));
+                    }
+                });
+                const mergedData = Array.from(inventoryMap.values());
+
                 return {
                     data: mergedData,
                     pagination: {
                         ...result.pagination,
                         page,
-                        hasMore: mergedData.length < (result.pagination?.total || 0)
+                        hasMore: result.pagination?.hasMore ?? false
                     },
                     fromCache: false,
                     append: true
                 };
             }
-            
+
             return { ...result, fromCache: false, append: false };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch inventory issues');

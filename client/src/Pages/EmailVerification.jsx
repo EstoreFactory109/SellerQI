@@ -12,12 +12,19 @@ import { useDispatch } from 'react-redux';
 import { updateTrialStatus } from '../redux/slices/authSlice.js';
 
 
+const PENDING_VERIFICATION_EMAIL = 'pendingVerificationEmail';
+const PENDING_VERIFICATION_PHONE = 'pendingVerificationPhone';
+
 const OtpVerification = () => {
   const [otp, setOtp] = useState(["", "", "", "", ""]);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const location = useLocation();
-  const { email, phone, intendedPackage: stateIntendedPackage } = location.state || {};
+  const stateData = location.state || {};
+  // Use state first, then sessionStorage (so resend works after refresh)
+  const [email, setEmail] = useState(() => stateData.email || sessionStorage.getItem(PENDING_VERIFICATION_EMAIL) || '');
+  const [phone, setPhone] = useState(() => stateData.phone ?? sessionStorage.getItem(PENDING_VERIFICATION_PHONE) ?? '');
+  const { intendedPackage: stateIntendedPackage } = stateData;
   const [loading, setLoading] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(300); // 5 minutes in seconds
   const [resendCooldown, setResendCooldown] = useState(40); // 40 seconds cooldown
@@ -38,6 +45,18 @@ const OtpVerification = () => {
   const intendedPackage = stateIntendedPackage !== null && stateIntendedPackage !== undefined 
     ? stateIntendedPackage 
     : localStorage.getItem('intendedPackage');
+
+  // Persist email/phone so resend works after refresh
+  useEffect(() => {
+    if (stateData.email) {
+      sessionStorage.setItem(PENDING_VERIFICATION_EMAIL, stateData.email);
+      setEmail(stateData.email);
+    }
+    if (stateData.phone != null && stateData.phone !== '') {
+      sessionStorage.setItem(PENDING_VERIFICATION_PHONE, stateData.phone);
+      setPhone(stateData.phone);
+    }
+  }, [stateData.email, stateData.phone]);
 
   useEffect(() => {
     one.current.focus();
@@ -105,15 +124,17 @@ const OtpVerification = () => {
 
   const handleResendOTP = async () => {
     if (!canResend) return;
-    
+    if (!email || !email.trim()) {
+      setErrorMessage('Email is required to resend OTP.');
+      return;
+    }
     try {
       setLoading(true);
-      console.log(email, phone);
-      // Call API to resend OTP
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/resend-otp`, {
-        email,
-        phone
-      });
+      // Server expects email (required) and optional phone as exactly 10 digits
+      const phoneDigits = (phone && typeof phone === 'string') ? phone.replace(/\D/g, '') : '';
+      const body = { email: email.trim() };
+      if (phoneDigits.length === 10) body.phone = phoneDigits;
+      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/resend-otp`, body);
       
       if (response.status === 200) {
         // Reset timers
@@ -128,7 +149,8 @@ const OtpVerification = () => {
       }
     } catch (error) {
       console.error("Resend failed", error);
-      setErrorMessage('Failed to resend OTP. Please try again.');
+      const msg = error.response?.data?.message || error.response?.data?.errors?.[0]?.msg;
+      setErrorMessage(msg || 'Failed to resend OTP. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -159,6 +181,9 @@ const OtpVerification = () => {
       },{withCredentials:true});
       
       if (response.status === 200) {
+        // Clear pending verification data (used for resend after refresh)
+        sessionStorage.removeItem(PENDING_VERIFICATION_EMAIL);
+        sessionStorage.removeItem(PENDING_VERIFICATION_PHONE);
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
         localStorage.setItem("isAuth", "true");
@@ -317,10 +342,16 @@ const OtpVerification = () => {
               transition={{ delay: 0.4 }}
               className="text-gray-500 text-sm"
             >
-              OTP has been sent to your registered email:
-              <br />
-              <span className="font-semibold text-gray-200">{email || 'your email'}</span>
+              OTP has been sent to your registered email.
             </motion.p>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.45 }}
+              className="mt-3 p-3 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200/95 text-sm text-center"
+            >
+              Can&apos;t find it? Check your <strong>Promotions</strong>, <strong>Spam</strong>, or <strong>Junk</strong> folder, or search for &quot;SellerQI&quot; or &quot;OTP&quot; in your inbox.
+            </motion.div>
           </div>
 
           {/* Timer Display */}
@@ -409,7 +440,7 @@ const OtpVerification = () => {
               className={`w-full py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
                 loading || isExpired
                   ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 shadow-lg shadow-blue-500/25 transform hover:scale-[1.02] active:scale-[0.98]'
+                  : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-500 hover:to-blue-600 transform hover:scale-[1.02] active:scale-[0.98]'
               }`}
             >
               {loading ? (

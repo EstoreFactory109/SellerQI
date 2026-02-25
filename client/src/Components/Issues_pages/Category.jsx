@@ -269,25 +269,31 @@ const ConversionTableSection = ({ data, buyBoxData, pagination, loading, onLoadM
     const buyboxErrors = [];
     if (Array.isArray(buyBoxData)) {
       buyBoxData.forEach((item) => {
-        if (item.buyBoxPercentage === 0 || item.buyBoxPercentage < 50) {
-          const asin = item.childAsin || item.parentAsin;
-          const productDetails = productInfoMap.get(asin);
-          const productTitle = productDetails?.Title || productDetails?.name || 'N/A';
-          const sku = productDetails?.sku || '';
+        // Backend now pre-filters and paginates buybox issues, so we just need to format them
+        // Support both old format (childAsin/parentAsin) and new format (asin directly)
+        const asin = item.asin || item.childAsin || item.parentAsin;
+        if (!asin) return;
+        
+        // Backend already filters for buyBoxPercentage === 0 || < 50, but check anyway for safety
+        const buyBoxPct = item.buyBoxPercentage;
+        if (buyBoxPct !== 0 && buyBoxPct >= 50) return;
+        
+        const productDetails = productInfoMap.get(asin);
+        const productTitle = item.Title || productDetails?.Title || productDetails?.name || 'N/A';
+        const sku = item.sku || productDetails?.sku || '';
 
-          let issueHeading, message, solution;
-          if (item.buyBoxPercentage === 0) {
-            issueHeading = 'Buy Box | No Buy Box';
-            message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
-            solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics, and consider using repricing tools.';
-          } else {
-            issueHeading = 'Buy Box | Low Buy Box Percentage';
-            message = `This product has only ${item.buyBoxPercentage.toFixed(1)}% Buy Box ownership. A significant portion of potential sales are going to competitors.`;
-            solution = 'Improve your Buy Box percentage by optimizing pricing, maintaining competitive shipping, and improving seller metrics.';
-          }
-
-          buyboxErrors.push({ asin, sku, title: productTitle, issueHeading, message, solution });
+        let issueHeading, message, solution;
+        if (buyBoxPct === 0) {
+          issueHeading = 'Buy Box | No Buy Box';
+          message = `This product has 0% Buy Box ownership. With ${item.pageViews || 0} page views and ${item.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`;
+          solution = 'Review your pricing strategy and ensure it\'s competitive. Check for pricing errors, verify your seller metrics, and consider using repricing tools.';
+        } else {
+          issueHeading = 'Buy Box | Low Buy Box Percentage';
+          message = `This product has only ${buyBoxPct.toFixed(1)}% Buy Box ownership. A significant portion of potential sales are going to competitors.`;
+          solution = 'Improve your Buy Box percentage by optimizing pricing, maintaining competitive shipping, and improving seller metrics.';
         }
+
+        buyboxErrors.push({ asin, sku, title: productTitle, issueHeading, message, solution });
       });
     }
 

@@ -454,7 +454,9 @@ function analyzeIssues(listingData, targetAttribute) {
     requiredAction: null,
     issues: issues,
     // Add catalog conflict analysis
-    catalogConflictAnalysis: analyzeCatalogConflicts(issues)
+    catalogConflictAnalysis: analyzeCatalogConflicts(issues),
+    // ── NEW: Amazon's value for the target attribute if a conflict exists on it
+    amazonValueForTargetAttribute: null
   };
 
   for (const issue of issues) {
@@ -465,12 +467,14 @@ function analyzeIssues(listingData, targetAttribute) {
     const conflictingAttr = conflictMatch ? conflictMatch[0]?.replace(/'/g, '') : null;
     
     if (strategy === 'CATALOG_CONFLICT') {
+      const parsed = parse8541Error(issue);
+
       analysis.catalogConflicts.push({
         code: issue.code,
         message: issue.message,
         attribute: conflictingAttr,
         severity: issue.severity,
-        parsed: parse8541Error(issue)
+        parsed
       });
       
       if (conflictingAttr) {
@@ -484,6 +488,15 @@ function analyzeIssues(listingData, targetAttribute) {
             conflictingAttr === targetAttribute ||
             issue.message?.toLowerCase().includes(targetAttrName)) {
           analysis.targetAttributeBlocked = true;
+
+          // ── NEW: Capture Amazon's expected value so autoFixConflicts can use it
+          if (parsed?.amazonValue) {
+            analysis.amazonValueForTargetAttribute = {
+              value: parsed.amazonValue,
+              languageTag: parsed.languageTag,
+              attributeName: parsed.attributeName
+            };
+          }
         }
       }
     } else if (strategy === 'MISSING_ATTRIBUTE') {
@@ -715,6 +728,11 @@ function getBlockedMessage(analysis) {
  * 2. Update a single attribute
  * 3. Fix all catalog conflicts AND update target attribute in ONE call (autoFixConflicts: true)
  * 
+ * FIX: When the conflict is on the target attribute itself and autoFixConflicts is true,
+ * Amazon's catalog value (extracted directly from the 8541 error message) is now used
+ * for that attribute instead of silently skipping it and sending the user's value —
+ * which was the root cause of the title not updating.
+ * 
  * @param {Object} params
  * @param {string} params.sku - Product SKU
  * @param {string} params.userId - User ID
@@ -792,7 +810,9 @@ async function autoFixListing(params) {
     canAutoFix: analysis.canAutoFix,
     targetAttributeBlocked: analysis.targetAttributeBlocked,
     conflictingAttributes: analysis.conflictingAttributes,
-    fixableConflicts: analysis.catalogConflictAnalysis.fixableCount
+    fixableConflicts: analysis.catalogConflictAnalysis.fixableCount,
+    // ── NEW: log whether we have an Amazon value for the blocked target attribute
+    amazonValueForTarget: analysis.amazonValueForTargetAttribute?.value ?? null
   });
 
   // If analyze only, return analysis
@@ -892,27 +912,66 @@ async function autoFixListing(params) {
   const allPatches = [];
   const fixedConflicts = [];
 
+  // ── NEW: Track whether a conflict on the target attribute was handled using
+  //         Amazon's catalog value. When true, Step 5b must NOT add the user's
+  //         value on top — that was the root cause of the title not updating.
+  let targetAttributeHandledByConflictFix = false;
+  let amazonValueUsedForTarget = null;
+
   // 5a: Add conflict fix patches if autoFixConflicts is enabled
   if (autoFixConflicts && analysis.catalogConflictAnalysis.fixableCount > 0) {
     for (const conflict of analysis.catalogConflictAnalysis.conflicts) {
       const { attributeName, amazonValue, merchantValue, languageTag: conflictLangTag } = conflict;
       
       if (!amazonValue) continue; // Skip if we don't know Amazon's value
-      
-      // Skip if this conflict is on the same attribute we're updating
-      // (we'll use the user's value for that)
+
       const targetAttrName = ATTRIBUTE_NAMES[dataToBeUpdated] || dataToBeUpdated;
+
       if (attributeName === targetAttrName) {
-        logger.info('AutoFixListingService: Skipping conflict fix for target attribute', { 
-          attributeName, 
-          willUseUserValue: finalValue 
+        // ── FIX: The conflict is on the SAME attribute the user wants to update.
+        //
+        //   OLD behaviour: `continue` — skipped building a conflict-fix patch,
+        //   then Step 5b sent the user's value → Amazon rejected it (8541 loop).
+        //
+        //   NEW behaviour: build the conflict-fix patch using Amazon's catalog
+        //   value from the error message, record it, and set a flag so Step 5b
+        //   knows NOT to overwrite it with the user's value.
+        const existingAttr = listingData?.attributes?.[attributeName];
+        const resolvedLanguageTag =
+          existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
+
+        const conflictPatch = buildConflictFixPatch(
+          attributeName,
+          amazonValue,
+          marketplaceId,
+          resolvedLanguageTag
+        );
+        allPatches.push(conflictPatch);
+
+        targetAttributeHandledByConflictFix = true;
+        amazonValueUsedForTarget = amazonValue;
+
+        fixedConflicts.push({
+          attribute: attributeName,
+          oldValue: merchantValue,
+          newValue: amazonValue,
+          languageTag: resolvedLanguageTag,
+          note: 'Conflict was on target attribute — Amazon catalog value applied instead of user-supplied value'
         });
+
+        logger.info('AutoFixListingService: Conflict is on target attribute — using Amazon catalog value', {
+          attributeName,
+          userRequestedValue: finalValue,
+          amazonValueApplied: amazonValue
+        });
+
         continue;
       }
       
-      // Get language tag for this conflict
+      // Conflict is on a different attribute — fix it normally
       const existingAttr = listingData?.attributes?.[attributeName];
-      const conflictLanguageTag = existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
+      const conflictLanguageTag =
+        existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
 
       const conflictPatch = buildConflictFixPatch(attributeName, amazonValue, marketplaceId, conflictLanguageTag);
       allPatches.push(conflictPatch);
@@ -927,18 +986,24 @@ async function autoFixListing(params) {
     
     logger.info('AutoFixListingService: Added conflict fix patches', { 
       count: fixedConflicts.length,
-      conflicts: fixedConflicts.map(c => c.attribute)
+      conflicts: fixedConflicts.map(c => c.attribute),
+      targetAttributeHandledByConflictFix
     });
   }
 
-  // 5b: Add target attribute patch
-  const targetPatches = buildPatches(dataToBeUpdated, finalValue, marketplaceId, languageTag);
-  allPatches.push(...targetPatches);
+  // 5b: Add target attribute patch ONLY if it was not already handled by a
+  //     conflict fix above. Previously this always ran, which overwrote the
+  //     correct Amazon catalog value with the user's rejected value.
+  if (!targetAttributeHandledByConflictFix) {
+    const targetPatches = buildPatches(dataToBeUpdated, finalValue, marketplaceId, languageTag);
+    allPatches.push(...targetPatches);
+  }
 
   logger.info('AutoFixListingService: Total patches to apply', { 
     total: allPatches.length,
     conflictFixes: fixedConflicts.length,
-    targetAttribute: dataToBeUpdated
+    targetAttribute: dataToBeUpdated,
+    targetHandledViaConflictFix: targetAttributeHandledByConflictFix
   });
 
   // Step 6: Execute SINGLE PATCH with all operations
@@ -964,7 +1029,7 @@ async function autoFixListing(params) {
         data: patchResult,
         issues: responseIssues,
         updatedAttribute: dataToBeUpdated,
-        newValue: finalValue,
+        newValue: targetAttributeHandledByConflictFix ? amazonValueUsedForTarget : finalValue,
         fixedConflicts: fixedConflicts.length > 0 ? fixedConflicts : undefined,
         message: 'Update submitted but may not take effect due to catalog restrictions.',
         warning: true
@@ -974,24 +1039,45 @@ async function autoFixListing(params) {
     logger.info('AutoFixListingService: Update successful', { 
       sku, 
       dataToBeUpdated,
-      conflictsFixed: fixedConflicts.length
+      conflictsFixed: fixedConflicts.length,
+      usedAmazonValueForTarget: targetAttributeHandledByConflictFix
     });
 
     // Build success message
     let successMessage = `Successfully updated ${dataToBeUpdated}`;
-    if (fixedConflicts.length > 0) {
-      successMessage += ` and fixed ${fixedConflicts.length} catalog conflict(s)`;
+    if (targetAttributeHandledByConflictFix) {
+      successMessage += ` using Amazon's catalog value (your value conflicted with the catalog)`;
     }
+    if (fixedConflicts.length > 0) {
+      const otherConflicts = fixedConflicts.filter(c => c.attribute !== attrName);
+      if (otherConflicts.length > 0) {
+        successMessage += ` and fixed ${otherConflicts.length} additional catalog conflict(s)`;
+      }
+    }
+
+    // ── NEW: Distinguish when Amazon's value was used for the target attribute
+    const action = targetAttributeHandledByConflictFix
+      ? 'AMAZON_VALUE_USED'
+      : fixedConflicts.length > 0
+        ? 'UPDATED_AND_CONFLICTS_FIXED'
+        : 'UPDATED';
 
     return {
       status: FIX_STATUS.SUCCESS,
-      action: fixedConflicts.length > 0 ? 'UPDATED_AND_CONFLICTS_FIXED' : 'UPDATED',
+      action,
       sku,
       asin,
       productType,
       data: patchResult,
       updatedAttribute: dataToBeUpdated,
-      newValue: finalValue,
+      // Surface which value actually landed on Amazon
+      newValue: targetAttributeHandledByConflictFix ? amazonValueUsedForTarget : finalValue,
+      // ── NEW: Let the caller know the user's value was overridden
+      ...(targetAttributeHandledByConflictFix && {
+        userRequestedValue: finalValue,
+        amazonValueApplied: amazonValueUsedForTarget,
+        notice: `Your requested value for '${dataToBeUpdated}' conflicts with Amazon's catalog. Amazon's catalog value was applied instead. To use your own value, register your brand via Amazon Brand Registry or raise a Seller Support case.`
+      }),
       fixedConflicts: fixedConflicts.length > 0 ? fixedConflicts : undefined,
       message: successMessage
     };

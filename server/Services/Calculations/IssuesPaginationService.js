@@ -247,30 +247,126 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
             }
         });
         
-        // Enrich ranking errors with product details (name, sku)
-        // Note: ranking errors have title at error.data.Title (from DashboardCalculation)
-        // TotalProduct has itemName/title, not Title
-        const enrichedErrors = allErrors.map(error => {
-            const product = productMap.get(error.asin);
-            return {
-                ...error,
-                Title: error.data?.Title || product?.itemName || product?.title || product?.name || error.Title || 'Unknown Product',
-                sku: product?.sku || error.sku || '',
-                MainImage: product?.MainImage || error.data?.MainImage || null
-            };
+        // Flatten ranking errors into individual issue rows (matching frontend logic and summary count)
+        // Each product can have multiple error checks: Title (charLim, RestrictedWords, SpecialChars),
+        // BulletPoints (same 3), Description (same 3), BackendKeywords (charLim)
+        const flattenedRankingIssues = [];
+        
+        const sectionConfig = [
+            { key: 'TitleResult', label: 'Title' },
+            { key: 'BulletPoints', label: 'Bullet Points' },
+            { key: 'Description', label: 'Description' }
+        ];
+        
+        const checkConfig = [
+            { key: 'charLim', label: 'Character Limit' },
+            { key: 'RestictedWords', label: 'Restricted Words' },
+            { key: 'checkSpecialCharacters', label: 'Special Characters' }
+        ];
+        
+        allErrors.forEach(productError => {
+            const asin = productError.asin;
+            const product = productMap.get(asin);
+            const title = productError.data?.Title || product?.itemName || product?.title || product?.name || 'Unknown Product';
+            const sku = product?.sku || productError.sku || '';
+            const data = productError.data || {};
+            
+            // Check each section (Title, BulletPoints, Description)
+            sectionConfig.forEach(({ key: sectionKey, label: sectionLabel }) => {
+                const section = data[sectionKey];
+                if (!section) return;
+                
+                // For backend keywords (charLim section at root level)
+                if (sectionKey === 'charLim') {
+                    if (section.status === 'Error') {
+                        flattenedRankingIssues.push({
+                            asin,
+                            sku,
+                            Title: title,
+                            sectionKey,
+                            checkKey: 'charLim',
+                            sectionLabel: 'Backend Keywords',
+                            checkLabel: 'Character Limit',
+                            errorData: section
+                        });
+                    }
+                    return;
+                }
+                
+                // Check each error type within the section
+                checkConfig.forEach(({ key: checkKey, label: checkLabel }) => {
+                    const check = section[checkKey];
+                    if (check?.status === 'Error') {
+                        flattenedRankingIssues.push({
+                            asin,
+                            sku,
+                            Title: title,
+                            sectionKey,
+                            checkKey,
+                            sectionLabel,
+                            checkLabel,
+                            errorData: check
+                        });
+                    }
+                });
+            });
+            
+            // Also check backend keywords (charLim at data root level)
+            if (data.charLim?.status === 'Error') {
+                flattenedRankingIssues.push({
+                    asin,
+                    sku,
+                    Title: title,
+                    sectionKey: 'charLim',
+                    checkKey: 'charLim',
+                    sectionLabel: 'Backend Keywords',
+                    checkLabel: 'Character Limit',
+                    errorData: data.charLim
+                });
+            }
         });
         
-        // Apply pagination
-        const total = enrichedErrors.length;
+        // Apply pagination to flattened issues
+        const total = flattenedRankingIssues.length;
         const startIndex = (page - 1) * limit;
-        const paginatedData = enrichedErrors.slice(startIndex, startIndex + limit);
+        const paginatedIssues = flattenedRankingIssues.slice(startIndex, startIndex + limit);
+        
+        // Group back by product for frontend compatibility
+        // Frontend expects: { asin, sku, Title, data: { TitleResult, BulletPoints, Description, charLim } }
+        const productIssuesMap = new Map();
+        paginatedIssues.forEach(issue => {
+            if (!productIssuesMap.has(issue.asin)) {
+                productIssuesMap.set(issue.asin, {
+                    asin: issue.asin,
+                    sku: issue.sku,
+                    Title: issue.Title,
+                    data: { Title: issue.Title }
+                });
+            }
+            const productEntry = productIssuesMap.get(issue.asin);
+            
+            if (issue.sectionKey === 'charLim') {
+                // Backend keywords error
+                productEntry.data.charLim = issue.errorData;
+            } else {
+                // Ensure section exists
+                if (!productEntry.data[issue.sectionKey]) {
+                    productEntry.data[issue.sectionKey] = {};
+                }
+                productEntry.data[issue.sectionKey][issue.checkKey] = issue.errorData;
+            }
+        });
+        
+        const paginatedData = Array.from(productIssuesMap.values());
         
         const duration = Date.now() - startTime;
         
         logger.info('[IssuesPaginationService] Ranking issues retrieved', {
             userId, country, region,
             page, limit, total,
-            returned: paginatedData.length,
+            flattenedCount: flattenedRankingIssues.length,
+            paginatedCount: paginatedIssues.length,
+            productsReturned: paginatedData.length,
             duration
         });
         
@@ -338,36 +434,105 @@ async function getConversionIssues(userId, country, region, page = 1, limit = DE
             }
         });
         
-        // Combine conversion errors with product details
-        // conversionErrors already have Title from DashboardCalculation, TotalProduct has itemName/title
-        const enrichedErrors = conversionErrors.map(error => {
-            const product = productMap.get(error.asin);
-            return {
-                ...error,
-                Title: error.Title || product?.itemName || product?.title || product?.name || 'Unknown Product',
-                sku: product?.sku || error.sku || '',
-                MainImage: product?.MainImage || null
-            };
+        // Flatten conversion errors into individual issue rows (matching dashboard count logic)
+        // Each product can have multiple error types: images, video, rating, A+, brand story, buybox
+        // NOTE: Buybox is counted via productsWithOutBuyboxErrorData inside conversionProductWiseErrors,
+        // NOT separately from buyBoxData. This matches how DashboardCalculation.getConversionErrors counts.
+        const flattenedConversionIssues = [];
+        
+        const errorTypeMapping = [
+            { key: 'imageResultErrorData', label: 'Images' },
+            { key: 'videoResultErrorData', label: 'Videos' },
+            { key: 'productStarRatingResultErrorData', label: 'Rating' },
+            { key: 'aplusErrorData', label: 'A Plus' },
+            { key: 'brandStoryErrorData', label: 'Brand Story' },
+            { key: 'productsWithOutBuyboxErrorData', label: 'No Buy Box' }
+        ];
+        
+        conversionErrors.forEach(productError => {
+            const asin = productError.asin;
+            const product = productMap.get(asin);
+            const title = productError.Title || product?.itemName || product?.title || product?.name || 'Unknown Product';
+            const sku = product?.sku || productError.sku || '';
+            
+            errorTypeMapping.forEach(({ key, label }) => {
+                const errorData = productError[key];
+                if (errorData) {
+                    flattenedConversionIssues.push({
+                        asin,
+                        sku,
+                        Title: title,
+                        issueType: label,
+                        errorData,
+                        _type: 'conversion'
+                    });
+                }
+            });
         });
         
-        // Apply pagination
-        const total = enrichedErrors.length;
+        // NOTE: We don't separately add buybox from buyBoxData because it's already counted
+        // via productsWithOutBuyboxErrorData in conversionProductWiseErrors above.
+        // The separate buyBoxData fetch is kept for backwards compatibility with frontend
+        // display but not used for pagination counting.
+        const flattenedBuyboxIssues = [];
+        
+        // Combine all flattened issues for pagination
+        // This ensures the count matches the issue summary (which counts individual errors)
+        const allFlattenedIssues = [...flattenedConversionIssues, ...flattenedBuyboxIssues];
+        
+        // Apply pagination to the flattened array
+        const total = allFlattenedIssues.length;
         const startIndex = (page - 1) * limit;
-        const paginatedData = enrichedErrors.slice(startIndex, startIndex + limit);
+        const paginatedIssues = allFlattenedIssues.slice(startIndex, startIndex + limit);
+        
+        // Separate the paginated results back into conversion and buybox for frontend compatibility
+        const paginatedConversionIssues = paginatedIssues.filter(item => item._type === 'conversion');
+        const paginatedBuyboxIssues = paginatedIssues.filter(item => item._type === 'buybox');
+        
+        // Group conversion issues back by product for frontend compatibility
+        // Frontend expects: { asin, sku, Title, imageResultErrorData, videoResultErrorData, ... }
+        const productIssuesMap = new Map();
+        paginatedConversionIssues.forEach(issue => {
+            if (!productIssuesMap.has(issue.asin)) {
+                productIssuesMap.set(issue.asin, {
+                    asin: issue.asin,
+                    sku: issue.sku,
+                    Title: issue.Title
+                });
+            }
+            const productEntry = productIssuesMap.get(issue.asin);
+            // Map issueType back to the original error data key
+            const keyMapping = {
+                'Images': 'imageResultErrorData',
+                'Videos': 'videoResultErrorData',
+                'Rating': 'productStarRatingResultErrorData',
+                'A Plus': 'aplusErrorData',
+                'Brand Story': 'brandStoryErrorData',
+                'No Buy Box': 'productsWithOutBuyboxErrorData'
+            };
+            const errorKey = keyMapping[issue.issueType];
+            if (errorKey) {
+                productEntry[errorKey] = issue.errorData;
+            }
+        });
+        
+        const paginatedConversionData = Array.from(productIssuesMap.values());
         
         const duration = Date.now() - startTime;
         
         logger.info('[IssuesPaginationService] Conversion issues retrieved', {
             userId, country, region,
             page, limit, total,
-            returned: paginatedData.length,
+            flattenedConversionCount: flattenedConversionIssues.length,
+            flattenedBuyboxCount: flattenedBuyboxIssues.length,
+            paginatedCount: paginatedIssues.length,
             duration
         });
         
         return {
             success: true,
-            data: paginatedData,
-            buyBoxData: buyBoxData, // Include buy box data for the conversion tab
+            data: paginatedConversionData,
+            buyBoxData: paginatedBuyboxIssues,
             pagination: {
                 page,
                 limit,
@@ -428,29 +593,139 @@ async function getInventoryIssues(userId, country, region, page = 1, limit = DEF
             }
         });
         
-        // Enrich inventory errors with product details
-        // inventoryErrors already have Title from DashboardCalculation, TotalProduct has itemName/title
-        const enrichedErrors = allErrors.map(error => {
-            const product = productMap.get(error.asin);
-            return {
-                ...error,
-                Title: error.Title || product?.itemName || product?.title || product?.name || 'Unknown Product',
-                sku: product?.sku || error.sku || '',
-                MainImage: product?.MainImage || null
-            };
+        // Flatten inventory errors into individual issue rows (matching frontend logic and summary count)
+        // Each product can have multiple error checks: longTermStorageFees, unfulfillable, stranded, compliance, replenishment(s)
+        const flattenedInventoryIssues = [];
+        
+        allErrors.forEach(productError => {
+            const asin = productError.asin;
+            const product = productMap.get(asin);
+            const title = productError.Title || product?.itemName || product?.title || product?.name || 'Unknown Product';
+            const defaultSku = product?.sku || productError.sku || '';
+            
+            // Check inventory planning errors
+            if (productError.inventoryPlanningErrorData) {
+                const planning = productError.inventoryPlanningErrorData;
+                if (planning.longTermStorageFees?.status === 'Error') {
+                    flattenedInventoryIssues.push({
+                        asin,
+                        sku: defaultSku,
+                        Title: title,
+                        issueType: 'inventoryPlanning',
+                        issueSubType: 'longTermStorageFees',
+                        errorData: planning.longTermStorageFees
+                    });
+                }
+                if (planning.unfulfillable?.status === 'Error') {
+                    flattenedInventoryIssues.push({
+                        asin,
+                        sku: defaultSku,
+                        Title: title,
+                        issueType: 'inventoryPlanning',
+                        issueSubType: 'unfulfillable',
+                        errorData: planning.unfulfillable
+                    });
+                }
+            }
+            
+            // Check stranded inventory errors
+            if (productError.strandedInventoryErrorData) {
+                flattenedInventoryIssues.push({
+                    asin,
+                    sku: defaultSku,
+                    Title: title,
+                    issueType: 'stranded',
+                    issueSubType: 'stranded',
+                    errorData: productError.strandedInventoryErrorData
+                });
+            }
+            
+            // Check inbound non-compliance errors
+            if (productError.inboundNonComplianceErrorData) {
+                flattenedInventoryIssues.push({
+                    asin,
+                    sku: defaultSku,
+                    Title: title,
+                    issueType: 'compliance',
+                    issueSubType: 'inboundNonCompliance',
+                    errorData: productError.inboundNonComplianceErrorData
+                });
+            }
+            
+            // Check replenishment errors (can be array or single)
+            if (productError.replenishmentErrorData) {
+                const replenishmentData = productError.replenishmentErrorData;
+                if (Array.isArray(replenishmentData)) {
+                    replenishmentData.forEach(error => {
+                        flattenedInventoryIssues.push({
+                            asin,
+                            sku: error.sku || defaultSku,
+                            Title: title,
+                            issueType: 'replenishment',
+                            issueSubType: 'lowInventory',
+                            errorData: error
+                        });
+                    });
+                } else {
+                    flattenedInventoryIssues.push({
+                        asin,
+                        sku: replenishmentData.sku || defaultSku,
+                        Title: title,
+                        issueType: 'replenishment',
+                        issueSubType: 'lowInventory',
+                        errorData: replenishmentData
+                    });
+                }
+            }
         });
         
-        // Apply pagination
-        const total = enrichedErrors.length;
+        // Apply pagination to flattened issues
+        const total = flattenedInventoryIssues.length;
         const startIndex = (page - 1) * limit;
-        const paginatedData = enrichedErrors.slice(startIndex, startIndex + limit);
+        const paginatedIssues = flattenedInventoryIssues.slice(startIndex, startIndex + limit);
+        
+        // Group back by product for frontend compatibility
+        // Frontend expects: { asin, sku, Title, inventoryPlanningErrorData, strandedInventoryErrorData, ... }
+        const productIssuesMap = new Map();
+        paginatedIssues.forEach(issue => {
+            if (!productIssuesMap.has(issue.asin)) {
+                productIssuesMap.set(issue.asin, {
+                    asin: issue.asin,
+                    sku: issue.sku,
+                    Title: issue.Title
+                });
+            }
+            const productEntry = productIssuesMap.get(issue.asin);
+            
+            if (issue.issueType === 'inventoryPlanning') {
+                if (!productEntry.inventoryPlanningErrorData) {
+                    productEntry.inventoryPlanningErrorData = {};
+                }
+                productEntry.inventoryPlanningErrorData[issue.issueSubType] = issue.errorData;
+            } else if (issue.issueType === 'stranded') {
+                productEntry.strandedInventoryErrorData = issue.errorData;
+            } else if (issue.issueType === 'compliance') {
+                productEntry.inboundNonComplianceErrorData = issue.errorData;
+            } else if (issue.issueType === 'replenishment') {
+                if (!productEntry.replenishmentErrorData) {
+                    productEntry.replenishmentErrorData = [];
+                }
+                if (Array.isArray(productEntry.replenishmentErrorData)) {
+                    productEntry.replenishmentErrorData.push(issue.errorData);
+                }
+            }
+        });
+        
+        const paginatedData = Array.from(productIssuesMap.values());
         
         const duration = Date.now() - startTime;
         
         logger.info('[IssuesPaginationService] Inventory issues retrieved', {
             userId, country, region,
             page, limit, total,
-            returned: paginatedData.length,
+            flattenedCount: flattenedInventoryIssues.length,
+            paginatedCount: paginatedIssues.length,
+            productsReturned: paginatedData.length,
             duration
         });
         
