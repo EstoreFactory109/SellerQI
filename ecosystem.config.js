@@ -7,6 +7,7 @@
  * 3. Integration Worker (first-time integration jobs)
  * 4. Weekly History Worker (Sunday 23:59 UTC)
  * 5. Alerts Worker (Sunday and Wednesday 06:00 UTC)
+ * 6. Delete User Worker (full user data purge after admin deletes a user)
  * 
  * Usage:
  *   pm2 start ecosystem.config.js
@@ -186,6 +187,34 @@ module.exports = {
             max_memory_restart: '768M',
             // Graceful shutdown timeout (30 seconds for cron-based worker)
             kill_timeout: 30 * 1000,
+            watch: false,
+            env_production: {
+                NODE_ENV: 'production'
+            },
+            env_development: {
+                NODE_ENV: 'development'
+            }
+        },
+        {
+            // Delete User Worker - processes 'full-user-data-deletion' queue
+            // Purges all remaining user data after User + Seller are deleted (hybrid delete flow)
+            name: 'delete-user-worker',
+            script: './server/Services/BackgroundJobs/deleteUserWorker.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                DELETE_USER_WORKER_CONCURRENCY: process.env.DELETE_USER_WORKER_CONCURRENCY || '1',
+            },
+            error_file: './logs/pm2-delete-user-worker-error.log',
+            out_file: './logs/pm2-delete-user-worker-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 10,
+            min_uptime: '10s',
+            max_memory_restart: '512M',
+            kill_timeout: 60 * 60 * 1000, // 1 hour (purge jobs can run long)
             watch: false,
             env_production: {
                 NODE_ENV: 'production'
