@@ -2352,6 +2352,112 @@ class Integration {
     }
 
     /**
+     * Helper function to process batch results and log individual service errors to the session.
+     * This ensures per-service errors are stored in the error model for the phased flow.
+     * 
+     * @param {Array} results - Array of Promise.allSettled results
+     * @param {Array} serviceNames - Array of service names corresponding to results
+     * @param {string} sessionId - Session ID to log to
+     * @param {string} userId - User ID for context
+     * @param {string} region - Region for context
+     * @param {string} country - Country for context
+     * @param {string} phaseName - Name of the phase for logging
+     * @returns {Object} Summary of successful and failed services
+     */
+    static async processAndLogBatchResults(results, serviceNames, sessionId, userId, region, country, phaseName) {
+        const successful = [];
+        const failed = [];
+
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const serviceName = serviceNames[i] || `Unknown Service ${i}`;
+
+            if (result.status === 'fulfilled') {
+                const value = result.value;
+                
+                // Check if the returned value indicates failure
+                const isFailure = value === false ||
+                    value === null ||
+                    (value && typeof value === 'object' && value.success === false);
+
+                if (isFailure) {
+                    const errorMsg = value?.message || value?.error || 'Function returned failure indicator';
+                    logger.error(`[${phaseName}] ${serviceName} failed`, { error: errorMsg, userId });
+                    failed.push({ name: serviceName, error: errorMsg });
+
+                    // Log error to session
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: serviceName,
+                                logType: 'error',
+                                status: 'failed',
+                                message: `${serviceName} failed: ${errorMsg}`,
+                                errorDetails: {
+                                    errorMessage: errorMsg,
+                                    phase: phaseName
+                                },
+                                contextData: { userId, region, country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[${phaseName}] Failed to log error for ${serviceName}: ${logError.message}`);
+                        }
+                    }
+                } else {
+                    successful.push(serviceName);
+                    // Log success to session
+                    if (sessionId) {
+                        try {
+                            const recordCount = Array.isArray(value) ? value.length : 
+                                (value?.data ? (Array.isArray(value.data) ? value.data.length : 1) : (value ? 1 : 0));
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: serviceName,
+                                logType: 'success',
+                                status: 'completed',
+                                message: `${serviceName} completed successfully`,
+                                dataMetrics: {
+                                    recordsProcessed: recordCount,
+                                    recordsSuccessful: recordCount
+                                },
+                                contextData: { userId, region, country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[${phaseName}] Failed to log success for ${serviceName}: ${logError.message}`);
+                        }
+                    }
+                }
+            } else {
+                // Promise was rejected
+                const errorMsg = result.reason?.message || result.reason?.toString() || 'Unknown error';
+                logger.error(`[${phaseName}] ${serviceName} failed (rejected)`, { error: errorMsg, userId });
+                failed.push({ name: serviceName, error: errorMsg });
+
+                // Log error to session
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: serviceName,
+                            logType: 'error',
+                            status: 'failed',
+                            message: `${serviceName} failed: ${errorMsg}`,
+                            errorDetails: {
+                                errorMessage: errorMsg,
+                                stackTrace: result.reason?.stack,
+                                phase: phaseName
+                            },
+                            contextData: { userId, region, country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[${phaseName}] Failed to log error for ${serviceName}: ${logError.message}`);
+                    }
+                }
+            }
+        }
+
+        return { successful, failed };
+    }
+
+    /**
      * Execute Phase 2: Batch 1 and 2
      * Runs first two batches of API calls (performance reports, PPC, inventory, reviews)
      * 
@@ -2449,8 +2555,22 @@ class Integration {
                 firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics", "PPC Units Sold");
             }
 
-            await Promise.allSettled(firstBatchPromises);
-            logger.info("[Integration:Batch1And2Phase] First Batch Ends");
+            const firstBatchResults = await Promise.allSettled(firstBatchPromises);
+            
+            // Process and log individual service results for first batch
+            const firstBatchSummary = await this.processAndLogBatchResults(
+                firstBatchResults,
+                firstBatchServiceNames,
+                sessionId,
+                userId,
+                Region,
+                Country,
+                'Integration:Batch1And2Phase:Batch1'
+            );
+            logger.info("[Integration:Batch1And2Phase] First Batch Ends", {
+                successful: firstBatchSummary.successful.length,
+                failed: firstBatchSummary.failed.length
+            });
 
             // Execute second batch
             logger.info("[Integration:Batch1And2Phase] Second Batch Starts");
@@ -2496,10 +2616,27 @@ class Integration {
                 secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
             }
 
-            await Promise.allSettled(secondBatchPromises);
-            logger.info("[Integration:Batch1And2Phase] Second Batch Ends");
+            const secondBatchResults = await Promise.allSettled(secondBatchPromises);
+            
+            // Process and log individual service results for second batch
+            const secondBatchSummary = await this.processAndLogBatchResults(
+                secondBatchResults,
+                secondBatchServiceNames,
+                sessionId,
+                userId,
+                Region,
+                Country,
+                'Integration:Batch1And2Phase:Batch2'
+            );
+            logger.info("[Integration:Batch1And2Phase] Second Batch Ends", {
+                successful: secondBatchSummary.successful.length,
+                failed: secondBatchSummary.failed.length
+            });
 
-            logger.info(`[Integration:Batch1And2Phase] Completed for user ${userId}`);
+            logger.info(`[Integration:Batch1And2Phase] Completed for user ${userId}`, {
+                totalSuccessful: firstBatchSummary.successful.length + secondBatchSummary.successful.length,
+                totalFailed: firstBatchSummary.failed.length + secondBatchSummary.failed.length
+            });
 
             // Log phase success
             if (sessionId) {
@@ -2621,6 +2758,7 @@ class Integration {
             // Third batch
             logger.info("[Integration:Batch3And4Phase] Third Batch Starts");
             const thirdBatchPromises = [];
+            const thirdBatchServiceNames = [];
 
             if (AccessToken) {
                 thirdBatchPromises.push(
@@ -2629,6 +2767,7 @@ class Integration {
                     tokenManager.wrapDataToSendFunction(getBrand, userId, RefreshToken, AdsRefreshToken)
                         (dataToSend, userId, Base_URI)
                 );
+                thirdBatchServiceNames.push("Shipment Data", "Brand Data");
             }
 
             if (AdsAccessToken) {
@@ -2636,6 +2775,7 @@ class Integration {
                     tokenManager.wrapAdsFunction(getAdGroups, userId, RefreshToken, AdsRefreshToken)
                         (AdsAccessToken, ProfileId, Region, userId, Country, [])
                 );
+                thirdBatchServiceNames.push("Ad Groups");
             }
 
             // MCP Economics
@@ -2643,23 +2783,72 @@ class Integration {
                 thirdBatchPromises.push(
                     fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
                 );
+                thirdBatchServiceNames.push("MCP Economics Data");
             }
 
-            await Promise.allSettled(thirdBatchPromises);
+            const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
+            
+            // Process and log individual service results for third batch
+            const thirdBatchSummary = await this.processAndLogBatchResults(
+                thirdBatchResults,
+                thirdBatchServiceNames,
+                sessionId,
+                userId,
+                Region,
+                Country,
+                'Integration:Batch3And4Phase:Batch3'
+            );
 
-            // MCP BuyBox (after Economics)
+            // MCP BuyBox (after Economics) - handled separately as it depends on Economics
             if (RefreshToken) {
                 try {
                     await fetchAndStoreBuyBoxData(userId, RefreshToken, Region, Country);
+                    // Log BuyBox success
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'MCP BuyBox Data',
+                                logType: 'success',
+                                status: 'completed',
+                                message: 'MCP BuyBox Data completed successfully',
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log BuyBox success: ${logError.message}`);
+                        }
+                    }
                 } catch (buyBoxError) {
                     logger.warn("[Integration:Batch3And4Phase] BuyBox fetch failed:", buyBoxError.message);
+                    // Log BuyBox error
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'MCP BuyBox Data',
+                                logType: 'error',
+                                status: 'failed',
+                                message: `MCP BuyBox Data failed: ${buyBoxError.message}`,
+                                errorDetails: {
+                                    errorMessage: buyBoxError.message,
+                                    stackTrace: buyBoxError.stack,
+                                    phase: 'Integration:Batch3And4Phase:Batch3'
+                                },
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log BuyBox error: ${logError.message}`);
+                        }
+                    }
                 }
             }
 
-            logger.info("[Integration:Batch3And4Phase] Third Batch Ends");
+            logger.info("[Integration:Batch3And4Phase] Third Batch Ends", {
+                successful: thirdBatchSummary.successful.length,
+                failed: thirdBatchSummary.failed.length
+            });
 
             // Fourth batch - Keywords
             logger.info("[Integration:Batch3And4Phase] Fourth Batch Starts");
+            let fourthBatchSummary = { successful: [], failed: [] };
             if (AdsAccessToken) {
                 const fourthBatchPromises = [
                     tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)
@@ -2670,19 +2859,38 @@ class Integration {
                     tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)
                         (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken)
                 ];
+                const fourthBatchServiceNames = ["Negative Keywords", "Search Keywords"];
 
                 if (asinArray.length > 0) {
                     fourthBatchPromises.push(
                         tokenManager.wrapAdsFunction(getKeywordRecommendations, userId, RefreshToken, AdsRefreshToken)
                             (AdsAccessToken, ProfileId, userId, Country, Region, asinArray)
                     );
+                    fourthBatchServiceNames.push("Keyword Recommendations");
                 }
 
-                await Promise.allSettled(fourthBatchPromises);
+                const fourthBatchResults = await Promise.allSettled(fourthBatchPromises);
+                
+                // Process and log individual service results for fourth batch
+                fourthBatchSummary = await this.processAndLogBatchResults(
+                    fourthBatchResults,
+                    fourthBatchServiceNames,
+                    sessionId,
+                    userId,
+                    Region,
+                    Country,
+                    'Integration:Batch3And4Phase:Batch4'
+                );
             }
-            logger.info("[Integration:Batch3And4Phase] Fourth Batch Ends");
+            logger.info("[Integration:Batch3And4Phase] Fourth Batch Ends", {
+                successful: fourthBatchSummary.successful.length,
+                failed: fourthBatchSummary.failed.length
+            });
 
-            logger.info(`[Integration:Batch3And4Phase] Completed for user ${userId}`);
+            logger.info(`[Integration:Batch3And4Phase] Completed for user ${userId}`, {
+                totalSuccessful: thirdBatchSummary.successful.length + fourthBatchSummary.successful.length,
+                totalFailed: thirdBatchSummary.failed.length + fourthBatchSummary.failed.length
+            });
 
             // Log phase success
             if (sessionId) {
@@ -2802,17 +3010,96 @@ class Integration {
 
             // Process active listing items
             logger.info("[Integration:ListingItemsPhase] Processing active listing items");
-            const genericKeyWordArray = await this.processListingItems(
-                AccessToken, skuArray, asinArray, dataToSend,
-                userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
-            );
+            let genericKeyWordArray = [];
+            try {
+                genericKeyWordArray = await this.processListingItems(
+                    AccessToken, skuArray, asinArray, dataToSend,
+                    userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
+                );
+                // Log success for listing items processing
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Listing Items Processing',
+                            logType: 'success',
+                            status: 'completed',
+                            message: 'Listing Items Processing completed successfully',
+                            dataMetrics: {
+                                recordsProcessed: genericKeyWordArray?.length || 0,
+                                recordsSuccessful: genericKeyWordArray?.length || 0
+                            },
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:ListingItemsPhase] Failed to log listing items success: ${logError.message}`);
+                    }
+                }
+            } catch (listingError) {
+                logger.error("[Integration:ListingItemsPhase] Failed to process listing items:", listingError.message);
+                // Log error for listing items processing
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Listing Items Processing',
+                            logType: 'error',
+                            status: 'failed',
+                            message: `Listing Items Processing failed: ${listingError.message}`,
+                            errorDetails: {
+                                errorMessage: listingError.message,
+                                stackTrace: listingError.stack,
+                                phase: 'Integration:ListingItemsPhase'
+                            },
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:ListingItemsPhase] Failed to log listing items error: ${logError.message}`);
+                    }
+                }
+            }
 
             // Save listing items data
             if (Array.isArray(genericKeyWordArray) && genericKeyWordArray.length > 0) {
                 try {
                     await saveListingItemsData(userId, Country, Region, genericKeyWordArray);
+                    // Log success for saving listing items data
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Save Listing Items Data',
+                                logType: 'success',
+                                status: 'completed',
+                                message: 'Save Listing Items Data completed successfully',
+                                dataMetrics: {
+                                    recordsProcessed: genericKeyWordArray.length,
+                                    recordsSuccessful: genericKeyWordArray.length
+                                },
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:ListingItemsPhase] Failed to log save listing items success: ${logError.message}`);
+                        }
+                    }
                 } catch (dbError) {
                     logger.error("[Integration:ListingItemsPhase] Failed to save listing items:", dbError.message);
+                    // Log error for saving listing items data
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Save Listing Items Data',
+                                logType: 'error',
+                                status: 'failed',
+                                message: `Save Listing Items Data failed: ${dbError.message}`,
+                                errorDetails: {
+                                    errorMessage: dbError.message,
+                                    stackTrace: dbError.stack,
+                                    phase: 'Integration:ListingItemsPhase'
+                                },
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:ListingItemsPhase] Failed to log save listing items error: ${logError.message}`);
+                        }
+                    }
                 }
             }
 
@@ -2821,10 +3108,51 @@ class Integration {
                 logger.info("[Integration:ListingItemsPhase] Processing inactive SKUs", {
                     count: inactiveSkuArray.length
                 });
-                await this.processInactiveListingItems(
-                    AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend,
-                    userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
-                );
+                try {
+                    await this.processInactiveListingItems(
+                        AccessToken, inactiveSkuArray, inactiveAsinArray, dataToSend,
+                        userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, null
+                    );
+                    // Log success for inactive listing items processing
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Inactive Listing Items Processing',
+                                logType: 'success',
+                                status: 'completed',
+                                message: 'Inactive Listing Items Processing completed successfully',
+                                dataMetrics: {
+                                    recordsProcessed: inactiveSkuArray.length,
+                                    recordsSuccessful: inactiveSkuArray.length
+                                },
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:ListingItemsPhase] Failed to log inactive listing items success: ${logError.message}`);
+                        }
+                    }
+                } catch (inactiveError) {
+                    logger.error("[Integration:ListingItemsPhase] Failed to process inactive listing items:", inactiveError.message);
+                    // Log error for inactive listing items processing
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Inactive Listing Items Processing',
+                                logType: 'error',
+                                status: 'failed',
+                                message: `Inactive Listing Items Processing failed: ${inactiveError.message}`,
+                                errorDetails: {
+                                    errorMessage: inactiveError.message,
+                                    stackTrace: inactiveError.stack,
+                                    phase: 'Integration:ListingItemsPhase'
+                                },
+                                contextData: { userId, region: Region, country: Country }
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:ListingItemsPhase] Failed to log inactive listing items error: ${logError.message}`);
+                        }
+                    }
+                }
             }
 
             logger.info(`[Integration:ListingItemsPhase] Completed for user ${userId}`, {
@@ -2919,18 +3247,121 @@ class Integration {
             try {
                 await clearAnalyseCache(userId, Country, Region, null);
                 logger.info('[Integration:FinalizePhase] Redis cache cleared', { userId, Country, Region });
+                // Log success for cache clearing
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Clear Redis Cache',
+                            logType: 'success',
+                            status: 'completed',
+                            message: 'Clear Redis Cache completed successfully',
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log cache clear success: ${logError.message}`);
+                    }
+                }
             } catch (cacheError) {
                 logger.warn('[Integration:FinalizePhase] Failed to clear Redis cache:', cacheError.message);
+                // Log error for cache clearing
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Clear Redis Cache',
+                            logType: 'error',
+                            status: 'failed',
+                            message: `Clear Redis Cache failed: ${cacheError.message}`,
+                            errorDetails: {
+                                errorMessage: cacheError.message,
+                                stackTrace: cacheError.stack,
+                                phase: 'Integration:FinalizePhase'
+                            },
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log cache clear error: ${logError.message}`);
+                    }
+                }
             }
 
             // Handle success (send email, mark first analysis done)
-            await this.handleSuccess(userId, Country, Region);
+            try {
+                await this.handleSuccess(userId, Country, Region);
+                // Log success for handle success
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Handle Success (Email/Mark Done)',
+                            logType: 'success',
+                            status: 'completed',
+                            message: 'Handle Success (Email/Mark Done) completed successfully',
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log handle success: ${logError.message}`);
+                    }
+                }
+            } catch (handleSuccessError) {
+                logger.error("[Integration:FinalizePhase] Error in handleSuccess:", handleSuccessError.message);
+                // Log error for handle success
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Handle Success (Email/Mark Done)',
+                            logType: 'error',
+                            status: 'failed',
+                            message: `Handle Success (Email/Mark Done) failed: ${handleSuccessError.message}`,
+                            errorDetails: {
+                                errorMessage: handleSuccessError.message,
+                                stackTrace: handleSuccessError.stack,
+                                phase: 'Integration:FinalizePhase'
+                            },
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log handle success error: ${logError.message}`);
+                    }
+                }
+            }
 
             // Add account history
             try {
                 await this.addNewAccountHistory(userId, Country, Region);
+                // Log success for add account history
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Add Account History',
+                            logType: 'success',
+                            status: 'completed',
+                            message: 'Add Account History completed successfully',
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log add account history success: ${logError.message}`);
+                    }
+                }
             } catch (historyError) {
                 logger.error("[Integration:FinalizePhase] Error adding account history:", historyError.message);
+                // Log error for add account history
+                if (sessionId) {
+                    try {
+                        await LoggingHelper.addLogToSession(sessionId, {
+                            functionName: 'Add Account History',
+                            logType: 'error',
+                            status: 'failed',
+                            message: `Add Account History failed: ${historyError.message}`,
+                            errorDetails: {
+                                errorMessage: historyError.message,
+                                stackTrace: historyError.stack,
+                                phase: 'Integration:FinalizePhase'
+                            },
+                            contextData: { userId, region: Region, country: Country }
+                        });
+                    } catch (logError) {
+                        logger.warn(`[Integration:FinalizePhase] Failed to log add account history error: ${logError.message}`);
+                    }
+                }
             }
 
             logger.info(`[Integration:FinalizePhase] Completed for user ${userId}`);
