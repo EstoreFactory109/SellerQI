@@ -72,6 +72,9 @@ module.exports = {
             autorestart: true,
             max_restarts: 10,
             min_uptime: '10s',
+            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in worker.js
+            // This gives long-running jobs time to complete before PM2 force-kills
+            kill_timeout: 30 * 60 * 1000, // 30 minutes
             // Memory limits (increased for 15 concurrent jobs per worker)
             max_memory_restart: '4G',
             // Watch mode (disable in production)

@@ -19,11 +19,13 @@ const UpgradeRequiredOverlay = ({ children }) => {
         </div>
       </div>
 
-      {/* Semi-transparent overlay so background remains visible */}
-      <div className="absolute inset-0 bg-[#111827]/40 backdrop-blur-[2px]" />
+      {/* Fixed overlay layers so they always sit on top of page content (e.g. sticky headers with z-40) */}
+      {/* Semi-transparent overlay - fixed to viewport, high z-index */}
+      <div className="fixed inset-0 z-[100] bg-[#111827]/40 backdrop-blur-[2px] pointer-events-none" aria-hidden />
 
-      {/* Upgrade CTA Card - dark theme to match main pages */}
-      <div className="absolute inset-0 flex items-center justify-center p-4 z-10">
+      {/* Upgrade CTA Card - fixed to viewport, above the overlay */}
+      <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+        <div className="pointer-events-auto">
         <motion.div
           initial={{ opacity: 0, scale: 0.9, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -113,6 +115,7 @@ const UpgradeRequiredOverlay = ({ children }) => {
             First time here? Start your 7-day free trial
           </button>
         </motion.div>
+        </div>
       </div>
     </div>
   );

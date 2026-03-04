@@ -540,7 +540,9 @@ async function startIntegrationWorker() {
 
     // Graceful shutdown with timeout
     // Give current job time to finish, but don't wait forever
-    const SHUTDOWN_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+    // Increased to 30 minutes to allow long-running phases to complete
+    // This matches worker.js and the PM2 kill_timeout in ecosystem.config.js
+    const SHUTDOWN_GRACE_MS = 30 * 60 * 1000; // 30 minutes
     let isShuttingDown = false;
 
     const gracefulShutdown = (signal) => {

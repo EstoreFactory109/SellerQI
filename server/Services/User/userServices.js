@@ -5,7 +5,7 @@ const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
 
 
-const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate) => {
+const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, agencyName = null) => {
 
     // Validate required fields
     // Note: trialEndsDate can be null for PRO users who need to pay (not in trial)
@@ -17,6 +17,12 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
     // If user is in trial period, trialEndsDate is required
     if (isInTrialPeriod === true && !trialEndsDate) {
         logger.error(new ApiError(400, "Trial end date is required for trial users"));
+        return false;
+    }
+
+    // Agency name is required for AGENCY package type
+    if (packageType === 'AGENCY' && !agencyName) {
+        logger.error(new ApiError(400, "Agency name is required for AGENCY package"));
         return false;
     }
 
@@ -45,6 +51,11 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
         if (trialEndsDate) {
             userData.trialEndsDate = trialEndsDate;
         }
+
+        // Set agencyName for AGENCY package users
+        if (agencyName) {
+            userData.agencyName = agencyName;
+        }
         
         const user = new UserModel(userData);
         return await user.save();
@@ -70,7 +81,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial");
+    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -93,6 +104,9 @@ const getUserById =async(id)=>{
         trialEndsDate: user.trialEndsDate,
         accessType: user.accessType,
         servedTrial: user.servedTrial,
+        agencyName: user.agencyName || null,
+        agencyId: user.agencyId || null,
+        isAgencyClient: user.isAgencyClient || false,
         // Include sellerCentral data for SP-API and Ads connection check
         sellerCentral: sellerCentral ? {
             sellerAccount: (sellerCentral.sellerAccount || []).map(account => ({

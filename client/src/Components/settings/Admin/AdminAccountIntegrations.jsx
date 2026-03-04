@@ -112,7 +112,7 @@ const AdminAccountIntegrations = () => {
   };
 
   const handleAddClient = () => {
-    navigate('/agency-client-registration');
+    navigate('/manage-agency-users');
   };
 
   return (

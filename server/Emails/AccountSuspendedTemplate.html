@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Your SellerQI Account Has Been Suspended</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body, html { margin: 0; padding: 0; }
+    a { color: #3182ce; text-decoration: none; }
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 2.5rem 0;
+    }
+    .email-container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 0.5rem;
+      padding: 3rem;
+      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    }
+    .text-center { text-align: center; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .mb-10 { margin-bottom: 2.5rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .text-gray-800 { color: #2d3748; }
+    .text-gray-600 { color: #718096; }
+    .text-gray-500 { color: #a0aec0; }
+    .bg-gray-50 { background-color: #f7fafc; }
+    .bg-blue-50 { background-color: #ebf8ff; }
+    .bg-red-50 { background-color: #fff5f5; }
+    .padding-6 { padding: 1.5rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .font-semibold { font-weight: 600; }
+    h1 { margin: 0; font-size: 2rem; font-weight: bold; line-height: 1.2; }
+    h3 { margin: 0; font-size: 1.125rem; font-weight: 600; }
+    p { margin: 0; line-height: 1.6; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    .content-text {
+      max-width: 500px;
+      margin: 0 auto;
+      font-size: 1.125rem;
+      color: #4a5568;
+      line-height: 1.8;
+    }
+    .button {
+      display: inline-block;
+      padding: 1rem 2.5rem;
+      background-color: #3182ce;
+      color: #ffffff !important;
+      font-weight: 600;
+      font-size: 1.125rem;
+      border-radius: 50px;
+      text-decoration: none;
+      text-align: center;
+    }
+    .button:hover { background-color: #2b6cb0; color: #ffffff !important; }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="text-center mb-10">
+      <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="SellerQI Logo" width="180" class="mb-10" loading="eager"/>
+    </div>
+
+    <div class="text-center">
+      <h1 class="text-gray-800 mb-6">Your Account Has Been Suspended</h1>
+      <p class="content-text mb-8">Hi <strong>{{userName}}</strong>,</p>
+      <p class="content-text mb-8">
+        Your SellerQI account has been suspended because it has been more than 6 months since you registered,
+        and we did not detect a connection to your Amazon seller/ads accounts or an active Pro plan.
+      </p>
+      <p class="content-text mb-8">
+        Your account data has been removed in line with our retention policy.
+      </p>
+      <p class="content-text mb-8">
+        If you would like to use SellerQI again, you can create a new account and connect your seller account
+        or upgrade to Pro from your dashboard.
+      </p>
+
+      <a href="{{signupUrl}}" target="_blank" rel="noopener noreferrer" class="button" style="color: #ffffff !important;"><span style="color: #ffffff;">Create a new account</span></a>
+
+      <p class="text-gray-600 mt-6 mb-4" style="font-size: 0.875rem;">
+        Questions? Contact us at <a href="mailto:support@sellerqi.com" class="font-semibold">support@sellerqi.com</a>
+      </p>
+      <p class="content-text">Best regards,<br/><strong>SellerQI Team</strong></p>
+    </div>
+
+    <hr />
+    <div class="bg-blue-50 padding-6 rounded-lg text-center" style="margin-bottom: 2rem;">
+      <h3 class="text-gray-800 mb-2">Need help?</h3>
+      <p class="text-gray-600">Email: <a href="mailto:support@sellerqi.com" class="font-semibold">support@sellerqi.com</a> · Phone: <a href="tel:+18183505203" class="font-semibold">+1 818 350 5203</a></p>
+    </div>
+    <hr />
+    <div class="text-center">
+      <p class="text-gray-500" style="font-size: 0.875rem;">
+        © 2025 SellerQI. All rights reserved.<br>
+        <a href="{{privacyUrl}}" class="text-gray-500">Privacy Policy</a> |
+        <a href="{{termsUrl}}" class="text-gray-500">Terms of Use</a> |
+        <a href="{{unsubscribeUrl}}" class="text-gray-500">Unsubscribe</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

@@ -29,14 +29,8 @@ const validateAgencyClientRegistration = [
         .isEmail().withMessage("Invalid email format")
         .normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false, outlookdotcom_remove_subaddress: false, yahoo_remove_subaddress: false, icloud_remove_subaddress: false }),
         
-    body("password")
-        .trim()
-        .notEmpty().withMessage("Password is required")
-        .isLength({ min: 8 }).withMessage("Password must be at least 8 characters long")
-        .matches(/[A-Z]/).withMessage("Password must contain at least one uppercase letter")
-        .matches(/[a-z]/).withMessage("Password must contain at least one lowercase letter")
-        .matches(/[0-9]/).withMessage("Password must contain at least one number")
-        .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage("Password must contain at least one special character"),
+    // Password is no longer required for agency clients - they cannot login directly
+    // They are accessed only through their agency owner's "Login as client" feature
 
     body("allTermsAndConditionsAgreed")
         .optional()

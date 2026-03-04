@@ -85,8 +85,9 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (workers may use more memory)
             max_memory_restart: '2G',
-            // Graceful shutdown timeout (5 minutes) - give worker time to finish current job
-            kill_timeout: 5 * 60 * 1000,
+            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in worker.js
+            // Increased to 30 minutes to allow long-running jobs to complete
+            kill_timeout: 30 * 60 * 1000, // 30 minutes
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -120,8 +121,9 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (integration jobs are heavier)
             max_memory_restart: '3G',
-            // Graceful shutdown timeout (5 minutes) - give worker time to finish current job
-            kill_timeout: 5 * 60 * 1000,
+            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in integrationWorker.js
+            // Integration jobs can run for hours, so we need a long timeout
+            kill_timeout: 30 * 60 * 1000, // 30 minutes
             // Watch mode (disable in production)
             watch: false,
             // Environment variables

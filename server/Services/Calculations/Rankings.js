@@ -6,40 +6,38 @@ const checkSpecialCharacters = (str) => {
   
   const containsRestrictedWords = (str) => {
     const restrictedWords = [
-        "anti-microbial", "Airborne microbial", "anti-bacterial", "bacterial", "pesticides",
-        "anti-fungal", "fungal", "kill", "antimicrobial", "virus", "antifungal", "antibacterial",
-        "heal", "sexy", "insect", "insecticide", "pesticide", "pest", "safe", "non-poisonous",
-        "non-injurious", "harmless", "infection", "risk", "disease", "non-toxic", "natural",
-        "repellent", "repelling", "repel", "antiseptic", "germ", "cbd", "compliance", "heart",
-        "covid", "coronavirus", "arthritis", "diabetes", "Ethanol", "toxic", "non", "weed",
-        "mold", "resistant", "kn", "fda approved", "bacteria", "biodegradable", "biological",
-        "contaminants", "cancer", "certified", "compostable", "cure", "decomposable", "degradable",
-        "filter", "flawless", "fungus", "acupuncture", "green", "guarantee", "home", "marine",
-        "mildew", "mould", "spores", "native", "N95", "KN95", "american indian tribes",
-        "fibrosis", "cystic fibrosis", "non-toxi", "noncorrosive", "peal", "platinum", "proven",
-        "recommended", "sanitize", "sanitizes", "tested", "treat", "validated", "viruses",
-        "fungicides", "fungicide", "detoxify", "detoxification", "weight loss", "treatment",
-        "toxin", "toxins", "viral", "parasitic", "remedy", "remedies", "diseases", "cancroid",
-        "chlamydia", "cytomegalovirus", "cmv", "human papiloma", "hpv", "gororrhea", "clap",
-        "hepatitis", "herpes simplex", "hsv", "immunodeficiency", "hiv", "aids", "acquired immune deficiency syndrome",
-        "lymphogranuloma venereum", "lgv", "mononucleosis", "mono", "mycoplasma genitalium",
-        "nongonococcal urethritis", "ngu", "pelvic inflammatory", "pid", "public lice", "crabs",
-        "scabies", "trichomoniasis", "trich", "liver", "multiple sclerosis", "kidney",
-        "alzheimer's", "dementia", "stroke", "parkinson's", "parkinson", "diabetic neuropathy",
-        "flu", "influenza", "meningitis", "glaucoma", "cataract", "attention deficit disorder",
-        "drug", "add", "adhd", "concussion", "traumatic brain injuries", "tbis", "nano silver",
-        "tumor", "seasonal affective", "sad", "depression", "crystic fibrosis",
-        "hodgkin's lymphoma", "lupus", "muscular dystrophy", "als", "infrared", "mental", "anxiety",
-        "stress", "pearl", "Amanita muscaria", "Clenbuterol", "Coca Leaves", "Codeine",
-        "Damiana", "Dimethyltryptamine (DMT)", "Drotebanol", "Ephedrine", "Ergotamine",
-        "Hawaiian Baby Woodrose or Argyreia Nervosa seeds", "Jimson Weed", "Kanna", "Ketamine",
-        "Klip Dagga", "Kratom", "Marshmallow Leaf", "Panther amanitas", "Peyote or mescaline",
-        "Phenylpropanalomine", "Poppers amyl nitrite", "Poppy", "Pseudoephedrine",
-        "Psilocybe Cubensis", "Psilocybin", "Salvia Divinorum", "Sonoran Song", "Mimosa Hostilis",
-        "Syrian Rue", "Wild Dagga", "Yopo Seeds", "Gonorrhea", "Syphilis", "Pubic", "Alzheimer’s",
-        "Alzheimer", "Concussion", "Gout", "Crohn’s", "Celiac", "Epilepsy", "Seizures",
-        "Seizure", "Obesity", "Autism", "macula", "macular"
-      ];
+      "cure", "treat", "diagnose", "prevent", "mitigate", "covid-19", "coronavirus", "pandemic",
+      "cancer", "diabetes", "hiv", "arthritis", "asthma", "alzheimer's", "fda-approved", "clinically proven",
+      "doctor recommended", "anti-bacterial", "anti-fungal", "antimicrobial", "antiviral", "infection",
+      "virus", "germs", "bacteria", "detoxify", "detox", "cleanse", "sanitizes", "disinfects", "sterilizes",
+      "kills germs", "cbd", "cannabinoid", "thc", "hemp oil", "marijuana", "full spectrum", "delta-8",
+      "delta-9", "cocaine", "opioid", "methamphetamine", "bong", "one hitter", "dab rig", "weed",
+      "picamilon", "phenibut", "dmt", "ayahuasca", "clenbuterol", "ephedrine", "minoxidil",
+      "guarantee", "guaranteed", "100% guaranteed", "best seller", "amazon's choice", "amazon's favorite",
+      "works better than", "fastest shipping", "instant fix", "magic solution", "free shipping",
+      "100% quality guaranteed", "sale", "discount", "promo", "deal", "today only", "limited time",
+      "last chance", "buy with confidence", "unlike other brands", "certified", "tested", "approved",
+      "validated", "epa registered", "non-toxic", "hypoallergenic", "kills 99.9% of germs", "bpa-free",
+      "lead-free", "eco-friendly", "biodegradable", "fda-registered facility", "kills", "eliminates",
+      "destroys", "repels", "repellent", "pesticide", "insecticide", "fungicide", "mold", "mildew remover",
+      "germ-free", "brightening", "whitening", "lightening", "anti-aging", "wrinkle-free", "removes wrinkles",
+      "permanent results", "antimicrobial", "antibacterial", "antifungal", "sanitize", "disinfect",
+      "sterilizes", "heal", "antiseptic", "germ", "fungal", "insecticide", "pesticides", "repel",
+      "repelling", "viruses", "detoxification", "treatment", "fungus", "contaminants", "compostable",
+      "decomposable", "proven", "recommended", "viruses", "fungicides", "toxin", "toxins", "viral",
+      "remedy", "remedies", "diseases", "fda approved", "covid", "toxic", "mildew", "mould", "spores",
+      "n95", "kn95", "cystic fibrosis", "sanitize", "weight loss", "chlamydia", "hepatitis", "hiv",
+      "aids", "mononucleosis", "mono", "pelvic inflammatory", "scabies", "trichomoniasis", "liver",
+      "multiple sclerosis", "kidney", "alzheimer's", "dementia", "stroke", "parkinson's", "parkinson",
+      "flu", "influenza", "meningitis", "glaucoma", "cataract", "adhd", "concussion", "tumor",
+      "depression", "lupus", "muscular dystrophy", "als", "anxiety", "stress", "clenbuterol",
+      "ephedrine", "kratom", "psilocybin", "syphilis", "gonorrhea", "gout", "crohn's", "celiac",
+      "epilepsy", "seizures", "seizure", "obesity", "autism",
+      "covid19", "covid 19", "delta8", "delta 8", "delta9", "delta 9",
+      "nontoxic", "non toxic", "bpafree", "bpa free", "leadfree", "lead free",
+      "ecofriendly", "eco friendly", "germfree", "germ free", "antiaging", "anti aging",
+      "wrinklefree", "wrinkle free", "fda registered facility", "anti microbial", "anti fungal", "anti bacterial"
+    ];
   
     const matchedWords = restrictedWords.filter(word => {
       const regex = new RegExp(`\\b${word}\\b`, 'i');
@@ -98,7 +96,7 @@ const checkTitle = (str) => {
         result.checkSpecialCharacters = {
             status: "Error",
             Message: `Your product title includes special characters that violate Amazon's guidelines. Using prohibited characters can lead to listing suppression or reduced search visibility. The characters which are used: ${SpecialCharacters.join(", ")} `,
-            HowTOSolve: "Remove all prohibited special characters from the product title. Follow Amazon’s title guidelines to maintain visibility and prevent suppression."
+            HowTOSolve: "Remove all prohibited special characters from the product title. Follow Amazon's title guidelines to maintain visibility and prevent suppression."
         }
     } else {
         result.checkSpecialCharacters = {
@@ -166,7 +164,7 @@ const checkBulletPoints = (arr) => {
     }else{
         result.charLim={
             status:"Success",
-            Message:"Great job! Your bullet points are adequately detailed, providing valuable information to customers and effectively enhancing your product’s appeal.",
+            Message:"Great job! Your bullet points are adequately detailed, providing valuable information to customers and effectively enhancing your product's appeal.",
             HowTOSolve:""
         }
     }
@@ -187,7 +185,7 @@ const checkBulletPoints = (arr) => {
         result.checkSpecialCharacters={
             status:"Error",
             Message:`Your bullet points contain special characters that are restricted by Amazon's guidelines. Using these characters can lead to issues with listing compliance and may prevent your listing from being properly displayed. The special characters used are: ${FinalSpecialCharacters.join(', ')}`,
-            HowTOSolve:"Review your bullet points and remove all restricted special characters. Refer to Amazon’s official style guide to ensure your content adheres to their formatting requirements. This will help maintain your listing's visibility and prevent potential suppression."
+            HowTOSolve:"Review your bullet points and remove all restricted special characters. Refer to Amazon's official style guide to ensure your content adheres to their formatting requirements. This will help maintain your listing's visibility and prevent potential suppression."
         }
     }else{
         result.checkSpecialCharacters={
@@ -247,7 +245,7 @@ const checkDescription = (arr) => {
             result.checkSpecialCharacters = {
                 status: "Error",
                 Message: `Your product description includes restricted special characters. The special characters used are: ${SpecialCharacters.join(', ')}`,
-                HowTOSolve: "Remove all restricted characters from your product description to meet Amazon’s formatting guidelines.",
+                HowTOSolve: "Remove all restricted characters from your product description to meet Amazon's formatting guidelines.",
                 PointNumber: pointCounter
             }
         } else {
@@ -295,17 +293,28 @@ const BackendKeyWordOrAttributesStatus = (str) => {
         return result;
     }
 
-    if (str.length < 450) {
+    // Calculate byte length, not character length
+    const byteLength = new TextEncoder().encode(str).length;
+    
+    // Amazon's limit is 250 bytes, best practice is 249 or less
+    if (byteLength > 250) {
         errorCount++;
         result.charLim = {
             status: "Error",
-            Message: "Your backend keywords total less than 450 characters. This may limit your product’s visibility by missing relevant search terms.",
-            HowTOSolve: "Use at least 450 characters out of the available 500. Include relevant, diverse, and unique keywords to improve product discoverability."
+            Message: `Your backend keywords exceed Amazon's 250-byte limit (currently ${byteLength} bytes). Amazon will ignore keywords beyond this limit.`,
+            HowTOSolve: "Reduce your keywords to 249 bytes or less. Remove unnecessary words, avoid repetition, and prioritize high-value search terms."
+        }
+    } else if (byteLength < 200) {
+        errorCount++;
+        result.charLim = {
+            status: "Warning",
+            Message: `Your backend keywords use only ${byteLength} of 250 available bytes. You may be missing valuable search terms.`,
+            HowTOSolve: "Add more relevant keywords like synonyms, alternate terms, misspellings, and related search phrases to maximize visibility."
         }
     } else {
         result.charLim = {
             status: "Success",
-            Message: "Great job! You're utilizing the backend keyword space effectively.",
+            Message: `Great job! You're using ${byteLength} of 250 bytes effectively.`,
             HowTOSolve: ""
         }
     }
@@ -348,9 +357,10 @@ const getRankings = (ProductDetails) => {
     return { finalResult };
 }
 
-module.exports = { getRankings, BackendKeyWordOrAttributesStatus, checkTitle, checkBulletPoints };
-
-
-
-
-
+module.exports = {
+    getRankings,
+    BackendKeyWordOrAttributesStatus,
+    checkTitle,
+    checkBulletPoints,
+    checkDescription
+};

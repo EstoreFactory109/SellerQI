@@ -40,9 +40,19 @@ const userSchema = new mongoose.Schema(
 
       password: {
         type: String,
-        required: [true, "Password is required"],
+        required: false, // Not required for agency clients
         minlength: [8, "Password must be at least 8 characters long"],
         select: false, // Prevents returning password in queries
+      },
+      agencyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false, // Set when user is a client of an agency
+        default: null,
+      },
+      isAgencyClient: {
+        type: Boolean,
+        default: false, // True if user is a client of an agency
       },
       allTermsAndConditionsAgreed: {
         type: Boolean,
@@ -70,6 +80,12 @@ const userSchema = new mongoose.Schema(
         required:true,
         enum: ["LITE", "PRO", "AGENCY"],
         default:"LITE"
+      },
+      agencyName: {
+        type: String,
+        required: false, // Required only for AGENCY packageType users (validated at controller level)
+        trim: true,
+        maxlength: [100, "Agency name must not exceed 100 characters"],
       },
       subscriptionStatus: {
         type: String,
@@ -168,9 +184,12 @@ userSchema.index({ packageType: 1 });
 userSchema.index({ subscriptionStatus: 1 });
 userSchema.index({ isInTrialPeriod: 1 });
 userSchema.index({ isVerified: 1 });
+userSchema.index({ agencyId: 1 });
+userSchema.index({ isAgencyClient: 1 });
 // Compound indexes for common queries
 userSchema.index({ packageType: 1, subscriptionStatus: 1 });
 userSchema.index({ isVerified: 1, packageType: 1 });
+userSchema.index({ agencyId: 1, isAgencyClient: 1 });
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 module.exports = User;

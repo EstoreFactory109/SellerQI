@@ -1,72 +1,80 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 
-import Signup from './Pages/SignUp.jsx';
-import Login from './Pages/Login.jsx';
-import EmailVerification from './Pages/EmailVerification.jsx';
-import ConnectToAmazon from './Pages/ConnectToAmazon.jsx';
-import FetchingTokens from './Pages/FetchingTokens.jsx';
-import AnalysingAccount from './Pages/AnalysingAccount.jsx';
+import Signup from './Pages/Auth/SignUp.jsx';
+import Login from './Pages/Auth/Login.jsx';
+import EmailVerification from './Pages/Auth/EmailVerification.jsx';
+import ConnectToAmazon from './Pages/Onboarding/ConnectToAmazon.jsx';
+import FetchingTokens from './Pages/Auth/FetchingTokens.jsx';
+import AnalysingAccount from './Pages/Onboarding/AnalysingAccount.jsx';
 import ProtectedAuthRouteWrapper from './Layout/ProtectedAuthRouteWrapper.jsx';
 import MainLayout from './Layout/MainPagesLayout.jsx';
-import DashBoard from './Pages/Dashboard.jsx';
-import Issues from './Pages/Issues.jsx';
-import AccountHistory from './Pages/Account.jsx';
-import Settings from './Pages/Settings.jsx';
-import ProductDetails from './Pages/ProductDetails.jsx';
-import IssuesByProduct from './Pages/IssuesByProduct.jsx';
-import Error from './Pages/error.jsx';
+import DashBoard from './Pages/Dashboard/Dashboard.jsx';
+import Issues from './Pages/Issues/Issues.jsx';
+import AccountHistory from './Pages/Account/Account.jsx';
+import Settings from './Pages/Account/Settings.jsx';
+import ProductDetails from './Pages/Products/ProductDetails.jsx';
+import IssuesByProduct from './Pages/Issues/IssuesByProduct.jsx';
+import Error from './Pages/Error/error.jsx';
 import ProtectedRouteWrapper from './Layout/ProtectedRouteWrapper.jsx';
 import PackageRouteWrapper from './Layout/PackageRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
-import ProfitibilityDashboard from './Pages/ProfitibilityDashboard.jsx';
-import PPCDashboard from './Pages/PPCDashboard.jsx';
-import KeywordAnalysisDashboard from './Pages/KeywordAnalysisDashboard.jsx';
-import EmailVerificationForNewPassword from './Pages/EmailVerificationForNewPassword.jsx';
-import ResetPassword from './Pages/ResetPassword.jsx';
-import Home from './Pages/Home.jsx';
-import Pricing from './Pages/Pricing.jsx';
-import PrivacyPolicy from './Pages/PrivacyPolicy.jsx';
-import ContactUs from './Pages/Contact.jsx';
-import Terms from './Pages/Terms.jsx';
-import LoadingPage from './Pages/LoadingPage.jsx';
-import ResultsPage from './Pages/ResultsPage.jsx';
-import RefundPolicy from './Pages/RefundPolicy.jsx';
-import SubscriptionSuccess from './Pages/SubscriptionSuccess.jsx';
-import AboutUs from './Pages/AboutUs.jsx';
-import HowItWorks from './Pages/HowItWorks.jsx';
-import PromotionsPage from './Pages/PromotionsPage.jsx';
-import Advertisement from './Pages/advertisement.jsx';
-import QMate from './Pages/QMate.jsx';
-import Features from './Pages/features.jsx';
-import InventoryManagement from './Pages/inventoryManagement.jsx';
-import GoogleInfoPage from './Pages/GoogleInfoPage.jsx';
-import ConnectAccounts from './Pages/ConnectAccounts.jsx';
-import ProfileIDSelection from './Pages/ProfileIDSeclection.jsx';
-import PaymentCancel from './Pages/PaymentCancel.jsx';
-import PaymentFailed from './Pages/PaymentFailed.jsx';
-import AgencyClientRegistration from './Pages/AgencyClientRegistration.jsx';
-import AdminLogin from './Pages/AdminLogin.jsx';
+import ProfitibilityDashboard from './Pages/Dashboard/ProfitibilityDashboard.jsx';
+import PPCDashboard from './Pages/Dashboard/PPCDashboard.jsx';
+import KeywordAnalysisDashboard from './Pages/Dashboard/KeywordAnalysisDashboard.jsx';
+import EmailVerificationForNewPassword from './Pages/Auth/EmailVerificationForNewPassword.jsx';
+import ResetPassword from './Pages/Auth/ResetPassword.jsx';
+import Home from './Pages/Static/Home.jsx';
+import Pricing from './Pages/Static/Pricing.jsx';
+import PrivacyPolicy from './Pages/Static/PrivacyPolicy.jsx';
+import ContactUs from './Pages/Static/Contact.jsx';
+import Terms from './Pages/Static/Terms.jsx';
+import LoadingPage from './Pages/Static/LoadingPage.jsx';
+import ResultsPage from './Pages/Static/ResultsPage.jsx';
+import RefundPolicy from './Pages/Static/RefundPolicy.jsx';
+import SubscriptionSuccess from './Pages/Payment/SubscriptionSuccess.jsx';
+import AboutUs from './Pages/Static/AboutUs.jsx';
+import HowItWorks from './Pages/Static/HowItWorks.jsx';
+import PromotionsPage from './Pages/Marketing/PromotionsPage.jsx';
+import Advertisement from './Pages/Marketing/advertisement.jsx';
+import QMate from './Pages/Tools/QMate.jsx';
+import Features from './Pages/Marketing/features.jsx';
+import InventoryManagement from './Pages/Marketing/inventoryManagement.jsx';
+import GoogleInfoPage from './Pages/Auth/GoogleInfoPage.jsx';
+import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
+import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
+import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
+import PaymentFailed from './Pages/Payment/PaymentFailed.jsx';
+import AdminLogin from './Pages/Auth/AdminLogin.jsx';
+import AgencySignUp from './Pages/Agency/AgencySignUp.jsx';
+import AgencyLogin from './Pages/Agency/AgencyLogin.jsx';
+import ManageAgencyUsersLayout from './Layout/ManageAgencyUsersLayout.jsx';
+import ManageAgencyUsers from './Pages/Agency/ManageAgencyUsers.jsx';
+import AgencySettings from './Pages/Agency/AgencySettings.jsx';
+import AgencyClientLayout from './Layout/AgencyClientLayout.jsx';
+import AgencyClientConnectToAmazon from './Pages/Agency/Client/AgencyClientConnectToAmazon.jsx';
+import AgencyClientConnectAccounts from './Pages/Agency/Client/AgencyClientConnectAccounts.jsx';
+import AgencyClientProfileSelection from './Pages/Agency/Client/AgencyClientProfileSelection.jsx';
 import ManageAccountsLayout from './Layout/ManageAccountsLayout.jsx';
-import ManageAccounts from './Pages/ManageAccounts.jsx';
+import ManageAccounts from './Pages/Account/ManageAccounts.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
 import AdminTicketMessages from './Pages/Admin/TicketMessages.jsx';
 import AdminUserLogs from './Pages/Admin/UserLogs.jsx';
 import AdminUserLogDetails from './Pages/Admin/UserLogDetails.jsx';
-import UserLogging from './Pages/UserLogging.jsx';
-import CalendlyWidget from './Pages/consultation.jsx';
-import Tasks from './Pages/Tasks.jsx';
-import EcommerceHolidaysCalendar from './Pages/EventCalender.jsx';
-import ReimbursementDashboard from './Pages/ReimbursementDashboard.jsx';
-import YourProducts from './Pages/YourProducts.jsx';
-import PreAnalysis from './Pages/PreAnalysis.jsx';
-import NotificationsPage from './Pages/NotificationsPage.jsx';
-import NotificationDetailsPage from './Pages/NotificationDetailsPage.jsx';
-import AuthError from './Pages/AuthError.jsx';
-import UnsubscribeAlerts from './Pages/UnsubscribeAlerts.jsx';
+import UserLogging from './Pages/Tools/UserLogging.jsx';
+import CalendlyWidget from './Pages/Tools/consultation.jsx';
+import Tasks from './Pages/Tools/Tasks.jsx';
+import EcommerceHolidaysCalendar from './Pages/Tools/EventCalender.jsx';
+import ReimbursementDashboard from './Pages/Dashboard/ReimbursementDashboard.jsx';
+import YourProducts from './Pages/Products/YourProducts.jsx';
+import PreAnalysis from './Pages/Products/PreAnalysis.jsx';
+import NotificationsPage from './Pages/Notifications/NotificationsPage.jsx';
+import NotificationDetailsPage from './Pages/Notifications/NotificationDetailsPage.jsx';
+import AuthError from './Pages/Auth/AuthError.jsx';
+import UnsubscribeAlerts from './Pages/Notifications/UnsubscribeAlerts.jsx';
 
 const App = () => {
 
@@ -86,6 +94,19 @@ const App = () => {
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
         <Route path='/admin-login' element={<AdminLogin />} />
+        <Route path='/agency-sign-up' element={<AgencySignUp />} />
+        <Route path='/agency-login' element={<AgencyLogin />} />
+        <Route path='/manage-agency-users' element={<ManageAgencyUsersLayout />}>
+          <Route index element={<ManageAgencyUsers />} />
+          <Route path='settings' element={<AgencySettings />} />
+          <Route path='consultation' element={<CalendlyWidget />} />
+        </Route>
+        <Route path='/agency/:agencyName/client/:clientId' element={<AgencyClientLayout />}>
+          <Route index element={<Navigate to="connect-to-amazon" replace />} />
+          <Route path='connect-to-amazon' element={<AgencyClientConnectToAmazon />} />
+          <Route path='connect-accounts' element={<AgencyClientConnectAccounts />} />
+          <Route path='profile-selection' element={<AgencyClientProfileSelection />} />
+        </Route>
         <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
           <Route index element={<ManageAccounts />} />
           <Route path='subscription' element={<AdminSubscription />} />
@@ -99,7 +120,6 @@ const App = () => {
         <Route path='/unsubscribe-alerts' element={<UnsubscribeAlerts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/connect-accounts' element={<ConnectAccounts />} />
-        <Route path='/agency-client-registration' element={<AgencyClientRegistration />} />
         <Route path='/auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />

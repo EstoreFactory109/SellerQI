@@ -54,3 +54,6 @@ yarn.lock
 
 # Ignore SSH keys
 *.pem
+
+# Migration backups (contain sensitive payment/subscription data)
+server/scripts/migrations/backups/

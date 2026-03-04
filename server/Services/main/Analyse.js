@@ -204,7 +204,13 @@ class AnalyseService {
             const getAdminStatus = await userModel.findOne({ _id: adminId }).select('accessType');
 
             if (getAdminStatus.accessType === 'enterpriseAdmin') {
-                const getClientsSellerCentral = await userModel.find({ adminId: adminId }).select('sellerCentral').sort({ createdAt: -1 });
+                // Query by agencyId (new) OR adminId (legacy) for backward compatibility
+                const getClientsSellerCentral = await userModel.find({
+                    $or: [
+                        { agencyId: adminId },
+                        { adminId: adminId }
+                    ]
+                }).select('sellerCentral').sort({ createdAt: -1 });
                 if (!getClientsSellerCentral) {
                     logger.error(new ApiError(404, "Client not found"));
                 }

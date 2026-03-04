@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { AlertTriangle, TrendingUp, Box, Filter, ChevronDown, Activity, LineChart, Layers, ShoppingBag } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Box, Filter, ChevronDown, Activity, LineChart, Layers, ShoppingBag, CheckCircle } from 'lucide-react';
 import { IssuesTableRowsSkeleton, IssuesCategoryPageSkeleton } from '../Skeleton/PageSkeletons.jsx';
+import axiosInstance from '../../config/axios.config.js';
 import {
   fetchIssuesSummary,
   fetchRankingIssues,
@@ -77,14 +78,37 @@ const FormattedMessage = ({ message }) => {
 
 const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country ?? state.currency?.country);
+  const region = useSelector((state) => state.Dashboard?.DashBoardInfo?.Region);
+  const [isFixModalOpen, setIsFixModalOpen] = useState(false);
+  const [fixContext, setFixContext] = useState({ asin: '', sku: '', title: '' });
+  const [fixForm, setFixForm] = useState({
+    title: '',
+    description: '',
+    bulletpoints: [''],
+    backendKeywords: ''
+  });
+  const [titleSuggestions, setTitleSuggestions] = useState([]);
+  const [generateTitleLoading, setGenerateTitleLoading] = useState(false);
+  const [generateTitleError, setGenerateTitleError] = useState(null);
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyError, setApplyError] = useState(null);
+  const [applySuccessMessage, setApplySuccessMessage] = useState(null);
+  const applySuccessTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (applySuccessTimeoutRef.current) clearTimeout(applySuccessTimeoutRef.current);
+    };
+  }, []);
 
   const flattenedData = useMemo(() => {
-    const sections = ['TitleResult', 'BulletPoints', 'Description', 'charLim'];
+    const sections = ['TitleResult', 'BulletPoints', 'Description'];
     const sectionLabels = {
       TitleResult: 'Title',
       BulletPoints: 'Bullet Points',
-      Description: 'Description',
-      charLim: 'Backend Keywords'
+      Description: 'Description'
     };
 
     const issueLabels = {
@@ -101,35 +125,59 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
         const section = item.data?.[sectionKey];
 
         if (section) {
-          if (sectionKey === 'charLim') {
-            if (section.status === 'Error') {
+          Object.keys(issueLabels).forEach((checkKey) => {
+            const check = section[checkKey];
+            if (check?.status === 'Error') {
+              const attributeKey =
+                sectionKey === 'TitleResult' ? 'title' :
+                sectionKey === 'BulletPoints' ? 'bulletpoints' :
+                'description';
               errorRows.push({
                 asin: item.asin,
                 sku: sku,
                 title: item.Title || item.data?.Title || 'N/A',
-                issueHeading: `${sectionLabels[sectionKey]}`,
-                message: section.Message,
-                solution: section.HowTOSolve
+                issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
+                message: check.Message,
+                solution: check.HowTOSolve,
+                attributeKey
               });
             }
-          } else {
-            Object.keys(issueLabels).forEach((checkKey) => {
-              if (checkKey === 'charLim') return;
-              const check = section[checkKey];
-              if (check?.status === 'Error') {
-                errorRows.push({
-                  asin: item.asin,
-                  sku: sku,
-                  title: item.Title || item.data?.Title || 'N/A',
-                  issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
-                  message: check.Message,
-                  solution: check.HowTOSolve
-                });
-              }
-            });
-          }
+          });
         }
       });
+
+      // Extract backend keywords errors (charLim and dublicateWords at root level)
+      const backendCharLim = item.data?.charLim;
+      const backendDuplicate = item.data?.dublicateWords;
+      
+      if (backendCharLim?.status === 'Error' || backendCharLim?.status === 'Warning') {
+        const msg = backendCharLim.Message || '';
+        const isTooLong = msg.includes('exceed') || msg.includes('250');
+        const isTooShort = msg.includes('only') || msg.includes('missing');
+        errorRows.push({
+          asin: item.asin,
+          sku: sku,
+          title: item.Title || item.data?.Title || 'N/A',
+          issueHeading: `Backend Keywords | ${isTooLong ? 'Too Long' : isTooShort ? 'Too Short' : 'Character Limit'}`,
+          message: backendCharLim.Message,
+          solution: backendCharLim.HowTOSolve,
+          attributeKey: 'backend',
+          backendErrorType: isTooLong ? 'too_long' : 'too_short'
+        });
+      }
+      
+      if (backendDuplicate?.status === 'Error') {
+        errorRows.push({
+          asin: item.asin,
+          sku: sku,
+          title: item.Title || item.data?.Title || 'N/A',
+          issueHeading: 'Backend Keywords | Duplicate Words',
+          message: backendDuplicate.Message,
+          solution: backendDuplicate.HowTOSolve,
+          attributeKey: 'backend',
+          backendErrorType: 'duplicate'
+        });
+      }
 
       return errorRows;
     };
@@ -138,6 +186,203 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
   }, [data]);
 
   const hasMore = pagination?.hasMore ?? false;
+
+  const openFixModal = (row) => {
+    setFixContext({
+      asin: row.asin,
+      sku: row.sku,
+      title: row.title,
+      attributeKey: row.attributeKey || 'title',
+      backendErrorType: row.backendErrorType || null
+    });
+    setFixForm({
+      title: '',
+      description: '',
+      bulletpoints: [''],
+      backendKeywords: ''
+    });
+    setTitleSuggestions([]);
+    setGenerateTitleError(null);
+    setApplyError(null);
+    setIsFixModalOpen(true);
+  };
+
+  const closeFixModal = () => {
+    setIsFixModalOpen(false);
+    setGenerateTitleError(null);
+    setApplyError(null);
+  };
+
+  const handleFixSubmit = (e) => {
+    e.preventDefault();
+    setApplyError(null);
+
+    const dataToBeUpdated = fixContext.attributeKey === 'title'
+      ? 'title'
+      : fixContext.attributeKey === 'description'
+        ? 'description'
+        : fixContext.attributeKey === 'backend'
+          ? 'generic_keyword'
+          : 'bulletpoints';
+
+    let valueToBeUpdated;
+    if (dataToBeUpdated === 'title') {
+      valueToBeUpdated = fixForm.title?.trim() || '';
+    } else if (dataToBeUpdated === 'description') {
+      valueToBeUpdated = fixForm.description?.trim() || '';
+    } else if (dataToBeUpdated === 'generic_keyword') {
+      valueToBeUpdated = fixForm.backendKeywords?.trim() || '';
+    } else {
+      const bullets = Array.isArray(fixForm.bulletpoints) ? fixForm.bulletpoints : [fixForm.bulletpoints || ''];
+      valueToBeUpdated = bullets.map((b) => String(b ?? '').trim()).filter(Boolean);
+    }
+
+    if (dataToBeUpdated === 'title' && !valueToBeUpdated) {
+      setApplyError('Please enter a title.');
+      return;
+    }
+    if (dataToBeUpdated === 'description' && !valueToBeUpdated) {
+      setApplyError('Please enter a description.');
+      return;
+    }
+    if (dataToBeUpdated === 'generic_keyword' && !valueToBeUpdated) {
+      setApplyError('Please enter backend keywords.');
+      return;
+    }
+    if (dataToBeUpdated === 'bulletpoints' && (!valueToBeUpdated || (Array.isArray(valueToBeUpdated) && valueToBeUpdated.length === 0))) {
+      setApplyError('Please enter at least one bullet point.');
+      return;
+    }
+
+    const sku = fixContext.sku?.trim();
+    if (!sku) {
+      setApplyError('SKU is required to update the listing. This row may not have a SKU.');
+      return;
+    }
+    if (!country || !region) {
+      setApplyError('Country and region are required. Please ensure you have selected a marketplace.');
+      return;
+    }
+
+    setApplyLoading(true);
+    axiosInstance.post('/api/listings/update-product-content', {
+      sku,
+      country,
+      region,
+      dataToBeUpdated,
+      valueToBeUpdated
+    })
+      .then(() => {
+        closeFixModal();
+        dispatch(fetchRankingIssues());
+        setApplySuccessMessage('It will be displayed on your catalog once Amazon accepts it.');
+        if (applySuccessTimeoutRef.current) clearTimeout(applySuccessTimeoutRef.current);
+        applySuccessTimeoutRef.current = setTimeout(() => setApplySuccessMessage(null), 5000);
+      })
+      .catch((err) => {
+        const msg = err.response?.data?.message || err.message || 'Failed to update listing.';
+        setApplyError(msg);
+      })
+      .finally(() => {
+        setApplyLoading(false);
+      });
+  };
+
+  const handleGenerateTitle = () => {
+    if (fixContext.attributeKey !== 'title') return;
+
+    setGenerateTitleError(null);
+    setGenerateTitleLoading(true);
+
+    const payload = {
+      asin: fixContext.asin,
+      attribute: 'title',
+      title: fixForm.title || fixContext.title || ''
+    };
+
+    axiosInstance.post('/api/ai/ranking-content', payload)
+      .then((res) => {
+        const data = res.data?.data || {};
+        const titles = Array.isArray(data.titles) ? data.titles : [];
+        if (titles.length > 0) {
+          setTitleSuggestions(titles);
+          setFixForm(prev => ({ ...prev, title: titles[0] }));
+          setGenerateTitleError(null);
+        }
+      })
+      .catch((err) => {
+        setGenerateTitleError(err.response?.data?.message || err.message || 'AI title suggestions failed.');
+      })
+      .finally(() => setGenerateTitleLoading(false));
+  };
+
+  const handleGenerateDescription = () => {
+    if (fixContext.attributeKey !== 'description') return;
+    setGenerateTitleError(null);
+    setGenerateTitleLoading(true);
+    axiosInstance.post('/api/ai/ranking-content', {
+      asin: fixContext.asin,
+      attribute: 'description',
+      description: fixForm.description || ''
+    })
+      .then((res) => {
+        const data = res.data?.data || {};
+        if (data.description) {
+          setFixForm(prev => ({ ...prev, description: data.description }));
+          setGenerateTitleError(null);
+        }
+      })
+      .catch((err) => {
+        setGenerateTitleError(err.response?.data?.message || err.message || 'AI description suggestion failed.');
+      })
+      .finally(() => setGenerateTitleLoading(false));
+  };
+
+  const handleGenerateBulletPoints = () => {
+    if (fixContext.attributeKey !== 'bulletpoints') return;
+    setGenerateTitleError(null);
+    setGenerateTitleLoading(true);
+    const bulletsForApi = Array.isArray(fixForm.bulletpoints) ? fixForm.bulletpoints : [fixForm.bulletpoints || ''];
+    axiosInstance.post('/api/ai/ranking-content', {
+      asin: fixContext.asin,
+      attribute: 'bulletpoints',
+      bulletpoints: bulletsForApi
+    })
+      .then((res) => {
+        const data = res.data?.data || {};
+        if (data.bulletpoints) {
+          const arr = Array.isArray(data.bulletpoints) ? data.bulletpoints : [String(data.bulletpoints)];
+          setFixForm(prev => ({ ...prev, bulletpoints: arr.length ? arr : [''] }));
+          setGenerateTitleError(null);
+        }
+      })
+      .catch((err) => {
+        setGenerateTitleError(err.response?.data?.message || err.message || 'AI bullet points suggestion failed.');
+      })
+      .finally(() => setGenerateTitleLoading(false));
+  };
+
+  const handleGenerateBackendKeywords = () => {
+    if (fixContext.attributeKey !== 'backend') return;
+    setGenerateTitleError(null);
+    setGenerateTitleLoading(true);
+    axiosInstance.post('/api/ai/ranking-content', {
+      asin: fixContext.asin,
+      attribute: 'generic_keyword',
+      backendKeywords: fixForm.backendKeywords || ''
+    })
+      .then((res) => {
+        const data = res.data?.data || {};
+        if (data.keywords !== undefined) {
+          setFixForm(prev => ({ ...prev, backendKeywords: data.keywords }));
+          setGenerateTitleError(null);
+        }
+      })
+      .catch((err) => {
+        setGenerateTitleError(err.response?.data?.message || err.message || 'AI backend keywords suggestion failed.');
+      })
+      .finally(() => setGenerateTitleLoading(false));
+  };
 
   return (
     <motion.div 
@@ -202,7 +447,18 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
                     </div>
                   </td>
                   <td className="py-2 px-2 align-top">
-                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">{row.solution}</p>
+                    <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">
+                      {row.solution}
+                    </p>
+                    <button
+                      className="mt-2 inline-flex items-center px-2 py-1 rounded text-[11px] font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openFixModal(row);
+                      }}
+                    >
+                      Fix it
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -223,6 +479,228 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
           </div>
         )}
       </div>
+
+      {/* Fix It Modal for Ranking issues */}
+      <AnimatePresence>
+        {isFixModalOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="bg-[#0d1117] border border-[#30363d] rounded-lg w-full max-w-lg mx-2 p-4 shadow-xl"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-100">Fix Ranking Issues</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    ASIN: <span className="font-mono">{fixContext.asin}</span>
+                    {fixContext.sku && (
+                      <>
+                        {' · '}
+                        SKU: <span className="font-mono">{fixContext.sku}</span>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <button
+                  className="text-gray-400 hover:text-gray-200 text-xs"
+                  onClick={closeFixModal}
+                >
+                  Close
+                </button>
+              </div>
+
+              <form className="space-y-3" onSubmit={handleFixSubmit}>
+                {fixContext.attributeKey === 'title' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1">
+                      New Title
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter optimized product title"
+                      value={fixForm.title}
+                      onChange={(e) => setFixForm(prev => ({ ...prev, title: e.target.value }))}
+                    />
+                    {titleSuggestions.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[11px] text-gray-400">AI suggestions:</p>
+                        <div className="flex flex-col gap-1">
+                          {titleSuggestions.map((t, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              className="w-full text-left text-[11px] px-2 py-1 rounded border border-[#30363d] bg-[#161b22] hover:border-blue-500 hover:bg-[#1f2937] text-gray-100"
+                              onClick={() => {
+                                setFixForm(prev => ({ ...prev, title: t }));
+                                setTitleSuggestions([]);
+                              }}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {generateTitleError && (
+                      <p className="mt-2 text-xs text-amber-400" role="alert">
+                        {generateTitleError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {fixContext.attributeKey === 'description' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1">
+                      New Description
+                    </label>
+                    <textarea
+                      rows={4}
+                      className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                      placeholder="Enter optimized product description"
+                      value={fixForm.description}
+                      onChange={(e) => setFixForm(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                    {generateTitleError && (
+                      <p className="mt-2 text-xs text-amber-400" role="alert">
+                        {generateTitleError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {fixContext.attributeKey === 'bulletpoints' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1">
+                      New Bullet Points
+                    </label>
+                    <div className="space-y-2">
+                      {(Array.isArray(fixForm.bulletpoints) ? fixForm.bulletpoints : [fixForm.bulletpoints || '']).map((bullet, idx) => (
+                        <div key={idx} className="flex gap-1.5 items-start">
+                          <span className="text-gray-500 text-xs mt-2 shrink-0">{idx + 1}.</span>
+                          <textarea
+                            rows={2}
+                            className="flex-1 px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[60px]"
+                            placeholder={`Bullet point ${idx + 1}`}
+                            value={bullet}
+                            onChange={(e) => setFixForm(prev => ({
+                              ...prev,
+                              bulletpoints: (prev.bulletpoints || ['']).map((b, i) => i === idx ? e.target.value : b)
+                            }))}
+                          />
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="text-xs text-blue-400 hover:text-blue-300 font-medium"
+                        onClick={() => setFixForm(prev => ({
+                          ...prev,
+                          bulletpoints: [...(Array.isArray(prev.bulletpoints) ? prev.bulletpoints : [prev.bulletpoints || '']), '']
+                        }))}
+                      >
+                        + Add more
+                      </button>
+                    </div>
+                    {generateTitleError && (
+                      <p className="mt-2 text-xs text-amber-400" role="alert">
+                        {generateTitleError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {fixContext.attributeKey === 'backend' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1">
+                      Backend Keywords
+                    </label>
+                    <textarea
+                      rows={4}
+                      className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                      placeholder="Enter backend search keywords (comma or newline separated)"
+                      value={fixForm.backendKeywords ?? ''}
+                      onChange={(e) => setFixForm(prev => ({ ...prev, backendKeywords: e.target.value }))}
+                    />
+                    {generateTitleError && (
+                      <p className="mt-2 text-xs text-amber-400" role="alert">
+                        {generateTitleError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {applyError && (
+                  <p className="text-xs text-amber-400" role="alert">
+                    {applyError}
+                  </p>
+                )}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-xs rounded border border-[#30363d] text-gray-300 hover:bg-[#21262d] disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={closeFixModal}
+                    disabled={applyLoading}
+                  >
+                    Cancel
+                  </button>
+                  {(fixContext.attributeKey === 'title' || fixContext.attributeKey === 'description' || fixContext.attributeKey === 'bulletpoints' || fixContext.attributeKey === 'backend') && (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 text-xs rounded bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={
+                        fixContext.attributeKey === 'title'
+                          ? handleGenerateTitle
+                          : fixContext.attributeKey === 'description'
+                            ? handleGenerateDescription
+                            : fixContext.attributeKey === 'backend'
+                              ? handleGenerateBackendKeywords
+                              : handleGenerateBulletPoints
+                      }
+                      disabled={generateTitleLoading || applyLoading}
+                    >
+                      {generateTitleLoading ? 'Generating…' : 'Generate'}
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={applyLoading}
+                  >
+                    {applyLoading ? 'Applying…' : 'Apply changes'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Apply success notification popup */}
+      <AnimatePresence>
+        {applySuccessMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="fixed top-4 right-4 z-[60] p-3 rounded-lg shadow-lg max-w-sm border border-green-500/30 bg-[#161b22]"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 shrink-0 text-green-400" />
+              <p className="text-sm text-gray-100">
+                {applySuccessMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

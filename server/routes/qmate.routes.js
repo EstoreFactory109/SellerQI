@@ -11,9 +11,22 @@ const {
     updateChat,
     deleteChat,
 } = require('../controllers/ai/QMateController.js');
+const {
+    generateSuggestion,
+    applyFix,
+    batchSuggestions
+} = require('../controllers/ai/QMateActionController.js');
 
 // QMate AI chat endpoint (requires location for analytics context)
 router.post('/chat', auth, getLocation, validateChatBody, handleChat);
+
+// QMate Fix It action endpoints (same capabilities as the Fix It button)
+// Generate AI content suggestions for title, bullet points, description, backend keywords
+router.post('/generate-suggestion', auth, getLocation, generateSuggestion);
+// Apply a content fix to Amazon listing
+router.post('/apply-fix', auth, getLocation, applyFix);
+// Generate suggestions for multiple attributes at once
+router.post('/batch-suggestions', auth, getLocation, batchSuggestions);
 
 // Chat history CRUD (auth only)
 router.get('/chats', auth, listChats);

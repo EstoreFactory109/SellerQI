@@ -69,7 +69,12 @@ const TopNav = () => {
     const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
     const adminAccessType = localStorage.getItem('adminAccessType');
     const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
+    const isAgencyAdmin = isAdminLoggedIn && adminAccessType === 'enterpriseAdmin';
     const loggedInAsUser = localStorage.getItem('loggedInAsUser');
+    const loggedInAsClient = localStorage.getItem('loggedInAsClient');
+    // Agency admin viewing a client's dashboard (not on manage-agency-users page)
+    // loggedInAsClient is now a JSON string (same pattern as loggedInAsUser)
+    const isAgencyAdminViewingClient = isAgencyAdmin && loggedInAsClient;
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
@@ -119,6 +124,13 @@ const TopNav = () => {
         } finally {
             setIsLoading(false);
         }
+    }
+
+    const handleSwitchToAgencyClients = () => {
+        // Clear the client context but keep agency admin context
+        localStorage.removeItem('loggedInAsClient');
+        // Navigate to agency manage clients page
+        window.location.href = '/manage-agency-users';
     }
 
     const handleHamburger = () => {
@@ -225,22 +237,40 @@ const TopNav = () => {
                 <Menu className="w-6 h-6 text-gray-300" />
             </button>
             <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
+                {/* Switch Client Button - First for Agency Admin viewing client */}
+                {isAgencyAdminViewingClient && (
+                    <div className="relative mr-3">
+                        <button
+                            onClick={handleSwitchToAgencyClients}
+                            className="group flex items-center gap-2 px-4 py-2 border-2 border-blue-500 text-blue-500 rounded-xl hover:bg-gradient-to-r hover:from-blue-500 hover:to-indigo-600 hover:text-white transition-all duration-300 hover:shadow-md text-sm font-medium"
+                            title="Switch client or go to manage clients"
+                        >
+                            <ArrowLeftRight className="w-4 h-4 text-blue-500 group-hover:text-white transition-colors duration-300" />
+                            <span className="hidden lg:block">Switch Client</span>
+                        </button>
+                    </div>
+                )}
+
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div 
-                        className={`group lg:px-6 lg:py-3 px-4 py-2 rounded-xl outline-none text-xs lg:text-sm flex justify-center items-center gap-3 min-w-[13rem] border cursor-pointer transition-all duration-300 ${
-                            openDropDown 
-                                ? 'bg-[#21262d] border-blue-500/50 ring-2 ring-blue-500/20' 
-                                : 'bg-[#21262d] border-blue-500/40 hover:border-blue-500/60 hover:bg-[#1c2128]'
+                        className={`group lg:px-6 lg:py-3 px-4 py-2 rounded-xl outline-none text-xs lg:text-sm flex justify-center items-center gap-3 min-w-[13rem] border transition-all duration-300 ${
+                            isAgencyAdminViewingClient
+                                ? 'bg-[#21262d] border-blue-500/40 cursor-default'
+                                : openDropDown 
+                                    ? 'bg-[#21262d] border-blue-500/50 ring-2 ring-blue-500/20 cursor-pointer' 
+                                    : 'bg-[#21262d] border-blue-500/40 hover:border-blue-500/60 hover:bg-[#1c2128] cursor-pointer'
                         }`}
-                        onClick={openDropDownfnc}
+                        onClick={isAgencyAdminViewingClient ? undefined : openDropDownfnc}
+                        role={isAgencyAdminViewingClient ? 'img' : 'button'}
+                        aria-label={isAgencyAdminViewingClient ? 'Brand and marketplace (view only)' : 'Switch brand or account'}
                     >
                         <div className="flex items-center gap-3 flex-1">
                             <Building className={`w-4 h-4 flex-shrink-0 transition-colors duration-300 ${
-                                openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
+                                isAgencyAdminViewingClient ? 'text-blue-400' : openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
                             }`} />
                             <div className="flex flex-col items-start">
                                 <p className={`font-semibold transition-colors duration-200 ${
-                                    openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
+                                    isAgencyAdminViewingClient ? 'text-blue-400' : openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
                                 }`}>
                                     {truncateBrandName(user?.brand)}
                                 </p>
@@ -249,11 +279,13 @@ const TopNav = () => {
                                 </p>
                             </div>
                         </div>
-                        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-all duration-300 ${
-                            openDropDown 
-                                ? 'text-blue-400 rotate-180' 
-                                : 'text-blue-400 group-hover:text-blue-300 rotate-0'
-                        }`} />
+                        {!isAgencyAdminViewingClient && (
+                            <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-all duration-300 ${
+                                openDropDown 
+                                    ? 'text-blue-400 rotate-180' 
+                                    : 'text-blue-400 group-hover:text-blue-300 rotate-0'
+                            }`} />
+                        )}
                     </div>
                     <AnimatePresence>
                         {openDropDown && (
@@ -291,33 +323,37 @@ const TopNav = () => {
                                     </motion.div>
                                 )}
                                 
-                                {/* Add New Account Option */}
-                                {sellerAccount.length > 1 && (
-                                    <div className="border-t border-[#30363d] my-1"></div>
+                                {/* Add New Account Option - Hidden for agency admin viewing client */}
+                                {!isAgencyAdminViewingClient && (
+                                    <>
+                                        {sellerAccount.length > 1 && (
+                                            <div className="border-t border-[#30363d] my-1"></div>
+                                        )}
+                                        <motion.div
+                                            initial={{ opacity: 0, x: -10 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ duration: 0.2, delay: sellerAccount.length * 0.05 }}
+                                            className="group min-w-[13rem] bg-[#161b22] hover:bg-[#21262d] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-dashed border-[#30363d] hover:border-green-500/50 transition-all duration-200"
+                                            onClick={() => {
+                                                setOpenDropDown(false);
+                                                navigate('/seller-central-checker/settings?tab=account-integration');
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <Plus className="w-4 h-4 flex-shrink-0 text-gray-400 group-hover:text-green-400 transition-colors duration-200" />
+                                                <div className="flex-1">
+                                                    <p className="font-semibold text-gray-300 group-hover:text-green-400 transition-colors duration-200">
+                                                        Add New Account
+                                                    </p>
+                                                    <p className="text-xs text-gray-500">
+                                                        Connect another marketplace
+                                                    </p>
+                                                </div>
+                                                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-green-500 opacity-0 group-hover:opacity-100 transition-all duration-200" />
+                                            </div>
+                                        </motion.div>
+                                    </>
                                 )}
-                                <motion.div
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ duration: 0.2, delay: sellerAccount.length * 0.05 }}
-                                    className="group min-w-[13rem] bg-[#161b22] hover:bg-[#21262d] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-dashed border-[#30363d] hover:border-green-500/50 transition-all duration-200"
-                                    onClick={() => {
-                                        setOpenDropDown(false);
-                                        navigate('/seller-central-checker/settings?tab=account-integration');
-                                    }}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <Plus className="w-4 h-4 flex-shrink-0 text-gray-400 group-hover:text-green-400 transition-colors duration-200" />
-                                        <div className="flex-1">
-                                            <p className="font-semibold text-gray-300 group-hover:text-green-400 transition-colors duration-200">
-                                                Add New Account
-                                            </p>
-                                            <p className="text-xs text-gray-500">
-                                                Connect another marketplace
-                                            </p>
-                                        </div>
-                                        <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-green-500 opacity-0 group-hover:opacity-100 transition-all duration-200" />
-                                    </div>
-                                </motion.div>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -337,7 +373,7 @@ const TopNav = () => {
                         </button>
                     </div>
                 )}
-                
+
                 <div className="relative mr-3" ref={notificationRef}>
                     <div 
                         className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl flex items-center justify-center cursor-pointer transition-all duration-300 ${
@@ -485,18 +521,25 @@ const TopNav = () => {
                         )}
                     </AnimatePresence>
                 </div>
+                {/* Profile Photo - Always visible; non-clickable for agency admin viewing client */}
                 <div 
-                    className="group w-10 h-10 lg:w-11 lg:h-11 rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-105 border-2 border-[#30363d] hover:border-blue-500/50"
-                    onClick={() => navigate('/seller-central-checker/settings')}
+                    className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl overflow-hidden transition-all duration-300 border-2 border-[#30363d] ${
+                        isAgencyAdminViewingClient 
+                            ? 'cursor-default opacity-90' 
+                            : 'cursor-pointer hover:scale-105 hover:border-blue-500/50'
+                    }`}
+                    onClick={isAgencyAdminViewingClient ? undefined : () => navigate('/seller-central-checker/settings')}
+                    role={isAgencyAdminViewingClient ? 'img' : 'button'}
+                    aria-label={isAgencyAdminViewingClient ? 'Profile (view only)' : 'Go to settings'}
                 >
                     {profilepic ? (
                         <img 
                             src={profilepic} 
                             alt="Profile" 
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
+                            className={`w-full h-full object-cover transition-transform duration-300 ${!isAgencyAdminViewingClient ? 'group-hover:scale-110' : ''}`} 
                         />
                     ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 group-hover:from-blue-500 group-hover:to-indigo-600 flex items-center justify-center transition-all duration-300">
+                        <div className={`w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center transition-all duration-300 ${!isAgencyAdminViewingClient ? 'group-hover:from-blue-500 group-hover:to-indigo-600' : ''}`}>
                             <User className="w-5 h-5 text-white" />
                         </div>
                     )}

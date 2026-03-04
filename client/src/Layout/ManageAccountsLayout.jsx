@@ -92,9 +92,8 @@ const ManageAccountsLayout = () => {
       >
         <div className="flex flex-col h-full w-[240px] shrink-0">
           <div className="p-5 border-b border-[#252525]">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center">
               <img src={sellerQILogo} alt="SellerQI" className="h-7 w-auto object-contain" />
-              <span className="text-sm font-semibold text-gray-200 tracking-tight">Admin</span>
             </div>
           </div>
           <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">

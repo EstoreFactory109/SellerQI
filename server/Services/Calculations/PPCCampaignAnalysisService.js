@@ -189,10 +189,25 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
     try {
         const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-        // Find the latest keywords document
-        const keywordsDoc = await adsKeywordsPerformanceModel.findOne({ userId: userIdObj, country, region })
-            .sort({ createdAt: -1 })
-            .lean();
+        // Find the latest keywords document and filter for ENABLED keywords at database level
+        const keywordsDocs = await adsKeywordsPerformanceModel.aggregate([
+            { $match: { userId: userIdObj, country, region } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            {
+                $project: {
+                    keywordsData: {
+                        $filter: {
+                            input: '$keywordsData',
+                            as: 'kw',
+                            cond: { $eq: ['$$kw.adKeywordStatus', 'ENABLED'] }
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const keywordsDoc = keywordsDocs[0] || null;
 
         if (!keywordsDoc || !keywordsDoc.keywordsData || keywordsDoc.keywordsData.length === 0) {
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
@@ -231,7 +246,8 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
                     cost: parseFloat(keyword.cost) || 0,
                     attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
                     impressions: parseFloat(keyword.impressions) || 0,
-                    clicks: parseFloat(keyword.clicks) || 0
+                    clicks: parseFloat(keyword.clicks) || 0,
+                    adKeywordStatus: keyword.adKeywordStatus || null
                 });
             }
         });
@@ -254,7 +270,8 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
             spend: parseFloat(k.cost.toFixed(2)),
             sales: parseFloat(k.attributedSales30d.toFixed(2)),
             impressions: k.impressions,
-            clicks: k.clicks
+            clicks: k.clicks,
+            status: k.adKeywordStatus || null
         }));
 
         logger.info(`[PPCCampaignAnalysis] Wasted spend keywords fetched in ${Date.now() - startTime}ms, count: ${paginatedData.length}`);

@@ -60,17 +60,12 @@ const LeftNavSection = () => {
     const adminAccessType = localStorage.getItem('adminAccessType');
     const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
     
-    // Debug logging for super admin access
-    console.log('🔍 Debug - User data:', {
-        user: user,
-        accessType: user?.accessType,
-        packageType: user?.packageType,
-        isAdminLoggedIn: isAdminLoggedIn,
-        adminAccessType: adminAccessType,
-        isSuperAdmin: isSuperAdmin,
-        isLiteUser: isLiteUser,
-        isAgencyUser: isAgencyUser
-    });
+    // Check if agency admin is logged in and viewing a client
+    const isAgencyAdmin = isAdminLoggedIn && adminAccessType === 'enterpriseAdmin';
+    const loggedInAsClient = localStorage.getItem('loggedInAsClient');
+    // Agency admin viewing a client's dashboard (not on manage-agency-users page)
+    // loggedInAsClient is now a JSON string (same pattern as loggedInAsUser)
+    const isAgencyAdminViewingClient = isAgencyAdmin && loggedInAsClient;
     
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
@@ -494,20 +489,25 @@ const LeftNavSection = () => {
                             </NavLink>
                         )}
 
-                        {/* Tasks - Available for ALL users including LITE */}
-                        <NavLink
-                            to="/seller-central-checker/tasks"
-                            className={({ isActive }) =>
-                                `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
-                            }
-                        >
-                            {({ isActive }) => (
-                                <>
-                                    <ClipboardPlus className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
-                                    <span className="font-medium">Tasks</span>
-                                </>
-                            )}
-                        </NavLink>
+                        {/* Tasks - LITE users see it with lock icon and blurred page */}
+                        {(!isLiteUser || isPremiumLocked) && (
+                            <NavLink
+                                to="/seller-central-checker/tasks"
+                                className={({ isActive }) =>
+                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <ClipboardPlus className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
+                                        <span className="font-medium flex-1">Tasks</span>
+                                        {isPremiumLocked && (
+                                            <Lock className="w-3.5 h-3.5 text-amber-500" />
+                                        )}
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
 
                         {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
                         {false && (
@@ -576,7 +576,8 @@ const LeftNavSection = () => {
                 {/* Bottom Section - Book a Call, Settings, and Logout */}
                 <div className="flex-shrink-0 border-t border-[#30363d] bg-[#1a1a1a]">
                 <div className="px-2 py-2">
-                    {/* Settings Section */}
+                    {/* Settings Section - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="mb-2">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 px-2">Settings</p>
                         
@@ -819,8 +820,10 @@ const LeftNavSection = () => {
                             </AnimatePresence>
                         </div>
                     </div>
+                    )}
 
-                    {/* Book Consultation Button */}
+                    {/* Book Consultation Button - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="mb-2">
                         <NavLink
                             to="/seller-central-checker/consultation"
@@ -831,8 +834,10 @@ const LeftNavSection = () => {
                             <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
                         </NavLink>
                     </div>
+                    )}
 
-                    {/* Logout Section */}
+                    {/* Logout Section - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="mt-2 pt-2 border-t border-[#30363d]">
                         <button 
                             className='group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm transition-all duration-300 text-red-400 hover:bg-red-500/20 hover:scale-[1.01] w-full'
@@ -843,6 +848,7 @@ const LeftNavSection = () => {
                             {loader && <BeatLoader color="#dc2626" size={6} />}
                         </button>
                     </div>
+                    )}
                 </div>
                 </div>
             </div>

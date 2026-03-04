@@ -8,13 +8,13 @@ const QMateChat = require('../../models/ai/QMateChatModel.js');
 
 /**
  * POST /api/qmate/chat
- * Body: { message: string, messages?: [{ role: 'user'|'assistant', content: string }] }
+ * Body: { message: string, messages?: [{ role: 'user'|'assistant', content: string }], dateRange?: { startDate, endDate, calendarMode } }
  */
 const handleChat = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const country = req.country;
     const region = req.region;
-    const { message, messages: chatHistory } = req.body || {};
+    const { message, messages: chatHistory, dateRange } = req.body || {};
 
     if (!userId) {
         return res
@@ -34,19 +34,31 @@ const handleChat = asyncHandler(async (req, res) => {
             .json(new ApiError(400, 'A non-empty message is required.'));
     }
 
+    // Extract date range if provided (from dashboard calendar filter)
+    const startDate = dateRange?.startDate || null;
+    const endDate = dateRange?.endDate || null;
+    const calendarMode = dateRange?.calendarMode || 'default';
+
     logger.info('[QMate] Incoming chat request', {
         userId,
         country,
         region,
         hasHistory: Array.isArray(chatHistory),
+        hasDateRange: !!(startDate && endDate),
+        calendarMode
     });
 
-    const result = await QMateService.generateResponse({
+    // Use optimized method by default (reads from pre-computed data)
+    // Falls back to legacy method internally if pre-computed data unavailable
+    const result = await QMateService.generateResponseOptimized({
         userId,
         country,
         region,
         question: message.trim(),
         chatHistory: Array.isArray(chatHistory) ? chatHistory : [],
+        startDate,
+        endDate,
+        calendarMode
     });
 
     if (!result || result.status !== 200) {
@@ -67,6 +79,11 @@ const handleChat = asyncHandler(async (req, res) => {
         answer_markdown,
         chart_suggestions,
         follow_up_questions,
+        content_actions,
+        suggested_title,
+        suggested_bullet_points,
+        suggested_description,
+        suggested_backend_keywords,
     } = result;
 
     const payload = {
@@ -75,6 +92,12 @@ const handleChat = asyncHandler(async (req, res) => {
             content: answer_markdown || '',
             charts: chart_suggestions || [],
             follow_up_questions: follow_up_questions || [],
+            // Fix It functionality fields
+            content_actions: content_actions || [],
+            suggested_title: suggested_title || null,
+            suggested_bullet_points: suggested_bullet_points || null,
+            suggested_description: suggested_description || null,
+            suggested_backend_keywords: suggested_backend_keywords || null,
         },
     };
 

@@ -49,12 +49,23 @@ const PackageRouteWrapper = ({ children }) => {
     '/seller-central-checker/consultation'
   ];
 
+  // Explicit path segments that are always restricted (premium-only). Ensures e.g. /tasks never slips through.
+  const restrictedPathSegments = [
+    '/tasks', '/dashboard', '/qmate', '/issues', '/issues-by-product', '/account-history',
+    '/reimbursement-dashboard', '/your-products', '/pre-analysis', '/ppc-dashboard',
+    '/keyword-analysis', '/notifications', '/ecommerce-calendar', '/user-logging'
+  ];
+
   // Check if current path is a restricted route (all routes except free ones)
   const isRestrictedRoute = useMemo(() => {
     const currentPath = location.pathname;
     // If it's a free route, it's not restricted
     if (freeRoutes.some(route => currentPath.startsWith(route))) {
       return false;
+    }
+    // Explicitly treat these path segments as restricted so overlay always shows for LITE
+    if (restrictedPathSegments.some(seg => currentPath.startsWith('/seller-central-checker' + seg))) {
+      return true;
     }
     // All other seller-central-checker routes are restricted for LITE users
     return currentPath.startsWith('/seller-central-checker/');

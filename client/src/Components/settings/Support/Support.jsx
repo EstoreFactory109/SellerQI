@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config';
 
-const Support = () => {
+const Support = ({ consultationPath = '/seller-central-checker/consultation' }) => {
   const [form, setForm] = useState({ 
     name: '', 
     email: '', 
@@ -370,7 +370,7 @@ const Support = () => {
                 <ArrowRight className="w-4 h-4" />
               </a>
               <Link
-                to="/seller-central-checker/consultation"
+                to={consultationPath}
                 className="border-2 border-[#30363d] text-gray-200 px-6 py-2 rounded-lg hover:border-[#21262d] hover:bg-[#21262d] transition-all duration-300 font-semibold text-center text-sm"
               >
                 Need Help?

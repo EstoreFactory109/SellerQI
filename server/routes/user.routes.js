@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, getAdminClients, removeAdminClient, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, updateAdminProfile, updateAdminProfilePic, updateAdminPassword, getAdminClients, removeAdminClient, switchToClient, completeAgencySignup, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
@@ -8,6 +8,7 @@ const { validateOtpResend } = require('../middlewares/validator/otpValidate.js')
 const { validateUpdateDetails } = require('../middlewares/validator/updateDetailsValidate.js');
 const { validateGoogleIdToken } = require('../middlewares/validator/googleAuthValidate.js');
 const { validateAgencyClientRegistration } = require('../middlewares/validator/agencyClientValidate.js');
+const { validateAgencyAdminProfile } = require('../middlewares/validator/agencyAdminProfileValidate.js');
 const { validateUpdateSubscriptionPlan } = require('../middlewares/validator/subscriptionValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
 const upload=require('../middlewares/multer/multer.js')
@@ -43,8 +44,13 @@ router.post('/register-agency-client', auth, validateAgencyClientRegistration, r
 
 // Admin routes
 router.get('/admin/profile', auth, getAdminProfile);
+router.put('/admin/profile', auth, validateAgencyAdminProfile, updateAdminProfile);
+router.put('/admin/profile-pic', auth, upload.single('avatar'), updateAdminProfilePic);
+router.put('/admin/update-password', auth, updateAdminPassword);
 router.get('/admin/clients', auth, getAdminClients);
 router.delete('/admin/clients/:clientId', auth, removeAdminClient);
+router.post('/admin/switch-to-client', auth, switchToClient);
+router.post('/complete-agency-signup', auth, completeAgencySignup);
 router.get('/admin/billing', auth, getAdminBillingInfo);
 router.post('/resend-otp', otpRateLimiter, validateOtpResend, resendOtp);
 

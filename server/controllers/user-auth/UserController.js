@@ -12,6 +12,7 @@ const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js
 const mongoose = require('mongoose');
 
 const { uploadToCloudinary } = require('../../Services/Cloudinary/Cloudinary.js');
+const AgencyAdminService = require('../../Services/User/AgencyAdminService.js');
 const { sendEmailResetLink } = require('../../Services/Email/SendResetLink.js');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
@@ -23,13 +24,19 @@ const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
     // console.log(firstname)
 
     // Validate required fields - trialEndsDate is only required for trial users
     if (!firstname || !lastname || !phone || !email || !password || !packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
+    }
+
+    // Agency name is required for AGENCY package type
+    if (packageType === 'AGENCY' && !agencyName) {
+        logger.error(new ApiError(400, "Agency name is required for AGENCY package"));
+        return res.status(400).json(new ApiResponse(400, "", "Agency name is required for agency registration"));
     }
 
     // If user is in trial period, trialEndsDate is required
@@ -74,6 +81,7 @@ const registerUser = asyncHandler(async (req, res) => {
     // Create user with proper package settings
     // PRO-Trial: isInTrialPeriod=true, subscriptionStatus=active, trialEndsDate set
     // PRO: isInTrialPeriod=false, subscriptionStatus=inactive (needs payment)
+    // AGENCY: includes agencyName
     let data = await createUser(
         firstname, 
         lastname, 
@@ -83,10 +91,11 @@ const registerUser = asyncHandler(async (req, res) => {
         password, 
         otp, 
         allTermsAndConditionsAgreed, 
-        packageType,           // PRO for both PRO-Trial and PRO
+        packageType,           // PRO for both PRO-Trial and PRO, AGENCY for agencies
         isInTrialPeriod,       // true for PRO-Trial, false for PRO
         subscriptionStatus,    // active for PRO-Trial, inactive for PRO (pending payment)
-        trialEndsDate          // Date for PRO-Trial, null for PRO
+        trialEndsDate,         // Date for PRO-Trial, null for PRO
+        agencyName             // Required for AGENCY, null for others
     );
 
     if (!data) {
@@ -107,12 +116,15 @@ const registerUser = asyncHandler(async (req, res) => {
 })
 
 const registerAgencyClient = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
-    const agencyOwnerId = req.userId; // Get the agency owner's ID from auth middleware
+    const { firstname, lastname, phone, email, allTermsAndConditionsAgreed } = req.body;
+    // Use adminId (from AdminToken) for agency owner - this is set by auth middleware
+    // Fallback to userId for backward compatibility
+    const agencyOwnerId = req.adminId || req.userId;
 
-    if (!firstname || !lastname || !phone || !email || !password) {
-        logger.error(new ApiError(400, "Details and credentials are missing"));
-        return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
+    // Password is no longer required for agency clients
+    if (!firstname || !lastname || !phone || !email) {
+        logger.error(new ApiError(400, "Details are missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Details are missing (firstname, lastname, phone, email)"));
     }
 
     if (!agencyOwnerId) {
@@ -135,21 +147,21 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
     }
 
     try {
-        // Hash the password
-        const hashedPassword = await hashPassword(password);
-
-        // Create the client user with adminId set to agency owner
+        // Agency clients do not have passwords - they can only be accessed via agency owner
+        // Create the client user with agencyId set to agency owner
         const newClient = new UserModel({
             firstName: firstname,
             lastName: lastname,
             phone: phone,
             whatsapp: phone, // Use phone as whatsapp for simplicity
             email: email,
-            password: hashedPassword,
+            // No password stored for agency clients
             isVerified: true, // Auto-verify agency clients
             allTermsAndConditionsAgreed: allTermsAndConditionsAgreed || true,
             packageType: 'PRO', // Give clients PRO access by default
-            adminId: agencyOwnerId, // Set the agency owner as admin
+            agencyId: agencyOwnerId, // Store the agency owner's ID
+            isAgencyClient: true, // Mark as agency client
+            adminId: agencyOwnerId, // Keep for backward compatibility
             OTP: null
         });
 
@@ -203,7 +215,8 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
                 // Admin token for the agency owner
                 adminToken: AdminAccessToken,
                 adminId: agencyOwnerId,
-                adminAccessType: agencyOwner.accessType || 'enterpriseAdmin'
+                adminAccessType: agencyOwner.accessType || 'enterpriseAdmin',
+                agencyName: agencyOwner.agencyName || ''
             }, "Client registered successfully"));
 
     } catch (error) {
@@ -340,6 +353,12 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
     }
 
+    // Block agency clients from direct login - they can only be accessed via agency owner
+    if (checkUserIfExists.isAgencyClient === true || checkUserIfExists.agencyId) {
+        logger.warn(`Agency client ${checkUserIfExists.email} attempted direct login`);
+        return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
+    }
+
     if (checkUserIfExists.isVerified === false) {
 
         let otp = generateOTP();
@@ -363,6 +382,8 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(401).json(new ApiResponse(401, { email: checkUserIfExists.email }, "User not verified"));
     }
 
+    // Agency clients have no password, but this check happens above
+    // For regular users, verify password
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
 
     if (!checkPassword) {
@@ -466,29 +487,33 @@ const loginUser = asyncHandler(async (req, res) => {
         }));
 
     } else if (checkUserIfExists.accessType === 'enterpriseAdmin') {
+        // AdminToken = agency owner's token (for admin operations like adding clients)
         adminToken = await createAccessToken(checkUserIfExists._id);
 
-        const sellerCentral = await SellerCentralModel.findOne({ User: checkUserIfExists._id });
-        if (!sellerCentral) {
-            const getClient = await UserModel.findOne({ adminId: checkUserIfExists._id }).sort({ createdAt: -1 });
-            if (!getClient) {
-                AccessToken = await createAccessToken(checkUserIfExists._id);
-                RefreshToken = await createRefreshToken(checkUserIfExists._id);
-                LocationToken = await createLocationToken("US", "NA");
+        // IBEXAccessToken/IBEXRefreshToken = client's token (like superAdmin pattern)
+        // Query by agencyId (new) OR adminId (legacy) for backward compatibility
+        const latestClient = await UserModel.findOne({
+            $or: [
+                { agencyId: checkUserIfExists._id },
+                { adminId: checkUserIfExists._id }
+            ]
+        }).sort({ createdAt: -1 });
+
+        if (latestClient) {
+            // Client exists - use client's token for IBEXAccessToken
+            AccessToken = await createAccessToken(latestClient._id);
+            RefreshToken = await createRefreshToken(latestClient._id);
+            const clientSellerCentral = await SellerCentralModel.findOne({ User: latestClient._id });
+            if (clientSellerCentral && clientSellerCentral.sellerAccount?.length > 0) {
+                LocationToken = await createLocationToken(clientSellerCentral.sellerAccount[0].country, clientSellerCentral.sellerAccount[0].region);
             } else {
-                AccessToken = await createAccessToken(getClient._id);
-                RefreshToken = await createRefreshToken(getClient._id);
-                const getClientSellerCentral = await SellerCentralModel.findOne({ User: getClient._id });
-                if (!getClientSellerCentral) {
-                    LocationToken = await createLocationToken("US", "NA");
-                } else {
-                    LocationToken = await createLocationToken(getClientSellerCentral.sellerAccount[0].country, getClientSellerCentral.sellerAccount[0].region);
-                }
+                LocationToken = await createLocationToken("US", "NA");
             }
         } else {
+            // No clients yet - use agency owner's token as fallback
             AccessToken = await createAccessToken(checkUserIfExists._id);
             RefreshToken = await createRefreshToken(checkUserIfExists._id);
-            LocationToken = await createLocationToken(sellerCentral.sellerAccount[0].country, sellerCentral.sellerAccount[0].region);
+            LocationToken = await createLocationToken("US", "NA");
         }
 
     }
@@ -1494,7 +1519,7 @@ const checkTrialStatus = asyncHandler(async (req, res) => {
     }
 });
 
-// Admin endpoints
+// Admin endpoints (agency admin profile – get/update details except email; logo upload via Cloudinary)
 const getAdminProfile = asyncHandler(async (req, res) => {
     const adminId = req.adminId;
 
@@ -1503,54 +1528,128 @@ const getAdminProfile = asyncHandler(async (req, res) => {
         return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
     }
 
-    try {
-        const adminUser = await UserModel.findById(adminId).select('-password');
-        console.log(adminUser);
+    const result = await AgencyAdminService.getAdminProfile(adminId);
+    if (!result) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
 
-        if (!adminUser) {
-            logger.error(new ApiError(404, "Admin user not found"));
-            return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
-        }
+    return res.status(200).json(new ApiResponse(200, result, "Admin profile fetched successfully"));
+});
 
-        // Get client statistics
-        const clientStats = await UserModel.aggregate([
-            { $match: { adminId: mongoose.Types.ObjectId(adminId) } },
-            {
-                $group: {
-                    _id: null,
-                    totalClients: { $sum: 1 },
-                    activeClients: {
-                        $sum: {
-                            $cond: [{ $eq: ["$subscriptionStatus", "active"] }, 1, 0]
-                        }
-                    }
-                }
-            }
-        ]);
+/**
+ * Update agency admin profile (firstName, lastName, phone, whatsapp, agencyName). Email is not updatable.
+ */
+const updateAdminProfile = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    const { firstName, lastName, phone, whatsapp, agencyName } = req.body;
 
-        // Get clients added this month
-        const thisMonth = new Date();
-        thisMonth.setDate(1);
-        thisMonth.setHours(0, 0, 0, 0);
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
 
-        const newClientsThisMonth = await UserModel.countDocuments({
-            adminId: adminId,
-            createdAt: { $gte: thisMonth }
-        });
+    const adminUser = await UserModel.findById(adminId).select('accessType');
+    if (!adminUser) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+    if (adminUser.accessType !== 'enterpriseAdmin') {
+        logger.error(new ApiError(403, "Only agency admins can update this profile"));
+        return res.status(403).json(new ApiResponse(403, "", "Unauthorized"));
+    }
 
-        const stats = clientStats[0] || { totalClients: 0, activeClients: 0 };
-        stats.thisMonth = newClientsThisMonth;
-
-        const responseData = {
-            adminInfo: adminUser,
-            clientStats: stats
-        };
-
-        return res.status(200).json(new ApiResponse(200, responseData, "Admin profile fetched successfully"));
-    } catch (error) {
-        logger.error(new ApiError(500, `Error fetching admin profile: ${error.message}`));
+    const payload = { firstName, lastName, phone, whatsapp, agencyName };
+    const updated = await AgencyAdminService.updateAdminProfile(adminId, payload);
+    if (!updated) {
+        logger.error(new ApiError(500, "Failed to update admin profile"));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
     }
+
+    return res.status(200).json(new ApiResponse(200, { adminInfo: updated }, "Profile updated successfully"));
+});
+
+/**
+ * Upload agency logo. Same flow as user profile pic: multer stores file, then upload to Cloudinary and save URL to profilePic.
+ */
+const updateAdminProfilePic = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    const localFilePath = req.file?.path;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+    if (!localFilePath) {
+        logger.error(new ApiError(400, "Logo file is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Logo file is missing"));
+    }
+
+    const adminUser = await UserModel.findById(adminId).select('accessType');
+    if (!adminUser) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+    if (adminUser.accessType !== 'enterpriseAdmin') {
+        logger.error(new ApiError(403, "Only agency admins can upload logo"));
+        return res.status(403).json(new ApiResponse(403, "", "Unauthorized"));
+    }
+
+    const result = await AgencyAdminService.uploadAgencyLogo(adminId, localFilePath);
+    if (!result) {
+        logger.error(new ApiError(500, "Internal server error in uploading logo"));
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in uploading logo"));
+    }
+
+    return res.status(200).json(new ApiResponse(200, { profilePicUrl: result.profilePicUrl }, "Logo updated successfully"));
+});
+
+/**
+ * Update agency admin password. Requires currentPassword and newPassword; uses req.adminId.
+ */
+const updateAdminPassword = asyncHandler(async (req, res) => {
+    const adminId = req.adminId;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+    if (!currentPassword || !newPassword) {
+        logger.error(new ApiError(400, "Current password and new password are required"));
+        return res.status(400).json(new ApiResponse(400, "", "Current password and new password are required"));
+    }
+    if (newPassword.length < 8) {
+        logger.error(new ApiError(400, "New password must be at least 8 characters"));
+        return res.status(400).json(new ApiResponse(400, "", "New password must be at least 8 characters"));
+    }
+
+    const adminUser = await UserModel.findById(adminId).select('+password');
+    if (!adminUser) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+    if (adminUser.accessType !== 'enterpriseAdmin') {
+        logger.error(new ApiError(403, "Only agency admins can update password here"));
+        return res.status(403).json(new ApiResponse(403, "", "Unauthorized"));
+    }
+    if (!adminUser.password) {
+        logger.error(new ApiError(400, "No password set for this account"));
+        return res.status(400).json(new ApiResponse(400, "", "No password set for this account"));
+    }
+
+    const isValid = await verifyPassword(currentPassword, adminUser.password);
+    if (!isValid) {
+        logger.error(new ApiError(401, "Current password is incorrect"));
+        return res.status(401).json(new ApiResponse(401, "", "Current password is incorrect"));
+    }
+
+    const hashed = await hashPassword(newPassword);
+    adminUser.password = hashed;
+    await adminUser.save();
+
+    logger.info(`Agency admin ${adminId} updated their password`);
+    return res.status(200).json(new ApiResponse(200, "", "Password updated successfully"));
 });
 
 const getAdminClients = asyncHandler(async (req, res) => {
@@ -1562,8 +1661,14 @@ const getAdminClients = asyncHandler(async (req, res) => {
     }
 
     try {
-        const clients = await UserModel.find({ adminId: adminId })
-            .select('firstName lastName email phone createdAt subscriptionStatus packageType')
+        // Query by agencyId (new field) OR adminId (legacy field) for backward compatibility
+        const clients = await UserModel.find({
+            $or: [
+                { agencyId: adminId },
+                { adminId: adminId }
+            ]
+        })
+            .select('firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient')
             .sort({ createdAt: -1 });
 
         // Check Amazon connection status for each client
@@ -1580,6 +1685,9 @@ const getAdminClients = asyncHandler(async (req, res) => {
                         ...clientObj,
                         amazonStatus: 'Not Connected',
                         amazonConnected: false,
+                        hasSpApi: false,
+                        hasAdsApi: false,
+                        brandName: null,
                         marketplace: null,
                         connectedDate: null
                     };
@@ -1610,6 +1718,9 @@ const getAdminClients = asyncHandler(async (req, res) => {
                     ...clientObj,
                     amazonStatus,
                     amazonConnected,
+                    hasSpApi: hasSpiToken,
+                    hasAdsApi: hasAdsToken,
+                    brandName: sellerDocument.brand || null,
                     marketplace: amazonConnected ? (sellerAccount.country || null) : null,
                     region: amazonConnected ? (sellerAccount.region || null) : null,
                     connectedDate: amazonConnected ? sellerDocument.createdAt : null
@@ -1634,8 +1745,14 @@ const removeAdminClient = asyncHandler(async (req, res) => {
     }
 
     try {
-        // Verify the client belongs to this admin
-        const client = await UserModel.findOne({ _id: clientId, adminId: adminId });
+        // Verify the client belongs to this admin (check both agencyId and legacy adminId)
+        const client = await UserModel.findOne({
+            _id: clientId,
+            $or: [
+                { agencyId: adminId },
+                { adminId: adminId }
+            ]
+        });
 
         if (!client) {
             logger.error(new ApiError(404, "Client not found or doesn't belong to this admin"));
@@ -1650,6 +1767,162 @@ const removeAdminClient = asyncHandler(async (req, res) => {
         logger.error(new ApiError(500, `Error removing client: ${error.message}`));
         return res.status(500).json(new ApiResponse(500, "", "Internal server error"));
     }
+});
+
+/**
+ * Agency: Switch to client context (login as client).
+ * Creates IBEX tokens for the client and sets them in cookies.
+ * Only agency owners can switch to their own clients (client.adminId === req.userId).
+ */
+const switchToClient = asyncHandler(async (req, res) => {
+    // Use adminId (from AdminToken) for agency owner - same pattern as superAdmin
+    const agencyOwnerId = req.adminId || req.userId;
+    const { clientId } = req.body;
+
+    if (!agencyOwnerId) {
+        logger.error(new ApiError(401, "Unauthorized"));
+        return res.status(401).json(new ApiResponse(401, "", "Unauthorized"));
+    }
+
+    if (!clientId) {
+        logger.error(new ApiError(400, "Client ID is required"));
+        return res.status(400).json(new ApiResponse(400, "", "Client ID is required"));
+    }
+
+    const agencyOwner = await UserModel.findById(agencyOwnerId);
+    if (!agencyOwner || agencyOwner.packageType !== 'AGENCY') {
+        logger.error(new ApiError(403, "Only agency accounts can switch to client"));
+        return res.status(403).json(new ApiResponse(403, "", "Only agency accounts can switch to client"));
+    }
+
+    // Check both agencyId (new) and adminId (legacy) for backward compatibility
+    const client = await UserModel.findOne({
+        _id: clientId,
+        $or: [
+            { agencyId: agencyOwnerId },
+            { adminId: agencyOwnerId }
+        ]
+    });
+    if (!client) {
+        logger.error(new ApiError(404, "Client not found or does not belong to your agency"));
+        return res.status(404).json(new ApiResponse(404, "", "Client not found"));
+    }
+
+    const accessToken = await createAccessToken(client._id);
+    const refreshToken = await createRefreshToken(client._id);
+    if (!accessToken || !refreshToken) {
+        logger.error(new ApiError(500, "Failed to create tokens"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to create tokens"));
+    }
+
+    await UserModel.findByIdAndUpdate(client._id, { appRefreshToken: refreshToken });
+
+    const sellerCentral = await SellerCentralModel.findOne({ User: client._id });
+    let locationToken;
+    if (!sellerCentral || !sellerCentral.sellerAccount?.length) {
+        locationToken = await createLocationToken("US", "NA");
+    } else {
+        const acc = sellerCentral.sellerAccount[0];
+        locationToken = await createLocationToken(acc.country || "US", acc.region || "NA");
+    }
+
+    const options = getHttpsCookieOptions();
+    const responseData = {
+        userId: client._id,
+        firstName: client.firstName,
+        lastName: client.lastName,
+        email: client.email,
+        packageType: client.packageType,
+    };
+
+    logger.info(`Agency ${agencyOwnerId} switched to client ${client._id} (${client.email})`);
+
+    res.status(200)
+        .cookie("IBEXAccessToken", accessToken, options)
+        .cookie("IBEXRefreshToken", refreshToken, options)
+        .cookie("IBEXLocationToken", locationToken, options)
+        .json(new ApiResponse(200, responseData, "Successfully switched to client"));
+});
+
+/**
+ * Complete agency signup without Stripe (separate flow from PRO).
+ * Called after email verification when intendedPackage is AGENCY.
+ * Activates the agency account and sets AdminToken so they can use manage-agency-users.
+ */
+const completeAgencySignup = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    if (!userId) {
+        logger.error(new ApiError(401, "Unauthorized"));
+        return res.status(401).json(new ApiResponse(401, "", "Unauthorized"));
+    }
+
+    const user = await UserModel.findById(userId);
+    if (!user) {
+        logger.error(new ApiError(404, "User not found"));
+        return res.status(404).json(new ApiResponse(404, "", "User not found"));
+    }
+
+    if (user.packageType !== 'AGENCY') {
+        logger.error(new ApiError(400, "Only agency signups can use this endpoint"));
+        return res.status(400).json(new ApiResponse(400, "", "Only agency signups can use this endpoint"));
+    }
+
+    if (user.subscriptionStatus === 'active') {
+        // Already activated (e.g. refresh), set all tokens and return redirect
+        const adminToken = await createAccessToken(userId);
+        
+        // Check for existing clients - use client token if exists, otherwise agency owner
+        const latestClient = await UserModel.findOne({
+            $or: [{ agencyId: userId }, { adminId: userId }]
+        }).sort({ createdAt: -1 });
+        
+        let accessToken, refreshToken;
+        if (latestClient) {
+            accessToken = await createAccessToken(latestClient._id);
+            refreshToken = await createRefreshToken(latestClient._id);
+        } else {
+            accessToken = await createAccessToken(userId);
+            refreshToken = await createRefreshToken(userId);
+        }
+        
+        const options = getHttpsCookieOptions();
+        return res.status(200)
+            .cookie("AdminToken", adminToken, options)
+            .cookie("IBEXAccessToken", accessToken, options)
+            .cookie("IBEXRefreshToken", refreshToken, options)
+            .json(new ApiResponse(200, { redirectTo: '/manage-agency-users' }, "Agency account ready"));
+    }
+
+    if (user.subscriptionStatus !== 'inactive') {
+        logger.error(new ApiError(400, "Invalid agency signup state"));
+        return res.status(400).json(new ApiResponse(400, "", "Invalid agency signup state"));
+    }
+
+    // Activate agency account (no Stripe; billing can be handled separately / contact sales)
+    await UserModel.findByIdAndUpdate(userId, {
+        subscriptionStatus: 'active',
+        accessType: 'enterpriseAdmin',
+    });
+
+    const adminToken = await createAccessToken(userId);
+    const accessToken = await createAccessToken(userId);
+    const refreshToken = await createRefreshToken(userId);
+    if (!adminToken || !accessToken || !refreshToken) {
+        logger.error(new ApiError(500, "Failed to create tokens"));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to create tokens"));
+    }
+
+    // Update user with refresh token
+    await UserModel.findByIdAndUpdate(userId, { appRefreshToken: refreshToken });
+
+    const options = getHttpsCookieOptions();
+    logger.info(`Agency signup completed for user ${userId} (${user.email}) without Stripe`);
+
+    res.status(200)
+        .cookie("AdminToken", adminToken, options)
+        .cookie("IBEXAccessToken", accessToken, options)
+        .cookie("IBEXRefreshToken", refreshToken, options)
+        .json(new ApiResponse(200, { redirectTo: '/manage-agency-users' }, "Agency account activated successfully"));
 });
 
 const getAdminBillingInfo = asyncHandler(async (req, res) => {
@@ -1839,8 +2112,13 @@ module.exports = {
     checkTrialStatus,
     // Admin endpoints
     getAdminProfile,
+    updateAdminProfile,
+    updateAdminProfilePic,
+    updateAdminPassword,
     getAdminClients,
     removeAdminClient,
+    switchToClient,
+    completeAgencySignup,
     getAdminBillingInfo,
     resendOtp,
     // Super Admin endpoints

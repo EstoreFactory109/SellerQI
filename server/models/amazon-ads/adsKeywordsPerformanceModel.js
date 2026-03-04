@@ -63,6 +63,10 @@ const adsKeywordsPerformanceSchema = new mongoose.Schema({
         adGroupId: {
             type:Number,
             required:true
+        },
+        adKeywordStatus: {
+            type: String,
+            required: false
         }
     }]
 }, { timestamps: true });

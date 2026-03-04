@@ -57,6 +57,15 @@ const LeftNavSection = () => {
     // No longer hiding pages - all LITE users can see and access pages (with blur overlay)
     const isLiteUser = false;
     
+    // Check if agency admin is logged in and viewing a client
+    const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
+    const adminAccessType = localStorage.getItem('adminAccessType');
+    const isAgencyAdmin = isAdminLoggedIn && adminAccessType === 'enterpriseAdmin';
+    const loggedInAsClient = localStorage.getItem('loggedInAsClient');
+    // Agency admin viewing a client's dashboard (not on manage-agency-users page)
+    // loggedInAsClient is now a JSON string (same pattern as loggedInAsUser)
+    const isAgencyAdminViewingClient = isAgencyAdmin && loggedInAsClient;
+    
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'category';
@@ -529,30 +538,35 @@ const LeftNavSection = () => {
                                 </NavLink>
                             )}
 
-                            {/* Tasks - Available for ALL users including LITE */}
-                            {<NavLink
-                                to="/seller-central-checker/tasks"
-                                className={({ isActive }) =>
-                                    `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`
-                                }
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                            isActive ? 'bg-white/20' : 'bg-indigo-50 group-hover:bg-indigo-100'
-                                        }`}>
-                                            <ClipboardPlus className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                isActive ? 'text-white' : 'text-indigo-600'
-                                            }`}/>
-                                        </div>
-                                        <span className="font-medium">Tasks</span>
-                                    </>
-                                )}
-                                                    </NavLink>}
+                            {/* Tasks - LITE users see it with lock icon and blurred page */}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavLink
+                                    to="/seller-central-checker/tasks"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive ? 'bg-white/20' : 'bg-indigo-50 group-hover:bg-indigo-100'
+                                            }`}>
+                                                <ClipboardPlus className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive ? 'text-white' : 'text-indigo-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium flex-1">Tasks</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                            )}
+                                        </>
+                                    )}
+                                </NavLink>
+                            )}
 
                             {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
                             {false && (
@@ -613,10 +627,13 @@ const LeftNavSection = () => {
                         </div>
                     </div>
 
-                    {/* Divider */}
+                    {/* Divider - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent my-6"></div>
+                    )}
 
-                    {/* Book Consultation Button */}
+                    {/* Book Consultation Button - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="mb-4">
                         <NavLink
                             to="/seller-central-checker/consultation"
@@ -629,8 +646,10 @@ const LeftNavSection = () => {
                             <div className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse"></div>
                         </NavLink>
                     </div>
+                    )}
 
-                    {/* Settings Section */}
+                    {/* Settings Section - Hidden for agency admin viewing client */}
+                    {!isAgencyAdminViewingClient && (
                     <div className="mb-6">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-2">Settings</p>
                         
@@ -901,10 +920,12 @@ const LeftNavSection = () => {
                             </AnimatePresence>
                         </div>
                     </div>
+                    )}
                 </div>
             </div>
 
-            {/* Logout Section */}
+            {/* Logout Section - Hidden for agency admin viewing client */}
+            {!isAgencyAdminViewingClient && (
             <div className="px-4 py-3 border-t border-gray-200/50 bg-gradient-to-r from-gray-50/50 to-white/50 flex-shrink-0">
                 <button 
                     className='group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 text-red-600 hover:bg-red-50 hover:shadow-md hover:shadow-red-200/50 hover:scale-[1.01] w-full'
@@ -917,6 +938,7 @@ const LeftNavSection = () => {
                     {loader && <BeatLoader color="#dc2626" size={6} />}
                 </button>
             </div>
+            )}
         </aside>
         </>
     );

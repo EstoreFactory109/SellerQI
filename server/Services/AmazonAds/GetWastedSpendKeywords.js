@@ -90,7 +90,8 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
                         "attributedSales30d",
                         "impressions",
                         "campaignId",
-                        "adGroupId"
+                        "adGroupId",
+                        "adKeywordStatus"
                     ]
                 }
             };

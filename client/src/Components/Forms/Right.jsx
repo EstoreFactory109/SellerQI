@@ -1,5 +1,4 @@
 import React from 'react'
-import Background from '../../assets/Background/Right-Background.png'
 
 const Right = () => {
     return (

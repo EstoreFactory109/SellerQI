@@ -11,7 +11,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { testUpdateProductContent } = require('../controllers/test/UpdateProductContentTestController.js');
+const { updateProductContentController } = require('../controllers/Operations/UpdateProductContentController.js');
 
 router.get('/test', (req, res) => {
   res.json({
@@ -32,13 +32,14 @@ router.get('/test', (req, res) => {
       analyzeOnly: 'boolean, default false - only analyze, do not update',
       fixConflictsOnly: 'boolean, default false - only fix 8541 catalog conflicts',
       autoFixConflicts: 'boolean, default true - fix conflicts and apply attribute update',
+      brandName: 'optional - if brand attribute is missing, set to Brand Registry name (case-sensitive)',
     },
     timestamp: new Date().toISOString(),
   });
 });
 
 // POST on base path so POST /api/test/update-product-content works
-router.post('/', testUpdateProductContent);
-router.post('/update', testUpdateProductContent);
+router.post('/', updateProductContentController);
+router.post('/update', updateProductContentController);
 
 module.exports = router;

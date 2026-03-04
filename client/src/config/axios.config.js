@@ -87,15 +87,27 @@ axiosInstance.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError);
         isRefreshing = false;
-        
+
+        // If this was an admin route, clear admin auth and redirect to admin login to avoid redirect loop
+        const isAdminRoute = currentPath.startsWith('/manage-accounts') || requestUrl.includes('/admin/');
+        if (isAdminRoute) {
+          localStorage.removeItem('isAdminAuth');
+          localStorage.removeItem('adminAccessType');
+          localStorage.removeItem('adminId');
+          if (currentPath !== '/admin-login') {
+            window.location.href = '/admin-login';
+          }
+          return Promise.reject(refreshError);
+        }
+
         // Refresh failed - clear auth and redirect to login
         localStorage.removeItem("isAuth");
-        
+
         // Redirect to login only if we're not already on the login page
         if (currentPath !== '/' && !currentPath.includes('/log-in')) {
           window.location.href = '/';
         }
-        
+
         return Promise.reject(refreshError);
       }
     }

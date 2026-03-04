@@ -5,6 +5,10 @@
  * 
  * KEY FEATURE: Single PATCH call can fix all catalog conflicts (8541/8542/8543) 
  * AND update target attribute simultaneously using autoFixConflicts option.
+ * 
+ * BRAND FIX: Automatically detects missing brand attribute and patches it in the
+ * same PATCH call using options.brandName — required for Brand Registry catalog
+ * authority to take effect on title and other attributes.
  */
 
 const axios = require('axios');
@@ -25,7 +29,6 @@ const DATA_TYPES = Object.freeze({
   title: 'title',
   description: 'description',
   bulletpoints: 'bulletpoints',
-  // Additional attribute types for catalog conflict fixes
   size: 'size',
   color: 'color',
   brand: 'brand',
@@ -36,7 +39,8 @@ const DATA_TYPES = Object.freeze({
   pattern: 'pattern',
   item_weight: 'item_weight',
   item_package_weight: 'item_package_weight',
-  unit_count: 'unit_count'
+  unit_count: 'unit_count',
+  generic_keyword: 'generic_keyword'
 });
 
 /** Attribute paths for PATCH operations */
@@ -44,7 +48,6 @@ const ATTRIBUTE_PATHS = Object.freeze({
   title: '/attributes/item_name',
   description: '/attributes/product_description',
   bulletpoints: '/attributes/bullet_point',
-  // Additional attribute paths
   size: '/attributes/size',
   color: '/attributes/color',
   brand: '/attributes/brand',
@@ -55,7 +58,8 @@ const ATTRIBUTE_PATHS = Object.freeze({
   pattern: '/attributes/pattern',
   item_weight: '/attributes/item_weight',
   item_package_weight: '/attributes/item_package_weight',
-  unit_count: '/attributes/unit_count'
+  unit_count: '/attributes/unit_count',
+  generic_keyword: '/attributes/generic_keyword'
 });
 
 /** Attribute names in listing data */
@@ -63,7 +67,6 @@ const ATTRIBUTE_NAMES = Object.freeze({
   title: 'item_name',
   description: 'product_description',
   bulletpoints: 'bullet_point',
-  // Additional attribute names
   size: 'size',
   color: 'color',
   brand: 'brand',
@@ -74,7 +77,8 @@ const ATTRIBUTE_NAMES = Object.freeze({
   pattern: 'pattern',
   item_weight: 'item_weight',
   item_package_weight: 'item_package_weight',
-  unit_count: 'unit_count'
+  unit_count: 'unit_count',
+  generic_keyword: 'generic_keyword'
 });
 
 /** 
@@ -91,7 +95,8 @@ const ATTRIBUTES_REQUIRING_LANGUAGE_TAG = Object.freeze([
   'manufacturer',
   'material',
   'style',
-  'pattern'
+  'pattern',
+  'generic_keyword'
 ]);
 
 /** 
@@ -162,8 +167,6 @@ const FIX_STATUS = Object.freeze({
 
 /**
  * Get language tag for a marketplace
- * @param {string} marketplaceId - Amazon marketplace ID
- * @returns {string} Language tag (e.g., 'en_US', 'en_AU')
  */
 function getLanguageTag(marketplaceId) {
   return MARKETPLACE_LANGUAGE_MAP[marketplaceId] || 'en_US';
@@ -171,8 +174,6 @@ function getLanguageTag(marketplaceId) {
 
 /**
  * Check if an attribute requires language_tag
- * @param {string} attributeName - Attribute name
- * @returns {boolean}
  */
 function requiresLanguageTag(attributeName) {
   return ATTRIBUTES_REQUIRING_LANGUAGE_TAG.includes(attributeName);
@@ -180,9 +181,6 @@ function requiresLanguageTag(attributeName) {
 
 /**
  * Resolve base URI, marketplace ID, and AWS region from region/country
- * @param {string} region - Region code (NA/EU/FE)
- * @param {string} country - Country code (US/AU/UK/etc)
- * @returns {Object} { baseUri, marketplaceId, awsRegion }
  */
 function getRegionConfig(region, country) {
   if (!URIs || !marketplaceConfig || !spapiRegions) {
@@ -207,11 +205,6 @@ function getRegionConfig(region, country) {
 
 /**
  * Get SP-API refresh token for seller
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region code
- * @param {string} [sellerId] - Optional seller ID
- * @returns {Promise<Object>} { refreshToken, sellerId }
  */
 async function getRefreshTokenForSeller(userId, country, region, sellerId) {
   const seller = await Seller.findOne({ User: userId });
@@ -226,19 +219,15 @@ async function getRefreshTokenForSeller(userId, country, region, sellerId) {
   if (!account.spiRefreshToken) {
     throw new ApiError(400, 'SP-API refresh token not found. Connect Amazon Seller Central first.');
   }
-  return { refreshToken: account.spiRefreshToken, sellerId: account.selling_partner_id };
+  return {
+    refreshToken: account.spiRefreshToken,
+    sellerId: account.selling_partner_id,
+    brand: seller.brand || null
+  };
 }
 
 /**
  * Sign request with AWS SigV4
- * @param {string} host - API host
- * @param {string} path - Request path
- * @param {string} method - HTTP method
- * @param {string} accessToken - SP-API access token
- * @param {Object} credentials - AWS credentials
- * @param {string} awsRegion - AWS region
- * @param {Object|string} [body] - Request body
- * @returns {Object} Signed request
  */
 function signRequest(host, path, method, accessToken, credentials, awsRegion, body) {
   const request = {
@@ -268,17 +257,6 @@ function signRequest(host, path, method, accessToken, credentials, awsRegion, bo
 // SP-API CALLS
 // ============================================================================
 
-/**
- * GET listing item with all available data
- * @param {string} sellerId - Seller ID
- * @param {string} sku - Product SKU
- * @param {string} marketplaceId - Marketplace ID
- * @param {string} baseUri - API base URI
- * @param {string} accessToken - Access token
- * @param {Object} credentials - AWS credentials
- * @param {string} awsRegion - AWS region
- * @returns {Promise<Object>} Listing data
- */
 async function getListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion) {
   const encodedSku = encodeURIComponent(sku);
   const query = new URLSearchParams({
@@ -292,19 +270,6 @@ async function getListingItem(sellerId, sku, marketplaceId, baseUri, accessToken
   return response.data;
 }
 
-/**
- * PATCH listing item
- * @param {string} sellerId - Seller ID
- * @param {string} sku - Product SKU
- * @param {string} marketplaceId - Marketplace ID
- * @param {string} baseUri - API base URI
- * @param {string} accessToken - Access token
- * @param {Object} credentials - AWS credentials
- * @param {string} awsRegion - AWS region
- * @param {string} productType - Product type
- * @param {Array} patches - Array of patch operations
- * @returns {Promise<Object>} Patch result
- */
 async function patchListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion, productType, patches) {
   const encodedSku = encodeURIComponent(sku);
   const query = new URLSearchParams({ marketplaceIds: marketplaceId });
@@ -316,16 +281,6 @@ async function patchListingItem(sellerId, sku, marketplaceId, baseUri, accessTok
   return response.data;
 }
 
-/**
- * GET catalog item to fetch Amazon's authoritative data
- * @param {string} asin - ASIN
- * @param {string} marketplaceId - Marketplace ID
- * @param {string} baseUri - API base URI
- * @param {string} accessToken - Access token
- * @param {Object} credentials - AWS credentials
- * @param {string} awsRegion - AWS region
- * @returns {Promise<Object>} Catalog data
- */
 async function getCatalogItem(asin, marketplaceId, baseUri, accessToken, credentials, awsRegion) {
   const query = new URLSearchParams({
     marketplaceIds: marketplaceId,
@@ -342,11 +297,6 @@ async function getCatalogItem(asin, marketplaceId, baseUri, accessToken, credent
 // CONFLICT PARSING & ANALYSIS
 // ============================================================================
 
-/**
- * Parse 8541/8542/8543 error to extract conflicting attribute and Amazon's expected value
- * @param {Object} issue - The issue object from SP-API response
- * @returns {Object|null} Parsed conflict info or null
- */
 function parse8541Error(issue) {
   if (!issue || !CATALOG_CONFLICT_CODES.includes(issue.code)) {
     return null;
@@ -354,24 +304,18 @@ function parse8541Error(issue) {
   
   const message = issue.message || '';
   
-  // Extract attribute name: 'size' or 'item_name' etc.
-  // Pattern: "attribute value(s) conflict with Amazon catalogue value(s): 'size'"
   const attrMatch = message.match(/(?:attribute value\(s\) conflict|following listing attribute).*?'(\w+)'/i);
   const attributeName = attrMatch ? attrMatch[1] : null;
   
-  // Extract Amazon's value: Amazon [en_AU: "1 Count (Pack of 1)"]
   const amazonValueMatch = message.match(/Amazon\s*\[[\w_]+:\s*"([^"]+)"\]/i);
   const amazonValue = amazonValueMatch ? amazonValueMatch[1] : null;
   
-  // Extract Merchant's value: Merchant [en_AU: "0.5mm"]
   const merchantValueMatch = message.match(/Merchant\s*\[[\w_]+:\s*"([^"]+)"\]/i);
   const merchantValue = merchantValueMatch ? merchantValueMatch[1] : null;
   
-  // Extract language tag from the message if present
   const languageTagMatch = message.match(/\[([\w_]+):\s*"/i);
   const languageTag = languageTagMatch ? languageTagMatch[1] : null;
   
-  // Extract ASIN
   const asinMatch = message.match(/ASIN\s+([A-Z0-9]{10})/i);
   const asin = asinMatch ? asinMatch[1] : null;
   
@@ -387,7 +331,7 @@ function parse8541Error(issue) {
     merchantValue,
     languageTag,
     asin,
-    canAutoFix: !!amazonValue, // Can only auto-fix if we know Amazon's value
+    canAutoFix: !!amazonValue,
     rawMessage: message,
     fixAction: amazonValue 
       ? `Update '${attributeName}' from "${merchantValue || 'current value'}" to "${amazonValue}"`
@@ -395,11 +339,6 @@ function parse8541Error(issue) {
   };
 }
 
-/**
- * Analyze all 8541/8542/8543 errors and return fixable conflicts
- * @param {Array} issues - Array of issues from listing data
- * @returns {Object} Analysis result with conflicts
- */
 function analyzeCatalogConflicts(issues) {
   const conflicts = [];
   const unfixableConflicts = [];
@@ -414,7 +353,6 @@ function analyzeCatalogConflicts(issues) {
           unfixableConflicts.push(parsed);
         }
       } else {
-        // Could not parse, add as unfixable
         unfixableConflicts.push({
           code: issue.code,
           rawMessage: issue.message,
@@ -436,10 +374,23 @@ function analyzeCatalogConflicts(issues) {
 }
 
 /**
- * Analyze listing issues and determine fix strategy
+ * Check if the brand attribute is missing or empty from listing data.
+ *
+ * WHY THIS MATTERS: When brand attribute is absent, Amazon cannot link the listing
+ * to Brand Registry. This means catalog contribution rights don't apply and
+ * title/display fields won't update in Seller Central even if the PATCH succeeds.
+ *
  * @param {Object} listingData - Listing data from GET call
- * @param {string} [targetAttribute] - Attribute user wants to update
- * @returns {Object} Analysis result
+ * @returns {boolean} True if brand attribute is missing or empty
+ */
+function isBrandAttributeMissing(listingData) {
+  const brand = listingData?.attributes?.brand;
+  if (!brand || !Array.isArray(brand) || brand.length === 0) return true;
+  return !brand[0]?.value || brand[0].value.trim() === '';
+}
+
+/**
+ * Analyze listing issues and determine fix strategy
  */
 function analyzeIssues(listingData, targetAttribute) {
   const issues = listingData?.issues || [];
@@ -453,16 +404,17 @@ function analyzeIssues(listingData, targetAttribute) {
     conflictingAttributes: [],
     requiredAction: null,
     issues: issues,
-    // Add catalog conflict analysis
     catalogConflictAnalysis: analyzeCatalogConflicts(issues),
-    // ── NEW: Amazon's value for the target attribute if a conflict exists on it
-    amazonValueForTargetAttribute: null
+    amazonValueForTargetAttribute: null,
+    // ── NEW: flag whether brand attribute is missing from this listing.
+    // When true and brandName is supplied in options, the brand patch will be
+    // included automatically in the same PATCH call as the main update.
+    missingBrand: isBrandAttributeMissing(listingData)
   };
 
   for (const issue of issues) {
     const strategy = ISSUE_FIX_STRATEGIES[issue.code];
     
-    // Parse which attribute is conflicting from the message
     const conflictMatch = issue.message?.match(/'(\w+)'/g);
     const conflictingAttr = conflictMatch ? conflictMatch[0]?.replace(/'/g, '') : null;
     
@@ -481,7 +433,6 @@ function analyzeIssues(listingData, targetAttribute) {
         analysis.conflictingAttributes.push(conflictingAttr);
       }
       
-      // Check if the conflict is on the attribute user wants to update
       if (targetAttribute) {
         const targetAttrName = ATTRIBUTE_NAMES[targetAttribute] || targetAttribute;
         if (conflictingAttr === targetAttrName || 
@@ -489,7 +440,6 @@ function analyzeIssues(listingData, targetAttribute) {
             issue.message?.toLowerCase().includes(targetAttrName)) {
           analysis.targetAttributeBlocked = true;
 
-          // ── NEW: Capture Amazon's expected value so autoFixConflicts can use it
           if (parsed?.amazonValue) {
             analysis.amazonValueForTargetAttribute = {
               value: parsed.amazonValue,
@@ -517,12 +467,10 @@ function analyzeIssues(listingData, targetAttribute) {
     }
   }
 
-  // Determine if we can auto-fix
   if (analysis.targetAttributeBlocked) {
     analysis.canAutoFix = false;
     analysis.requiredAction = 'TARGET_ATTRIBUTE_CONFLICT';
   } else if (analysis.catalogConflicts.length > 0 && !analysis.targetAttributeBlocked) {
-    // Conflict exists but NOT on the target attribute - we can try to update
     analysis.canAutoFix = true;
     analysis.requiredAction = 'PROCEED_WITH_CAUTION';
   }
@@ -534,13 +482,6 @@ function analyzeIssues(listingData, targetAttribute) {
 // PATCH BUILDING
 // ============================================================================
 
-/**
- * Extract language tag from existing listing data
- * @param {Object} listingData - Listing data
- * @param {string} attributeName - Attribute name
- * @param {string} marketplaceId - Marketplace ID
- * @returns {string} Language tag
- */
 function extractLanguageTag(listingData, attributeName, marketplaceId) {
   const attributes = listingData?.attributes;
   if (attributes && attributes[attributeName]) {
@@ -552,23 +493,12 @@ function extractLanguageTag(listingData, attributeName, marketplaceId) {
   return getLanguageTag(marketplaceId);
 }
 
-/**
- * Build a patch for a specific attribute with its Amazon catalog value
- * Used to fix individual conflicting attributes
- * @param {string} attributeName - Attribute name (e.g., 'size', 'color')
- * @param {string} amazonValue - Amazon's catalog value
- * @param {string} marketplaceId - Marketplace ID
- * @param {string} languageTag - Language tag
- * @returns {Object} Patch operation
- */
 function buildConflictFixPatch(attributeName, amazonValue, marketplaceId, languageTag) {
   const attributePath = `/attributes/${attributeName}`;
-  
   const valueObj = { value: String(amazonValue), marketplace_id: marketplaceId };
   if (requiresLanguageTag(attributeName)) {
     valueObj.language_tag = languageTag;
   }
-  
   return {
     op: 'replace',
     path: attributePath,
@@ -577,22 +507,36 @@ function buildConflictFixPatch(attributeName, amazonValue, marketplaceId, langua
 }
 
 /**
- * Build patches for the update - supports both simple and complex attribute types
- * @param {string} dataType - Data type (title, description, bulletpoints, size, etc.)
- * @param {string|string[]} value - Value to set
+ * Build the brand attribute patch.
+ * The brandName MUST exactly match Brand Registry enrollment — it is case-sensitive.
+ * e.g. "DIRECT FROM FACTORY" not "Direct From Factory"
+ *
+ * @param {string} brandName - Brand name exactly as enrolled in Brand Registry
  * @param {string} marketplaceId - Marketplace ID
  * @param {string} languageTag - Language tag
- * @returns {Array} Array of patch operations
+ * @returns {Object} Patch operation
  */
+function buildBrandPatch(brandName, marketplaceId, languageTag) {
+  return {
+    op: 'replace',
+    path: '/attributes/brand',
+    value: [
+      {
+        value: String(brandName),
+        language_tag: languageTag,
+        marketplace_id: marketplaceId
+      }
+    ]
+  };
+}
+
 function buildPatches(dataType, value, marketplaceId, languageTag) {
   const normalizedType = (dataType || '').toLowerCase();
   const patches = [];
   
-  // Get attribute name - check if it's a known type or use as-is (for dynamic attributes)
   const attributeName = ATTRIBUTE_NAMES[normalizedType] || normalizedType;
   const attributePath = ATTRIBUTE_PATHS[normalizedType] || `/attributes/${attributeName}`;
 
-  // Handle bullet points specially (array of values)
   if (normalizedType === DATA_TYPES.bulletpoints) {
     const arr = Array.isArray(value) ? value : [value];
     patches.push({
@@ -607,10 +551,8 @@ function buildPatches(dataType, value, marketplaceId, languageTag) {
     return patches;
   }
 
-  // Handle special attribute structures (weight, unit_count, etc.)
   const specialStructure = SPECIAL_ATTRIBUTE_STRUCTURES[attributeName];
   if (specialStructure) {
-    // For special attributes, try to preserve existing structure or use value as-is
     if (typeof value === 'object' && value !== null) {
       patches.push({
         op: 'replace',
@@ -618,7 +560,6 @@ function buildPatches(dataType, value, marketplaceId, languageTag) {
         value: [{ ...value, marketplace_id: marketplaceId }]
       });
     } else {
-      // Simple value - wrap appropriately
       const valueObj = { value: String(value), marketplace_id: marketplaceId };
       if (requiresLanguageTag(attributeName)) {
         valueObj.language_tag = languageTag;
@@ -632,7 +573,6 @@ function buildPatches(dataType, value, marketplaceId, languageTag) {
     return patches;
   }
 
-  // Standard text attributes
   const valueObj = { value: String(value), marketplace_id: marketplaceId };
   if (requiresLanguageTag(attributeName)) {
     valueObj.language_tag = languageTag;
@@ -647,18 +587,10 @@ function buildPatches(dataType, value, marketplaceId, languageTag) {
   return patches;
 }
 
-/**
- * Get Amazon's catalog value for an attribute (to match if needed)
- * @param {Object} catalogData - Catalog data from getCatalogItem
- * @param {string} attributeName - Attribute name
- * @param {string} marketplaceId - Marketplace ID
- * @returns {string|null} Catalog value or null
- */
 function getAmazonCatalogValue(catalogData, attributeName, marketplaceId) {
   const attributes = catalogData?.attributes;
   if (!attributes) return null;
 
-  // Try direct attribute name
   if (attributes[attributeName]) {
     const attr = attributes[attributeName];
     if (Array.isArray(attr) && attr.length > 0) {
@@ -666,7 +598,6 @@ function getAmazonCatalogValue(catalogData, attributeName, marketplaceId) {
     }
   }
 
-  // Try summaries for common attributes
   const summaries = catalogData?.summaries;
   if (summaries && Array.isArray(summaries)) {
     const summary = summaries.find(s => s.marketplaceId === marketplaceId) || summaries[0];
@@ -679,12 +610,6 @@ function getAmazonCatalogValue(catalogData, attributeName, marketplaceId) {
   return null;
 }
 
-/**
- * Get current value of an attribute from listing data
- * @param {Object} listingData - Listing data
- * @param {string} dataType - Data type
- * @returns {string|string[]|null} Current value
- */
 function getCurrentAttributeValue(listingData, dataType) {
   const attrName = ATTRIBUTE_NAMES[dataType.toLowerCase()] || dataType.toLowerCase();
   const attrs = listingData?.attributes?.[attrName];
@@ -698,21 +623,14 @@ function getCurrentAttributeValue(listingData, dataType) {
   return attrs[0]?.value || null;
 }
 
-/**
- * Get user-friendly message for blocked updates
- * @param {Object} analysis - Analysis result
- * @returns {string} User-friendly message
- */
 function getBlockedMessage(analysis) {
   if (analysis.requiredAction === 'BRAND_REGISTRY_REQUIRED') {
     return 'This product requires Brand Registry permissions to update catalog data.';
   }
-  
   if (analysis.requiredAction === 'TARGET_ATTRIBUTE_CONFLICT') {
     const conflicts = analysis.catalogConflicts.map(c => c.message).join(' ');
     return `Cannot update: The attribute you want to change conflicts with Amazon's catalog. ${conflicts}`;
   }
-  
   return 'Unable to update this attribute due to catalog restrictions.';
 }
 
@@ -727,11 +645,7 @@ function getBlockedMessage(analysis) {
  * 1. Analyze listing issues (analyzeOnly: true)
  * 2. Update a single attribute
  * 3. Fix all catalog conflicts AND update target attribute in ONE call (autoFixConflicts: true)
- * 
- * FIX: When the conflict is on the target attribute itself and autoFixConflicts is true,
- * Amazon's catalog value (extracted directly from the 8541 error message) is now used
- * for that attribute instead of silently skipping it and sending the user's value —
- * which was the root cause of the title not updating.
+ * 4. Automatically patch missing brand attribute in the same call (options.brandName)
  * 
  * @param {Object} params
  * @param {string} params.sku - Product SKU
@@ -739,13 +653,18 @@ function getBlockedMessage(analysis) {
  * @param {string} params.country - Country code
  * @param {string} params.region - Region (NA/EU/FE)
  * @param {string} [params.sellerId] - Seller ID (optional)
- * @param {string} params.dataToBeUpdated - 'title' | 'description' | 'bulletpoints' | 'size' | etc.
+ * @param {string} params.dataToBeUpdated - 'title' | 'description' | 'bulletpoints' | 'size' | 'generic_keyword' | etc.
  * @param {string|string[]} params.valueToBeUpdated - New value
  * @param {Object} [params.options] - Additional options
  * @param {boolean} [params.options.autoMatchCatalog=false] - Auto-match Amazon catalog if conflict on target
  * @param {boolean} [params.options.forceUpdate=false] - Try update even with conflicts
  * @param {boolean} [params.options.analyzeOnly=false] - Only analyze, don't update
  * @param {boolean} [params.options.autoFixConflicts=false] - Auto-fix all catalog conflicts in same call
+ * @param {string}  [params.options.brandName] - Brand name EXACTLY as enrolled in Brand Registry
+ *                                               (case-sensitive, e.g. "DIRECT FROM FACTORY").
+ *                                               When provided and brand is missing from the listing,
+ *                                               it is patched in the same PATCH call automatically
+ *                                               so Brand Registry catalog authority takes effect.
  * @returns {Promise<Object>} Fix result
  */
 async function autoFixListing(params) {
@@ -764,18 +683,19 @@ async function autoFixListing(params) {
     autoMatchCatalog = false,
     forceUpdate = false,
     analyzeOnly = false,
-    autoFixConflicts = false
+    autoFixConflicts = false,
+    // ── NEW: brand name exactly as enrolled in Brand Registry (case-sensitive)
+    brandName = null
   } = options;
 
-  // Validate required params
   if (!sku || !userId || !country || !region || !dataToBeUpdated) {
     throw new ApiError(400, 'Missing required parameters');
   }
 
   logger.info('AutoFixListingService: Starting', { sku, dataToBeUpdated, options });
 
-  // Initialize API clients
-  const { refreshToken, sellerId: resolvedSellerId } = await getRefreshTokenForSeller(userId, country, region, sellerId);
+  const { refreshToken, sellerId: resolvedSellerId, brand: sellerBrand } =
+    await getRefreshTokenForSeller(userId, country, region, sellerId);
   const accessToken = await generateAccessToken(userId, refreshToken);
   if (!accessToken) throw new ApiError(500, 'Failed to generate access token');
 
@@ -784,6 +704,9 @@ async function autoFixListing(params) {
   if (!credentials?.AccessKey) throw new ApiError(500, 'Failed to get AWS credentials');
 
   const effectiveSellerId = sellerId || resolvedSellerId;
+
+  // Prefer explicit brandName from options; fall back to seller.brand when available
+  const effectiveBrandName = brandName || sellerBrand || null;
 
   // Step 1: Get current listing data
   let listingData;
@@ -811,8 +734,9 @@ async function autoFixListing(params) {
     targetAttributeBlocked: analysis.targetAttributeBlocked,
     conflictingAttributes: analysis.conflictingAttributes,
     fixableConflicts: analysis.catalogConflictAnalysis.fixableCount,
-    // ── NEW: log whether we have an Amazon value for the blocked target attribute
-    amazonValueForTarget: analysis.amazonValueForTargetAttribute?.value ?? null
+    amazonValueForTarget: analysis.amazonValueForTargetAttribute?.value ?? null,
+    missingBrand: analysis.missingBrand,
+    brandWillBePatched: analysis.missingBrand && !!effectiveBrandName
   });
 
   // If analyze only, return analysis
@@ -827,6 +751,10 @@ async function autoFixListing(params) {
       currentValue: getCurrentAttributeValue(listingData, dataToBeUpdated),
       canUpdate: analysis.canAutoFix,
       catalogConflicts: analysis.catalogConflictAnalysis,
+      // ── NEW: surface brand warning so caller knows what to pass
+      brandWarning: analysis.missingBrand
+        ? 'Brand attribute is missing. Title and other attributes may not update in Seller Central display even if PATCH succeeds. If seller.brand is set we will use that; otherwise pass options.brandName (exactly as in Brand Registry) to fix automatically.'
+        : null,
       message: analysis.canAutoFix 
         ? 'Attribute can be updated' 
         : getBlockedMessage(analysis)
@@ -835,7 +763,6 @@ async function autoFixListing(params) {
 
   // Step 3: Handle blocked target attribute (without autoFixConflicts)
   if (analysis.targetAttributeBlocked && !forceUpdate && !autoFixConflicts) {
-    // Option: Auto-match catalog value if enabled
     if (autoMatchCatalog && asin) {
       try {
         const catalogData = await getCatalogItem(asin, marketplaceId, baseUri, accessToken, credentials, awsRegion);
@@ -853,10 +780,7 @@ async function autoFixListing(params) {
             userRequestedValue: valueToBeUpdated,
             amazonCatalogValue: catalogValue,
             message: `Your requested value conflicts with Amazon catalog. Amazon's value: "${catalogValue}". Use this value or contact Brand Registry support.`,
-            suggestedFix: {
-              useAmazonValue: true,
-              value: catalogValue
-            },
+            suggestedFix: { useAmazonValue: true, value: catalogValue },
             canProceedWithAmazonValue: true
           };
         }
@@ -876,7 +800,7 @@ async function autoFixListing(params) {
       message: getBlockedMessage(analysis),
       possibleSolutions: [
         'Enable autoFixConflicts option to fix all conflicts automatically',
-        'Register your brand with Amazon Brand Registry to gain catalog update permissions',
+        'Register your brand with Amazon Brand Registry to gain catalog update permissions (and set seller.brand in Seller model)',
         'Contact Seller Support to request a catalog update'
       ]
     };
@@ -887,11 +811,9 @@ async function autoFixListing(params) {
     throw new ApiError(400, 'valueToBeUpdated is required for update operation');
   }
 
-  // Get language tag for target attribute
   const attrName = ATTRIBUTE_NAMES[dataToBeUpdated] || dataToBeUpdated;
   const languageTag = extractLanguageTag(listingData, attrName, marketplaceId);
 
-  // Handle partial bullet point update
   let finalValue = valueToBeUpdated;
   if (dataToBeUpdated.toLowerCase() === DATA_TYPES.bulletpoints && 
       valueToBeUpdated && 
@@ -908,45 +830,51 @@ async function autoFixListing(params) {
     finalValue = bulletValues;
   }
 
-  // Step 5: Build ALL patches (conflicts + target attribute) in ONE array
+  // Step 5: Build ALL patches in ONE array
   const allPatches = [];
   const fixedConflicts = [];
-
-  // ── NEW: Track whether a conflict on the target attribute was handled using
-  //         Amazon's catalog value. When true, Step 5b must NOT add the user's
-  //         value on top — that was the root cause of the title not updating.
   let targetAttributeHandledByConflictFix = false;
   let amazonValueUsedForTarget = null;
 
-  // 5a: Add conflict fix patches if autoFixConflicts is enabled
+  // ── NEW 5a: Patch brand attribute FIRST if it is missing AND brandName was provided.
+  //    Done first so Amazon links the listing to Brand Registry before processing
+  //    the rest of the patches in the same call.
+  let brandWasPatched = false;
+  if (analysis.missingBrand && effectiveBrandName) {
+    const brandLanguageTag = getLanguageTag(marketplaceId);
+    allPatches.push(buildBrandPatch(effectiveBrandName, marketplaceId, brandLanguageTag));
+    brandWasPatched = true;
+    logger.info('AutoFixListingService: Adding brand patch — brand attribute was missing', {
+      brandName: effectiveBrandName,
+      marketplaceId,
+      languageTag: brandLanguageTag
+    });
+  } else if (analysis.missingBrand && !effectiveBrandName) {
+    logger.warn(
+      'AutoFixListingService: Brand attribute is missing and neither options.brandName nor seller.brand are set. ' +
+      'Title/display changes may not reflect in Seller Central until brand is set. ' +
+      'Pass options.brandName to fix automatically.',
+      { sku }
+    );
+  }
+
+  // 5b: Add conflict fix patches if autoFixConflicts is enabled
   if (autoFixConflicts && analysis.catalogConflictAnalysis.fixableCount > 0) {
     for (const conflict of analysis.catalogConflictAnalysis.conflicts) {
       const { attributeName, amazonValue, merchantValue, languageTag: conflictLangTag } = conflict;
       
-      if (!amazonValue) continue; // Skip if we don't know Amazon's value
+      if (!amazonValue) continue;
 
       const targetAttrName = ATTRIBUTE_NAMES[dataToBeUpdated] || dataToBeUpdated;
 
       if (attributeName === targetAttrName) {
-        // ── FIX: The conflict is on the SAME attribute the user wants to update.
-        //
-        //   OLD behaviour: `continue` — skipped building a conflict-fix patch,
-        //   then Step 5b sent the user's value → Amazon rejected it (8541 loop).
-        //
-        //   NEW behaviour: build the conflict-fix patch using Amazon's catalog
-        //   value from the error message, record it, and set a flag so Step 5b
-        //   knows NOT to overwrite it with the user's value.
+        // Conflict is on the SAME attribute the user wants to update.
+        // Use Amazon's catalog value — sending user's value would cause an 8541 loop.
         const existingAttr = listingData?.attributes?.[attributeName];
         const resolvedLanguageTag =
           existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
 
-        const conflictPatch = buildConflictFixPatch(
-          attributeName,
-          amazonValue,
-          marketplaceId,
-          resolvedLanguageTag
-        );
-        allPatches.push(conflictPatch);
+        allPatches.push(buildConflictFixPatch(attributeName, amazonValue, marketplaceId, resolvedLanguageTag));
 
         targetAttributeHandledByConflictFix = true;
         amazonValueUsedForTarget = amazonValue;
@@ -968,14 +896,11 @@ async function autoFixListing(params) {
         continue;
       }
       
-      // Conflict is on a different attribute — fix it normally
       const existingAttr = listingData?.attributes?.[attributeName];
       const conflictLanguageTag =
         existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
 
-      const conflictPatch = buildConflictFixPatch(attributeName, amazonValue, marketplaceId, conflictLanguageTag);
-      allPatches.push(conflictPatch);
-
+      allPatches.push(buildConflictFixPatch(attributeName, amazonValue, marketplaceId, conflictLanguageTag));
       fixedConflicts.push({
         attribute: attributeName,
         oldValue: merchantValue,
@@ -991,9 +916,7 @@ async function autoFixListing(params) {
     });
   }
 
-  // 5b: Add target attribute patch ONLY if it was not already handled by a
-  //     conflict fix above. Previously this always ran, which overwrote the
-  //     correct Amazon catalog value with the user's rejected value.
+  // 5c: Add target attribute patch ONLY if not already handled by a conflict fix
   if (!targetAttributeHandledByConflictFix) {
     const targetPatches = buildPatches(dataToBeUpdated, finalValue, marketplaceId, languageTag);
     allPatches.push(...targetPatches);
@@ -1001,6 +924,7 @@ async function autoFixListing(params) {
 
   logger.info('AutoFixListingService: Total patches to apply', { 
     total: allPatches.length,
+    brandPatched: brandWasPatched,
     conflictFixes: fixedConflicts.length,
     targetAttribute: dataToBeUpdated,
     targetHandledViaConflictFix: targetAttributeHandledByConflictFix
@@ -1013,11 +937,8 @@ async function autoFixListing(params) {
       accessToken, credentials, awsRegion, productType, allPatches
     );
 
-    // Check response for issues
     const responseIssues = patchResult?.issues || [];
-    const hasResponseConflicts = responseIssues.some(i => 
-      CATALOG_CONFLICT_CODES.includes(i.code)
-    );
+    const hasResponseConflicts = responseIssues.some(i => CATALOG_CONFLICT_CODES.includes(i.code));
 
     if (hasResponseConflicts) {
       return {
@@ -1031,6 +952,7 @@ async function autoFixListing(params) {
         updatedAttribute: dataToBeUpdated,
         newValue: targetAttributeHandledByConflictFix ? amazonValueUsedForTarget : finalValue,
         fixedConflicts: fixedConflicts.length > 0 ? fixedConflicts : undefined,
+        brandPatched: brandWasPatched ? effectiveBrandName : undefined,
         message: 'Update submitted but may not take effect due to catalog restrictions.',
         warning: true
       };
@@ -1040,11 +962,14 @@ async function autoFixListing(params) {
       sku, 
       dataToBeUpdated,
       conflictsFixed: fixedConflicts.length,
-      usedAmazonValueForTarget: targetAttributeHandledByConflictFix
+      usedAmazonValueForTarget: targetAttributeHandledByConflictFix,
+      brandPatched: brandWasPatched
     });
 
-    // Build success message
     let successMessage = `Successfully updated ${dataToBeUpdated}`;
+    if (brandWasPatched) {
+      successMessage += ` and set brand to "${effectiveBrandName}"`;
+    }
     if (targetAttributeHandledByConflictFix) {
       successMessage += ` using Amazon's catalog value (your value conflicted with the catalog)`;
     }
@@ -1055,7 +980,6 @@ async function autoFixListing(params) {
       }
     }
 
-    // ── NEW: Distinguish when Amazon's value was used for the target attribute
     const action = targetAttributeHandledByConflictFix
       ? 'AMAZON_VALUE_USED'
       : fixedConflicts.length > 0
@@ -1070,13 +994,16 @@ async function autoFixListing(params) {
       productType,
       data: patchResult,
       updatedAttribute: dataToBeUpdated,
-      // Surface which value actually landed on Amazon
       newValue: targetAttributeHandledByConflictFix ? amazonValueUsedForTarget : finalValue,
-      // ── NEW: Let the caller know the user's value was overridden
       ...(targetAttributeHandledByConflictFix && {
         userRequestedValue: finalValue,
         amazonValueApplied: amazonValueUsedForTarget,
         notice: `Your requested value for '${dataToBeUpdated}' conflicts with Amazon's catalog. Amazon's catalog value was applied instead. To use your own value, register your brand via Amazon Brand Registry or raise a Seller Support case.`
+      }),
+      // ── NEW: surface brand patch result to caller
+      ...(brandWasPatched && {
+        brandPatched: effectiveBrandName,
+        brandNote: 'Brand attribute was missing and has been set. Amazon should now link this listing to your Brand Registry enrollment, allowing display attributes to update correctly.'
       }),
       fixedConflicts: fixedConflicts.length > 0 ? fixedConflicts : undefined,
       message: successMessage
@@ -1092,11 +1019,8 @@ async function autoFixListing(params) {
       error: errData || err.message
     });
 
-    // Check if it's a catalog conflict error
     const errIssues = errData?.issues || errData?.errors || [];
-    const isCatalogConflict = errIssues.some(i => 
-      CATALOG_CONFLICT_CODES.includes(i.code)
-    );
+    const isCatalogConflict = errIssues.some(i => CATALOG_CONFLICT_CODES.includes(i.code));
 
     if (isCatalogConflict) {
       return {
@@ -1123,24 +1047,34 @@ async function autoFixListing(params) {
 }
 
 /**
- * Auto-fix all catalog conflicts only (without updating any other attribute)
- * Use this when you just want to clear the 8541 errors
- * 
+ * Ensure brand attribute is set on a listing.
+ * Use this as a standalone call when you just want to set/fix the brand
+ * without updating any other attribute.
+ *
+ * WHY THIS MATTERS: When brand attribute is missing, Amazon cannot link the
+ * listing to Brand Registry. This means catalog contribution rights don't apply
+ * and title/display fields won't update in Seller Central even though the PATCH
+ * succeeds at the attributes level.
+ *
  * @param {Object} params
  * @param {string} params.sku - Product SKU
  * @param {string} params.userId - User ID
  * @param {string} params.country - Country code
  * @param {string} params.region - Region (NA/EU/FE)
- * @param {string} [params.sellerId] - Seller ID (optional)
- * @param {boolean} [params.dryRun=false] - If true, only analyze without making changes
+ * @param {string} [params.sellerId] - Seller ID
+ * @param {string} params.brandName - Brand name EXACTLY as enrolled in Brand Registry (case-sensitive)
+ * @param {boolean} [params.forceUpdate=false] - Overwrite brand even if one already exists
  * @returns {Promise<Object>} Fix result
  */
-async function autoFixCatalogConflicts(params) {
-  const { sku, userId, country, region, sellerId, dryRun = false } = params;
+async function ensureBrandAttribute(params) {
+  const { sku, userId, country, region, sellerId, brandName, forceUpdate = false } = params;
 
-  logger.info('AutoFixCatalogConflicts: Starting', { sku, dryRun });
+  if (!brandName) {
+    throw new ApiError(400, 'brandName is required and must exactly match your Brand Registry enrollment');
+  }
 
-  // Get credentials
+  logger.info('EnsureBrandAttribute: Starting', { sku, brandName, forceUpdate });
+
   const { refreshToken, sellerId: resolvedSellerId } = await getRefreshTokenForSeller(userId, country, region, sellerId);
   const accessToken = await generateAccessToken(userId, refreshToken);
   if (!accessToken) throw new ApiError(500, 'Failed to generate access token');
@@ -1151,7 +1085,6 @@ async function autoFixCatalogConflicts(params) {
 
   const effectiveSellerId = sellerId || resolvedSellerId;
 
-  // Get listing data
   let listingData;
   try {
     listingData = await getListingItem(effectiveSellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion);
@@ -1162,10 +1095,101 @@ async function autoFixCatalogConflicts(params) {
 
   const productType = listingData?.summaries?.[0]?.productType;
   const asin = listingData?.summaries?.[0]?.asin;
-  
   if (!productType) throw new ApiError(404, 'Product type not found');
 
-  // Analyze conflicts
+  const missing = isBrandAttributeMissing(listingData);
+  const currentBrand = listingData?.attributes?.brand?.[0]?.value || null;
+
+  // Brand already set to the correct value — nothing to do
+  if (!missing && !forceUpdate) {
+    if (currentBrand === brandName) {
+      return {
+        status: FIX_STATUS.SUCCESS,
+        action: 'BRAND_ALREADY_SET',
+        message: `Brand is already set to "${brandName}". No update needed.`,
+        sku,
+        asin,
+        productType,
+        currentBrand
+      };
+    }
+    // Brand exists but is different value — require explicit forceUpdate
+    return {
+      status: FIX_STATUS.REQUIRES_MANUAL,
+      action: 'BRAND_MISMATCH',
+      message: `Brand is currently "${currentBrand}" which differs from "${brandName}". Pass forceUpdate: true to overwrite.`,
+      sku,
+      asin,
+      productType,
+      currentBrand,
+      requestedBrand: brandName
+    };
+  }
+
+  const languageTag = getLanguageTag(marketplaceId);
+  const patch = buildBrandPatch(brandName, marketplaceId, languageTag);
+
+  try {
+    const patchResult = await patchListingItem(
+      effectiveSellerId, sku, marketplaceId, baseUri,
+      accessToken, credentials, awsRegion, productType, [patch]
+    );
+
+    const responseIssues = patchResult?.issues || [];
+    logger.info('EnsureBrandAttribute: Success', { sku, brandName });
+
+    return {
+      status: FIX_STATUS.SUCCESS,
+      action: 'BRAND_SET',
+      message: `Brand attribute successfully set to "${brandName}". Amazon should now link this listing to your Brand Registry enrollment.`,
+      sku,
+      asin,
+      productType,
+      previousBrand: currentBrand,
+      newBrand: brandName,
+      data: patchResult,
+      issues: responseIssues.length > 0 ? responseIssues : undefined
+    };
+  } catch (err) {
+    const errData = err.response?.data;
+    logger.error('EnsureBrandAttribute: Failed', { sku, brandName, error: errData || err.message });
+    throw new ApiError(
+      err.response?.status || 500,
+      errData?.errors?.[0]?.message || `Failed to set brand attribute`
+    );
+  }
+}
+
+/**
+ * Auto-fix all catalog conflicts only
+ */
+async function autoFixCatalogConflicts(params) {
+  const { sku, userId, country, region, sellerId, dryRun = false } = params;
+
+  logger.info('AutoFixCatalogConflicts: Starting', { sku, dryRun });
+
+  const { refreshToken, sellerId: resolvedSellerId } = await getRefreshTokenForSeller(userId, country, region, sellerId);
+  const accessToken = await generateAccessToken(userId, refreshToken);
+  if (!accessToken) throw new ApiError(500, 'Failed to generate access token');
+
+  const { baseUri, marketplaceId, awsRegion } = getRegionConfig(region, country);
+  const credentials = await getTemporaryCredentials(awsRegion);
+  if (!credentials?.AccessKey) throw new ApiError(500, 'Failed to get AWS credentials');
+
+  const effectiveSellerId = sellerId || resolvedSellerId;
+
+  let listingData;
+  try {
+    listingData = await getListingItem(effectiveSellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion);
+  } catch (err) {
+    const errData = err.response?.data;
+    throw new ApiError(err.response?.status || 500, errData?.errors?.[0]?.message || 'Failed to fetch listing');
+  }
+
+  const productType = listingData?.summaries?.[0]?.productType;
+  const asin = listingData?.summaries?.[0]?.asin;
+  if (!productType) throw new ApiError(404, 'Product type not found');
+
   const issues = listingData?.issues || [];
   const conflictAnalysis = analyzeCatalogConflicts(issues);
 
@@ -1174,9 +1198,7 @@ async function autoFixCatalogConflicts(params) {
       status: FIX_STATUS.NO_CONFLICTS,
       action: 'NO_ACTION_NEEDED',
       message: 'No catalog conflicts found for this listing',
-      sku,
-      asin,
-      productType
+      sku, asin, productType
     };
   }
 
@@ -1185,9 +1207,7 @@ async function autoFixCatalogConflicts(params) {
       status: FIX_STATUS.CANNOT_FIX,
       action: 'MANUAL_FIX_REQUIRED',
       message: 'Conflicts found but cannot be auto-fixed. Amazon\'s expected values could not be determined.',
-      sku,
-      asin,
-      productType,
+      sku, asin, productType,
       conflicts: conflictAnalysis.unfixableConflicts,
       possibleSolutions: [
         'Review the error messages and manually update the conflicting attributes',
@@ -1196,38 +1216,24 @@ async function autoFixCatalogConflicts(params) {
     };
   }
 
-  // Build patches
   const patches = [];
   const fixedAttributes = [];
 
   for (const conflict of conflictAnalysis.conflicts) {
     const { attributeName, amazonValue, merchantValue, languageTag: conflictLangTag } = conflict;
-    
     if (!amazonValue) continue;
-    
     const existingAttr = listingData?.attributes?.[attributeName];
     const languageTag = existingAttr?.[0]?.language_tag || conflictLangTag || getLanguageTag(marketplaceId);
-
-    const patch = buildConflictFixPatch(attributeName, amazonValue, marketplaceId, languageTag);
-    patches.push(patch);
-
-    fixedAttributes.push({
-      attribute: attributeName,
-      oldValue: merchantValue,
-      newValue: amazonValue,
-      languageTag
-    });
+    patches.push(buildConflictFixPatch(attributeName, amazonValue, marketplaceId, languageTag));
+    fixedAttributes.push({ attribute: attributeName, oldValue: merchantValue, newValue: amazonValue, languageTag });
   }
 
-  // Dry run - return what would be fixed
   if (dryRun) {
     return {
       status: FIX_STATUS.SUCCESS,
       action: 'DRY_RUN_ANALYSIS',
       message: `Found ${fixedAttributes.length} conflict(s) that can be auto-fixed`,
-      sku,
-      asin,
-      productType,
+      sku, asin, productType,
       wouldFix: fixedAttributes,
       unfixable: conflictAnalysis.unfixableConflicts
     };
@@ -1238,13 +1244,10 @@ async function autoFixCatalogConflicts(params) {
       status: FIX_STATUS.CANNOT_FIX,
       action: 'NO_FIXABLE_CONFLICTS',
       message: 'No conflicts could be auto-fixed',
-      sku,
-      asin,
-      productType
+      sku, asin, productType
     };
   }
 
-  // Execute patch
   try {
     const patchResult = await patchListingItem(
       effectiveSellerId, sku, marketplaceId, baseUri,
@@ -1254,11 +1257,7 @@ async function autoFixCatalogConflicts(params) {
     const responseIssues = patchResult?.issues || [];
     const hasNewIssues = responseIssues.length > 0;
 
-    logger.info('AutoFixCatalogConflicts: Completed', { 
-      sku, 
-      fixedCount: fixedAttributes.length,
-      hasNewIssues
-    });
+    logger.info('AutoFixCatalogConflicts: Completed', { sku, fixedCount: fixedAttributes.length, hasNewIssues });
 
     return {
       status: hasNewIssues ? FIX_STATUS.PARTIAL_SUCCESS : FIX_STATUS.SUCCESS,
@@ -1266,9 +1265,7 @@ async function autoFixCatalogConflicts(params) {
       message: hasNewIssues 
         ? `Fixed ${fixedAttributes.length} conflict(s) but new issues were reported`
         : `Successfully fixed ${fixedAttributes.length} catalog conflict(s)`,
-      sku,
-      asin,
-      productType,
+      sku, asin, productType,
       fixedAttributes,
       data: patchResult,
       newIssues: hasNewIssues ? responseIssues : undefined
@@ -1276,7 +1273,6 @@ async function autoFixCatalogConflicts(params) {
   } catch (err) {
     const errData = err.response?.data;
     logger.error('AutoFixCatalogConflicts: Failed', { sku, error: errData || err.message });
-    
     throw new ApiError(
       err.response?.status || 500,
       errData?.errors?.[0]?.message || 'Failed to fix catalog conflicts'
@@ -1286,15 +1282,6 @@ async function autoFixCatalogConflicts(params) {
 
 /**
  * Fix a single specific attribute
- * @param {Object} params
- * @param {string} params.sku - Product SKU
- * @param {string} params.userId - User ID
- * @param {string} params.country - Country code
- * @param {string} params.region - Region (NA/EU/FE)
- * @param {string} [params.sellerId] - Seller ID
- * @param {string} params.attributeName - Attribute to fix
- * @param {string} params.newValue - New value
- * @returns {Promise<Object>} Fix result
  */
 async function fixSingleAttribute(params) {
   const { sku, userId, country, region, sellerId, attributeName, newValue } = params;
@@ -1325,7 +1312,6 @@ async function fixSingleAttribute(params) {
 
   const productType = listingData?.summaries?.[0]?.productType;
   const asin = listingData?.summaries?.[0]?.asin;
-  
   if (!productType) throw new ApiError(404, 'Product type not found');
 
   const languageTag = extractLanguageTag(listingData, attributeName, marketplaceId);
@@ -1343,19 +1329,13 @@ async function fixSingleAttribute(params) {
       status: FIX_STATUS.SUCCESS,
       action: 'ATTRIBUTE_FIXED',
       message: `Successfully updated '${attributeName}'`,
-      sku,
-      asin,
-      productType,
-      fixedAttribute: {
-        attribute: attributeName,
-        newValue: newValue
-      },
+      sku, asin, productType,
+      fixedAttribute: { attribute: attributeName, newValue },
       data: patchResult
     };
   } catch (err) {
     const errData = err.response?.data;
     logger.error('FixSingleAttribute: Failed', { sku, attributeName, error: errData || err.message });
-    
     throw new ApiError(
       err.response?.status || 500,
       errData?.errors?.[0]?.message || `Failed to update '${attributeName}'`
@@ -1365,36 +1345,20 @@ async function fixSingleAttribute(params) {
 
 /**
  * Batch analyze multiple SKUs
- * @param {Object} params
- * @param {string[]} params.skus - Array of SKUs
- * @param {string} params.userId - User ID
- * @param {string} params.country - Country code
- * @param {string} params.region - Region
- * @param {string} params.dataToBeUpdated - Target attribute
- * @returns {Promise<Object>} Batch analysis result
  */
 async function batchAnalyze(params) {
   const { skus, userId, country, region, dataToBeUpdated } = params;
-  
   const results = [];
   
   for (const sku of skus) {
     try {
       const result = await autoFixListing({
-        sku,
-        userId,
-        country,
-        region,
-        dataToBeUpdated,
+        sku, userId, country, region, dataToBeUpdated,
         options: { analyzeOnly: true }
       });
       results.push({ sku, ...result });
     } catch (err) {
-      results.push({
-        sku,
-        status: FIX_STATUS.ERROR,
-        error: err.message
-      });
+      results.push({ sku, status: FIX_STATUS.ERROR, error: err.message });
     }
   }
   
@@ -1409,25 +1373,11 @@ async function batchAnalyze(params) {
 
 /**
  * Apply fix using Amazon's catalog value
- * @param {Object} params
- * @param {string} params.sku - Product SKU
- * @param {string} params.userId - User ID
- * @param {string} params.country - Country code
- * @param {string} params.region - Region
- * @param {string} [params.sellerId] - Seller ID
- * @param {string} params.dataToBeUpdated - Target attribute
- * @param {string} params.catalogValue - Amazon's catalog value
- * @returns {Promise<Object>} Fix result
  */
 async function applyAmazonCatalogValue(params) {
   const { sku, userId, country, region, sellerId, dataToBeUpdated, catalogValue } = params;
-  
   return autoFixListing({
-    sku,
-    userId,
-    country,
-    region,
-    sellerId,
+    sku, userId, country, region, sellerId,
     dataToBeUpdated,
     valueToBeUpdated: catalogValue,
     options: { forceUpdate: true }
@@ -1435,19 +1385,15 @@ async function applyAmazonCatalogValue(params) {
 }
 
 /**
- * Simple update product content with auto-fix conflicts enabled by default
- * This is the main function for simple updates via controller
- * 
- * @param {Object} params - Same as autoFixListing
- * @returns {Promise<Object>} Result from autoFixListing
+ * Simple update product content with auto-fix conflicts enabled by default.
+ * Pass options.brandName to also fix a missing brand attribute in the same call.
  */
 async function updateProductContent(params) {
   const { options = {}, ...rest } = params;
-  
   return autoFixListing({
     ...rest,
     options: {
-      autoFixConflicts: true,  // Enable by default for seamless updates
+      autoFixConflicts: true,
       ...options
     }
   });
@@ -1463,7 +1409,8 @@ module.exports = {
   autoFixListing,
   autoFixCatalogConflicts,
   fixSingleAttribute,
-  
+  ensureBrandAttribute,         // ── NEW: standalone brand setter
+
   // Batch operations
   batchAnalyze,
   
@@ -1476,7 +1423,9 @@ module.exports = {
   getCurrentAttributeValue,
   buildPatches,
   buildConflictFixPatch,
+  buildBrandPatch,              // ── NEW
   extractLanguageTag,
+  isBrandAttributeMissing,      // ── NEW
   
   // Constants
   FIX_STATUS,
