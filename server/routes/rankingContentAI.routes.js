@@ -5,7 +5,7 @@ const { getLocation } = require('../middlewares/Auth/getLocation.js');
 
 const {
   generateRankingContent
-} = require('../controllers/Operations/RankingContentAIController.js');
+} = require('../controllers/operations/RankingContentAIController.js');
 
 // AI suggestions for ranking-related listing content (title, bullet points, description)
 router.post('/ranking-content', auth, getLocation, generateRankingContent);

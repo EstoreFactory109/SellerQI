@@ -30,7 +30,7 @@ const { getLocation } = require('../middlewares/Auth/getLocation.js');
 
 const {
   updateProductContentController
-} = require('../controllers/Operations/UpdateProductContentController.js');
+} = require('../controllers/operations/UpdateProductContentController.js');
 
 // Production endpoint for frontend integration (auth + location required)
 router.post('/update-product-content', auth, getLocation, updateProductContentController);
