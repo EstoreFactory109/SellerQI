@@ -11,7 +11,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { updateProductContentController } = require('../controllers/Operations/UpdateProductContentController.js');
+const { updateProductContentController } = require('../controllers/operations/UpdateProductContentController.js');
 
 router.get('/test', (req, res) => {
   res.json({

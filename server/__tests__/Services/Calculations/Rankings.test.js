@@ -219,15 +219,16 @@ describe('Rankings Calculations', () => {
       expect(result.charLim.status).toBe('Error');
     });
 
-    it('should detect short backend keywords (< 450 chars)', () => {
+    it('should warn when backend keywords are under 200 bytes', () => {
       const result = BackendKeyWordOrAttributesStatus('short keywords');
 
-      expect(result.charLim.status).toBe('Error');
-      expect(result.charLim.Message).toContain('less than 450 characters');
+      expect(result.charLim.status).toBe('Warning');
+      expect(result.charLim.Message).toContain('250');
+      expect(result.charLim.Message).toContain('bytes');
     });
 
-    it('should pass backend keywords with 450+ characters', () => {
-      const result = BackendKeyWordOrAttributesStatus('a '.repeat(250)); // 500 chars
+    it('should pass backend keywords within 200-250 bytes', () => {
+      const result = BackendKeyWordOrAttributesStatus('a'.repeat(220)); // 220 bytes
 
       expect(result.charLim.status).toBe('Success');
       expect(result.charLim.Message).toContain('effectively');
