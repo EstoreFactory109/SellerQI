@@ -14,6 +14,7 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const { generateRankingContentSuggestion } = require('../../Services/AI/RankingContentAIService.js');
 const { updateProductContent } = require('../../Services/Sp_API/UpdateProductContentService.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 
 const ALLOWED_ATTRIBUTES = ['title', 'bulletpoints', 'description', 'generic_keyword'];
 
@@ -328,8 +329,94 @@ const batchSuggestions = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * GET /api/qmate/lookup-sku/:asin
+ * 
+ * Look up the SKU for a given ASIN.
+ * This is used when QMate's content_actions has a null SKU
+ * and the frontend needs to resolve it before applying a fix.
+ */
+const lookupSku = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { asin } = req.params;
+
+    if (!userId) {
+        return res.status(400).json(new ApiError(400, 'User ID is required'));
+    }
+
+    if (!country || !region) {
+        return res.status(400).json(new ApiError(400, 'Country and region are required'));
+    }
+
+    if (!asin) {
+        return res.status(400).json(new ApiError(400, 'ASIN is required'));
+    }
+
+    logger.info('[QMateAction] Looking up SKU for ASIN', {
+        userId,
+        country,
+        region,
+        asin
+    });
+
+    try {
+        const sellerData = await Seller.findOne(
+            { User: userId },
+            { 'sellerAccount': { $elemMatch: { region, country } } }
+        ).lean();
+
+        const products = sellerData?.sellerAccount?.[0]?.products || [];
+        const product = products.find(p => p.asin === asin);
+
+        if (!product) {
+            logger.warn('[QMateAction] Product not found for ASIN', { userId, asin });
+            return res.status(404).json(
+                new ApiError(404, `Product with ASIN ${asin} not found in your catalog`)
+            );
+        }
+
+        if (!product.sku) {
+            logger.warn('[QMateAction] SKU not available for ASIN', { userId, asin });
+            return res.status(404).json(
+                new ApiError(404, `SKU not available for ASIN ${asin}`)
+            );
+        }
+
+        logger.info('[QMateAction] SKU found for ASIN', {
+            userId,
+            asin,
+            sku: product.sku
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                asin,
+                sku: product.sku,
+                itemName: product.itemName || null,
+                status: product.status || null
+            }, 'SKU found successfully')
+        );
+
+    } catch (error) {
+        logger.error('[QMateAction] Error looking up SKU', {
+            error: error.message,
+            stack: error.stack,
+            userId,
+            asin
+        });
+
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json(
+            new ApiError(statusCode, error.message || 'Failed to look up SKU')
+        );
+    }
+});
+
 module.exports = {
     generateSuggestion,
     applyFix,
-    batchSuggestions
+    batchSuggestions,
+    lookupSku
 };

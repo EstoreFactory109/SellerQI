@@ -2,19 +2,34 @@
  * QMateReimbursementService
  * 
  * Specialized service for reimbursement data for QMate AI.
- * Provides recoverable amounts, expiring claims, and breakdown by reason.
+ * Provides:
+ * 1. RECOVERABLE reimbursements (expected amounts that can be claimed) - matches dashboard
+ *    - Shipment discrepancy
+ *    - Lost inventory
+ *    - Damaged inventory
+ *    - Disposed inventory
+ * 2. RECEIVED reimbursements (already processed by Amazon)
+ *    - Historical reimbursements by reason
+ *    - Monthly trends
  * 
  * Data Sources:
- * - FBAReimbursements: Amazon reimbursement data
- * - IssuesDataChunks: Reimbursement-related issues
+ * - FBAReimbursements: Amazon reimbursement data (already received)
+ * - Reimbursement.js calculations: Expected/recoverable amounts
  * 
  * This service is INDEPENDENT and does not affect any existing flows.
  */
 
 const logger = require('../../utils/Logger.js');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
-const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const mongoose = require('mongoose');
+
+// Import calculation functions for recoverable reimbursements (matches dashboard)
+const {
+    calculateShipmentDiscrepancy,
+    calculateLostInventoryReimbursement,
+    calculateDamagedInventoryReimbursement,
+    calculateDisposedInventoryReimbursement
+} = require('../Calculations/Reimbursement.js');
 
 /**
  * Get reimbursement summary
@@ -453,7 +468,171 @@ async function getReimbursementTrends(userId, country, region) {
 }
 
 /**
+ * Get RECOVERABLE reimbursements (expected amounts that can be claimed)
+ * This matches what the Reimbursement Dashboard shows.
+ * 
+ * Categories:
+ * 1. Shipment Discrepancy - items shipped but not received
+ * 2. Lost Inventory - items lost in Amazon warehouse
+ * 3. Damaged Inventory - items damaged in warehouse
+ * 4. Disposed Inventory - items disposed by Amazon
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @param {number} limit - Max items per category
+ * @returns {Promise<Object>} Recoverable reimbursement data
+ */
+async function getRecoverableReimbursements(userId, country, region, limit = 15) {
+    const startTime = Date.now();
+    
+    try {
+        // Calculate all recoverable reimbursements in parallel
+        const [
+            shipmentResult,
+            lostResult,
+            damagedResult,
+            disposedResult
+        ] = await Promise.all([
+            calculateShipmentDiscrepancy(userId, country, region),
+            calculateLostInventoryReimbursement(userId, country, region),
+            calculateDamagedInventoryReimbursement(userId, country, region),
+            calculateDisposedInventoryReimbursement(userId, country, region)
+        ]);
+        
+        // Process shipment discrepancy data
+        const shipmentData = (shipmentResult.data || [])
+            .filter(item => (item.reimbursementAmount || 0) > 0)
+            .sort((a, b) => (b.reimbursementAmount || 0) - (a.reimbursementAmount || 0))
+            .slice(0, limit)
+            .map(item => ({
+                date: item.date || '',
+                shipmentId: item.shipmentId || '',
+                sku: item.sellerSKU || '',
+                quantityShipped: item.quantityShipped || 0,
+                quantityReceived: item.quantityReceived || 0,
+                discrepancy: item.discrepancy || 0,
+                expectedAmount: item.reimbursementAmount || 0
+            }));
+        
+        // Process lost inventory data
+        const lostData = (lostResult.data || [])
+            .filter(item => (item.expectedAmount || 0) > 0)
+            .sort((a, b) => (b.expectedAmount || 0) - (a.expectedAmount || 0))
+            .slice(0, limit)
+            .map(item => ({
+                date: item.date || '',
+                asin: item.asin || '',
+                fnsku: item.fnsku || '',
+                title: item.title || '',
+                lostUnits: item.lostUnits || 0,
+                foundUnits: item.foundUnits || 0,
+                reimbursedUnits: item.reimbursedUnits || 0,
+                discrepancyUnits: item.discrepancyUnits || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
+        
+        // Process damaged inventory data
+        const damagedData = (damagedResult.data || [])
+            .filter(item => (item.expectedAmount || 0) > 0)
+            .sort((a, b) => (b.expectedAmount || 0) - (a.expectedAmount || 0))
+            .slice(0, limit)
+            .map(item => ({
+                date: item.date || '',
+                asin: item.asin || '',
+                fnsku: item.fnsku || '',
+                title: item.title || '',
+                reasonCode: item.reasonCode || '',
+                damagedUnits: item.damagedUnits || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
+        
+        // Process disposed inventory data
+        const disposedData = (disposedResult.data || [])
+            .filter(item => (item.expectedAmount || 0) > 0)
+            .sort((a, b) => (b.expectedAmount || 0) - (a.expectedAmount || 0))
+            .slice(0, limit)
+            .map(item => ({
+                date: item.date || '',
+                asin: item.asin || '',
+                fnsku: item.fnsku || '',
+                title: item.title || '',
+                disposition: item.disposition || '',
+                disposedUnits: item.disposedUnits || 0,
+                expectedAmount: item.expectedAmount || 0
+            }));
+        
+        // Calculate totals
+        const shipmentTotal = shipmentResult.totalReimbursement || 0;
+        const lostTotal = lostResult.totalExpectedAmount || 0;
+        const damagedTotal = damagedResult.totalExpectedAmount || 0;
+        const disposedTotal = disposedResult.totalExpectedAmount || 0;
+        const totalRecoverable = shipmentTotal + lostTotal + damagedTotal + disposedTotal;
+        
+        // Get total counts
+        const shipmentCount = (shipmentResult.data || []).filter(item => (item.reimbursementAmount || 0) > 0).length;
+        const lostCount = (lostResult.data || []).filter(item => (item.expectedAmount || 0) > 0).length;
+        const damagedCount = (damagedResult.data || []).filter(item => (item.expectedAmount || 0) > 0).length;
+        const disposedCount = (disposedResult.data || []).filter(item => (item.expectedAmount || 0) > 0).length;
+        
+        logger.info('[QMateReimbursementService] Got recoverable reimbursements', {
+            userId, country, region,
+            duration: Date.now() - startTime,
+            totalRecoverable,
+            shipmentCount,
+            lostCount,
+            damagedCount,
+            disposedCount
+        });
+        
+        return {
+            success: true,
+            data: {
+                summary: {
+                    totalRecoverable: parseFloat(totalRecoverable.toFixed(2)),
+                    shipmentDiscrepancyTotal: parseFloat(shipmentTotal.toFixed(2)),
+                    lostInventoryTotal: parseFloat(lostTotal.toFixed(2)),
+                    damagedInventoryTotal: parseFloat(damagedTotal.toFixed(2)),
+                    disposedInventoryTotal: parseFloat(disposedTotal.toFixed(2)),
+                    totalDiscrepancies: shipmentCount + lostCount + damagedCount + disposedCount
+                },
+                shipmentDiscrepancy: {
+                    count: shipmentCount,
+                    totalAmount: parseFloat(shipmentTotal.toFixed(2)),
+                    items: shipmentData
+                },
+                lostInventory: {
+                    count: lostCount,
+                    totalAmount: parseFloat(lostTotal.toFixed(2)),
+                    items: lostData
+                },
+                damagedInventory: {
+                    count: damagedCount,
+                    totalAmount: parseFloat(damagedTotal.toFixed(2)),
+                    items: damagedData
+                },
+                disposedInventory: {
+                    count: disposedCount,
+                    totalAmount: parseFloat(disposedTotal.toFixed(2)),
+                    items: disposedData
+                }
+            }
+        };
+        
+    } catch (error) {
+        logger.error('[QMateReimbursementService] Error getting recoverable reimbursements', {
+            error: error.message, userId, country, region
+        });
+        return { success: false, error: error.message, data: null };
+    }
+}
+
+/**
  * Get complete reimbursement context for QMate AI
+ * 
+ * Includes:
+ * 1. RECOVERABLE: Expected amounts that can be claimed (matches dashboard)
+ * 2. RECEIVED: Already processed reimbursements from Amazon (historical data)
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
@@ -464,59 +643,76 @@ async function getQMateReimbursementContext(userId, country, region) {
     const startTime = Date.now();
     
     try {
-        // Fetch all reimbursement data in parallel
+        // Fetch ALL reimbursement data in parallel:
+        // 1. Recoverable (expected amounts - matches dashboard)
+        // 2. Received (historical from Amazon)
         const [
-            summaryResult,
-            lostInventoryResult,
-            returnAnalysisResult,
-            trendsResult
+            recoverableResult,
+            receivedSummaryResult,
+            receivedTrendsResult
         ] = await Promise.all([
+            getRecoverableReimbursements(userId, country, region, 15),
             getReimbursementSummary(userId, country, region),
-            getLostInventoryAnalysis(userId, country, region),
-            getCustomerReturnAnalysis(userId, country, region),
             getReimbursementTrends(userId, country, region)
         ]);
         
         const context = {
-            summary: null,
-            lostInventory: null,
-            customerReturns: null,
-            trends: null
+            // RECOVERABLE: What can be claimed (matches dashboard)
+            recoverable: null,
+            // RECEIVED: Historical reimbursements from Amazon
+            received: null,
+            trends: null,
+            insights: null
         };
         
-        if (summaryResult?.success) {
-            context.summary = summaryResult.data;
+        // Recoverable reimbursements (expected amounts)
+        if (recoverableResult?.success) {
+            context.recoverable = recoverableResult.data;
         }
         
-        if (lostInventoryResult?.success) {
-            context.lostInventory = lostInventoryResult.data;
+        // Received reimbursements (from Amazon)
+        if (receivedSummaryResult?.success) {
+            context.received = receivedSummaryResult.data;
         }
         
-        if (returnAnalysisResult?.success) {
-            context.customerReturns = returnAnalysisResult.data;
-        }
-        
-        if (trendsResult?.success) {
-            context.trends = trendsResult.data;
+        // Monthly trends
+        if (receivedTrendsResult?.success) {
+            context.trends = receivedTrendsResult.data;
         }
         
         // Generate insights
-        const totalReimbursed = context.summary?.summary?.totalAmount || 0;
-        const lostInventoryAmount = context.lostInventory?.summary?.totalAmountReimbursed || 0;
-        const returnAmount = context.customerReturns?.summary?.totalAmountReimbursed || 0;
+        const totalRecoverable = context.recoverable?.summary?.totalRecoverable || 0;
+        const totalReceived = context.received?.summary?.totalAmount || 0;
+        
+        // Identify the largest recoverable category
+        const categoryAmounts = {
+            'Shipment Discrepancy': context.recoverable?.shipmentDiscrepancy?.totalAmount || 0,
+            'Lost Inventory': context.recoverable?.lostInventory?.totalAmount || 0,
+            'Damaged Inventory': context.recoverable?.damagedInventory?.totalAmount || 0,
+            'Disposed Inventory': context.recoverable?.disposedInventory?.totalAmount || 0
+        };
+        
+        const largestCategory = Object.entries(categoryAmounts)
+            .sort((a, b) => b[1] - a[1])[0];
         
         context.insights = {
-            totalRecovered: parseFloat(totalReimbursed.toFixed(2)),
-            primarySource: lostInventoryAmount > returnAmount ? 'Lost Inventory' : 'Customer Returns',
-            recommendation: totalReimbursed > 1000 
-                ? 'Consider auditing inventory regularly to minimize losses'
-                : 'Reimbursement levels appear normal'
+            totalRecoverable: parseFloat(totalRecoverable.toFixed(2)),
+            totalReceived: parseFloat(totalReceived.toFixed(2)),
+            largestRecoverableCategory: largestCategory[1] > 0 ? largestCategory[0] : null,
+            largestRecoverableAmount: parseFloat(largestCategory[1].toFixed(2)),
+            hasRecoverableAmount: totalRecoverable > 0,
+            recommendation: totalRecoverable > 500 
+                ? `You have ${totalRecoverable.toFixed(2)} in recoverable reimbursements. Focus on ${largestCategory[0]} claims first.`
+                : totalRecoverable > 0
+                    ? 'Small recoverable amount detected. Consider filing claims when you have time.'
+                    : 'No significant recoverable amounts at this time.'
         };
         
         logger.info('[QMateReimbursementService] Got complete reimbursement context', {
             userId, country, region,
             duration: Date.now() - startTime,
-            totalRecovered: totalReimbursed
+            totalRecoverable,
+            totalReceived
         });
         
         return {
@@ -538,5 +734,6 @@ module.exports = {
     getLostInventoryAnalysis,
     getCustomerReturnAnalysis,
     getReimbursementTrends,
+    getRecoverableReimbursements,
     getQMateReimbursementContext
 };

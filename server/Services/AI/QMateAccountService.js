@@ -223,10 +223,9 @@ async function getAccountStatus(userId, country, region) {
             : userId;
         
         // Fetch data in parallel
-        const [issueSummary, v2Performance, v1Performance, sellerData] = await Promise.all([
+        const [issueSummary, v2Performance, sellerData] = await Promise.all([
             IssueSummary.getIssueSummary(userObjectId, country, region),
             V2SellerPerformance.findOne({ User: userObjectId, country, region }).sort({ createdAt: -1 }).lean(),
-            V1SellerPerformance.findOne({ User: userObjectId, country, region }).sort({ createdAt: -1 }).lean(),
             Seller.findOne({ User: userObjectId }).select('sellerAccount').lean()
         ]);
         
@@ -254,14 +253,6 @@ async function getAccountStatus(userId, country, region) {
             }
         }
         
-        if (v1Performance) {
-            const azClaims = parseInt(v1Performance.a_z_claims?.count) || 0;
-            if (azClaims > 0) {
-                healthScore -= Math.min(azClaims * 5, 15);
-                issues.push({ metric: 'A-to-Z Claims', count: azClaims, impact: 'high' });
-            }
-        }
-        
         healthScore = Math.max(0, healthScore);
         
         let accountHealthStatus = 'Healthy';
@@ -276,7 +267,7 @@ async function getAccountStatus(userId, country, region) {
         
         return {
             success: true,
-            source: 'combined_account_data',
+            source: 'v2_account_data',
             data: {
                 accountInfo: {
                     marketplace: country,

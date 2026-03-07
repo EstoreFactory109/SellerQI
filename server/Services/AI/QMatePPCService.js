@@ -4,11 +4,15 @@
  * Specialized service for PPC/Advertising data for QMate AI.
  * Provides detailed campaign analysis, keyword performance, and ad optimization insights.
  * 
+ * IMPORTANT: This service now uses PPCCampaignAnalysisService to ensure data consistency
+ * with the Campaign Analysis Dashboard. All tab data (High ACOS, Wasted Spend, etc.)
+ * comes from the same source as the frontend dashboard.
+ * 
  * Data Sources:
- * - PPCMetrics: Overall PPC performance summary
- * - adsKeywordsPerformance: Keyword-level performance data
- * - SearchTerms: Search term performance for targeting
- * - Campaign: Campaign configuration data
+ * - PPCMetrics: Overall PPC performance summary and dateWiseMetrics
+ * - PPCUnitsSold: Units sold from PPC
+ * - PPCCampaignAnalysisService: All 6 dashboard tabs + KPI summary
+ * - EconomicsMetrics: Total sales for TACOS calculation
  * - IssuesDataChunks: PPC-related issues and recommendations
  * 
  * This service is INDEPENDENT and does not affect any existing flows.
@@ -16,10 +20,10 @@
 
 const logger = require('../../utils/Logger.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
-const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
-const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
-const Campaign = require('../../models/amazon-ads/CampaignModel.js');
+const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
+const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+const PPCCampaignAnalysisService = require('../Calculations/PPCCampaignAnalysisService.js');
 const mongoose = require('mongoose');
 
 /**
@@ -543,116 +547,163 @@ async function getPPCIssues(userId, country, region) {
 
 /**
  * Get complete PPC context for QMate AI
- * Combines all PPC data sources
+ * Uses PPCCampaignAnalysisService to ensure data consistency with the dashboard.
+ * 
+ * This provides the EXACT same data as the Campaign Analysis Dashboard:
+ * - KPI Summary: PPC sales, spend, ACOS, TACOS, units sold, total issues
+ * - DateWise metrics for charts
+ * - All 6 tabs: High ACOS, Wasted Spend, No Negatives, Top Keywords, Zero Sales, Auto Insights
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region
- * @param {Object} options - Options
- * @returns {Promise<Object>} Complete PPC context
+ * @param {Object} options - Options (startDate, endDate for filtering)
+ * @returns {Promise<Object>} Complete PPC context matching dashboard
  */
 async function getQMatePPCContext(userId, country, region, options = {}) {
     const startTime = Date.now();
+    const { startDate, endDate, limit = 50 } = options;
     
     try {
-        // Fetch all PPC data in parallel
+        const userIdStr = userId?.toString() || userId;
+        
+        // Fetch all PPC data in parallel - using same sources as dashboard
         const [
-            highAcosResult,
-            zeroSalesResult,
-            topKeywordsResult,
-            searchTermsResult,
-            campaignResult,
-            ppcIssuesResult,
-            ppcMetrics
+            kpiSummary,
+            ppcMetrics,
+            tabCounts,
+            highAcosData,
+            wastedSpendData,
+            noNegativesData,
+            topKeywordsData,
+            zeroSalesData,
+            autoInsightsData,
+            ppcIssuesResult
         ] = await Promise.all([
-            getHighAcosCampaigns(userId, country, region, options.acosThreshold || 50),
-            getZeroSalesKeywords(userId, country, region, options.minSpend || 5),
-            getTopPerformingKeywords(userId, country, region, options.topKeywordsLimit || 15),
-            getSearchTermAnalysis(userId, country, region),
-            getCampaignOverview(userId, country, region),
-            getPPCIssues(userId, country, region),
-            PPCMetrics.findLatestForUser(userId?.toString(), country, region)
+            // KPI Summary (same as dashboard top boxes)
+            PPCCampaignAnalysisService.getPPCKPISummary(userId, country, region),
+            // PPCMetrics for dateWise data and campaign breakdown
+            PPCMetrics.findLatestForUser(userIdStr, country, region),
+            // Tab counts for overview
+            PPCCampaignAnalysisService.getTabCounts(userId, country, region),
+            // All 6 tabs data (same as dashboard tabs) - get more items for QMate context
+            PPCCampaignAnalysisService.getHighAcosCampaigns(userId, country, region, 1, limit, startDate, endDate),
+            PPCCampaignAnalysisService.getWastedSpendKeywords(userId, country, region, 1, limit, startDate, endDate),
+            PPCCampaignAnalysisService.getCampaignsWithoutNegatives(userId, country, region, 1, limit),
+            PPCCampaignAnalysisService.getTopPerformingKeywords(userId, country, region, 1, limit, startDate, endDate),
+            PPCCampaignAnalysisService.getSearchTermsZeroSales(userId, country, region, 1, limit, startDate, endDate),
+            PPCCampaignAnalysisService.getAutoCampaignInsights(userId, country, region, 1, limit, startDate, endDate),
+            // PPC issues from IssuesDataChunks
+            getPPCIssues(userId, country, region)
         ]);
         
+        // Build context matching dashboard structure
         const context = {
-            summary: null,
-            highAcosCampaigns: null,
-            zeroSalesKeywords: null,
-            topPerformingKeywords: null,
-            searchTerms: null,
-            campaigns: null,
-            issues: null
+            // KPI Summary - exactly matching dashboard top boxes
+            summary: {
+                ppcSales: kpiSummary?.sales || 0,
+                ppcSpend: kpiSummary?.spend || 0,
+                acos: kpiSummary?.acos || 0,
+                tacos: kpiSummary?.tacos || 0,
+                roas: kpiSummary?.roas || 0,
+                unitsSold: kpiSummary?.unitsSold || 0,
+                totalIssues: kpiSummary?.totalIssues || 0,
+                impressions: kpiSummary?.impressions || 0,
+                clicks: kpiSummary?.clicks || 0,
+                ctr: kpiSummary?.ctr || 0,
+                cpc: kpiSummary?.cpc || 0,
+                dateRange: kpiSummary?.dateRange || ppcMetrics?.dateRange || null
+            },
+            
+            // Campaign type breakdown (SP, SB, SD)
+            campaignTypeBreakdown: ppcMetrics?.campaignTypeBreakdown || null,
+            
+            // DateWise metrics for charts - PPC sales and spend over time
+            dateWiseMetrics: ppcMetrics?.dateWiseMetrics || [],
+            
+            // Tab counts for overview
+            tabCounts: {
+                highAcosCampaigns: tabCounts?.highAcos || highAcosData?.pagination?.totalItems || 0,
+                wastedSpendKeywords: tabCounts?.wastedSpend || wastedSpendData?.pagination?.totalItems || 0,
+                campaignsWithoutNegatives: tabCounts?.noNegatives || noNegativesData?.pagination?.totalItems || 0,
+                topPerformingKeywords: tabCounts?.topKeywords || topKeywordsData?.pagination?.totalItems || 0,
+                searchTermsZeroSales: tabCounts?.zeroSales || zeroSalesData?.pagination?.totalItems || 0,
+                autoCampaignInsights: tabCounts?.autoInsights || autoInsightsData?.pagination?.totalItems || 0
+            },
+            
+            // High ACOS Campaigns (ACOS > 40%, sales > 0) - Tab 0
+            highAcosCampaigns: {
+                data: highAcosData?.data || [],
+                total: highAcosData?.pagination?.totalItems || 0,
+                criteria: 'ACOS > 40% with sales > 0'
+            },
+            
+            // Wasted Spend Keywords (cost > 0, sales < 0.01) - Tab 1
+            wastedSpendKeywords: {
+                data: wastedSpendData?.data || [],
+                total: wastedSpendData?.pagination?.totalItems || 0,
+                totalWastedSpend: (wastedSpendData?.data || []).reduce((sum, k) => sum + (k.spend || 0), 0),
+                criteria: 'Keywords with spend but no sales'
+            },
+            
+            // Campaigns Without Negative Keywords - Tab 2
+            campaignsWithoutNegatives: {
+                data: noNegativesData?.data || [],
+                total: noNegativesData?.pagination?.totalItems || 0,
+                criteria: 'Campaigns missing negative keywords'
+            },
+            
+            // Top Performing Keywords (ACOS < 20%, sales > 100, impressions > 1000) - Tab 3
+            topPerformingKeywords: {
+                data: topKeywordsData?.data || [],
+                total: topKeywordsData?.pagination?.totalItems || 0,
+                criteria: 'ACOS < 20%, sales > 100, impressions > 1000'
+            },
+            
+            // Search Terms with Zero Sales (clicks >= 10, sales < 0.01) - Tab 4
+            searchTermsZeroSales: {
+                data: zeroSalesData?.data || [],
+                total: zeroSalesData?.pagination?.totalItems || 0,
+                totalWastedSpend: (zeroSalesData?.data || []).reduce((sum, t) => sum + (t.spend || 0), 0),
+                criteria: 'Search terms with 10+ clicks but no sales'
+            },
+            
+            // Auto Campaign Insights (sales > 30, auto campaign, not in manual) - Tab 5
+            autoCampaignInsights: {
+                data: autoInsightsData?.data || [],
+                total: autoInsightsData?.pagination?.totalItems || 0,
+                criteria: 'High-performing auto terms to migrate to manual campaigns'
+            },
+            
+            // PPC Issues
+            issues: ppcIssuesResult?.success ? ppcIssuesResult.data : null,
+            
+            // Optimization opportunity summary
+            optimizationSummary: {
+                totalWastedSpend: parseFloat((
+                    (wastedSpendData?.data || []).reduce((sum, k) => sum + (k.spend || 0), 0) +
+                    (zeroSalesData?.data || []).reduce((sum, t) => sum + (t.spend || 0), 0)
+                ).toFixed(2)),
+                highAcosCampaignsCount: highAcosData?.pagination?.totalItems || 0,
+                wastedKeywordsCount: wastedSpendData?.pagination?.totalItems || 0,
+                zeroSalesTermsCount: zeroSalesData?.pagination?.totalItems || 0,
+                campaignsNeedingNegatives: noNegativesData?.pagination?.totalItems || 0,
+                autoTermsToMigrate: autoInsightsData?.pagination?.totalItems || 0
+            }
         };
         
-        // Add PPC summary
-        if (ppcMetrics) {
-            context.summary = {
-                totalSpend: ppcMetrics.summary?.totalSpend || 0,
-                totalSalesFromAds: ppcMetrics.summary?.totalSales || 0,
-                overallAcos: ppcMetrics.summary?.overallAcos || 0,
-                overallRoas: ppcMetrics.summary?.overallRoas || 0,
-                totalImpressions: ppcMetrics.summary?.totalImpressions || 0,
-                totalClicks: ppcMetrics.summary?.totalClicks || 0,
-                ctr: ppcMetrics.summary?.ctr || 0,
-                cpc: ppcMetrics.summary?.cpc || 0,
-                dateRange: ppcMetrics.dateRange,
-                campaignTypeBreakdown: ppcMetrics.campaignTypeBreakdown || null
-            };
-        }
-        
-        // Add high ACOS data
-        if (highAcosResult?.success) {
-            context.highAcosCampaigns = highAcosResult.data;
-        }
-        
-        // Add zero sales keywords
-        if (zeroSalesResult?.success) {
-            context.zeroSalesKeywords = zeroSalesResult.data;
-        }
-        
-        // Add top performing keywords
-        if (topKeywordsResult?.success) {
-            context.topPerformingKeywords = topKeywordsResult.data;
-        }
-        
-        // Add search terms analysis
-        if (searchTermsResult?.success) {
-            context.searchTerms = searchTermsResult.data;
-        }
-        
-        // Add campaign overview
-        if (campaignResult?.success) {
-            context.campaigns = campaignResult.data;
-        }
-        
-        // Add PPC issues
-        if (ppcIssuesResult?.success) {
-            context.issues = ppcIssuesResult.data;
-        }
-        
-        // Calculate optimization opportunities
-        const totalWasted = 
-            (context.highAcosCampaigns?.totalWastedOnHighAcos || 0) +
-            (context.zeroSalesKeywords?.totalWasted || 0) +
-            (context.searchTerms?.totalWastedOnTerms || 0);
-        
-        context.optimizationOpportunity = {
-            totalWastedSpend: parseFloat(totalWasted.toFixed(2)),
-            highAcosCount: context.highAcosCampaigns?.count || 0,
-            zeroSalesCount: context.zeroSalesKeywords?.count || 0,
-            wastedSearchTermsCount: context.searchTerms?.summary?.wastedCount || 0
-        };
-        
-        logger.info('[QMatePPCService] Got complete PPC context', {
+        logger.info('[QMatePPCService] Got complete PPC context (dashboard aligned)', {
             userId, country, region,
             duration: Date.now() - startTime,
             hasSummary: !!context.summary,
-            totalWasted
+            highAcosCount: context.highAcosCampaigns.total,
+            wastedSpendCount: context.wastedSpendKeywords.total,
+            dateWiseCount: context.dateWiseMetrics.length
         });
         
         return {
             success: true,
-            source: 'combined_ppc_sources',
+            source: 'ppc_campaign_analysis_service',
             data: context
         };
         

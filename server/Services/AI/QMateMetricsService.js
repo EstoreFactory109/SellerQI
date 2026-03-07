@@ -25,6 +25,7 @@ const CogsModel = require('../../models/finance/CogsModel.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const V2SellerPerformance = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1SellerPerformance = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
+const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Calculations/AccountHealth.js');
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -46,9 +47,14 @@ async function getFinancialSummary(userId, country, region) {
         const userObjectId = typeof userId === 'string' 
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
+        const userIdStr = userId?.toString() || userId;
         
-        // Get latest EconomicsMetrics document
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
+        // Get latest EconomicsMetrics and PPCMetrics documents in parallel
+        // Dashboard uses PPCMetrics as primary source for PPC spend
+        const [economicsMetrics, ppcMetrics] = await Promise.all([
+            EconomicsMetrics.findLatest(userObjectId, region, country),
+            PPCMetrics.findLatestForUser(userIdStr, country, region)
+        ]);
         
         if (!economicsMetrics) {
             logger.warn('[QMateMetricsService] No economics metrics found', {
@@ -66,37 +72,80 @@ async function getFinancialSummary(userId, country, region) {
             };
         }
         
-        // Calculate totals from datewiseSales and datewiseGrossProfit by summing
-        // This matches DashboardCalculation.js getPpcSalesFromEconomics (line 55-72)
+        // =====================================================================
+        // EXACT COPY OF Analyse.js convertEconomicsToFinanceFormat() LOGIC
+        // This ensures QMate shows the same gross profit as the dashboard
+        // =====================================================================
+        
+        // PRIMARY: Use PPCMetrics totalSpend (from Amazon Ads API) - matches dashboard behavior
+        // FALLBACK: Use economicsMetrics.ppcSpent (from SP-API finance events)
+        const ppcSpend = ppcMetrics?.summary?.totalSpend || economicsMetrics.ppcSpent?.amount || 0;
+        
+        // Calculate totalSales by summing datewiseSales for consistency
         let totalSales = 0;
-        let totalGrossProfit = 0;
+        let fbaFees = 0;
+        let storageFees = 0;
+        let refunds = 0;
         
         if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
             economicsMetrics.datewiseSales.forEach(item => {
                 totalSales += item.sales?.amount || 0;
-                totalGrossProfit += item.grossProfit?.amount || 0;
             });
+            totalSales = parseFloat(totalSales.toFixed(2));
         } else {
             totalSales = economicsMetrics.totalSales?.amount || 0;
-            totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
         }
         
-        // Get individual components
-        const ppcSpend = economicsMetrics.ppcSpent?.amount || 0;
-        let amazonFees = economicsMetrics.amazonFees?.amount || 0;
-        const fbaFees = economicsMetrics.fbaFees?.amount || 0;
-        const storageFees = economicsMetrics.storageFees?.amount || 0;
-        const refunds = economicsMetrics.refunds?.amount || 0;
-        
-        // Fallback: use fbaFees + storageFees if amazonFees is 0 (matches DashboardSummaryService)
-        if (amazonFees === 0) {
-            amazonFees = fbaFees + storageFees;
+        // Calculate fees from datewise data for consistency (SAME as Analyse.js)
+        if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
+            economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
+                fbaFees += item.fbaFulfillmentFee?.amount || 0;
+                storageFees += item.storageFee?.amount || 0;
+                refunds += item.refunds?.amount || 0;
+            });
+            fbaFees = parseFloat(fbaFees.toFixed(2));
+            storageFees = parseFloat(storageFees.toFixed(2));
+            refunds = parseFloat(refunds.toFixed(2));
+        } else {
+            fbaFees = economicsMetrics.fbaFees?.amount || 0;
+            storageFees = economicsMetrics.storageFees?.amount || 0;
+            refunds = economicsMetrics.refunds?.amount || 0;
         }
         
-        // DISPLAYED Gross Profit = Backend Gross Profit (from datewiseGrossProfit) - PPC Spend
+        // Get Amazon fees - calculate from datewiseAmazonFees for consistency (SAME as Analyse.js)
+        let amazonFees = 0;
+        if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
+            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
+            economicsMetrics.datewiseAmazonFees.forEach(item => {
+                amazonFees += item.totalAmount?.amount || 0;
+            });
+            amazonFees = parseFloat(amazonFees.toFixed(2));
+        } else {
+            // Fallback 1: Get from summary level
+            amazonFees = economicsMetrics.amazonFees?.amount || 0;
+            
+            // Fallback 2: Calculate from ASIN-wise data if still 0
+            if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
+                economicsMetrics.asinWiseSales.forEach(item => {
+                    amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+                });
+                amazonFees = parseFloat(amazonFees.toFixed(2));
+            }
+            
+            // Final fallback: use fbaFees + storageFees if still 0
+            if (amazonFees === 0) {
+                amazonFees = fbaFees + storageFees;
+            }
+        }
+        
+        // Calculate gross profit: Sales - Amazon Fees - Refunds (SAME FORMULA as Analyse.js line 659)
+        // Note: This is the BACKEND gross profit, before PPC is subtracted
+        const backendGrossProfit = totalSales - amazonFees - refunds;
+        
+        // DISPLAYED Gross Profit = Backend Gross Profit - PPC Spend
         // This is what the dashboard displays to users as "Gross Profit"
-        // NOTE: totalGrossProfit comes from datewiseGrossProfit which is already Sales - Amazon Fees - Refunds
-        const displayedGrossProfit = totalGrossProfit - ppcSpend;
+        // (matches TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent)
+        const displayedGrossProfit = backendGrossProfit - ppcSpend;
         
         const summary = {
             dateRange: economicsMetrics.dateRange,
@@ -650,7 +699,9 @@ async function getBuyBoxData(userId, country, region) {
 
 /**
  * Get Account Health data for QMate context
- * Returns V1/V2 seller performance metrics
+ * Returns account health data using the SAME logic as the Account Health page:
+ * - Percentage/status from V2 `ahrScore` mapping (calculateAccountHealthPercentage)
+ * - Metric-level issues + HowTOSolve from checkAccountHealth(v2, v1)
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
@@ -665,72 +716,34 @@ async function getAccountHealthData(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        // Fetch V2 and V1 data in parallel
+        // Fetch V2/V1 seller performance like Analyse.js does for the Account Health page.
         const [v2Data, v1Data] = await Promise.all([
             V2SellerPerformance.findOne({ User: userObjectId, country, region })
                 .sort({ createdAt: -1 }).lean(),
             V1SellerPerformance.findOne({ User: userObjectId, country, region })
-                .sort({ createdAt: -1 }).lean()
+                .sort({ createdAt: -1 }).lean(),
         ]);
         
-        if (!v2Data && !v1Data) {
+        if (!v2Data) {
             return {
                 success: false,
-                source: 'none',
-                error: 'No account health data found',
+                source: 'seller_performance',
+                error: 'No V2 account health data found (ahrScore missing)',
                 data: null
             };
         }
         
-        // Calculate account health percentage (matches AccountHealth.js calculation)
-        let healthPercentage = 100;
-        let status = 'GOOD';
-        const issues = [];
-        
-        if (v2Data) {
-            // Check each metric and deduct points for issues
-            if (v2Data.CancellationRate && v2Data.CancellationRate !== 'GOOD' && v2Data.CancellationRate !== '') {
-                healthPercentage -= 15;
-                issues.push({ type: 'CancellationRate', status: v2Data.CancellationRate, impact: 'High cancellation rate affects account health' });
-            }
-            if (v2Data.orderWithDefectsStatus && v2Data.orderWithDefectsStatus !== 'GOOD' && v2Data.orderWithDefectsStatus !== '') {
-                healthPercentage -= 20;
-                issues.push({ type: 'OrderDefects', status: v2Data.orderWithDefectsStatus, impact: 'Order defects can lead to account suspension' });
-            }
-            if (v2Data.lateShipmentRateStatus && v2Data.lateShipmentRateStatus !== 'GOOD' && v2Data.lateShipmentRateStatus !== '') {
-                healthPercentage -= 15;
-                issues.push({ type: 'LateShipment', status: v2Data.lateShipmentRateStatus, impact: 'Late shipments affect customer experience' });
-            }
-            if (v2Data.validTrackingRateStatus && v2Data.validTrackingRateStatus !== 'GOOD' && v2Data.validTrackingRateStatus !== '') {
-                healthPercentage -= 10;
-                issues.push({ type: 'ValidTracking', status: v2Data.validTrackingRateStatus, impact: 'Missing tracking info reduces buyer confidence' });
-            }
-            if (v2Data.listingPolicyViolations && v2Data.listingPolicyViolations !== '' && v2Data.listingPolicyViolations !== '0') {
-                healthPercentage -= 10;
-                issues.push({ type: 'PolicyViolations', count: v2Data.listingPolicyViolations, impact: 'Policy violations require immediate attention' });
-            }
-        }
-        
-        // Add V1 data issues
-        if (v1Data) {
-            const negativeFeedbackCount = parseInt(v1Data.negativeFeedbacks?.count) || 0;
-            if (negativeFeedbackCount > 0) {
-                healthPercentage -= Math.min(negativeFeedbackCount * 2, 10);
-                issues.push({ type: 'NegativeFeedback', count: negativeFeedbackCount, impact: 'Negative feedback affects Buy Box eligibility' });
-            }
-            
-            const azClaimsCount = parseInt(v1Data.a_z_claims?.count) || 0;
-            if (azClaimsCount > 0) {
-                healthPercentage -= Math.min(azClaimsCount * 5, 15);
-                issues.push({ type: 'AZClaims', count: azClaimsCount, impact: 'A-to-z claims significantly impact account health' });
-            }
-        }
-        
-        healthPercentage = Math.max(0, healthPercentage);
-        if (healthPercentage < 50) status = 'CRITICAL';
-        else if (healthPercentage < 80) status = 'AT_RISK';
+        // Calculate account health percentage EXACTLY like SellerQI dashboard (V2 ahrScore mapping).
+        const calculated = calculateAccountHealthPercentage(v2Data);
+        const healthPercentage = calculated?.Percentage ?? 0;
+        const status = calculated?.status ?? 'Data Not Available';
+
+        // Metric-level issues and HowTOSolve (same object the Account Health UI consumes).
+        const accountErrors = checkAccountHealth(v2Data, v1Data);
         
         const accountHealth = {
+            accountHealthPercentage: calculated,
+            AccountErrors: accountErrors,
             percentage: healthPercentage,
             status,
             ahrScore: v2Data?.ahrScore || null,
@@ -747,21 +760,21 @@ async function getAccountHealthData(userId, country, region) {
                 lateShipments: parseInt(v1Data.lateShipmentCount?.count) || 0,
                 cancellations: parseInt(v1Data.preFulfillmentCancellationCount?.count) || 0,
                 refunds: parseInt(v1Data.refundsCount?.count) || 0,
-                azClaims: parseInt(v1Data.a_z_claims?.count) || 0
-            } : null,
-            issues
+                azClaims: parseInt(v1Data.a_z_claims?.count) || 0,
+                responseUnder24HoursCount: parseInt(v1Data.responseUnder24HoursCount) || 0
+            } : null
         };
         
         logger.info('[QMateMetricsService] Got account health data', {
             userId, country, region,
             duration: Date.now() - startTime,
             healthPercentage,
-            issuesCount: issues.length
+            errorsCount: accountErrors?.TotalErrors || 0
         });
         
         return {
             success: true,
-            source: 'v2_v1_performance',
+            source: 'seller_performance',
             data: accountHealth
         };
         
@@ -1286,7 +1299,6 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             
             // Calculate totals - EXACTLY like Analyse.js processCustomDateRange()
             let totalSales = 0;
-            let totalGrossProfit = 0;
             let totalFbaFees = 0;
             let totalStorageFees = 0;
             let totalAmazonFees = 0;
@@ -1296,25 +1308,28 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             if (usesPreAggregated) {
                 // Use pre-aggregated totals from the document (matches Analyse.js line 1463-1485)
                 totalSales = economicsMetrics.totalSales?.amount || 0;
-                totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
                 totalFbaFees = economicsMetrics.fbaFees?.amount || 0;
                 totalStorageFees = economicsMetrics.storageFees?.amount || 0;
-                totalAmazonFees = totalFbaFees + totalStorageFees;
                 totalRefunds = economicsMetrics.refunds?.amount || 0;
-                ppcSpend = economicsMetrics.ppcSpent?.amount || 0;
-            } else if (shouldFilterByDate) {
-                // Sum from filtered datewise data (matches Analyse.js line 1507-1599)
+                ppcSpend = ppcMetrics?.summary?.totalSpend || economicsMetrics.ppcSpent?.amount || 0;
                 
-                // Build gross profit map from datewiseGrossProfit (like Analyse.js line 1523-1536)
-                const processedGrossProfitDates = new Set();
-                filteredGrossProfit.forEach(item => {
-                    const itemDate = new Date(item.date);
-                    const dateKey = itemDate.toISOString().split('T')[0];
-                    if (!processedGrossProfitDates.has(dateKey)) {
-                        totalGrossProfit += item.grossProfit?.amount || 0;
-                        processedGrossProfitDates.add(dateKey);
+                // Get Amazon fees from datewiseAmazonFees for consistency (SAME as Analyse.js)
+                if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
+                    economicsMetrics.datewiseAmazonFees.forEach(item => {
+                        totalAmazonFees += item.totalAmount?.amount || 0;
+                    });
+                } else {
+                    totalAmazonFees = economicsMetrics.amazonFees?.amount || 0;
+                    if (totalAmazonFees === 0) {
+                        totalAmazonFees = totalFbaFees + totalStorageFees;
                     }
-                });
+                }
+            } else if (shouldFilterByDate) {
+                // =====================================================================
+                // DATE FILTERED: Use same formula as Analyse.js processCustomDateRange()
+                // backendGrossProfit = totalSales - totalAmazonFees - totalRefunds
+                // displayedGrossProfit = backendGrossProfit - ppcSpend
+                // =====================================================================
                 
                 // Sum sales from filtered datewiseSales (like Analyse.js line 1538-1561)
                 const processedSalesDates = new Set();
@@ -1340,7 +1355,22 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                     }
                 });
                 
-                totalAmazonFees = totalFbaFees + totalStorageFees;
+                // Sum Amazon fees from filtered datewiseAmazonFees (SAME as Analyse.js)
+                // This includes ALL Amazon fees (referral, FBA, storage, etc.)
+                const processedAmazonFeeDates = new Set();
+                filteredAmazonFees.forEach(item => {
+                    const itemDate = new Date(item.date);
+                    const dateKey = itemDate.toISOString().split('T')[0];
+                    if (!processedAmazonFeeDates.has(dateKey)) {
+                        totalAmazonFees += item.totalAmount?.amount || 0;
+                        processedAmazonFeeDates.add(dateKey);
+                    }
+                });
+                
+                // Fallback: use fbaFees + storageFees if datewiseAmazonFees not available
+                if (totalAmazonFees === 0) {
+                    totalAmazonFees = totalFbaFees + totalStorageFees;
+                }
                 
                 // Calculate PPC spend proportionally (like Analyse.js line 1579-1598)
                 // For simplicity, sum from ppcMetrics dateWiseMetrics filtered by date
@@ -1377,35 +1407,73 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                     }
                 }
             } else {
-                // No date filtering - sum from datewiseSales (like DashboardCalculation.js line 55-72)
+                // =====================================================================
+                // EXACT COPY OF Analyse.js convertEconomicsToFinanceFormat() LOGIC
+                // No date filtering - calculate same way as dashboard
+                // =====================================================================
+                
+                // Calculate totalSales by summing datewiseSales
                 if (Array.isArray(datewiseSalesData) && datewiseSalesData.length > 0) {
                     datewiseSalesData.forEach(item => {
                         totalSales += item.sales?.amount || 0;
-                        totalGrossProfit += item.grossProfit?.amount || 0;
                     });
+                    totalSales = parseFloat(totalSales.toFixed(2));
                 } else {
                     totalSales = economicsMetrics.totalSales?.amount || 0;
-                    totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
                 }
                 
-                totalFbaFees = economicsMetrics.fbaFees?.amount || 0;
-                totalStorageFees = economicsMetrics.storageFees?.amount || 0;
-                totalAmazonFees = economicsMetrics.amazonFees?.amount || 0;
-                totalRefunds = economicsMetrics.refunds?.amount || 0;
+                // Calculate fees from datewise data for consistency (SAME as Analyse.js)
+                if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
+                    economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
+                        totalFbaFees += item.fbaFulfillmentFee?.amount || 0;
+                        totalStorageFees += item.storageFee?.amount || 0;
+                        totalRefunds += item.refunds?.amount || 0;
+                    });
+                    totalFbaFees = parseFloat(totalFbaFees.toFixed(2));
+                    totalStorageFees = parseFloat(totalStorageFees.toFixed(2));
+                    totalRefunds = parseFloat(totalRefunds.toFixed(2));
+                } else {
+                    totalFbaFees = economicsMetrics.fbaFees?.amount || 0;
+                    totalStorageFees = economicsMetrics.storageFees?.amount || 0;
+                    totalRefunds = economicsMetrics.refunds?.amount || 0;
+                }
+                
+                // Get Amazon fees - calculate from datewiseAmazonFees for consistency (SAME as Analyse.js)
+                if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
+                    // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
+                    economicsMetrics.datewiseAmazonFees.forEach(item => {
+                        totalAmazonFees += item.totalAmount?.amount || 0;
+                    });
+                    totalAmazonFees = parseFloat(totalAmazonFees.toFixed(2));
+                } else {
+                    // Fallback 1: Get from summary level
+                    totalAmazonFees = economicsMetrics.amazonFees?.amount || 0;
+                    
+                    // Fallback 2: Calculate from ASIN-wise data if still 0
+                    if (totalAmazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
+                        economicsMetrics.asinWiseSales.forEach(item => {
+                            totalAmazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+                        });
+                        totalAmazonFees = parseFloat(totalAmazonFees.toFixed(2));
+                    }
+                    
+                    // Final fallback: use fbaFees + storageFees if still 0
+                    if (totalAmazonFees === 0) {
+                        totalAmazonFees = totalFbaFees + totalStorageFees;
+                    }
+                }
+                
                 ppcSpend = ppcMetrics?.summary?.totalSpend || economicsMetrics.ppcSpent?.amount || 0;
-                
-                // Fallback: use fbaFees + storageFees if amazonFees is 0 (matches DashboardSummaryService)
-                if (totalAmazonFees === 0) {
-                    totalAmazonFees = totalFbaFees + totalStorageFees;
-                }
             }
             
-            // DISPLAYED Gross Profit = Backend Gross Profit (from datewiseGrossProfit) - PPC Spend
+            // Calculate gross profit: Sales - Amazon Fees - Refunds (SAME FORMULA as Analyse.js line 659)
+            // This is the BACKEND gross profit, before PPC is subtracted
+            const backendGrossProfit = totalSales - totalAmazonFees - totalRefunds;
+            
+            // DISPLAYED Gross Profit = Backend Gross Profit - PPC Spend
             // This is what the dashboard displays to users as "Gross Profit"
-            // See: TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent
-            // See: ProfitibilityDashboard.jsx line 569: grossProfit = grossProfitFromBackend - adSpend
-            // NOTE: totalGrossProfit already comes from datewiseGrossProfit which is Sales - Amazon Fees - Refunds
-            const displayedGrossProfit = totalGrossProfit - ppcSpend;
+            // (matches TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent)
+            const displayedGrossProfit = backendGrossProfit - ppcSpend;
             
             // Add datewise sales for charts (use filtered data)
             if (Array.isArray(filteredSales) && filteredSales.length > 0) {

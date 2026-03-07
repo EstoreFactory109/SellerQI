@@ -628,15 +628,32 @@ const QMate = () => {
   };
 
   const handleApplyFix = async (asin, sku, attribute, value) => {
-    if (!sku) {
-      alert('SKU is required to apply fixes. Please provide the product SKU.');
-      return null;
-    }
     setActionLoading(true);
     try {
+      let resolvedSku = sku;
+      
+      // If SKU is not provided, try to look it up from the backend
+      if (!resolvedSku && asin) {
+        console.log('[QMate] SKU not provided, looking up for ASIN:', asin);
+        try {
+          const lookupResponse = await axiosInstance.get(`/api/qmate/lookup-sku/${asin}`);
+          resolvedSku = lookupResponse.data?.data?.sku;
+          console.log('[QMate] SKU lookup result:', resolvedSku);
+        } catch (lookupError) {
+          console.error('[QMate] SKU lookup failed:', lookupError);
+          alert(`Could not find SKU for ASIN ${asin}. Please ensure the product exists in your catalog.`);
+          return null;
+        }
+      }
+      
+      if (!resolvedSku) {
+        alert('SKU is required to apply fixes. Please provide the product SKU.');
+        return null;
+      }
+      
       const response = await axiosInstance.post('/api/qmate/apply-fix', {
         asin,
-        sku,
+        sku: resolvedSku,
         attribute,
         value
       });
@@ -732,11 +749,14 @@ const QMate = () => {
         timestamp: new Date(),
         charts: assistantPayload.charts || [],
         followUps: assistantPayload.follow_up_questions || [],
+        needsClarification: Boolean(assistantPayload.needs_clarification),
+        clarifyingQuestions: Array.isArray(assistantPayload.clarifying_questions) ? assistantPayload.clarifying_questions : [],
         contentActions: assistantPayload.content_actions || [],
         suggestedTitle: assistantPayload.suggested_title || null,
         suggestedBulletPoints: assistantPayload.suggested_bullet_points || null,
         suggestedDescription: assistantPayload.suggested_description || null,
         suggestedBackendKeywords: assistantPayload.suggested_backend_keywords || null,
+        loadMoreAvailable: assistantPayload.load_more_available || null,
       };
 
       // Process content_actions if present
@@ -1030,6 +1050,26 @@ const QMate = () => {
                       </div>
                     )}
 
+                    {message.role === 'assistant' && message.needsClarification && message.clarifyingQuestions && message.clarifyingQuestions.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-[11px] font-semibold text-amber-400/90 mb-1">
+                          Please choose one so I can help:
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {message.clarifyingQuestions.map((q, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleSuggestionClick(q)}
+                              className="text-[11px] px-2 py-1 rounded-full bg-[#161b22] border border-amber-500/40 hover:border-amber-400/70 text-gray-300 hover:text-white transition-colors"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {message.role === 'assistant' && message.followUps && message.followUps.length > 0 && (
                       <div className="mt-3">
                         <p className="text-[11px] font-semibold text-gray-400 mb-1">
@@ -1046,6 +1086,27 @@ const QMate = () => {
                               {q}
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Load More Button for paginated data */}
+                    {message.role === 'assistant' && message.loadMoreAvailable?.enabled && (
+                      <div className="mt-4 pt-3 border-t border-[#30363d]">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] text-gray-400">
+                            Showing {message.loadMoreAvailable.shown} of {message.loadMoreAvailable.total} items
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleSuggestionClick(message.loadMoreAvailable.next_prompt)}
+                            className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium rounded-lg bg-gradient-to-r from-blue-600/80 to-blue-700/80 hover:from-blue-500 hover:to-blue-600 text-white shadow-sm transition-all duration-200"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                            Load More ({message.loadMoreAvailable.total - message.loadMoreAvailable.shown} remaining)
+                          </button>
                         </div>
                       </div>
                     )}

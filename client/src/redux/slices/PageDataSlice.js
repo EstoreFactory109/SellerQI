@@ -248,7 +248,7 @@ const initialState = {
             error: null,
             lastFetched: null
         },
-        // Inactive products (separate endpoint)
+        // Inactive products (separate endpoint) - DEPRECATED: Use nonSellable instead
         inactive: {
             products: [],
             pagination: {},
@@ -256,10 +256,19 @@ const initialState = {
             error: null,
             lastFetched: null
         },
-        // Incomplete products (separate endpoint)
+        // Incomplete products (separate endpoint) - DEPRECATED: Use nonSellable instead
         incomplete: {
             products: [],
             pagination: {},
+            loading: false,
+            error: null,
+            lastFetched: null
+        },
+        // Non-Sellable products (Inactive + Incomplete combined)
+        nonSellable: {
+            products: [],
+            pagination: {},
+            counts: { inactive: 0, incomplete: 0 },
             loading: false,
             error: null,
             lastFetched: null
@@ -1806,6 +1815,54 @@ export const fetchYourProductsIncompleteV3 = createAsyncThunk(
 );
 
 /**
+ * Fetch V3 Non-Sellable Products (Inactive + Incomplete combined)
+ */
+export const fetchYourProductsNonSellableV3 = createAsyncThunk(
+    'pageData/fetchYourProductsNonSellableV3',
+    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+        try {
+            const state = getState();
+            const existing = state.pageData?.yourProductsV3?.nonSellable;
+            
+            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+                console.log('[v3 Redux] Using cached Non-Sellable products');
+                return { fromCache: true };
+            }
+            
+            console.log(`[v3 Redux] Fetching Non-Sellable products page ${page}`);
+            const response = await axiosInstance.get('/api/pagewise/your-products-v3/non-sellable', {
+                params: { page, limit }
+            });
+            
+            const newData = response.data.data;
+            
+            if (append && existing?.products?.length > 0) {
+                const existingKeys = new Set(existing.products.map(p => `${p.asin}-${p.sku}`));
+                const uniqueNewProducts = (newData.products || []).filter(
+                    p => !existingKeys.has(`${p.asin}-${p.sku}`)
+                );
+                const mergedProducts = [...existing.products, ...uniqueNewProducts];
+                
+                return {
+                    products: mergedProducts,
+                    pagination: {
+                        ...newData.pagination,
+                        page,
+                        hasMore: mergedProducts.length < (newData.pagination?.totalItems || 0)
+                    },
+                    counts: newData.counts || { inactive: 0, incomplete: 0 },
+                    fromCache: false
+                };
+            }
+            
+            return { ...newData, fromCache: false };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch Non-Sellable products');
+        }
+    }
+);
+
+/**
  * Fetch V3 Products Without A+ Content
  */
 export const fetchYourProductsWithoutAPlusV3 = createAsyncThunk(
@@ -2650,6 +2707,25 @@ const pageDataSlice = createSlice({
             .addCase(fetchYourProductsIncompleteV3.rejected, (state, action) => {
                 state.yourProductsV3.incomplete.loading = false;
                 state.yourProductsV3.incomplete.error = action.payload;
+            })
+        
+        // V3 Non-Sellable (Inactive + Incomplete combined)
+            .addCase(fetchYourProductsNonSellableV3.pending, (state) => {
+                state.yourProductsV3.nonSellable.loading = true;
+                state.yourProductsV3.nonSellable.error = null;
+            })
+            .addCase(fetchYourProductsNonSellableV3.fulfilled, (state, action) => {
+                state.yourProductsV3.nonSellable.loading = false;
+                if (!action.payload?.fromCache) {
+                    state.yourProductsV3.nonSellable.products = action.payload.products || [];
+                    state.yourProductsV3.nonSellable.pagination = action.payload.pagination || {};
+                    state.yourProductsV3.nonSellable.counts = action.payload.counts || { inactive: 0, incomplete: 0 };
+                    state.yourProductsV3.nonSellable.lastFetched = Date.now();
+                }
+            })
+            .addCase(fetchYourProductsNonSellableV3.rejected, (state, action) => {
+                state.yourProductsV3.nonSellable.loading = false;
+                state.yourProductsV3.nonSellable.error = action.payload;
             })
         
         // V3 Without A+

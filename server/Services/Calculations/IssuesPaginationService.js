@@ -22,6 +22,7 @@ const logger = require('../../utils/Logger.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const IssuesDataService = require('./IssuesDataService.js');
+const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 
 // Default pagination settings
 const DEFAULT_PAGE_SIZE = 10;
@@ -331,8 +332,35 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
         const startIndex = (page - 1) * limit;
         const paginatedIssues = flattenedRankingIssues.slice(startIndex, startIndex + limit);
         
+        // Map sectionKey to attribute name for fix status lookup
+        const sectionKeyToAttribute = {
+            'TitleResult': 'title',
+            'BulletPoints': 'bulletpoints',
+            'Description': 'description',
+            'charLim': 'generic_keyword'
+        };
+        
+        // Get fix status for paginated issues
+        const productKeys = paginatedIssues.map(issue => ({
+            asin: issue.asin,
+            sku: issue.sku,
+            attribute: sectionKeyToAttribute[issue.sectionKey] || issue.sectionKey
+        }));
+        
+        let fixedStatusMap = new Map();
+        try {
+            fixedStatusMap = await ListingFixStatus.getFixedStatusForProducts(
+                userId, country, region, productKeys
+            );
+        } catch (fixStatusErr) {
+            logger.warn('[IssuesPaginationService] Failed to get fix status (non-blocking)', {
+                error: fixStatusErr.message,
+                userId, country, region
+            });
+        }
+        
         // Group back by product for frontend compatibility
-        // Frontend expects: { asin, sku, Title, data: { TitleResult, BulletPoints, Description, charLim } }
+        // Frontend expects: { asin, sku, Title, data: { TitleResult, BulletPoints, Description, charLim }, fixedAttributes: {} }
         const productIssuesMap = new Map();
         paginatedIssues.forEach(issue => {
             if (!productIssuesMap.has(issue.asin)) {
@@ -340,10 +368,18 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
                     asin: issue.asin,
                     sku: issue.sku,
                     Title: issue.Title,
-                    data: { Title: issue.Title }
+                    data: { Title: issue.Title },
+                    fixedAttributes: {}
                 });
             }
             const productEntry = productIssuesMap.get(issue.asin);
+            
+            // Check if this attribute has been fixed
+            const attribute = sectionKeyToAttribute[issue.sectionKey] || issue.sectionKey;
+            const fixKey = `${issue.asin}|${issue.sku}|${attribute}`;
+            if (fixedStatusMap.has(fixKey)) {
+                productEntry.fixedAttributes[attribute] = fixedStatusMap.get(fixKey);
+            }
             
             if (issue.sectionKey === 'charLim') {
                 // Backend keywords error
@@ -367,6 +403,7 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
             flattenedCount: flattenedRankingIssues.length,
             paginatedCount: paginatedIssues.length,
             productsReturned: paginatedData.length,
+            fixedCount: fixedStatusMap.size,
             duration
         });
         
@@ -944,7 +981,47 @@ async function getProductsWithIssues(userId, country, region, options = {}) {
         // Apply pagination
         const total = products.length;
         const startIndex = (page - 1) * limit;
-        const paginatedData = products.slice(startIndex, startIndex + limit);
+        let paginatedData = products.slice(startIndex, startIndex + limit);
+        
+        // Get fix status for paginated products (all fixable attributes)
+        const fixableAttributes = ['title', 'description', 'bulletpoints', 'generic_keyword'];
+        const productKeys = [];
+        paginatedData.forEach(product => {
+            fixableAttributes.forEach(attr => {
+                productKeys.push({
+                    asin: product.asin,
+                    sku: product.sku,
+                    attribute: attr
+                });
+            });
+        });
+        
+        let fixedStatusMap = new Map();
+        try {
+            fixedStatusMap = await ListingFixStatus.getFixedStatusForProducts(
+                userId, country, region, productKeys
+            );
+        } catch (fixStatusErr) {
+            logger.warn('[IssuesPaginationService] Failed to get fix status for products (non-blocking)', {
+                error: fixStatusErr.message,
+                userId, country, region
+            });
+        }
+        
+        // Enrich paginated products with fixed attributes
+        paginatedData = paginatedData.map(product => {
+            const fixedAttributes = {};
+            fixableAttributes.forEach(attr => {
+                const fixKey = `${product.asin}|${product.sku}|${attr}`;
+                if (fixedStatusMap.has(fixKey)) {
+                    fixedAttributes[attr] = fixedStatusMap.get(fixKey);
+                }
+            });
+            return {
+                ...product,
+                fixedAttributes
+            };
+        });
         
         const duration = Date.now() - startTime;
         
@@ -953,6 +1030,7 @@ async function getProductsWithIssues(userId, country, region, options = {}) {
             page, limit, sort, sortOrder, priority, search,
             total,
             returned: paginatedData.length,
+            fixedCount: fixedStatusMap.size,
             duration
         });
         

@@ -21,6 +21,9 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const CogsModel = require('../../models/finance/CogsModel.js');
 const ProductWiseFinancial = require('../../models/finance/ProductWiseFinancialModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
+const { getAdsSpendByAsin } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const mongoose = require('mongoose');
 
 /**
@@ -554,30 +557,410 @@ async function getProductFinancialBreakdown(userId, country, region, limit = 20)
 }
 
 /**
+ * Get datewise profitability data (gross profit and sales per day)
+ * Matches the Profitability Dashboard chart exactly
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @returns {Promise<Object>} Datewise profitability data
+ */
+async function getDatewiseProfitability(userId, country, region) {
+    const startTime = Date.now();
+    
+    try {
+        const userObjectId = typeof userId === 'string' 
+            ? new mongoose.Types.ObjectId(userId) 
+            : userId;
+        const userIdStr = userId?.toString() || userId;
+        
+        const [economicsMetrics, ppcMetrics] = await Promise.all([
+            EconomicsMetrics.findLatest(userObjectId, region, country),
+            PPCMetrics.findLatestForUser(userIdStr, country, region)
+        ]);
+        
+        if (!economicsMetrics) {
+            return {
+                success: false,
+                source: 'none',
+                error: 'No economics data found',
+                data: null
+            };
+        }
+        
+        const currencyCode = economicsMetrics.totalSales?.currencyCode || 'USD';
+        const datewiseSales = economicsMetrics.datewiseSales || [];
+        const datewiseFeesAndRefunds = economicsMetrics.datewiseFeesAndRefunds || [];
+        const datewiseAmazonFees = economicsMetrics.datewiseAmazonFees || [];
+        const dateWisePPCMetrics = ppcMetrics?.dateWiseMetrics || [];
+        
+        const feesMap = new Map();
+        datewiseFeesAndRefunds.forEach(item => {
+            if (item.date) {
+                const dateKey = new Date(item.date).toISOString().split('T')[0];
+                feesMap.set(dateKey, {
+                    fbaFees: item.fbaFulfillmentFee?.amount || 0,
+                    storageFees: item.storageFee?.amount || 0,
+                    refunds: item.refunds?.amount || 0
+                });
+            }
+        });
+        
+        const amazonFeesMap = new Map();
+        datewiseAmazonFees.forEach(item => {
+            if (item.date) {
+                const dateKey = new Date(item.date).toISOString().split('T')[0];
+                amazonFeesMap.set(dateKey, item.totalAmount?.amount || 0);
+            }
+        });
+        
+        const ppcMap = new Map();
+        dateWisePPCMetrics.forEach(item => {
+            if (item.date) {
+                const dateKey = new Date(item.date).toISOString().split('T')[0];
+                ppcMap.set(dateKey, {
+                    spend: item.cost || item.spend || 0,
+                    sales: item.sales14d || item.sales7d || item.sales || 0
+                });
+            }
+        });
+        
+        const datewiseData = datewiseSales.map(item => {
+            if (!item.date) return null;
+            
+            const dateKey = new Date(item.date).toISOString().split('T')[0];
+            const sales = item.sales?.amount || 0;
+            const backendGrossProfit = item.grossProfit?.amount || 0;
+            const fees = feesMap.get(dateKey) || { fbaFees: 0, storageFees: 0, refunds: 0 };
+            const amazonFees = amazonFeesMap.get(dateKey) || 0;
+            const ppc = ppcMap.get(dateKey) || { spend: 0, sales: 0 };
+            
+            const displayedGrossProfit = backendGrossProfit - ppc.spend;
+            
+            return {
+                date: dateKey,
+                totalSales: parseFloat(sales.toFixed(2)),
+                grossProfit: parseFloat(displayedGrossProfit.toFixed(2)),
+                backendGrossProfit: parseFloat(backendGrossProfit.toFixed(2)),
+                ppcSpend: parseFloat(ppc.spend.toFixed(2)),
+                ppcSales: parseFloat(ppc.sales.toFixed(2)),
+                amazonFees: parseFloat(amazonFees.toFixed(2)),
+                fbaFees: parseFloat(fees.fbaFees.toFixed(2)),
+                refunds: parseFloat(fees.refunds.toFixed(2)),
+                unitsSold: item.unitsSold || 0
+            };
+        }).filter(item => item !== null)
+          .sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        let totalSales = 0;
+        let totalGrossProfit = 0;
+        let totalPpcSpend = 0;
+        let totalPpcSales = 0;
+        let totalAmazonFees = 0;
+        let totalUnitsSold = 0;
+        
+        datewiseData.forEach(item => {
+            totalSales += item.totalSales;
+            totalGrossProfit += item.grossProfit;
+            totalPpcSpend += item.ppcSpend;
+            totalPpcSales += item.ppcSales;
+            totalAmazonFees += item.amazonFees;
+            totalUnitsSold += item.unitsSold;
+        });
+        
+        logger.info('[QMateProfitabilityService] Got datewise profitability', {
+            userId, country, region,
+            duration: Date.now() - startTime,
+            daysCount: datewiseData.length
+        });
+        
+        return {
+            success: true,
+            source: 'economics_metrics',
+            data: {
+                datewiseData,
+                summary: {
+                    totalSales: parseFloat(totalSales.toFixed(2)),
+                    totalGrossProfit: parseFloat(totalGrossProfit.toFixed(2)),
+                    totalPpcSpend: parseFloat(totalPpcSpend.toFixed(2)),
+                    totalPpcSales: parseFloat(totalPpcSales.toFixed(2)),
+                    totalAmazonFees: parseFloat(totalAmazonFees.toFixed(2)),
+                    totalUnitsSold,
+                    profitMargin: totalSales > 0 ? parseFloat(((totalGrossProfit / totalSales) * 100).toFixed(2)) : 0,
+                    daysCount: datewiseData.length,
+                    currencyCode,
+                    dateRange: economicsMetrics.dateRange || null
+                }
+            }
+        };
+        
+    } catch (error) {
+        logger.error('[QMateProfitabilityService] Error getting datewise profitability', {
+            error: error.message, userId, country, region
+        });
+        return { success: false, error: error.message, data: null };
+    }
+}
+
+/**
+ * Get ASIN-wise profitability data with full breakdown
+ * Matches the Profitability Dashboard table exactly
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @param {number} limit - Maximum ASINs to return (default 100)
+ * @returns {Promise<Object>} ASIN-wise profitability data
+ */
+async function getAsinWiseProfitability(userId, country, region, limit = 100) {
+    const startTime = Date.now();
+    
+    try {
+        const userObjectId = typeof userId === 'string' 
+            ? new mongoose.Types.ObjectId(userId) 
+            : userId;
+        
+        const [economicsMetrics, cogsDoc, sellerData, adsSpendByAsin] = await Promise.all([
+            EconomicsMetrics.findLatest(userObjectId, region, country),
+            CogsModel.findOne({ userId: userObjectId, countryCode: country }).lean(),
+            Seller.findOne(
+                { User: userId },
+                { 'sellerAccount': { $elemMatch: { region, country } } }
+            ).lean(),
+            getAdsSpendByAsin(userId, country, region)
+        ]);
+        
+        if (!economicsMetrics) {
+            return {
+                success: false,
+                source: 'none',
+                error: 'No economics data found',
+                data: null
+            };
+        }
+        
+        const currencyCode = economicsMetrics.totalSales?.currencyCode || 'USD';
+        
+        const cogsMap = {};
+        if (cogsDoc?.cogsEntries) {
+            cogsDoc.cogsEntries.forEach(e => {
+                cogsMap[e.asin] = e.cogs || 0;
+            });
+        }
+        
+        const productNameMap = new Map();
+        const products = sellerData?.sellerAccount?.[0]?.products || [];
+        products.forEach(p => {
+            if (p.asin) {
+                productNameMap.set(p.asin, {
+                    itemName: p.itemName,
+                    sku: p.sku,
+                    status: p.status,
+                    price: p.price
+                });
+            }
+        });
+        
+        let asinData = [];
+        const isBigAccount = economicsMetrics.isBig === true;
+        
+        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+            const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
+            asinData = Array.from(profitMap.values());
+        } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
+            const asinMap = new Map();
+            economicsMetrics.asinWiseSales.forEach(item => {
+                if (!item.asin) return;
+                if (asinMap.has(item.asin)) {
+                    const e = asinMap.get(item.asin);
+                    e.sales += item.sales?.amount || 0;
+                    e.grossProfit += item.grossProfit?.amount || 0;
+                    e.unitsSold += item.unitsSold || 0;
+                    e.fbaFees += item.fbaFees?.amount || 0;
+                    e.storageFees += item.storageFees?.amount || 0;
+                    e.totalFees += item.totalFees?.amount || 0;
+                    e.amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
+                    e.refunds += item.refunds?.amount || 0;
+                } else {
+                    asinMap.set(item.asin, {
+                        asin: item.asin,
+                        parentAsin: item.parentAsin || item.asin,
+                        sales: item.sales?.amount || 0,
+                        grossProfit: item.grossProfit?.amount || 0,
+                        unitsSold: item.unitsSold || 0,
+                        fbaFees: item.fbaFees?.amount || 0,
+                        storageFees: item.storageFees?.amount || 0,
+                        totalFees: item.totalFees?.amount || 0,
+                        amazonFees: item.amazonFees?.amount || item.totalFees?.amount || 0,
+                        refunds: item.refunds?.amount || 0
+                    });
+                }
+            });
+            asinData = Array.from(asinMap.values());
+        }
+        
+        const profitabilityList = asinData.map(item => {
+            const asin = item.asin;
+            const productInfo = productNameMap.get(asin) || {};
+            const adsSpend = adsSpendByAsin.get(asin) || 0;
+            const cogsPerUnit = cogsMap[asin] || 0;
+            const totalCogs = cogsPerUnit * (item.unitsSold || 0);
+            const hasCOGS = cogsPerUnit > 0;
+            
+            const sales = item.sales || 0;
+            const amazonFees = item.amazonFees || item.totalFees || 0;
+            
+            const grossProfit = sales - adsSpend - amazonFees;
+            const netProfit = hasCOGS ? grossProfit - totalCogs : null;
+            const profitMargin = sales > 0 ? (grossProfit / sales) * 100 : 0;
+            const netProfitMargin = hasCOGS && sales > 0 ? (netProfit / sales) * 100 : null;
+            
+            return {
+                asin,
+                parentAsin: item.parentAsin || asin,
+                itemName: productInfo.itemName || null,
+                sku: productInfo.sku || null,
+                status: productInfo.status || null,
+                unitsSold: item.unitsSold || 0,
+                sales: parseFloat(sales.toFixed(2)),
+                adsSpend: parseFloat(adsSpend.toFixed(2)),
+                amazonFees: parseFloat(amazonFees.toFixed(2)),
+                fbaFees: parseFloat((item.fbaFees || 0).toFixed(2)),
+                storageFees: parseFloat((item.storageFees || 0).toFixed(2)),
+                refunds: parseFloat((item.refunds || 0).toFixed(2)),
+                cogs: hasCOGS ? parseFloat(totalCogs.toFixed(2)) : null,
+                cogsPerUnit: hasCOGS ? parseFloat(cogsPerUnit.toFixed(2)) : null,
+                hasCOGS,
+                grossProfit: parseFloat(grossProfit.toFixed(2)),
+                netProfit: netProfit !== null ? parseFloat(netProfit.toFixed(2)) : null,
+                profitMargin: parseFloat(profitMargin.toFixed(2)),
+                netProfitMargin: netProfitMargin !== null ? parseFloat(netProfitMargin.toFixed(2)) : null
+            };
+        });
+        
+        profitabilityList.sort((a, b) => b.sales - a.sales);
+        
+        let totalSales = 0;
+        let totalGrossProfit = 0;
+        let totalAdsSpend = 0;
+        let totalAmazonFees = 0;
+        let totalUnitsSold = 0;
+        let totalCogs = 0;
+        let productsWithCOGS = 0;
+        
+        const lossMakingProducts = [];
+        const profitableProducts = [];
+        const lowMarginProducts = [];
+        
+        profitabilityList.forEach(item => {
+            totalSales += item.sales;
+            totalGrossProfit += item.grossProfit;
+            totalAdsSpend += item.adsSpend;
+            totalAmazonFees += item.amazonFees;
+            totalUnitsSold += item.unitsSold;
+            if (item.hasCOGS) {
+                totalCogs += item.cogs;
+                productsWithCOGS++;
+            }
+            if (item.grossProfit < 0) {
+                lossMakingProducts.push(item);
+            } else if (item.grossProfit > 0) {
+                if (item.profitMargin < 15) {
+                    lowMarginProducts.push(item);
+                }
+                profitableProducts.push(item);
+            }
+        });
+        
+        // Sort loss-making products by absolute loss (biggest losses first)
+        lossMakingProducts.sort((a, b) => a.grossProfit - b.grossProfit);
+        // Sort profitable products by profit (highest profit first)
+        profitableProducts.sort((a, b) => b.grossProfit - a.grossProfit);
+        // Sort low margin products by margin (lowest margin first)
+        lowMarginProducts.sort((a, b) => a.profitMargin - b.profitMargin);
+        
+        const totalProducts = profitabilityList.length;
+        const overallProfitMargin = totalSales > 0 ? (totalGrossProfit / totalSales) * 100 : 0;
+        
+        logger.info('[QMateProfitabilityService] Got ASIN-wise profitability', {
+            userId, country, region,
+            duration: Date.now() - startTime,
+            totalAsins: totalProducts,
+            lossMaking: lossMakingProducts.length,
+            profitable: profitableProducts.length
+        });
+        
+        return {
+            success: true,
+            source: 'economics_metrics',
+            data: {
+                asinProfitability: profitabilityList.slice(0, limit),
+                total: totalProducts,
+                lossMakingProducts,
+                lossMakingTotal: lossMakingProducts.length,
+                profitableProducts,
+                profitableTotal: profitableProducts.length,
+                lowMarginProducts: lowMarginProducts.slice(0, 50),
+                lowMarginTotal: lowMarginProducts.length,
+                summary: {
+                    totalProducts,
+                    totalSales: parseFloat(totalSales.toFixed(2)),
+                    totalGrossProfit: parseFloat(totalGrossProfit.toFixed(2)),
+                    totalAdsSpend: parseFloat(totalAdsSpend.toFixed(2)),
+                    totalAmazonFees: parseFloat(totalAmazonFees.toFixed(2)),
+                    totalUnitsSold,
+                    totalCogs: parseFloat(totalCogs.toFixed(2)),
+                    productsWithCOGS,
+                    overallProfitMargin: parseFloat(overallProfitMargin.toFixed(2)),
+                    lossMakingCount: lossMakingProducts.length,
+                    lowMarginCount: lowMarginProducts.length,
+                    profitableCount: profitableProducts.length,
+                    currencyCode,
+                    dateRange: economicsMetrics.dateRange || null
+                }
+            }
+        };
+        
+    } catch (error) {
+        logger.error('[QMateProfitabilityService] Error getting ASIN-wise profitability', {
+            error: error.message, userId, country, region
+        });
+        return { success: false, error: error.message, data: null };
+    }
+}
+
+/**
  * Get complete profitability context for QMate AI
  * 
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region
+ * @param {Object} options - Options for data fetching
+ * @param {number} options.asinLimit - Max ASINs to return (default 100)
  * @returns {Promise<Object>} Complete profitability context
  */
-async function getQMateProfitabilityContext(userId, country, region) {
+async function getQMateProfitabilityContext(userId, country, region, options = {}) {
     const startTime = Date.now();
+    const { asinLimit = 100 } = options;
     
     try {
-        // Fetch all data in parallel
+        // Fetch all data in parallel - including new datewise and ASIN-wise data
         const [
             cogsResult,
             marginCategoriesResult,
             parentChildResult,
             issuesResult,
-            financialBreakdownResult
+            financialBreakdownResult,
+            datewiseResult,
+            asinWiseResult
         ] = await Promise.all([
             getCOGSData(userId, country),
             getProfitMarginCategories(userId, country, region),
             getParentChildAggregation(userId, country, region),
             getProfitabilityIssues(userId, country, region),
-            getProductFinancialBreakdown(userId, country, region, 15)
+            getProductFinancialBreakdown(userId, country, region, 15),
+            getDatewiseProfitability(userId, country, region),
+            getAsinWiseProfitability(userId, country, region, asinLimit)
         ]);
         
         const context = {
@@ -585,7 +968,9 @@ async function getQMateProfitabilityContext(userId, country, region) {
             marginCategories: null,
             parentChildAnalysis: null,
             issues: null,
-            financialBreakdown: null
+            financialBreakdown: null,
+            datewiseProfitability: null,
+            asinWiseProfitability: null
         };
         
         if (cogsResult?.success) {
@@ -608,23 +993,48 @@ async function getQMateProfitabilityContext(userId, country, region) {
             context.financialBreakdown = financialBreakdownResult.data;
         }
         
-        // Generate overall profitability summary
+        if (datewiseResult?.success) {
+            context.datewiseProfitability = datewiseResult.data;
+        }
+        
+        if (asinWiseResult?.success) {
+            context.asinWiseProfitability = asinWiseResult.data;
+        }
+        
+        // Generate overall profitability summary using ASIN-wise data for accuracy
+        const asinSummary = context.asinWiseProfitability?.summary || {};
+        const datewiseSummary = context.datewiseProfitability?.summary || {};
+        
         context.overallSummary = {
             hasCOGSData: context.cogsData?.hasCOGS || false,
-            totalProducts: context.marginCategories?.summary?.totalProducts || 0,
-            overallProfitMargin: context.marginCategories?.summary?.overallProfitMargin || 0,
-            lossMakingCount: context.marginCategories?.summary?.lossMakingCount || 0,
+            totalProducts: asinSummary.totalProducts || context.marginCategories?.summary?.totalProducts || 0,
+            totalSales: asinSummary.totalSales || datewiseSummary.totalSales || 0,
+            totalGrossProfit: asinSummary.totalGrossProfit || datewiseSummary.totalGrossProfit || 0,
+            totalAdsSpend: asinSummary.totalAdsSpend || datewiseSummary.totalPpcSpend || 0,
+            totalAmazonFees: asinSummary.totalAmazonFees || datewiseSummary.totalAmazonFees || 0,
+            totalUnitsSold: asinSummary.totalUnitsSold || datewiseSummary.totalUnitsSold || 0,
+            overallProfitMargin: asinSummary.overallProfitMargin || context.marginCategories?.summary?.overallProfitMargin || 0,
+            lossMakingCount: asinSummary.lossMakingCount || context.marginCategories?.summary?.lossMakingCount || 0,
+            lowMarginCount: asinSummary.lowMarginCount || context.marginCategories?.summary?.lowMarginCount || 0,
+            productsWithCOGS: asinSummary.productsWithCOGS || 0,
+            totalCogs: asinSummary.totalCogs || 0,
             totalIssues: context.issues?.summary?.totalIssues || 0,
-            topRecommendation: context.marginCategories?.summary?.lossMakingCount > 0 
+            currencyCode: asinSummary.currencyCode || datewiseSummary.currencyCode || 'USD',
+            dateRange: asinSummary.dateRange || datewiseSummary.dateRange || null,
+            topRecommendation: (asinSummary.lossMakingCount || 0) > 0 
                 ? 'Review loss-making products and consider price adjustments or cost reduction'
-                : (context.marginCategories?.summary?.lowMarginCount > 5 
+                : ((asinSummary.lowMarginCount || 0) > 5 
                     ? 'Optimize low-margin products to improve overall profitability'
                     : 'Profitability is healthy, focus on scaling top performers')
         };
         
         logger.info('[QMateProfitabilityService] Got complete profitability context', {
             userId, country, region,
-            duration: Date.now() - startTime
+            duration: Date.now() - startTime,
+            hasDatewise: !!context.datewiseProfitability,
+            hasAsinWise: !!context.asinWiseProfitability,
+            asinCount: context.asinWiseProfitability?.asinProfitability?.length || 0,
+            datewiseDays: context.datewiseProfitability?.datewiseData?.length || 0
         });
         
         return {
@@ -647,5 +1057,7 @@ module.exports = {
     getParentChildAggregation,
     getProfitabilityIssues,
     getProductFinancialBreakdown,
+    getDatewiseProfitability,
+    getAsinWiseProfitability,
     getQMateProfitabilityContext
 };

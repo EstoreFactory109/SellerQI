@@ -792,69 +792,126 @@ function transformRankingIssues(rankingErrors) {
 
 /**
  * Transform conversion issues to include suggestions
+ * Handles both the legacy format (imageCount, hasVideo, etc.) and the actual IssuesData format
+ * (imageResultErrorData, videoResultErrorData, etc.)
  */
 function transformConversionIssues(conversionErrors) {
     if (!conversionErrors) return null;
     
     const issues = [];
     
-    // Image count
-    if (conversionErrors.imageCount !== undefined && conversionErrors.imageCount < 7) {
+    // Handle actual IssuesData format (from IssuesPaginationService)
+    // imageResultErrorData
+    if (conversionErrors.imageResultErrorData?.status === 'Error') {
+        const errorData = conversionErrors.imageResultErrorData;
         issues.push({
             type: 'low_image_count',
-            currentValue: conversionErrors.imageCount,
-            requiredValue: 7,
-            message: `Product has only ${conversionErrors.imageCount} images (minimum 7 recommended)`,
-            suggestion: 'Add more high-quality product images showing different angles, lifestyle, and infographics'
+            message: errorData.Message || 'Product has fewer than 7 images',
+            suggestion: errorData.HowToSolve || 'Add more high-quality product images showing different angles, lifestyle, and infographics',
+            mainImage: errorData.MainImage || null
         });
     }
     
-    // Video
-    if (conversionErrors.hasVideo === false) {
+    // videoResultErrorData
+    if (conversionErrors.videoResultErrorData?.status === 'Error') {
+        const errorData = conversionErrors.videoResultErrorData;
         issues.push({
             type: 'no_video',
-            message: 'Product listing has no video',
-            suggestion: 'Add a product video to increase engagement and conversion rate'
+            message: errorData.Message || 'Product listing has no video',
+            suggestion: errorData.HowToSolve || 'Add a product video to increase engagement and conversion rate'
         });
     }
     
-    // A+ Content
-    if (conversionErrors.hasAPlus === false) {
-        issues.push({
-            type: 'no_aplus',
-            message: 'Product does not have A+ Content',
-            suggestion: 'Create A+ Content to showcase brand story and product features visually'
-        });
-    }
-    
-    // Star Rating
-    if (conversionErrors.starRating !== undefined && conversionErrors.starRating < 4.3) {
+    // productStarRatingResultErrorData
+    if (conversionErrors.productStarRatingResultErrorData?.status === 'Error') {
+        const errorData = conversionErrors.productStarRatingResultErrorData;
         issues.push({
             type: 'low_rating',
-            currentValue: conversionErrors.starRating,
-            requiredValue: 4.3,
-            message: `Product rating is ${conversionErrors.starRating} (below 4.3 threshold)`,
-            suggestion: 'Focus on product quality and customer service to improve ratings'
+            message: errorData.Message || 'Product rating is below 4.3',
+            suggestion: errorData.HowToSolve || 'Focus on product quality and customer service to improve ratings'
         });
     }
     
-    // Buy Box
-    if (conversionErrors.hasBuyBox === false || conversionErrors.buyBoxPercentage === 0) {
+    // aplusErrorData
+    if (conversionErrors.aplusErrorData?.status === 'Error') {
+        const errorData = conversionErrors.aplusErrorData;
         issues.push({
-            type: 'no_buybox',
-            buyBoxPercentage: conversionErrors.buyBoxPercentage || 0,
-            message: 'Seller does not have the Buy Box',
-            suggestion: 'Review pricing, fulfillment method (FBA), and seller metrics to win Buy Box'
+            type: 'no_aplus',
+            message: errorData.Message || 'Product does not have A+ Content',
+            suggestion: errorData.HowToSolve || 'Create A+ Content to showcase brand story and product features visually'
         });
     }
     
-    // Brand Story
-    if (conversionErrors.hasBrandStory === false) {
+    // brandStoryErrorData
+    if (conversionErrors.brandStoryErrorData?.status === 'Error') {
+        const errorData = conversionErrors.brandStoryErrorData;
         issues.push({
             type: 'no_brand_story',
-            message: 'Product does not have Brand Story',
-            suggestion: 'Add Brand Story to build brand awareness and customer trust'
+            message: errorData.Message || 'Product does not have Brand Story',
+            suggestion: errorData.HowToSolve || 'Add Brand Story to build brand awareness and customer trust'
         });
+    }
+    
+    // productsWithOutBuyboxErrorData
+    if (conversionErrors.productsWithOutBuyboxErrorData?.status === 'Error') {
+        const errorData = conversionErrors.productsWithOutBuyboxErrorData;
+        issues.push({
+            type: 'no_buybox',
+            buyBoxPercentage: errorData.buyBoxPercentage || 0,
+            message: errorData.Message || 'Seller does not have the Buy Box',
+            suggestion: errorData.HowToSolve || 'Review pricing, fulfillment method (FBA), and seller metrics to win Buy Box'
+        });
+    }
+    
+    // Legacy format fallbacks (for backwards compatibility)
+    if (issues.length === 0) {
+        if (conversionErrors.imageCount !== undefined && conversionErrors.imageCount < 7) {
+            issues.push({
+                type: 'low_image_count',
+                currentValue: conversionErrors.imageCount,
+                requiredValue: 7,
+                message: `Product has only ${conversionErrors.imageCount} images (minimum 7 recommended)`,
+                suggestion: 'Add more high-quality product images showing different angles, lifestyle, and infographics'
+            });
+        }
+        if (conversionErrors.hasVideo === false) {
+            issues.push({
+                type: 'no_video',
+                message: 'Product listing has no video',
+                suggestion: 'Add a product video to increase engagement and conversion rate'
+            });
+        }
+        if (conversionErrors.hasAPlus === false) {
+            issues.push({
+                type: 'no_aplus',
+                message: 'Product does not have A+ Content',
+                suggestion: 'Create A+ Content to showcase brand story and product features visually'
+            });
+        }
+        if (conversionErrors.starRating !== undefined && conversionErrors.starRating < 4.3) {
+            issues.push({
+                type: 'low_rating',
+                currentValue: conversionErrors.starRating,
+                requiredValue: 4.3,
+                message: `Product rating is ${conversionErrors.starRating} (below 4.3 threshold)`,
+                suggestion: 'Focus on product quality and customer service to improve ratings'
+            });
+        }
+        if (conversionErrors.hasBuyBox === false || conversionErrors.buyBoxPercentage === 0) {
+            issues.push({
+                type: 'no_buybox',
+                buyBoxPercentage: conversionErrors.buyBoxPercentage || 0,
+                message: 'Seller does not have the Buy Box',
+                suggestion: 'Review pricing, fulfillment method (FBA), and seller metrics to win Buy Box'
+            });
+        }
+        if (conversionErrors.hasBrandStory === false) {
+            issues.push({
+                type: 'no_brand_story',
+                message: 'Product does not have Brand Story',
+                suggestion: 'Add Brand Story to build brand awareness and customer trust'
+            });
+        }
     }
     
     return issues.length > 0 ? issues : null;
@@ -862,61 +919,134 @@ function transformConversionIssues(conversionErrors) {
 
 /**
  * Transform inventory issues to include suggestions
+ * Handles both the legacy format (inventoryPlanning, strandedInventory, etc.) and the actual IssuesData format
+ * (inventoryPlanningErrorData, strandedInventoryErrorData, etc.)
  */
 function transformInventoryIssues(inventoryErrors) {
     if (!inventoryErrors) return null;
     
     const issues = [];
     
-    // Inventory Planning issues
-    if (inventoryErrors.inventoryPlanning) {
-        const ip = inventoryErrors.inventoryPlanning;
-        if (ip.hasLongTermStorageFee) {
+    // Handle actual IssuesData format (from IssuesPaginationService)
+    // inventoryPlanningErrorData.longTermStorageFees
+    if (inventoryErrors.inventoryPlanningErrorData) {
+        const planning = inventoryErrors.inventoryPlanningErrorData;
+        
+        if (planning.longTermStorageFees?.status === 'Error') {
+            const errorData = planning.longTermStorageFees;
             issues.push({
                 type: 'long_term_storage',
-                message: 'Product incurring long-term storage fees',
-                suggestion: 'Remove slow-moving inventory or create promotions to increase sales velocity'
+                message: errorData.Message || 'Product incurring long-term storage fees',
+                suggestion: errorData.HowToSolve || 'Remove slow-moving inventory or create promotions to increase sales velocity',
+                // Include additional details if available
+                quantity181_210: errorData.quantity_to_be_charged_ais_181_210_days,
+                quantity211_240: errorData.quantity_to_be_charged_ais_211_240_days,
+                quantity241_270: errorData.quantity_to_be_charged_ais_241_270_days,
+                quantity271_300: errorData.quantity_to_be_charged_ais_271_300_days,
+                quantity301_330: errorData.quantity_to_be_charged_ais_301_330_days,
+                quantity331_365: errorData.quantity_to_be_charged_ais_331_365_days,
+                quantity365plus: errorData.quantity_to_be_charged_ais_365_plus_days
             });
         }
-        if (ip.hasUnfulfillableInventory) {
+        
+        if (planning.unfulfillable?.status === 'Error') {
+            const errorData = planning.unfulfillable;
             issues.push({
                 type: 'unfulfillable_inventory',
-                message: 'Product has unfulfillable inventory',
-                suggestion: 'Request removal or disposal of unfulfillable units, or investigate root cause'
+                quantity: errorData.unfulfillable_quantity,
+                message: errorData.Message || 'Product has unfulfillable inventory',
+                suggestion: errorData.HowToSolve || 'Request removal or disposal of unfulfillable units, or investigate root cause'
             });
         }
     }
     
-    // Stranded Inventory
-    if (inventoryErrors.strandedInventory) {
+    // strandedInventoryErrorData
+    if (inventoryErrors.strandedInventoryErrorData) {
+        const errorData = inventoryErrors.strandedInventoryErrorData;
         issues.push({
             type: 'stranded_inventory',
-            quantity: inventoryErrors.strandedInventory.quantity || 0,
-            message: 'Product has stranded inventory',
-            suggestion: 'Fix listing issues to make stranded inventory sellable again'
+            strandedReason: errorData.stranded_reason || errorData.status_primary,
+            message: errorData.Message || 'Product has stranded inventory',
+            suggestion: errorData.HowToSolve || 'Fix listing issues to make stranded inventory sellable again'
         });
     }
     
-    // Inbound Non-Compliance
-    if (inventoryErrors.inboundNonCompliance) {
+    // inboundNonComplianceErrorData
+    if (inventoryErrors.inboundNonComplianceErrorData) {
+        const errorData = inventoryErrors.inboundNonComplianceErrorData;
         issues.push({
             type: 'inbound_non_compliance',
-            message: 'Inbound shipment non-compliance issues',
-            suggestion: 'Review and resolve inbound shipment problems in Seller Central'
+            problemType: errorData.problemType || errorData.problem_type,
+            message: errorData.Message || 'Inbound shipment non-compliance issues',
+            suggestion: errorData.HowToSolve || 'Review and resolve inbound shipment problems in Seller Central'
         });
     }
     
-    // Replenishment
-    if (inventoryErrors.replenishment) {
-        const rep = inventoryErrors.replenishment;
-        if (rep.status === 'Error' || rep.recommendedAction) {
+    // replenishmentErrorData (can be array or single)
+    if (inventoryErrors.replenishmentErrorData) {
+        const repData = inventoryErrors.replenishmentErrorData;
+        const repArray = Array.isArray(repData) ? repData : [repData];
+        
+        repArray.forEach(errorData => {
+            if (errorData.status === 'Error' || errorData.alert === 'out_of_stock' || errorData.recommendedReplenishmentQty > 0) {
+                issues.push({
+                    type: errorData.alert === 'out_of_stock' ? 'out_of_stock' : 'replenishment_needed',
+                    recommendedQuantity: errorData.recommendedReplenishmentQty || errorData.recommendedQuantity || 0,
+                    availableQuantity: errorData.available || 0,
+                    daysOfSupply: errorData.daysOfSupply || 0,
+                    sku: errorData.sku,
+                    message: errorData.Message || (errorData.alert === 'out_of_stock' ? 'Product is out of stock' : 'Product needs replenishment'),
+                    suggestion: errorData.HowToSolve || `Send ${errorData.recommendedReplenishmentQty || 'more'} units to avoid stockout`
+                });
+            }
+        });
+    }
+    
+    // Legacy format fallbacks (for backwards compatibility)
+    if (issues.length === 0) {
+        if (inventoryErrors.inventoryPlanning) {
+            const ip = inventoryErrors.inventoryPlanning;
+            if (ip.hasLongTermStorageFee) {
+                issues.push({
+                    type: 'long_term_storage',
+                    message: 'Product incurring long-term storage fees',
+                    suggestion: 'Remove slow-moving inventory or create promotions to increase sales velocity'
+                });
+            }
+            if (ip.hasUnfulfillableInventory) {
+                issues.push({
+                    type: 'unfulfillable_inventory',
+                    message: 'Product has unfulfillable inventory',
+                    suggestion: 'Request removal or disposal of unfulfillable units, or investigate root cause'
+                });
+            }
+        }
+        if (inventoryErrors.strandedInventory) {
             issues.push({
-                type: 'replenishment_needed',
-                daysOfSupply: rep.daysOfSupply || 0,
-                recommendedQuantity: rep.recommendedQuantity || 0,
-                message: rep.recommendedAction || 'Product needs replenishment',
-                suggestion: `Send ${rep.recommendedQuantity || 'more'} units to avoid stockout`
+                type: 'stranded_inventory',
+                quantity: inventoryErrors.strandedInventory.quantity || 0,
+                message: 'Product has stranded inventory',
+                suggestion: 'Fix listing issues to make stranded inventory sellable again'
             });
+        }
+        if (inventoryErrors.inboundNonCompliance) {
+            issues.push({
+                type: 'inbound_non_compliance',
+                message: 'Inbound shipment non-compliance issues',
+                suggestion: 'Review and resolve inbound shipment problems in Seller Central'
+            });
+        }
+        if (inventoryErrors.replenishment) {
+            const rep = inventoryErrors.replenishment;
+            if (rep.status === 'Error' || rep.recommendedAction) {
+                issues.push({
+                    type: 'replenishment_needed',
+                    daysOfSupply: rep.daysOfSupply || 0,
+                    recommendedQuantity: rep.recommendedQuantity || 0,
+                    message: rep.recommendedAction || 'Product needs replenishment',
+                    suggestion: `Send ${rep.recommendedQuantity || 'more'} units to avoid stockout`
+                });
+            }
         }
     }
     

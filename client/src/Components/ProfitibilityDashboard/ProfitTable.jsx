@@ -308,18 +308,8 @@ const ProfitTable = ({
                 // Transform children if present
                 if (product.children && product.children.length > 0) {
                     transformed.children = product.children.map(child => transformProduct(child));
-                    // Parent row: show Ad Spend, Amz Fees, and total fees as sum of parent + all children (like amz fees).
-                    const childAdSpend = transformed.children.reduce((sum, c) => sum + (Number(c.adSpend) || 0), 0);
-                    const childAmazonFees = transformed.children.reduce((sum, c) => sum + (Number(c.amazonFees) || 0), 0);
-                    const childFees = transformed.children.reduce((sum, c) => sum + (Number(c.fees) || 0), 0);
-                    transformed.adSpend = (Number(transformed.adSpend) || 0) + childAdSpend;
-                    transformed.amazonFees = (Number(transformed.amazonFees) || 0) + childAmazonFees;
-                    transformed.fees = (Number(transformed.fees) || 0) + childFees;
-                    // Recalculate parent gross profit: sales - fees - adSpend (totals including children)
-                    const sales = Number(transformed.sales) || 0;
-                    const fees = Number(transformed.fees) || 0;
-                    const adSpend = Number(transformed.adSpend) || 0;
-                    transformed.grossProfit = sales - fees - adSpend;
+                    // Parent row: server already sends parent with adSpend, amazonFees, and totalFees
+                    // as the sum of all children — do not add children again (would double-count).
                 } else {
                     transformed.children = [];
                 }

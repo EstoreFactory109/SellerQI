@@ -43,6 +43,7 @@ const {
     getYourProductsActiveV3,
     getYourProductsInactiveV3,
     getYourProductsIncompleteV3,
+    getYourProductsNonSellableV3,
     getYourProductsWithoutAPlusV3,
     getYourProductsNotTargetedInAdsV3,
     getOptimizationProductsV3,
@@ -82,6 +83,10 @@ const {
     getAutoCampaignInsights,
     getTabCounts
 } = require('../controllers/analytics/PPCCampaignAnalysisController.js');
+
+const { pauseKeyword } = require('../controllers/analytics/PauseKeywordController.js');
+const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
+const { pauseAndAddToNegative } = require('../controllers/analytics/PauseAndAddToNegativeController.js');
 
 const {
     getIssuesSummary,
@@ -223,6 +228,18 @@ router.get('/ppc/zero-sales', auth, getLocation, analyseDataCache(600, 'ppc-zero
 // Cache TTL: 10 minutes (only page 1 cached)
 router.get('/ppc/auto-insights', auth, getLocation, analyseDataCache(600, 'ppc-auto-insights'), getAutoCampaignInsights);
 
+// Pause keyword (used by Wasted Spend Keywords table)
+// POST body: { keywordId: string, adType?: "SP" | "SB" | "SD" }
+router.post('/ads/pause-keyword', auth, getLocation, pauseKeyword);
+
+// Add keywords to negative (ad-group or campaign level)
+// POST body: { keywords: [{ campaignId, adGroupId?, keywordText, matchType? }], level?: 'adGroup' | 'campaign', matchType?: 'negativeExact' | 'negativePhrase' }
+router.post('/ads/add-to-negative', auth, getLocation, addToNegativeKeywords);
+
+// Pause keyword then add to negative (synchronous: pause first, then add-to-negative)
+// POST body: { keywordId, campaignId, adGroupId, keywordText, matchType?, adType? }
+router.post('/ads/pause-and-add-to-negative', auth, getLocation, pauseAndAddToNegative);
+
 // ===== ISSUES PAGE =====
 // Returns issues summary data
 router.get('/issues', auth, getLocation, analyseDataCache(3600, 'issues'), getIssuesData);
@@ -328,6 +345,13 @@ router.get('/your-products-v3/inactive', auth, getLocation, analyseDataCache(900
 // Query params: page, limit
 // Cache TTL: 15 minutes (only page 1 cached)
 router.get('/your-products-v3/incomplete', auth, getLocation, analyseDataCache(900, 'your-products-v3-incomplete'), getYourProductsIncompleteV3);
+
+// Non-Sellable products (Inactive + Incomplete combined) - paginated (from Seller model only)
+// Returns both inactive and incomplete products in a single request
+// Note: B2B pricing is NOT included for non-sellable products
+// Query params: page, limit
+// Cache TTL: 15 minutes (only page 1 cached)
+router.get('/your-products-v3/non-sellable', auth, getLocation, analyseDataCache(900, 'your-products-v3-non-sellable'), getYourProductsNonSellableV3);
 
 // Products without A+ content - paginated
 // Query params: page, limit

@@ -10,6 +10,9 @@ const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
 
+// Pause / Archive Keywords - Test controller for pausing or archiving Amazon Ads keywords
+const { testPauseKeywords, testArchiveKeywords, getPauseArchiveKeywordsInfo } = require('../controllers/test/PauseArchiveKeywordsTestController.js')
+
     
 router.post('/testreport',testReport);
 router.get('/totalsales',getTotalSales);
@@ -39,6 +42,11 @@ router.post('/testPPCMetrics',testPPCMetrics)  // Fetch aggregated PPC metrics f
 // PPC Units Sold - Date-wise units sold data with attribution windows
 router.post('/testPPCUnitsSold', testGetPPCUnitsSold)  // Fetch units sold data date-wise from SP, SB, SD campaigns
 router.get('/ppc-units-sold/info', getUnitsMetricsInfo)  // Get info about available units sold metrics
+
+// Pause / Archive Keywords - Pause or archive Amazon Ads keywords (SP, SB, SD)
+router.post('/pause-keywords', testPauseKeywords)   // Body: userId, country, region, adType, keywordId | keywordIds | keywordText [, matchType]
+router.post('/archive-keywords', testArchiveKeywords)  // Same body as pause-keywords
+router.get('/pause-archive-keywords/info', getPauseArchiveKeywordsInfo)  // API info
 
 // NumberOfProductReviews - Fetches product review data from RapidAPI
 router.post('/testNumberOfProductReviews', testNumberOfProductReviews)  // Fetch ASINs from DB and fetch product reviews data

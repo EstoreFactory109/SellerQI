@@ -6,6 +6,7 @@
  * Runs ONLY on:
  * - Sunday (0)
  * - Wednesday (3)
+ * - Friday (5)
  *
  * Responsibilities:
  * - Iterate all verified users who are subscribedToAlerts !== false
@@ -23,7 +24,7 @@
  *   node server/Services/BackgroundJobs/alertsWorker.js
  *
  * Optional env:
- * - ALERTS_WORKER_CRON (default: "0 6 * * 0,3")  // 06:00 UTC on Sun/Wed
+ * - ALERTS_WORKER_CRON (default: "0 6 * * 0,3,5")  // 06:00 UTC on Sun/Wed/Fri
  * - TIMEZONE (default: "UTC")
  */
 
@@ -48,7 +49,7 @@ const { detectAndStoreStrandedInventoryAlerts } = require('../Alerts/Other-Alert
 const { detectAndStoreInboundShipmentAlerts } = require('../Alerts/Other-Alerts/InboundShipmentAlertService.js');
 const { detectSalesDrop } = require('../Alerts/Other-Alerts/SalesDropAlertService.js');
 
-const DEFAULT_CRON = '0 6 * * 0,3'; // 06:00 UTC Sunday + Wednesday
+const DEFAULT_CRON = '0 6 * * 0,3,5'; // 06:00 UTC Sunday + Wednesday + Friday
 const BATCH_SIZE = 10;
 const DELAY_BETWEEN_BATCHES_MS = 1000;
 
@@ -256,13 +257,13 @@ function setupAlertsCron() {
   const tz = process.env.TIMEZONE || 'UTC';
   const expr = process.env.ALERTS_WORKER_CRON || DEFAULT_CRON;
 
-  // Cron expression (e.g. "0 6 * * 0,3") ensures this only fires on Sunday and Wednesday.
+  // Cron expression (e.g. "0 6 * * 0,3,5") ensures this only fires on Sunday, Wednesday and Friday.
   // When it runs, we execute ALL alert services for every subscribed user/account.
   const cronJob = cron.schedule(
     expr,
     async () => {
       try {
-        logger.info('[AlertsWorker] Cron fired – running all alert services (Sun/Wed run)');
+        logger.info('[AlertsWorker] Cron fired – running all alert services (Sun/Wed/Fri run)');
         await processAllUsersAlerts();
       } catch (err) {
         logger.error('[AlertsWorker] Cron run failed', { error: err?.message, stack: err?.stack });

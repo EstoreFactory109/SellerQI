@@ -19,6 +19,8 @@ const NumberOfProductReviews = require('../../models/seller-performance/NumberOf
 const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
+const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
 const mongoose = require('mongoose');
 
 /**
@@ -505,6 +507,267 @@ async function getProductsByIssueCategory(userId, country, region, category) {
 }
 
 /**
+ * Get product categorization data (Sellable, Non-Sellable, A+, B2B, Ads targeting)
+ * This matches the "Your Products" page categories exactly.
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @param {number} limit - Max products per category to return
+ * @returns {Promise<Object>} Product categorization data
+ */
+async function getProductCategorization(userId, country, region, limit = 20) {
+    const startTime = Date.now();
+    
+    try {
+        const userObjectId = typeof userId === 'string' 
+            ? new mongoose.Types.ObjectId(userId) 
+            : userId;
+        
+        // Fetch all required data in parallel
+        const [
+            sellerData,
+            aPlusData,
+            reviewsData,
+            latestAdsItem
+        ] = await Promise.all([
+            // Get all products from Seller model
+            Seller.findOne({ User: userObjectId })
+                .select('sellerAccount')
+                .lean(),
+            
+            // Get A+ content data
+            APlusContent.findOne({
+                User: userObjectId,
+                country: country,
+                region: region
+            }).sort({ createdAt: -1 }).select('ApiContentDetails').lean(),
+            
+            // Get reviews/brand story data
+            NumberOfProductReviews.findOne({
+                User: userObjectId,
+                country: country,
+                region: region
+            }).sort({ createdAt: -1 }).select('Products').lean(),
+            
+            // Get latest ads batch
+            ProductWiseSponsoredAdsItem.findOne({
+                userId: userObjectId,
+                country: country,
+                region: region
+            }).sort({ createdAt: -1 }).select('batchId').lean()
+        ]);
+        
+        if (!sellerData?.sellerAccount) {
+            return {
+                success: true,
+                source: 'product_categorization',
+                data: {
+                    hasProducts: false,
+                    summary: { totalProducts: 0 }
+                }
+            };
+        }
+        
+        // Find matching account
+        const account = sellerData.sellerAccount.find(
+            acc => acc.country === country && acc.region === region
+        );
+        
+        if (!account?.products || account.products.length === 0) {
+            return {
+                success: true,
+                source: 'product_categorization',
+                data: {
+                    hasProducts: false,
+                    summary: { totalProducts: 0 }
+                }
+            };
+        }
+        
+        const allProducts = account.products;
+        
+        // Build A+ content map (ASIN -> has A+)
+        const aPlusAsins = new Set();
+        if (aPlusData?.ApiContentDetails) {
+            aPlusData.ApiContentDetails.forEach(item => {
+                if (item.status === 'APPROVED' || item.status === 'PUBLISHED') {
+                    // A+ content is linked to ASINs in the item
+                    if (item.asin) aPlusAsins.add(item.asin.toUpperCase());
+                    if (item.contentReferenceKey) {
+                        // Some structures have ASINs in different fields
+                        const asins = item.includedDataTypes?.ASIN || [];
+                        asins.forEach(a => aPlusAsins.add(a.toUpperCase()));
+                    }
+                }
+            });
+        }
+        
+        // Build reviews/brand story map
+        const reviewsMap = {};
+        if (reviewsData?.Products) {
+            reviewsData.Products.forEach(p => {
+                if (p.asin) {
+                    reviewsMap[p.asin.toUpperCase()] = {
+                        hasVideo: (p.video_url?.length || 0) > 0,
+                        hasBrandStory: p.has_brandstory || false,
+                        photoCount: p.product_photos?.length || 0,
+                        rating: parseFloat(p.product_star_ratings) || 0,
+                        numRatings: parseInt(p.product_num_ratings) || 0
+                    };
+                }
+            });
+        }
+        
+        // Build ads targeting map
+        let targetedAsins = new Set();
+        if (latestAdsItem?.batchId) {
+            const adsItems = await ProductWiseSponsoredAdsItem.find({
+                batchId: latestAdsItem.batchId
+            }).select('asin').lean();
+            
+            adsItems.forEach(item => {
+                if (item.asin) targetedAsins.add(item.asin.toUpperCase());
+            });
+        }
+        
+        // Categorize products
+        const sellableProducts = [];
+        const nonSellableProducts = [];
+        const withAPlusProducts = [];
+        const withoutAPlusProducts = [];
+        const withB2BPricing = [];
+        const withoutB2BPricing = [];
+        const targetedInAds = [];
+        const notTargetedInAds = [];
+        const withVideo = [];
+        const withoutVideo = [];
+        const withBrandStory = [];
+        const withoutBrandStory = [];
+        
+        allProducts.forEach(p => {
+            const asinUpper = (p.asin || '').toUpperCase();
+            const status = (p.status || '').toLowerCase();
+            const reviewInfo = reviewsMap[asinUpper] || {};
+            
+            const productInfo = {
+                asin: p.asin,
+                sku: p.sku,
+                itemName: p.itemName || 'Unknown Product',
+                status: p.status,
+                price: p.price,
+                quantity: p.quantity,
+                hasAPlus: aPlusAsins.has(asinUpper),
+                hasB2BPricing: p.has_b2b_pricing || false,
+                isTargetedInAds: targetedAsins.has(asinUpper),
+                hasVideo: reviewInfo.hasVideo || false,
+                hasBrandStory: reviewInfo.hasBrandStory || false,
+                rating: reviewInfo.rating || 0,
+                numRatings: reviewInfo.numRatings || 0
+            };
+            
+            // Categorize by sellability
+            if (status === 'active') {
+                sellableProducts.push(productInfo);
+            } else {
+                // For non-sellable products, include the issues array (reasons why inactive/incomplete)
+                // This comes directly from Amazon and explains exactly why the product is not sellable
+                const nonSellableProductInfo = {
+                    ...productInfo,
+                    issues: Array.isArray(p.issues) ? p.issues : []
+                };
+                nonSellableProducts.push(nonSellableProductInfo);
+            }
+            
+            // Categorize by A+ content
+            if (productInfo.hasAPlus) {
+                withAPlusProducts.push(productInfo);
+            } else {
+                withoutAPlusProducts.push(productInfo);
+            }
+            
+            // Categorize by B2B pricing
+            if (productInfo.hasB2BPricing) {
+                withB2BPricing.push(productInfo);
+            } else {
+                withoutB2BPricing.push(productInfo);
+            }
+            
+            // Categorize by ads targeting (only for active products)
+            if (status === 'active') {
+                if (productInfo.isTargetedInAds) {
+                    targetedInAds.push(productInfo);
+                } else {
+                    notTargetedInAds.push(productInfo);
+                }
+            }
+            
+            // Categorize by video
+            if (productInfo.hasVideo) {
+                withVideo.push(productInfo);
+            } else {
+                withoutVideo.push(productInfo);
+            }
+            
+            // Categorize by brand story
+            if (productInfo.hasBrandStory) {
+                withBrandStory.push(productInfo);
+            } else {
+                withoutBrandStory.push(productInfo);
+            }
+        });
+        
+        logger.info('[QMateProductsService] Got product categorization', {
+            userId, country, region,
+            duration: Date.now() - startTime,
+            totalProducts: allProducts.length
+        });
+        
+        return {
+            success: true,
+            source: 'product_categorization',
+            data: {
+                hasProducts: true,
+                summary: {
+                    totalProducts: allProducts.length,
+                    sellableCount: sellableProducts.length,
+                    nonSellableCount: nonSellableProducts.length,
+                    withAPlusCount: withAPlusProducts.length,
+                    withoutAPlusCount: withoutAPlusProducts.length,
+                    withB2BPricingCount: withB2BPricing.length,
+                    withoutB2BPricingCount: withoutB2BPricing.length,
+                    targetedInAdsCount: targetedInAds.length,
+                    notTargetedInAdsCount: notTargetedInAds.length,
+                    withVideoCount: withVideo.length,
+                    withoutVideoCount: withoutVideo.length,
+                    withBrandStoryCount: withBrandStory.length,
+                    withoutBrandStoryCount: withoutBrandStory.length
+                },
+                // Return sliced lists for context (full lists could be too large)
+                sellableProducts: sellableProducts.slice(0, limit),
+                nonSellableProducts: nonSellableProducts.slice(0, limit),
+                withAPlusProducts: withAPlusProducts.slice(0, limit),
+                withoutAPlusProducts: withoutAPlusProducts.slice(0, limit),
+                withB2BPricing: withB2BPricing.slice(0, limit),
+                withoutB2BPricing: withoutB2BPricing.slice(0, limit),
+                targetedInAds: targetedInAds.slice(0, limit),
+                notTargetedInAds: notTargetedInAds.slice(0, limit),
+                withVideo: withVideo.slice(0, limit),
+                withoutVideo: withoutVideo.slice(0, limit),
+                withBrandStory: withBrandStory.slice(0, limit),
+                withoutBrandStory: withoutBrandStory.slice(0, limit)
+            }
+        };
+        
+    } catch (error) {
+        logger.error('[QMateProductsService] Error getting product categorization', {
+            error: error.message, userId, country, region
+        });
+        return { success: false, error: error.message, data: null };
+    }
+}
+
+/**
  * Get complete products context for QMate AI
  * 
  * @param {string} userId - User ID
@@ -520,17 +783,20 @@ async function getQMateProductsContext(userId, country, region) {
         const [
             reviewsResult,
             salesResult,
-            listingQualityResult
+            listingQualityResult,
+            categorizationResult
         ] = await Promise.all([
             getProductReviewsData(userId, country, region),
             getProductSalesData(userId, country, region, 20),
-            getListingQualityAnalysis(userId, country, region)
+            getListingQualityAnalysis(userId, country, region),
+            getProductCategorization(userId, country, region, 20)
         ]);
         
         const context = {
             reviews: null,
             sales: null,
-            listingQuality: null
+            listingQuality: null,
+            categorization: null
         };
         
         if (reviewsResult?.success) {
@@ -545,21 +811,40 @@ async function getQMateProductsContext(userId, country, region) {
             context.listingQuality = listingQualityResult.data;
         }
         
+        if (categorizationResult?.success) {
+            context.categorization = categorizationResult.data;
+        }
+        
         // Generate product health summary
         const lowRatedCount = context.reviews?.summary?.lowRatedCount || 0;
         const noReviewsCount = context.reviews?.summary?.noReviewsCount || 0;
         const zeroSalesCount = context.sales?.zeroSalesProducts?.length || 0;
+        const categorizationSummary = context.categorization?.summary || {};
         
         context.productHealthSummary = {
-            totalProducts: context.listingQuality?.summary?.totalProducts || context.sales?.summary?.totalProducts || 0,
-            activeProducts: context.listingQuality?.summary?.activeProducts || 0,
+            totalProducts: categorizationSummary.totalProducts || context.listingQuality?.summary?.totalProducts || context.sales?.summary?.totalProducts || 0,
+            activeProducts: categorizationSummary.sellableCount || context.listingQuality?.summary?.activeProducts || 0,
+            nonSellableProducts: categorizationSummary.nonSellableCount || 0,
             averageRating: context.reviews?.summary?.averageRating || 0,
             productsNeedingAttention: lowRatedCount + noReviewsCount + zeroSalesCount,
+            // Categorization counts
+            withAPlus: categorizationSummary.withAPlusCount || 0,
+            withoutAPlus: categorizationSummary.withoutAPlusCount || 0,
+            withB2BPricing: categorizationSummary.withB2BPricingCount || 0,
+            withoutB2BPricing: categorizationSummary.withoutB2BPricingCount || 0,
+            targetedInAds: categorizationSummary.targetedInAdsCount || 0,
+            notTargetedInAds: categorizationSummary.notTargetedInAdsCount || 0,
+            withVideo: categorizationSummary.withVideoCount || 0,
+            withoutVideo: categorizationSummary.withoutVideoCount || 0,
+            withBrandStory: categorizationSummary.withBrandStoryCount || 0,
+            withoutBrandStory: categorizationSummary.withoutBrandStoryCount || 0,
             recommendations: [
                 ...(lowRatedCount > 0 ? [`${lowRatedCount} products have low ratings - consider quality improvements`] : []),
                 ...(noReviewsCount > 5 ? [`${noReviewsCount} products have no reviews - consider review campaigns`] : []),
-                ...(zeroSalesCount > 0 ? [`${zeroSalesCount} products have zero sales - review pricing/visibility`] : [])
-            ].slice(0, 3)
+                ...(zeroSalesCount > 0 ? [`${zeroSalesCount} products have zero sales - review pricing/visibility`] : []),
+                ...(categorizationSummary.withoutAPlusCount > 0 ? [`${categorizationSummary.withoutAPlusCount} products without A+ Content`] : []),
+                ...(categorizationSummary.notTargetedInAdsCount > 0 ? [`${categorizationSummary.notTargetedInAdsCount} active products not targeted in ads`] : [])
+            ].slice(0, 5)
         };
         
         logger.info('[QMateProductsService] Got complete products context', {
@@ -587,5 +872,6 @@ module.exports = {
     getAsinIssues,
     getListingQualityAnalysis,
     getProductsByIssueCategory,
+    getProductCategorization,
     getQMateProductsContext
 };

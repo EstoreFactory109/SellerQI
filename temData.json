@@ -1,0 +1,1684 @@
+/** 
+* Paste one or more documents here
+*/
+{
+    "User": {
+      "$oid": "699f3c11d3f957a08cb9524d"
+    },
+    "region": "FE",
+    "country": "AU",
+    "dateRange": {
+      "startDate": "2026-02-03",
+      "endDate": "2026-03-05"
+    },
+    "totalSales": {
+      "amount": 7830.31,
+      "currencyCode": "AUD"
+    },
+    "grossProfit": {
+      "amount": 3206.15,
+      "currencyCode": "AUD"
+    },
+    "ppcSpent": {
+      "amount": 1237,
+      "currencyCode": "AUD"
+    },
+    "fbaFees": {
+      "amount": 3095.82,
+      "currencyCode": "AUD"
+    },
+    "storageFees": {
+      "amount": 0,
+      "currencyCode": "AUD"
+    },
+    "totalFees": {
+      "amount": 3963.72,
+      "currencyCode": "AUD"
+    },
+    "amazonFees": {
+      "amount": 3963.72,
+      "currencyCode": "AUD"
+    },
+    "amazonFeesBreakdown": [
+      {
+        "feeType": "FbaFulfilmentFee",
+        "amount": 3095.82
+      },
+      {
+        "feeType": "ReferralFee",
+        "amount": 865.38
+      },
+      {
+        "feeType": "RefundCommissionFee",
+        "amount": 2.29
+      },
+      {
+        "feeType": "DisposalFee",
+        "amount": 0.23
+      }
+    ],
+    "refunds": {
+      "amount": 85.09,
+      "currencyCode": "AUD"
+    },
+    "datewiseSales": [
+      {
+        "date": "2026-02-03",
+        "sales": {
+          "amount": 159.28,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 7.76,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-04",
+        "sales": {
+          "amount": 184.21,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 91.83,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-05",
+        "sales": {
+          "amount": 185.11,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 76.51,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-06",
+        "sales": {
+          "amount": 220.98,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 149.97,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-07",
+        "sales": {
+          "amount": 360.94,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 154.66,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-08",
+        "sales": {
+          "amount": 320.98,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 139.22,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-09",
+        "sales": {
+          "amount": 345.38,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 154.36,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-10",
+        "sales": {
+          "amount": 281.46,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 88.34,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-11",
+        "sales": {
+          "amount": 232.81,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 104.06,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-12",
+        "sales": {
+          "amount": 297.92,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 127.98,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-13",
+        "sales": {
+          "amount": 182.95,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 24.11,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-14",
+        "sales": {
+          "amount": 209.93,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 73.71,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-15",
+        "sales": {
+          "amount": 364.03,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 204.21,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-16",
+        "sales": {
+          "amount": 280.94,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 45.5,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-17",
+        "sales": {
+          "amount": 293.12,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 142.78,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-18",
+        "sales": {
+          "amount": 276.61,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 87.08,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-19",
+        "sales": {
+          "amount": 289.74,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 121.63,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-20",
+        "sales": {
+          "amount": 354.49,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 179.53,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-21",
+        "sales": {
+          "amount": 159.09,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 27.5,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-22",
+        "sales": {
+          "amount": 369.73,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 222.67,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-23",
+        "sales": {
+          "amount": 337.62,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 104.28,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-24",
+        "sales": {
+          "amount": 250.1,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 120.02,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-25",
+        "sales": {
+          "amount": 284.51,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 105.81,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-26",
+        "sales": {
+          "amount": 253.85,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 92.34,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-27",
+        "sales": {
+          "amount": 203.95,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 58.75,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-28",
+        "sales": {
+          "amount": 308.05,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 187.74,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-01",
+        "sales": {
+          "amount": 205.12,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 52.21,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-02",
+        "sales": {
+          "amount": 188.78,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 71.05,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-03",
+        "sales": {
+          "amount": 80.81,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": -25.67,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-04",
+        "sales": {
+          "amount": 221.43,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 126.82,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-05",
+        "sales": {
+          "amount": 126.39,
+          "currencyCode": "AUD"
+        },
+        "grossProfit": {
+          "amount": 89.39,
+          "currencyCode": "AUD"
+        }
+      }
+    ],
+    "datewiseGrossProfit": [
+      {
+        "date": "2026-02-03",
+        "grossProfit": {
+          "amount": 7.76,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-04",
+        "grossProfit": {
+          "amount": 91.83,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-05",
+        "grossProfit": {
+          "amount": 76.51,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-06",
+        "grossProfit": {
+          "amount": 149.97,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-07",
+        "grossProfit": {
+          "amount": 154.66,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-08",
+        "grossProfit": {
+          "amount": 139.22,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-09",
+        "grossProfit": {
+          "amount": 154.36,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-10",
+        "grossProfit": {
+          "amount": 88.34,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-11",
+        "grossProfit": {
+          "amount": 104.06,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-12",
+        "grossProfit": {
+          "amount": 127.98,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-13",
+        "grossProfit": {
+          "amount": 24.11,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-14",
+        "grossProfit": {
+          "amount": 73.71,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-15",
+        "grossProfit": {
+          "amount": 204.21,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-16",
+        "grossProfit": {
+          "amount": 45.5,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-17",
+        "grossProfit": {
+          "amount": 142.78,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-18",
+        "grossProfit": {
+          "amount": 87.08,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-19",
+        "grossProfit": {
+          "amount": 121.63,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-20",
+        "grossProfit": {
+          "amount": 179.53,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-21",
+        "grossProfit": {
+          "amount": 27.5,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-22",
+        "grossProfit": {
+          "amount": 222.67,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-23",
+        "grossProfit": {
+          "amount": 104.28,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-24",
+        "grossProfit": {
+          "amount": 120.02,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-25",
+        "grossProfit": {
+          "amount": 105.81,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-26",
+        "grossProfit": {
+          "amount": 92.34,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-27",
+        "grossProfit": {
+          "amount": 58.75,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-28",
+        "grossProfit": {
+          "amount": 187.74,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-01",
+        "grossProfit": {
+          "amount": 52.21,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-02",
+        "grossProfit": {
+          "amount": 71.05,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-03",
+        "grossProfit": {
+          "amount": -25.67,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-04",
+        "grossProfit": {
+          "amount": 126.82,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-05",
+        "grossProfit": {
+          "amount": 89.39,
+          "currencyCode": "AUD"
+        }
+      }
+    ],
+    "datewiseFeesAndRefunds": [
+      {
+        "date": "2026-02-03",
+        "fbaFulfillmentFee": {
+          "amount": 131.54,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-04",
+        "fbaFulfillmentFee": {
+          "amount": 63.76,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-05",
+        "fbaFulfillmentFee": {
+          "amount": 67.7,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 1,
+          "amount": 5.45,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-06",
+        "fbaFulfillmentFee": {
+          "amount": 27.85,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 1,
+          "amount": 8.78,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-07",
+        "fbaFulfillmentFee": {
+          "amount": 126.6,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-08",
+        "fbaFulfillmentFee": {
+          "amount": 142.67,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-09",
+        "fbaFulfillmentFee": {
+          "amount": 118.56,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-10",
+        "fbaFulfillmentFee": {
+          "amount": 103.7,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-11",
+        "fbaFulfillmentFee": {
+          "amount": 99.49,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-12",
+        "fbaFulfillmentFee": {
+          "amount": 78.07,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-13",
+        "fbaFulfillmentFee": {
+          "amount": 117.1,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-14",
+        "fbaFulfillmentFee": {
+          "amount": 94.58,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-15",
+        "fbaFulfillmentFee": {
+          "amount": 83.69,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-16",
+        "fbaFulfillmentFee": {
+          "amount": 179.34,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-17",
+        "fbaFulfillmentFee": {
+          "amount": 71.73,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 2,
+          "amount": 25.43,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-18",
+        "fbaFulfillmentFee": {
+          "amount": 145.84,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-19",
+        "fbaFulfillmentFee": {
+          "amount": 124.85,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-20",
+        "fbaFulfillmentFee": {
+          "amount": 112.65,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-21",
+        "fbaFulfillmentFee": {
+          "amount": 101.17,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-22",
+        "fbaFulfillmentFee": {
+          "amount": 79.95,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-23",
+        "fbaFulfillmentFee": {
+          "amount": 175.91,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-24",
+        "fbaFulfillmentFee": {
+          "amount": 87.82,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-25",
+        "fbaFulfillmentFee": {
+          "amount": 140.15,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-26",
+        "fbaFulfillmentFee": {
+          "amount": 108.8,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-27",
+        "fbaFulfillmentFee": {
+          "amount": 110.92,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-02-28",
+        "fbaFulfillmentFee": {
+          "amount": 71.12,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-01",
+        "fbaFulfillmentFee": {
+          "amount": 119.54,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-02",
+        "fbaFulfillmentFee": {
+          "amount": 78.52,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 1,
+          "amount": 27.26,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-03",
+        "fbaFulfillmentFee": {
+          "amount": 71.05,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 1,
+          "amount": 18.17,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-04",
+        "fbaFulfillmentFee": {
+          "amount": 61.15,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      },
+      {
+        "date": "2026-03-05",
+        "fbaFulfillmentFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "storageFee": {
+          "amount": 0,
+          "currencyCode": "AUD"
+        },
+        "refunds": {
+          "units": 0,
+          "amount": 0,
+          "currencyCode": "AUD"
+        }
+      }
+    ],
+    "datewiseAmazonFees": [
+      {
+        "date": "2026-02-03",
+        "totalAmount": {
+          "amount": 151.05,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 131.54
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 19.51
+          }
+        ]
+      },
+      {
+        "date": "2026-02-04",
+        "totalAmount": {
+          "amount": 86.84,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 63.76
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 23.08
+          }
+        ]
+      },
+      {
+        "date": "2026-02-05",
+        "totalAmount": {
+          "amount": 90.02,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 67.7
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 22.32
+          }
+        ]
+      },
+      {
+        "date": "2026-02-06",
+        "totalAmount": {
+          "amount": 52.45,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 27.85
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 24.38
+          },
+          {
+            "feeType": "RefundCommissionFee",
+            "amount": 0.22
+          }
+        ]
+      },
+      {
+        "date": "2026-02-07",
+        "totalAmount": {
+          "amount": 173.76,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 126.6
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 47.16
+          }
+        ]
+      },
+      {
+        "date": "2026-02-08",
+        "totalAmount": {
+          "amount": 178.29,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 142.67
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 35.62
+          }
+        ]
+      },
+      {
+        "date": "2026-02-09",
+        "totalAmount": {
+          "amount": 162.73,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 118.56
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 44.17
+          }
+        ]
+      },
+      {
+        "date": "2026-02-10",
+        "totalAmount": {
+          "amount": 135.74,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 103.7
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 32.04
+          }
+        ]
+      },
+      {
+        "date": "2026-02-11",
+        "totalAmount": {
+          "amount": 123.71,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 99.49
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 24.22
+          }
+        ]
+      },
+      {
+        "date": "2026-02-12",
+        "totalAmount": {
+          "amount": 111.03,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 78.07
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 32.96
+          }
+        ]
+      },
+      {
+        "date": "2026-02-13",
+        "totalAmount": {
+          "amount": 138.9,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 117.1
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 21.8
+          }
+        ]
+      },
+      {
+        "date": "2026-02-14",
+        "totalAmount": {
+          "amount": 119.71,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 94.58
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 25.13
+          }
+        ]
+      },
+      {
+        "date": "2026-02-15",
+        "totalAmount": {
+          "amount": 127.46,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 83.69
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 43.77
+          }
+        ]
+      },
+      {
+        "date": "2026-02-16",
+        "totalAmount": {
+          "amount": 208.35,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 179.34
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 29.01
+          }
+        ]
+      },
+      {
+        "date": "2026-02-17",
+        "totalAmount": {
+          "amount": 105.01,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 71.73
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 32.53
+          },
+          {
+            "feeType": "RefundCommissionFee",
+            "amount": 0.75
+          }
+        ]
+      },
+      {
+        "date": "2026-02-18",
+        "totalAmount": {
+          "amount": 178.35,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 145.84
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 32.51
+          }
+        ]
+      },
+      {
+        "date": "2026-02-19",
+        "totalAmount": {
+          "amount": 155.98,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 124.85
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 30.9
+          },
+          {
+            "feeType": "DisposalFee",
+            "amount": 0.23
+          }
+        ]
+      },
+      {
+        "date": "2026-02-20",
+        "totalAmount": {
+          "amount": 150.68,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 112.65
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 38.03
+          }
+        ]
+      },
+      {
+        "date": "2026-02-21",
+        "totalAmount": {
+          "amount": 117.26,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 101.17
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 16.09
+          }
+        ]
+      },
+      {
+        "date": "2026-02-22",
+        "totalAmount": {
+          "amount": 118.63,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 79.95
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 38.68
+          }
+        ]
+      },
+      {
+        "date": "2026-02-23",
+        "totalAmount": {
+          "amount": 212.6,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 175.91
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 36.69
+          }
+        ]
+      },
+      {
+        "date": "2026-02-24",
+        "totalAmount": {
+          "amount": 114.6,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 87.82
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 26.78
+          }
+        ]
+      },
+      {
+        "date": "2026-02-25",
+        "totalAmount": {
+          "amount": 168.15,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 140.15
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 28
+          }
+        ]
+      },
+      {
+        "date": "2026-02-26",
+        "totalAmount": {
+          "amount": 138.54,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 108.8
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 29.74
+          }
+        ]
+      },
+      {
+        "date": "2026-02-27",
+        "totalAmount": {
+          "amount": 133.81,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 110.92
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 22.89
+          }
+        ]
+      },
+      {
+        "date": "2026-02-28",
+        "totalAmount": {
+          "amount": 107.88,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 71.12
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 36.76
+          }
+        ]
+      },
+      {
+        "date": "2026-03-01",
+        "totalAmount": {
+          "amount": 141.09,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 119.54
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 21.55
+          }
+        ]
+      },
+      {
+        "date": "2026-03-02",
+        "totalAmount": {
+          "amount": 92.72,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 78.52
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 13.34
+          },
+          {
+            "feeType": "RefundCommissionFee",
+            "amount": 0.86
+          }
+        ]
+      },
+      {
+        "date": "2026-03-03",
+        "totalAmount": {
+          "amount": 80.54,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 71.05
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 9.03
+          },
+          {
+            "feeType": "RefundCommissionFee",
+            "amount": 0.46
+          }
+        ]
+      },
+      {
+        "date": "2026-03-04",
+        "totalAmount": {
+          "amount": 78.15,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "FbaFulfilmentFee",
+            "amount": 61.15
+          },
+          {
+            "feeType": "ReferralFee",
+            "amount": 17
+          }
+        ]
+      },
+      {
+        "date": "2026-03-05",
+        "totalAmount": {
+          "amount": 9.69,
+          "currencyCode": "AUD"
+        },
+        "feeBreakdown": [
+          {
+            "feeType": "ReferralFee",
+            "amount": 9.69
+          }
+        ]
+      }
+    ],
+    "asinWiseSales": [],
+    "queryId": "583422020518",
+    "documentId": "amzn1.tortuga.4.fe.10e04a45-509b-4ec8-ad47-a80cdadcdb44.T2XJDRHDBT888T",
+    "dataSource": "DataKiosk",
+    "isBig": true,
+    "processedAt": {
+      "$date": "2026-03-06T12:08:37.138Z"
+    },
+    "createdAt": {
+      "$date": "2026-03-06T12:08:37.147Z"
+    },
+    "updatedAt": {
+      "$date": "2026-03-06T12:08:37.147Z"
+    },
+    "__v": 0
+  }

@@ -264,13 +264,6 @@ const Dashboard = () => {
     console.log('Calendar mode:', calendarMode);
     console.log('Start date:', dashboardInfo?.startDate);
     console.log('End date:', dashboardInfo?.endDate);
-    
-    // Helper function to get actual end date (yesterday due to 24-hour data delay)
-    const getActualEndDate = () => {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      return yesterday;
-    };
 
     const formatDate = (date) => {
       const dateObj = date instanceof Date ? date : new Date(date);
@@ -281,7 +274,8 @@ const Dashboard = () => {
       });
     };
 
-    // Always use the actual dates from the database if available
+    // Only update selectedPeriod when we have actual dates from the database
+    // This prevents showing incorrect calculated dates before Phase 1 data loads
     if (dashboardInfo?.startDate && dashboardInfo?.endDate) {
       // Parse date strings as local dates (YYYY-MM-DD format)
       const parseLocalDate = (dateString) => {
@@ -295,23 +289,9 @@ const Dashboard = () => {
       const period = `${formatDate(startDateObj)} - ${formatDate(endDateObj)}`;
       setSelectedPeriod(period);
       console.log('Dashboard showing date range from database:', period);
-    } else if (calendarMode === 'last7') {
-      // Fallback: Show actual date range for Last 7 Days
-      const actualEndDate = getActualEndDate();
-      const startDate = new Date(actualEndDate);
-      startDate.setDate(actualEndDate.getDate() - 6);
-      const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-      setSelectedPeriod(period);
-      console.log('Dashboard showing Last 7 Days:', period);
-    } else {
-      // Fallback: Show actual date range for Last 30 Days
-      const actualEndDate = getActualEndDate();
-      const startDate = new Date(actualEndDate);
-      startDate.setDate(actualEndDate.getDate() - 30);
-      const period = `${formatDate(startDate)} - ${formatDate(actualEndDate)}`;
-      setSelectedPeriod(period);
-      console.log('Dashboard showing Last 30 Days:', period);
     }
+    // If no dates from database yet, keep the default "Last 30 Days" label
+    // The actual dates will be set once Phase 1 data loads from DataFetchTracking
   }, [dashboardInfo?.calendarMode, dashboardInfo?.startDate, dashboardInfo?.endDate]);
   
   // Fetch reimbursement data from Redux (cached for 5 minutes)

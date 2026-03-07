@@ -2778,6 +2778,104 @@ const getYourProductsIncompleteV3 = asyncHandler(async (req, res) => {
 });
 
 /**
+ * V3 Non-Sellable (Inactive + Incomplete) Combined Endpoint
+ * Returns: Paginated products that are either Inactive OR Incomplete (combined)
+ * Uses single aggregation with $facet for efficiency
+ * Note: B2B pricing is NOT fetched for non-sellable products
+ */
+const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+    try {
+        logger.info(`[v3-non-sellable] Getting Non-Sellable (Inactive+Incomplete) products for user ${userId}, page ${page}`);
+
+        const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+
+        // Single aggregation with $facet - matches both inactive and incomplete statuses
+        // Note: B2B pricing excluded as it's not relevant for non-sellable products
+        const pipeline = [
+            { $match: { User: userObjectId } },
+            { $unwind: '$sellerAccount' },
+            { $match: { 'sellerAccount.region': Region } },
+            { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            { $match: { 'sellerAccount.products.status': { $regex: /^(inactive|incomplete)$/i } } },
+            {
+                $facet: {
+                    count: [{ $count: 'total' }],
+                    inactiveCount: [
+                        { $match: { 'sellerAccount.products.status': { $regex: /^inactive$/i } } },
+                        { $count: 'total' }
+                    ],
+                    incompleteCount: [
+                        { $match: { 'sellerAccount.products.status': { $regex: /^incomplete$/i } } },
+                        { $count: 'total' }
+                    ],
+                    products: [
+                        { $sort: { 'sellerAccount.products.status': 1, 'sellerAccount.products.asin': 1 } },
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                asin: '$sellerAccount.products.asin',
+                                sku: '$sellerAccount.products.sku',
+                                itemName: '$sellerAccount.products.itemName',
+                                price: '$sellerAccount.products.price',
+                                status: '$sellerAccount.products.status',
+                                quantity: '$sellerAccount.products.quantity',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] }
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const [result] = await Seller.aggregate(pipeline);
+        const totalItems = result?.count[0]?.total || 0;
+        const inactiveTotal = result?.inactiveCount[0]?.total || 0;
+        const incompleteTotal = result?.incompleteCount[0]?.total || 0;
+        const products = result?.products || [];
+
+        // Map products to response format with proper status capitalization
+        const responseProducts = products.map(p => ({
+            asin: p.asin,
+            sku: p.sku,
+            title: p.itemName || '',
+            price: p.price || '0',
+            status: p.status?.toLowerCase() === 'inactive' ? 'Inactive' : 'Incomplete',
+            quantity: p.quantity ?? 0,
+            issues: Array.isArray(p.issues) ? p.issues : []
+        }));
+
+        const totalPages = Math.ceil(totalItems / limit);
+        const elapsed = Date.now() - startTime;
+        logger.info(`[v3-non-sellable] Completed in ${elapsed}ms - ${responseProducts.length} products (${inactiveTotal} inactive, ${incompleteTotal} incomplete)`);
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                products: responseProducts,
+                pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+                counts: { inactive: inactiveTotal, incomplete: incompleteTotal },
+                country: Country,
+                region: Region
+            }, "Non-Sellable products retrieved")
+        );
+
+    } catch (error) {
+        logger.error("[v3-non-sellable] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting Non-Sellable products: ${error.message}`)
+        );
+    }
+});
+
+/**
  * V3 Without A+ Content Endpoint
  * Returns: Paginated products that DON'T have A+ content (APPROVED/PUBLISHED)
  * 
@@ -3192,6 +3290,7 @@ module.exports = {
     getYourProductsActiveV3,
     getYourProductsInactiveV3,
     getYourProductsIncompleteV3,
+    getYourProductsNonSellableV3,
     getYourProductsWithoutAPlusV3,
     getYourProductsNotTargetedInAdsV3,
     getOptimizationProductsV3,

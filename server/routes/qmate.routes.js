@@ -14,7 +14,8 @@ const {
 const {
     generateSuggestion,
     applyFix,
-    batchSuggestions
+    batchSuggestions,
+    lookupSku
 } = require('../controllers/ai/QMateActionController.js');
 
 // QMate AI chat endpoint (requires location for analytics context)
@@ -27,6 +28,8 @@ router.post('/generate-suggestion', auth, getLocation, generateSuggestion);
 router.post('/apply-fix', auth, getLocation, applyFix);
 // Generate suggestions for multiple attributes at once
 router.post('/batch-suggestions', auth, getLocation, batchSuggestions);
+// Look up SKU for an ASIN (used when content_actions has null SKU)
+router.get('/lookup-sku/:asin', auth, getLocation, lookupSku);
 
 // Chat history CRUD (auth only)
 router.get('/chats', auth, listChats);

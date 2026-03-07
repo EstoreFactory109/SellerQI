@@ -27,8 +27,10 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const {
   updateProductContent,
-  autoFixCatalogConflicts
+  autoFixCatalogConflicts,
+  FIX_STATUS
 } = require('../../Services/Sp_API/UpdateProductContentService.js');
+const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 
 const ALLOWED_UPDATE_TYPES = ['title', 'description', 'bulletpoints', 'generic_keyword'];
 
@@ -130,6 +132,34 @@ const updateProductContentController = asyncHandler(async (req, res) => {
         ...(brandName != null && brandName !== '' && { brandName: String(brandName).trim() })
       }
     });
+
+    if (!analyzeOnly && result.status === FIX_STATUS.SUCCESS && result.asin) {
+      try {
+        await ListingFixStatus.markAsFixed({
+          userId,
+          country,
+          region,
+          asin: result.asin,
+          sku,
+          attribute: normalizedType,
+          valueApplied: valueToBeUpdated
+        });
+        logger.info('[UpdateProductContent] Marked listing fix status', {
+          userId,
+          country,
+          region,
+          asin: result.asin,
+          sku,
+          attribute: normalizedType
+        });
+      } catch (fixStatusErr) {
+        logger.warn('[UpdateProductContent] Failed to mark fix status (non-blocking)', {
+          error: fixStatusErr.message,
+          userId,
+          sku
+        });
+      }
+    }
   }
 
   return res.status(200).json({

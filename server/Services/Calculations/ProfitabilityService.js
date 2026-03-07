@@ -678,28 +678,29 @@ const getProfitabilityMetrics = async (userId, country, region) => {
     // With .lean(), economicsMetricsData is already a plain object
     const processedEconomicsMetrics = economicsMetricsData;
 
-    // Calculate totals from datewiseSales for consistency
+    // =====================================================================
+    // EXACT COPY OF Analyse.js convertEconomicsToFinanceFormat() LOGIC
+    // This ensures Profitability page shows the same gross profit as Dashboard
+    // =====================================================================
+    
     let totalSales = 0;
-    let totalGrossProfit = 0;
     let fbaFees = 0;
     let storageFees = 0;
     let refunds = 0;
     let amazonFees = 0;
     
     if (processedEconomicsMetrics) {
+        // Calculate totalSales by summing datewiseSales
         if (Array.isArray(processedEconomicsMetrics.datewiseSales) && processedEconomicsMetrics.datewiseSales.length > 0) {
             processedEconomicsMetrics.datewiseSales.forEach(item => {
                 totalSales += item.sales?.amount || 0;
-                totalGrossProfit += item.grossProfit?.amount || 0;
             });
             totalSales = parseFloat(totalSales.toFixed(2));
-            totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
         } else {
             totalSales = processedEconomicsMetrics.totalSales?.amount || 0;
-            totalGrossProfit = processedEconomicsMetrics.grossProfit?.amount || 0;
         }
         
-        // Calculate fees from datewise data
+        // Calculate fees from datewise data for consistency (SAME as Analyse.js)
         if (Array.isArray(processedEconomicsMetrics.datewiseFeesAndRefunds) && processedEconomicsMetrics.datewiseFeesAndRefunds.length > 0) {
             processedEconomicsMetrics.datewiseFeesAndRefunds.forEach(item => {
                 fbaFees += item.fbaFulfillmentFee?.amount || 0;
@@ -715,19 +716,26 @@ const getProfitabilityMetrics = async (userId, country, region) => {
             refunds = processedEconomicsMetrics.refunds?.amount || 0;
         }
         
-        // Get Amazon fees
+        // Get Amazon fees - calculate from datewiseAmazonFees for consistency (SAME as Analyse.js)
         if (Array.isArray(processedEconomicsMetrics.datewiseAmazonFees) && processedEconomicsMetrics.datewiseAmazonFees.length > 0) {
+            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
             processedEconomicsMetrics.datewiseAmazonFees.forEach(item => {
                 amazonFees += item.totalAmount?.amount || 0;
             });
             amazonFees = parseFloat(amazonFees.toFixed(2));
         } else {
+            // Fallback 1: Get from summary level
             amazonFees = processedEconomicsMetrics.amazonFees?.amount || 0;
+            
+            // Final fallback: use fbaFees + storageFees if still 0
             if (amazonFees === 0) {
                 amazonFees = fbaFees + storageFees;
             }
         }
     }
+    
+    // Calculate BACKEND gross profit: Sales - Amazon Fees - Refunds (SAME FORMULA as Analyse.js line 659)
+    const backendGrossProfit = totalSales - amazonFees - refunds;
 
     // Get PPC data from PPCMetrics model
     // Note: PPCMetrics stores totals in the 'summary' sub-object
@@ -752,8 +760,10 @@ const getProfitabilityMetrics = async (userId, country, region) => {
         logger.info(`[ProfitabilityMetrics] No PPCMetrics data found for user ${userId}, country ${country}, region ${region}`);
     }
 
-    // Calculate gross profit (Sales - Amazon Fees - Refunds - Ad Spend)
-    const grossProfit = totalGrossProfit - totalAdSpend;
+    // DISPLAYED Gross Profit = Backend Gross Profit - PPC Spend
+    // This is what the dashboard displays to users as "Gross Profit"
+    // (matches TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent)
+    const grossProfit = backendGrossProfit - totalAdSpend;
 
     const fetchTime = Date.now() - startTime;
     logger.info(`[PERF] ProfitabilityService.getProfitabilityMetrics completed in ${fetchTime}ms`);
@@ -769,9 +779,11 @@ const getProfitabilityMetrics = async (userId, country, region) => {
         storageFees,
         refunds,
         // Additional data for backward compatibility
+        // NOTE: Gross_Profit here is the BACKEND gross profit (before PPC subtraction)
+        // This matches what Analyse.js returns in accountFinance.Gross_Profit
         accountFinance: {
             Total_Sales: totalSales,
-            Gross_Profit: totalGrossProfit,
+            Gross_Profit: parseFloat(backendGrossProfit.toFixed(2)),
             ProductAdsPayment: totalAdSpend,
             FBA_Fees: fbaFees,
             Storage: storageFees,

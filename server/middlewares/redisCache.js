@@ -65,9 +65,9 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
                 }
             }
             
-            // For your-products-v3 paginated endpoints (active, inactive, incomplete, without-aplus, not-targeted-in-ads, optimization)
+            // For your-products-v3 paginated endpoints (active, inactive, incomplete, non-sellable, without-aplus, not-targeted-in-ads, optimization)
             // Cache only page 1 - Load More (page > 1) bypasses cache
-            const v3PaginatedTypes = ['your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'your-products-v3-optimization'];
+            const v3PaginatedTypes = ['your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-non-sellable', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'your-products-v3-optimization'];
             if (v3PaginatedTypes.includes(pageType)) {
                 const page = parseInt(req.query.page) || 1;
                 const limit = parseInt(req.query.limit) || 20;

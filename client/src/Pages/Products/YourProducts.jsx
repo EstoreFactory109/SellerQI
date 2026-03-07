@@ -23,8 +23,7 @@ import {
   // V3 optimized endpoints
   fetchYourProductsSummaryV3,
   fetchYourProductsActiveV3,
-  fetchYourProductsInactiveV3,
-  fetchYourProductsIncompleteV3,
+  fetchYourProductsNonSellableV3,
   fetchYourProductsWithoutAPlusV3,
   fetchYourProductsNotTargetedInAdsV3,
   fetchOptimizationProductsV3
@@ -219,8 +218,7 @@ const YourProducts = () => {
   // ========== V3 OPTIMIZED: Separate endpoints, parallel calls ==========
   const v3Summary = useSelector((state) => state.pageData?.yourProductsV3?.summary);
   const v3Active = useSelector((state) => state.pageData?.yourProductsV3?.active);
-  const v3Inactive = useSelector((state) => state.pageData?.yourProductsV3?.inactive);
-  const v3Incomplete = useSelector((state) => state.pageData?.yourProductsV3?.incomplete);
+  const v3NonSellable = useSelector((state) => state.pageData?.yourProductsV3?.nonSellable);
   const v3WithoutAPlus = useSelector((state) => state.pageData?.yourProductsV3?.withoutAPlus);
   const v3NotTargetedInAds = useSelector((state) => state.pageData?.yourProductsV3?.notTargetedInAds);
 
@@ -233,13 +231,12 @@ const YourProducts = () => {
   const currentTabData = useMemo(() => {
     switch (activeTab) {
       case 'active': return v3Active;
-      case 'inactive': return v3Inactive;
-      case 'incomplete': return v3Incomplete;
+      case 'nonSellable': return v3NonSellable;
       case 'withoutAPlus': return v3WithoutAPlus;
       case 'notTargetedInAds': return v3NotTargetedInAds;
       default: return null;
     }
-  }, [activeTab, v3Active, v3Inactive, v3Incomplete, v3WithoutAPlus, v3NotTargetedInAds]);
+  }, [activeTab, v3Active, v3NonSellable, v3WithoutAPlus, v3NotTargetedInAds]);
 
   const products = currentTabData?.products || [];
   const pagination = currentTabData?.pagination || {};
@@ -283,11 +280,8 @@ const YourProducts = () => {
     if (!hasData || isStale) {
       if (!tabData?.loading) {
         switch (activeTab) {
-          case 'inactive':
-            dispatch(fetchYourProductsInactiveV3({ limit: itemsPerPage }));
-            break;
-          case 'incomplete':
-            dispatch(fetchYourProductsIncompleteV3({ limit: itemsPerPage }));
+          case 'nonSellable':
+            dispatch(fetchYourProductsNonSellableV3({ limit: itemsPerPage }));
             break;
           case 'withoutAPlus':
             dispatch(fetchYourProductsWithoutAPlusV3({ limit: itemsPerPage }));
@@ -336,11 +330,8 @@ const YourProducts = () => {
         case 'active':
           await dispatch(fetchYourProductsActiveV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
           break;
-        case 'inactive':
-          await dispatch(fetchYourProductsInactiveV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
-          break;
-        case 'incomplete':
-          await dispatch(fetchYourProductsIncompleteV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+        case 'nonSellable':
+          await dispatch(fetchYourProductsNonSellableV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
           break;
         case 'withoutAPlus':
           await dispatch(fetchYourProductsWithoutAPlusV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
@@ -615,12 +606,11 @@ const YourProducts = () => {
         .issues-content a { word-break: break-all; overflow-wrap: anywhere; }
         table { max-width: 100%; }
         table th, table td { word-wrap: break-word; overflow-wrap: break-word; overflow: visible; }
-        .max-w-7xl { max-width: 100%; overflow-x: hidden; overflow-y: visible; }
         table thead { position: relative; }
         table thead th { overflow: visible !important; position: relative; }
       `}</style>
 
-      <div className="max-w-7xl mx-auto px-2 lg:px-3 py-1.5" style={{ maxWidth: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
+      <div className="w-full mx-auto px-2 lg:px-3 py-1.5" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
         {/* Header */}
         <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -643,8 +633,8 @@ const YourProducts = () => {
           </div>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1.5 mb-2">
+        {/* Summary Cards - full width */}
+        <div className="w-full grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1.5 mb-2">
           {v3Summary?.loading && !summary.totalProducts ? (
             <>
               {Array.from({ length: 6 }).map((_, idx) => (
@@ -666,23 +656,16 @@ const YourProducts = () => {
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
                   <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Active</span>
+                  <span>Sellable</span>
                 </div>
                 <div className="text-lg font-bold text-white">{summary.activeProducts || 0}</div>
               </div>
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
                   <XCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Inactive</span>
+                  <span>Non-Sellable</span>
                 </div>
-                <div className="text-lg font-bold text-white">{summary.inactiveProducts || 0}</div>
-              </div>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Incomplete</span>
-                </div>
-                <div className="text-lg font-bold text-white">{summary.incompleteProducts || 0}</div>
+                <div className="text-lg font-bold text-white">{(summary.inactiveProducts || 0) + (summary.incompleteProducts || 0)}</div>
               </div>
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
@@ -715,7 +698,7 @@ const YourProducts = () => {
             <div>
               <h3 className="text-xs font-semibold text-blue-300 mb-0.5">Customize table columns</h3>
               <p className="text-xs text-blue-400">
-                Use the <strong>Columns</strong> dropdown next to the search bar (on Active and Optimization tabs) to choose up to 2 extra columns.
+                Use the <strong>Columns</strong> dropdown next to the search bar (on Sellable and Optimization tabs) to choose up to 2 extra columns.
               </p>
             </div>
           </div>
@@ -820,12 +803,11 @@ const YourProducts = () => {
         {/* Tabs */}
         <div className="bg-[#161b22] rounded-t border border-b-0 border-[#30363d] px-2 flex gap-1 overflow-x-auto">
           {[
-            { key: 'active', label: 'Active', count: summary.activeProducts || 0 },
+            { key: 'active', label: 'Sellable', count: summary.activeProducts || 0 },
             { key: 'optimization', label: 'Optimization', count: null },
             { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus || 0 },
             { key: 'notTargetedInAds', label: 'Not Targeted to Ads', count: summary.productsNotTargetedInAds || 0 },
-            { key: 'inactive', label: 'Inactive', count: summary.inactiveProducts || 0 },
-            { key: 'incomplete', label: 'Incomplete', count: summary.incompleteProducts || 0 }
+            { key: 'nonSellable', label: 'Non-Sellable', count: (summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) }
           ].map(tab => (
             <button
               key={tab.key}
@@ -859,14 +841,14 @@ const YourProducts = () => {
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[0])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[0])?.label ?? selectedOptimizationColumns[0]} {sortConfig.key === selectedOptimizationColumns[0] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[1])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[1])?.label ?? selectedOptimizationColumns[1]} {sortConfig.key === selectedOptimizationColumns[1] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.recommendation }}>Recommendation</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.view }}>View</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.view }}>View Details</th>
                     </>
-                  ) : (activeTab === 'inactive' || activeTab === 'incomplete') ? (
+                  ) : activeTab === 'nonSellable' ? (
                     <>
                       <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '10%' }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '29%' }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '8%' }}>B2B Pricing</th>
-                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '53%' }}>Issues</th>
+                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '24%' }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '10%' }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '56%' }}>Issues</th>
                     </>
                   ) : activeTab === 'active' ? (
                     <>
@@ -875,7 +857,7 @@ const YourProducts = () => {
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.issues }} onClick={() => handleSort('issueCount')}>Issues {sortConfig.key === 'issueCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[0])?.label ?? selectedProductColumns[0]} {sortConfig.key === (selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[1])?.label ?? selectedProductColumns[1]} {sortConfig.key === (selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: productFixedWidths.view }}>View</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: productFixedWidths.view }}>View Details</th>
                     </>
                   ) : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? (
                     <>
@@ -883,7 +865,7 @@ const YourProducts = () => {
                       <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '48%' }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '15%' }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '15%' }}>{activeTab === 'withoutAPlus' ? 'A+' : 'Ads'}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '10%' }}>View</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '10%' }}>View Details</th>
                     </>
                   ) : null}
                 </tr>
@@ -943,9 +925,10 @@ const YourProducts = () => {
                       );
                     }
                     
-                    // Inactive/Incomplete tabs
-                    if (activeTab === 'inactive' || activeTab === 'incomplete') {
+                    // Non-Sellable tab (Inactive + Incomplete combined)
+                    if (activeTab === 'nonSellable') {
                       const issueCount = product.issues?.length || 0;
+                      const statusColor = product.status === 'Inactive' ? 'text-red-400' : 'text-yellow-400';
                       return (
                         <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
                           <td className="px-1.5 py-2 text-left align-top">
@@ -958,7 +941,7 @@ const YourProducts = () => {
                             <span className="text-sm text-gray-100 font-medium leading-relaxed block break-words">{product.title || '—'}</span>
                           </td>
                           <td className="px-2 py-2 text-center align-top">
-                            {product.has_b2b_pricing ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />}
+                            <span className={`text-xs font-medium ${statusColor}`}>{product.status || '—'}</span>
                           </td>
                           <td className="px-2 py-2 text-left align-top issues-cell">
                             {issueCount > 0 ? (
@@ -1061,7 +1044,7 @@ const YourProducts = () => {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={activeTab === 'optimization' ? optimizationTableColCount : (activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-12 text-center text-gray-400">
+                    <td colSpan={activeTab === 'optimization' ? optimizationTableColCount : activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-12 text-center text-gray-400">
                       {activeTab === 'optimization'
                         ? (optimizationProducts.length === 0 ? 'No optimization data yet. Data loads when you open this tab.' : 'No products match your current filters.')
                         : (products.length === 0 ? 'No products found. Please ensure your account is connected and data is synced.' : 'No products match your current filters.')}
@@ -1071,7 +1054,7 @@ const YourProducts = () => {
                 
                 {loadingMore && displayedProducts.length > 0 && activeTab !== 'optimization' && (
                   <tr>
-                    <td colSpan={(activeTab === 'inactive' || activeTab === 'incomplete') ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-8 text-center bg-[#21262d]">
+                    <td colSpan={activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-8 text-center bg-[#21262d]">
                       <div className="flex items-center justify-center gap-3">
                         <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
                         <span className="text-sm text-gray-400">Loading more products...</span>

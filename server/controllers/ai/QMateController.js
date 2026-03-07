@@ -79,6 +79,9 @@ const handleChat = asyncHandler(async (req, res) => {
         answer_markdown,
         chart_suggestions,
         follow_up_questions,
+        needs_clarification,
+        clarifying_questions,
+        load_more_available,
         content_actions,
         suggested_title,
         suggested_bullet_points,
@@ -92,6 +95,10 @@ const handleChat = asyncHandler(async (req, res) => {
             content: answer_markdown || '',
             charts: chart_suggestions || [],
             follow_up_questions: follow_up_questions || [],
+            needs_clarification: Boolean(needs_clarification),
+            clarifying_questions: Array.isArray(clarifying_questions) ? clarifying_questions : [],
+            // Pagination for large data lists
+            load_more_available: load_more_available || null,
             // Fix It functionality fields
             content_actions: content_actions || [],
             suggested_title: suggested_title || null,

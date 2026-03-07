@@ -117,9 +117,16 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
       charLim: 'Character Limit'
     };
 
+    const sectionKeyToAttribute = {
+      TitleResult: 'title',
+      BulletPoints: 'bulletpoints',
+      Description: 'description'
+    };
+
     const extractErrors = (item) => {
       const errorRows = [];
       const sku = item.sku || '';
+      const fixedAttributes = item.fixedAttributes || {};
 
       sections.forEach((sectionKey) => {
         const section = item.data?.[sectionKey];
@@ -128,10 +135,8 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
           Object.keys(issueLabels).forEach((checkKey) => {
             const check = section[checkKey];
             if (check?.status === 'Error') {
-              const attributeKey =
-                sectionKey === 'TitleResult' ? 'title' :
-                sectionKey === 'BulletPoints' ? 'bulletpoints' :
-                'description';
+              const attributeKey = sectionKeyToAttribute[sectionKey];
+              const isFixed = !!fixedAttributes[attributeKey]?.fixed;
               errorRows.push({
                 asin: item.asin,
                 sku: sku,
@@ -139,7 +144,8 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
                 issueHeading: `${sectionLabels[sectionKey]} | ${issueLabels[checkKey]}`,
                 message: check.Message,
                 solution: check.HowTOSolve,
-                attributeKey
+                attributeKey,
+                isFixed
               });
             }
           });
@@ -149,6 +155,7 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
       // Extract backend keywords errors (charLim and dublicateWords at root level)
       const backendCharLim = item.data?.charLim;
       const backendDuplicate = item.data?.dublicateWords;
+      const isBackendFixed = !!fixedAttributes['generic_keyword']?.fixed;
       
       if (backendCharLim?.status === 'Error' || backendCharLim?.status === 'Warning') {
         const msg = backendCharLim.Message || '';
@@ -162,7 +169,8 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
           message: backendCharLim.Message,
           solution: backendCharLim.HowTOSolve,
           attributeKey: 'backend',
-          backendErrorType: isTooLong ? 'too_long' : 'too_short'
+          backendErrorType: isTooLong ? 'too_long' : 'too_short',
+          isFixed: isBackendFixed
         });
       }
       
@@ -175,7 +183,8 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
           message: backendDuplicate.Message,
           solution: backendDuplicate.HowTOSolve,
           attributeKey: 'backend',
-          backendErrorType: 'duplicate'
+          backendErrorType: 'duplicate',
+          isFixed: isBackendFixed
         });
       }
 
@@ -450,15 +459,22 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
                     <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">
                       {row.solution}
                     </p>
-                    <button
-                      className="mt-2 inline-flex items-center px-2 py-1 rounded text-[11px] font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openFixModal(row);
-                      }}
-                    >
-                      Fix it
-                    </button>
+                    {row.isFixed ? (
+                      <span className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                        <CheckCircle className="w-3 h-3" />
+                        Applied
+                      </span>
+                    ) : (
+                      <button
+                        className="mt-2 inline-flex items-center px-2 py-1 rounded text-[11px] font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openFixModal(row);
+                        }}
+                      >
+                        Fix it
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

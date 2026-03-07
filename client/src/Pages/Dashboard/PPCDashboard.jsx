@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2 } from 'lucide-react';
 import Calender from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
@@ -60,6 +60,7 @@ import { parseLocalDate } from '../../utils/dateUtils.js';
 import { usePPCData } from '../../hooks/usePageData.js';
 import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx';
+import axiosInstance from '../../config/axios.config.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -195,6 +196,11 @@ const PPCDashboard = () => {
   const [topPerformingPage, setTopPerformingPage] = useState(1);
   const [searchTermsPage, setSearchTermsPage] = useState(1);
   const [autoCampaignPage, setAutoCampaignPage] = useState(1);
+  const [pausingKeywordId, setPausingKeywordId] = useState(null);
+  const [addingToNegativeKeywordId, setAddingToNegativeKeywordId] = useState(null);
+  const [pausingAndAddingKeywordId, setPausingAndAddingKeywordId] = useState(null);
+  const [feedbackPopup, setFeedbackPopup] = useState({ show: false, type: 'success', message: '' });
+  const [openWastedActionIndex, setOpenWastedActionIndex] = useState(null);
   
   const itemsPerPage = 10;
   
@@ -399,6 +405,96 @@ const PPCDashboard = () => {
       case 5: dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage })); break;
     }
   };
+
+  const handlePauseKeyword = async (keyword) => {
+    const id = keyword.keywordId;
+    if (id == null || id === '') return;
+    setPausingKeywordId(id);
+    try {
+      await axiosInstance.post('/api/pagewise/ads/pause-keyword', {
+        keywordId: String(id),
+        adType: 'SP',
+      });
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused successfully.' });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause keyword';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setPausingKeywordId(null);
+      setOpenWastedActionIndex(null);
+    }
+  };
+
+  const handleAddToNegative = async (keyword) => {
+    if (!keyword.campaignId || !keyword.adGroupId || !keyword.keyword) return;
+    const id = keyword.keywordId;
+    setAddingToNegativeKeywordId(id);
+    const matchType = (keyword.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
+    try {
+      await axiosInstance.post('/api/pagewise/ads/add-to-negative', {
+        keywords: [{
+          campaignId: String(keyword.campaignId),
+          adGroupId: String(keyword.adGroupId),
+          keywordText: keyword.keyword,
+          matchType,
+        }],
+        level: 'adGroup',
+      });
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: 'Keyword added to negative keywords successfully.' });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to add keyword to negative.';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setAddingToNegativeKeywordId(null);
+      setOpenWastedActionIndex(null);
+    }
+  };
+
+  const handlePauseAndAddToNegative = async (keyword) => {
+    if (keyword.keywordId == null || keyword.keywordId === '' || !keyword.campaignId || !keyword.adGroupId || !keyword.keyword) return;
+    setPausingAndAddingKeywordId(keyword.keywordId);
+    const matchType = (keyword.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
+    try {
+      await axiosInstance.post('/api/pagewise/ads/pause-and-add-to-negative', {
+        keywordId: String(keyword.keywordId),
+        campaignId: String(keyword.campaignId),
+        adGroupId: String(keyword.adGroupId),
+        keywordText: keyword.keyword,
+        matchType,
+        adType: 'SP',
+      });
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused and added to negative successfully.' });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause and add to negative.';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setPausingAndAddingKeywordId(null);
+      setOpenWastedActionIndex(null);
+    }
+  };
+
+  // Auto-dismiss feedback popup after 5 seconds
+  useEffect(() => {
+    if (!feedbackPopup.show) return;
+    const t = setTimeout(() => setFeedbackPopup((p) => ({ ...p, show: false })), 5000);
+    return () => clearTimeout(t);
+  }, [feedbackPopup.show]);
+
+  // Close wasted-spend action dropdown when clicking outside
+  useEffect(() => {
+    if (openWastedActionIndex === null) return;
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('[data-wasted-action-cell]')) setOpenWastedActionIndex(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openWastedActionIndex]);
   
   // Track if we've fetched initial data for each tab
   const tabFetchAttempted = useRef({
@@ -2100,19 +2196,20 @@ const PPCDashboard = () => {
                         <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-[#30363d]">
-                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
-                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[15%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[15%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[14%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[14%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">Action</th>
                             </tr>
                           </thead>
                           <tbody>
                             {wastedSpendLoading ? (
-                              <TableSkeletonRows columns={5} rows={5} />
+                              <TableSkeletonRows columns={6} rows={5} />
                             ) : wastedSpendData.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={6} className="text-center py-6 text-gray-400 text-xs">
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No wasted keywords found</div>
                                     <div className="text-xs">
@@ -2124,18 +2221,92 @@ const PPCDashboard = () => {
                             ) : (
                               wastedSpendData.map((keyword, idx) => (
                                 <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-[20%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {keyword.keyword}
                                   </td>
-                                  <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
                                     {keyword.campaignName}
                                   </td>
-                                  <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
                                     {keyword.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[15%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
-                                  <td className="w-[15%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                  <td className="w-[14%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
+                                  <td className="w-[14%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
                                     {formatCurrencyWithLocale(keyword.spend, currency)}
+                                  </td>
+                                  <td className="w-[10%] py-2 px-2 relative" data-wasted-action-cell>
+                                    <div className="flex items-center justify-center">
+                                      {(keyword.keywordId != null && keyword.keywordId !== '') || (keyword.campaignId != null && keyword.adGroupId != null && keyword.keyword) ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenWastedActionIndex(openWastedActionIndex === idx ? null : idx)}
+                                            className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent hover:border-[#30363d]"
+                                            title="Actions"
+                                            aria-haspopup="true"
+                                            aria-expanded={openWastedActionIndex === idx}
+                                          >
+                                            <MoreVertical className="w-4 h-4" />
+                                          </button>
+                                          {openWastedActionIndex === idx && (
+                                            <div
+                                              className={`absolute right-0 z-20 min-w-[160px] py-1 rounded-md border border-[#30363d] bg-[#161b22] shadow-lg ${idx <= 1 ? 'top-full mt-0.5' : 'bottom-full mb-0.5'}`}
+                                            >
+                                              {keyword.keywordId != null && keyword.keywordId !== '' && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handlePauseKeyword(keyword)}
+                                                  disabled={pausingKeywordId === keyword.keywordId}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                  {pausingKeywordId === keyword.keywordId ? (
+                                                    <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" aria-hidden />
+                                                  ) : (
+                                                    <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                                  )}
+                                                  {pausingKeywordId === keyword.keywordId ? 'Pausing…' : 'Pause keyword'}
+                                                </button>
+                                              )}
+                                              {keyword.campaignId != null && keyword.adGroupId != null && keyword.keyword && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleAddToNegative(keyword)}
+                                                  disabled={addingToNegativeKeywordId === keyword.keywordId}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                  {addingToNegativeKeywordId === keyword.keywordId ? (
+                                                    <Loader2 className="w-3.5 h-3.5 text-slate-400 shrink-0 animate-spin" aria-hidden />
+                                                  ) : (
+                                                    <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                  )}
+                                                  {addingToNegativeKeywordId === keyword.keywordId ? 'Adding…' : 'Add to negative'}
+                                                </button>
+                                              )}
+                                              {keyword.keywordId != null && keyword.keywordId !== '' && keyword.campaignId != null && keyword.adGroupId != null && keyword.keyword && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handlePauseAndAddToNegative(keyword)}
+                                                  disabled={pausingAndAddingKeywordId === keyword.keywordId}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed border-t border-[#30363d]"
+                                                >
+                                                  {pausingAndAddingKeywordId === keyword.keywordId ? (
+                                                    <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" aria-hidden />
+                                                  ) : (
+                                                    <>
+                                                      <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                                      <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                    </>
+                                                  )}
+                                                  {pausingAndAddingKeywordId === keyword.keywordId ? 'Pausing & adding…' : 'Pause then add to negative'}
+                                                </button>
+                                              )}
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="text-gray-500 text-xs">—</span>
+                                      )}
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -2430,6 +2601,45 @@ const PPCDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Success / Error feedback popup for pause keyword */}
+      <AnimatePresence>
+        {feedbackPopup.show && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+            className="fixed top-4 right-4 z-[100] flex items-start gap-3 p-3 rounded-lg shadow-lg max-w-sm border min-w-[280px]"
+            style={{
+              backgroundColor: 'var(--bg-card, #161b22)',
+              borderColor: feedbackPopup.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+            }}
+          >
+            {feedbackPopup.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 shrink-0 text-green-400 mt-0.5" />
+            ) : (
+              <XCircle className="w-5 h-5 shrink-0 text-red-400 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-medium ${feedbackPopup.type === 'success' ? 'text-green-100' : 'text-red-100'}`}>
+                {feedbackPopup.type === 'success' ? 'Success' : 'Error'}
+              </p>
+              <p className="text-sm text-gray-300 mt-0.5 break-words">
+                {feedbackPopup.message}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFeedbackPopup((p) => ({ ...p, show: false }))}
+              className="shrink-0 p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

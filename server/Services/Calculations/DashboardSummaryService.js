@@ -99,7 +99,7 @@ async function getDashboardSummary(userId, country, region) {
             // DataFetchTracking: Get actual date range from last fetch
             DataFetchTracking.findOne({ User: userId, country, region, status: 'completed' })
                 .sort({ fetchedAt: -1 })
-                .select('dateRange calendarMode')
+                .select('dataRange')
                 .lean(),
             
             // IssueSummary: Get precomputed issue counts for quick dashboard display
@@ -181,11 +181,10 @@ async function getDashboardSummary(userId, country, region) {
         let startDate = null;
         let endDate = null;
         let calendarMode = 'default';
-        
-        if (dataFetchTracking?.dateRange) {
-            startDate = dataFetchTracking.dateRange.startDate;
-            endDate = dataFetchTracking.dateRange.endDate;
-            calendarMode = dataFetchTracking.calendarMode || 'default';
+
+        if (dataFetchTracking?.dataRange) {
+            startDate = dataFetchTracking.dataRange.startDate;
+            endDate = dataFetchTracking.dataRange.endDate;
         } else if (economicsMetrics?.dateRange) {
             startDate = economicsMetrics.dateRange.startDate;
             endDate = economicsMetrics.dateRange.endDate;
@@ -468,7 +467,7 @@ async function getDashboardPhase1(userId, country, region) {
                 .lean(),
             DataFetchTracking.findOne({ User: userId, country, region, status: 'completed' })
                 .sort({ fetchedAt: -1 })
-                .select('dateRange calendarMode')
+                .select('dataRange')
                 .lean()
         ]);
 
@@ -486,10 +485,9 @@ async function getDashboardPhase1(userId, country, region) {
         let startDate = null;
         let endDate = null;
         let calendarMode = 'default';
-        if (dataFetchTracking?.dateRange) {
-            startDate = dataFetchTracking.dateRange.startDate;
-            endDate = dataFetchTracking.dateRange.endDate;
-            calendarMode = dataFetchTracking.calendarMode || 'default';
+        if (dataFetchTracking?.dataRange) {
+            startDate = dataFetchTracking.dataRange.startDate;
+            endDate = dataFetchTracking.dataRange.endDate;
         }
 
         const hasIssueSummary = issueSummary && !issueSummary.isStale;
