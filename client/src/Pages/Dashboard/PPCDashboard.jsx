@@ -35,6 +35,7 @@ import {
   selectPPCKPISummary,
   selectPPCKPISummaryLoading,
   selectPPCTabCounts,
+  selectPPCTabCountsLoading,
   selectHighAcosCampaigns,
   selectHighAcosPagination,
   selectHighAcosLoading,
@@ -350,8 +351,9 @@ const PPCDashboard = () => {
   const ppcKPISummary = useSelector(selectPPCKPISummary);
   const ppcKPISummaryLoading = useSelector(selectPPCKPISummaryLoading);
   
-  // Get tab counts for badges
+  // Get tab counts for badges (and to show only tabs with data)
   const ppcTabCounts = useSelector(selectPPCTabCounts);
+  const ppcTabCountsLoading = useSelector(selectPPCTabCountsLoading);
   
   // Get paginated data for each tab
   const highAcosCampaignsData = useSelector(selectHighAcosCampaigns);
@@ -506,9 +508,10 @@ const PPCDashboard = () => {
     autoInsights: false
   });
   
-  // Fetch KPI summary on mount (tab counts are fetched lazily)
+  // Fetch KPI summary and tab counts on mount (tab counts used to show only tabs with data)
   useEffect(() => {
     dispatch(fetchPPCKPISummary());
+    dispatch(fetchPPCTabCounts());
   }, [dispatch]);
   
   // Fetch initial data for the first tab (High ACOS) on mount
@@ -1304,8 +1307,20 @@ const PPCDashboard = () => {
     ppcTabCounts
   ]);
   
-  // All tabs are always visible - no filtering based on data presence
-  const tabs = allTabs;
+  // Only show tabs that have data (count > 0). While tab counts are loading, show all tabs to avoid flicker.
+  const tabs = useMemo(() => {
+    if (ppcTabCountsLoading) return allTabs;
+    return allTabs.filter((t) => (t.count ?? 0) > 0);
+  }, [allTabs, ppcTabCountsLoading]);
+
+  // When visible tabs change, ensure selectedTab is one of them
+  const visibleTabIds = useMemo(() => new Set(tabs.map((t) => t.id)), [tabs]);
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    if (!visibleTabIds.has(selectedTab)) {
+      setSelectedTab(tabs[0].id);
+    }
+  }, [tabs, visibleTabIds, selectedTab]);
 
   // Check scroll buttons on mount and when tabs change
   useEffect(() => {
