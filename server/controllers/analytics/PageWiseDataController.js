@@ -2408,14 +2408,19 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
         const inactiveProducts = countsMap['inactive'] || 0;
         const incompleteProducts = countsMap['incomplete'] || 0;
 
-        // Count products with A+ (APPROVED or PUBLISHED)
-        let productsWithAPlus = 0;
+        // Count products with A+ (APPROVED or PUBLISHED) - used for summary and for "active without A+" count
+        const asinsWithAPlusSet = new Set();
         if (aPlusData?.ApiContentDetails) {
-            productsWithAPlus = aPlusData.ApiContentDetails.filter(
-                item => item.status === 'APPROVED' || item.status === 'PUBLISHED'
-            ).length;
+            aPlusData.ApiContentDetails.forEach(item => {
+                if ((item.status === 'APPROVED' || item.status === 'PUBLISHED') && item.Asins) {
+                    asinsWithAPlusSet.add((item.Asins || '').toUpperCase());
+                }
+            });
         }
-        const productsWithoutAPlus = totalProducts - productsWithAPlus;
+        const productsWithAPlus = asinsWithAPlusSet.size;
+        // Without A+ count: active products only (matches the Without A+ tab which lists active only)
+        const activeAsinsList = (activeProductAsins || []).map(p => (p.asin || '').toUpperCase()).filter(Boolean);
+        const productsWithoutAPlus = activeAsinsList.filter(asin => !asinsWithAPlusSet.has(asin)).length;
 
         // Check if any product has brand story
         let hasBrandStory = false;
@@ -2877,9 +2882,9 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
 
 /**
  * V3 Without A+ Content Endpoint
- * Returns: Paginated products that DON'T have A+ content (APPROVED/PUBLISHED)
+ * Returns: Paginated Active products that DON'T have A+ content (APPROVED/PUBLISHED)
  * 
- * Logic: Get all ASINs from Seller, subtract ASINs with A+ from APlusContent
+ * Logic: Get Active products from Seller, exclude ASINs with A+ from APlusContent.
  */
 const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
     const startTime = Date.now();
@@ -2919,6 +2924,8 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
             { $unwind: '$sellerAccount' },
             { $match: { 'sellerAccount.region': Region } },
             { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
+            // Only Active products (same as Not Targeted in Ads)
+            { $match: { 'sellerAccount.products.status': 'Active' } },
             // Filter out products with A+ content
             {
                 $match: {
@@ -2962,7 +2969,7 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
             sku: p.sku,
             title: p.itemName || '',
             price: p.price || '0',
-            status: p.status || 'Unknown',
+            status: p.status || 'Active',
             quantity: p.quantity ?? 0,
             hasAPlus: false
         }));
