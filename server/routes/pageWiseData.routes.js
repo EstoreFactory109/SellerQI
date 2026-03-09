@@ -84,9 +84,9 @@ const {
     getTabCounts
 } = require('../controllers/analytics/PPCCampaignAnalysisController.js');
 
-const { pauseKeyword } = require('../controllers/analytics/PauseKeywordController.js');
+const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
 const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
-const { pauseAndAddToNegative } = require('../controllers/analytics/PauseAndAddToNegativeController.js');
+const { pauseAndAddToNegative, pauseAndAddToNegativeBulk } = require('../controllers/analytics/PauseAndAddToNegativeController.js');
 
 const {
     getIssuesSummary,
@@ -239,6 +239,12 @@ router.post('/ads/add-to-negative', auth, getLocation, addToNegativeKeywords);
 // Pause keyword then add to negative (synchronous: pause first, then add-to-negative)
 // POST body: { keywordId, campaignId, adGroupId, keywordText, matchType?, adType? }
 router.post('/ads/pause-and-add-to-negative', auth, getLocation, pauseAndAddToNegative);
+
+// Bulk: pause multiple keywords. POST body: { keywordIds: string[], adType?: 'SP' | 'SB' | 'SD' }
+router.post('/ads/pause-keywords', auth, getLocation, pauseKeywordsBulk);
+
+// Bulk: pause then add to negative for multiple keywords. POST body: { keywords: [{ keywordId, campaignId, adGroupId, keywordText, matchType? }], adType? }
+router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAddToNegativeBulk);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data

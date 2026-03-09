@@ -87,6 +87,9 @@ const handleChat = asyncHandler(async (req, res) => {
         suggested_bullet_points,
         suggested_description,
         suggested_backend_keywords,
+        wasted_keywords,
+        wasted_keywords_total,
+        wasted_keywords_offset,
     } = result;
 
     const payload = {
@@ -105,6 +108,10 @@ const handleChat = asyncHandler(async (req, res) => {
             suggested_bullet_points: suggested_bullet_points || null,
             suggested_description: suggested_description || null,
             suggested_backend_keywords: suggested_backend_keywords || null,
+            // PPC Actions - wasted keywords for pause/add-to-negative
+            wasted_keywords: wasted_keywords || null,
+            wasted_keywords_total: wasted_keywords_total || null,
+            wasted_keywords_offset: wasted_keywords_offset || null,
         },
     };
 

@@ -15,7 +15,12 @@ const {
     generateSuggestion,
     applyFix,
     batchSuggestions,
-    lookupSku
+    lookupSku,
+    pauseKeywordAction,
+    addToNegativeAction,
+    pauseAndAddToNegativeAction,
+    bulkPauseAction,
+    bulkPauseAndAddToNegativeAction
 } = require('../controllers/ai/QMateActionController.js');
 
 // QMate AI chat endpoint (requires location for analytics context)
@@ -30,6 +35,15 @@ router.post('/apply-fix', auth, getLocation, applyFix);
 router.post('/batch-suggestions', auth, getLocation, batchSuggestions);
 // Look up SKU for an ASIN (used when content_actions has null SKU)
 router.get('/lookup-sku/:asin', auth, getLocation, lookupSku);
+
+// PPC Keyword Actions (for QMate wasted spend keyword management)
+// Single keyword actions
+router.post('/ppc/pause-keyword', auth, getLocation, pauseKeywordAction);
+router.post('/ppc/add-to-negative', auth, getLocation, addToNegativeAction);
+router.post('/ppc/pause-and-add-to-negative', auth, getLocation, pauseAndAddToNegativeAction);
+// Bulk actions (max 10 keywords)
+router.post('/ppc/bulk-pause', auth, getLocation, bulkPauseAction);
+router.post('/ppc/bulk-pause-and-add-to-negative', auth, getLocation, bulkPauseAndAddToNegativeAction);
 
 // Chat history CRUD (auth only)
 router.get('/chats', auth, listChats);

@@ -146,4 +146,77 @@ const pauseKeyword = asyncHandler(async (req, res) => {
   );
 });
 
-module.exports = { pauseKeyword };
+/**
+ * POST /api/pagewise/ads/pause-keywords (bulk)
+ * Body: { keywordIds: string[] (required, non-empty), adType?: "SP" | "SB" | "SD" }
+ */
+const pauseKeywordsBulk = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+  const country = req.country;
+  const region = req.region;
+  const { keywordIds, adType = 'SP' } = req.body || {};
+
+  if (!userId || !country || !region) {
+    return res.status(400).json(
+      new ApiError(400, 'User ID, country, and region are required (set by auth and getLocation)')
+    );
+  }
+
+  if (!Array.isArray(keywordIds) || keywordIds.length === 0) {
+    return res.status(400).json(
+      new ApiError(400, 'keywordIds array is required and must not be empty')
+    );
+  }
+
+  const ids = keywordIds.map((id) => String(id)).filter(Boolean);
+  if (ids.length === 0) {
+    return res.status(400).json(
+      new ApiError(400, 'At least one valid keywordId is required')
+    );
+  }
+
+  const adTypeUpper = (adType || 'SP').toUpperCase();
+  if (!validAdTypes.includes(adTypeUpper)) {
+    return res.status(400).json(
+      new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`)
+    );
+  }
+
+  const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).json(
+      new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set in environment')
+    );
+  }
+
+  const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(
+    userId,
+    country,
+    region
+  );
+
+  logger.info('[PauseKeywordBulk] Pausing keywords', { count: ids.length, adType: adTypeUpper, userId });
+
+  const result = await pauseKeywords({
+    adType: adTypeUpper,
+    keywordIds: ids,
+    accessToken,
+    profileId,
+    region: resolvedRegion,
+    clientId,
+  });
+
+  const failed = Object.entries(result).find(([, v]) => v && v.success === false);
+  if (failed) {
+    const [, errObj] = failed;
+    return res.status(400).json(
+      new ApiError(400, errObj.error || 'Failed to pause keywords', { result })
+    );
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200, result, `${ids.length} keyword(s) paused successfully`)
+  );
+});
+
+module.exports = { pauseKeyword, pauseKeywordsBulk };

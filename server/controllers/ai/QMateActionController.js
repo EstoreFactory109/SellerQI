@@ -414,9 +414,400 @@ const lookupSku = asyncHandler(async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PPC Keyword Actions (Pause, Add to Negative, Pause & Add to Negative)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const { pauseKeywords } = require('../../Services/AmazonAds/Pause-ArchiveKeywords.js');
+const { addToNegative, getConfig } = require('../../Services/AmazonAds/addToNegetive.js');
+const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
+const mongoose = require('mongoose');
+
+const validAdTypes = ['SP', 'SB', 'SD'];
+
+async function resolveAdsCredentials(userId, country, region) {
+    let userIdQuery = userId;
+    if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+        userIdQuery = new mongoose.Types.ObjectId(userId);
+    }
+
+    const sellerCentral = await Seller.findOne({ User: userIdQuery });
+    if (!sellerCentral) {
+        throw new ApiError(404, 'Seller account not found', {
+            suggestion: 'Ensure the user has connected their Amazon Seller Central account.',
+        });
+    }
+
+    const sellerAccount = sellerCentral.sellerAccount?.find(
+        (acc) => acc.country === country && acc.region === region
+    );
+    if (!sellerAccount) {
+        throw new ApiError(404, `No seller account for country: ${country}, region: ${region}`);
+    }
+
+    if (!sellerAccount.adsRefreshToken) {
+        throw new ApiError(400, 'Ads refresh token not found', {
+            suggestion: 'Connect the Amazon Ads account first.',
+        });
+    }
+
+    const accessToken = await generateAdsAccessToken(sellerAccount.adsRefreshToken);
+    if (!accessToken) {
+        throw new ApiError(500, 'Failed to generate Ads access token', {
+            suggestion: 'Refresh token may be invalid. Try reconnecting the Amazon Ads account.',
+        });
+    }
+
+    let profileId = sellerAccount.ProfileId?.toString();
+    if (!profileId) {
+        const profiles = await getProfileById(accessToken, region, country, userId);
+        if (!profiles || !Array.isArray(profiles) || profiles.length === 0) {
+            throw new ApiError(400, 'No Amazon Ads profiles found for this account');
+        }
+        const countryCodeMap = {
+            US: 'US', CA: 'CA', MX: 'MX', BR: 'BR',
+            UK: 'UK', GB: 'UK', DE: 'DE', FR: 'FR', ES: 'ES', IT: 'IT', NL: 'NL', SE: 'SE', PL: 'PL', BE: 'BE',
+            JP: 'JP', AU: 'AU', SG: 'SG', IN: 'IN', AE: 'AE', SA: 'SA',
+        };
+        const targetCountryCode = countryCodeMap[country] || country;
+        const matchingProfile =
+            profiles.find(
+                (p) =>
+                    p.countryCode === targetCountryCode ||
+                    p.countryCode?.toUpperCase() === country?.toUpperCase()
+            ) || profiles[0];
+        profileId = matchingProfile.profileId?.toString();
+        if (!profileId) {
+            throw new ApiError(400, 'Could not resolve a profile ID from Amazon Ads API.');
+        }
+    }
+
+    return { accessToken, profileId, region };
+}
+
+/**
+ * POST /api/qmate/ppc/pause-keyword
+ * Pause a single keyword.
+ * Body: { keywordId: string, adType?: 'SP' | 'SB' | 'SD' }
+ */
+const pauseKeywordAction = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { keywordId, adType = 'SP' } = req.body || {};
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(new ApiError(400, 'User ID, country, and region are required'));
+    }
+
+    if (!keywordId) {
+        return res.status(400).json(new ApiError(400, 'keywordId is required'));
+    }
+
+    const adTypeUpper = (adType || 'SP').toUpperCase();
+    if (!validAdTypes.includes(adTypeUpper)) {
+        return res.status(400).json(new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`));
+    }
+
+    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+    if (!clientId) {
+        return res.status(500).json(new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set'));
+    }
+
+    const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(userId, country, region);
+
+    logger.info('[QMateAction] Pausing keyword', { keywordId, adType: adTypeUpper, userId });
+
+    const result = await pauseKeywords({
+        adType: adTypeUpper,
+        keywordId: String(keywordId),
+        accessToken,
+        profileId,
+        region: resolvedRegion,
+        clientId,
+    });
+
+    const failed = Object.entries(result).find(([, v]) => v && v.success === false);
+    if (failed) {
+        const [, errObj] = failed;
+        return res.status(400).json(new ApiError(400, errObj.error || 'Failed to pause keyword', { result }));
+    }
+
+    return res.status(200).json(new ApiResponse(200, result, 'Keyword paused successfully'));
+});
+
+/**
+ * POST /api/qmate/ppc/add-to-negative
+ * Add a keyword to negative (ad-group level).
+ * Body: { campaignId, adGroupId, keywordText, matchType?: 'negativeExact' | 'negativePhrase' }
+ */
+const addToNegativeAction = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { campaignId, adGroupId, keywordText, matchType = 'negativePhrase' } = req.body || {};
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(new ApiError(400, 'User ID, country, and region are required'));
+    }
+
+    if (!campaignId || !adGroupId || !keywordText) {
+        return res.status(400).json(new ApiError(400, 'campaignId, adGroupId, and keywordText are required'));
+    }
+
+    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+    if (!clientId) {
+        return res.status(500).json(new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set'));
+    }
+
+    const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(userId, country, region);
+
+    const config = getConfig({ accessToken, profileId, region: resolvedRegion, clientId });
+
+    logger.info('[QMateAction] Adding keyword to negative', { keywordText, campaignId, adGroupId, userId });
+
+    const keywords = [{
+        campaignId: String(campaignId),
+        adGroupId: String(adGroupId),
+        keywordText: String(keywordText).trim(),
+        matchType: matchType === 'negativeExact' ? 'negativeExact' : 'negativePhrase',
+    }];
+
+    const result = await addToNegative(config, keywords, { level: 'adGroup' });
+
+    return res.status(200).json(new ApiResponse(200, result, 'Keyword added to negative successfully'));
+});
+
+/**
+ * POST /api/qmate/ppc/pause-and-add-to-negative
+ * Pause a keyword then add it to negative.
+ * Body: { keywordId, campaignId, adGroupId, keywordText, matchType?, adType? }
+ */
+const pauseAndAddToNegativeAction = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { keywordId, campaignId, adGroupId, keywordText, matchType = 'negativePhrase', adType = 'SP' } = req.body || {};
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(new ApiError(400, 'User ID, country, and region are required'));
+    }
+
+    if (!keywordId) {
+        return res.status(400).json(new ApiError(400, 'keywordId is required'));
+    }
+    if (!campaignId || !adGroupId || !keywordText) {
+        return res.status(400).json(new ApiError(400, 'campaignId, adGroupId, and keywordText are required'));
+    }
+
+    const adTypeUpper = (adType || 'SP').toUpperCase();
+    if (!validAdTypes.includes(adTypeUpper)) {
+        return res.status(400).json(new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`));
+    }
+
+    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+    if (!clientId) {
+        return res.status(500).json(new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set'));
+    }
+
+    const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(userId, country, region);
+
+    const config = getConfig({ accessToken, profileId, region: resolvedRegion, clientId });
+
+    logger.info('[QMateAction] Step 1: Pausing keyword', { keywordId, userId });
+
+    const pauseResult = await pauseKeywords({
+        adType: adTypeUpper,
+        keywordId: String(keywordId),
+        accessToken,
+        profileId,
+        region: resolvedRegion,
+        clientId,
+    });
+
+    const pauseFailed = Object.entries(pauseResult).find(([, v]) => v && v.success === false);
+    if (pauseFailed) {
+        const [, errObj] = pauseFailed;
+        return res.status(400).json(new ApiError(400, errObj.error || 'Failed to pause keyword', { step: 'pause', result: pauseResult }));
+    }
+
+    logger.info('[QMateAction] Step 2: Adding to negative', { keywordText, userId });
+
+    const keywords = [{
+        campaignId: String(campaignId),
+        adGroupId: String(adGroupId),
+        keywordText: String(keywordText).trim(),
+        matchType: matchType === 'negativeExact' ? 'negativeExact' : 'negativePhrase',
+    }];
+
+    let addResult;
+    try {
+        addResult = await addToNegative(config, keywords, { level: 'adGroup' });
+    } catch (err) {
+        logger.error('[QMateAction] Add to negative failed', { message: err.message });
+        return res.status(400).json(new ApiError(400, err.message || 'Failed to add to negative (keyword was paused)', { step: 'addToNegative', pauseSucceeded: true }));
+    }
+
+    return res.status(200).json(new ApiResponse(200, { pause: pauseResult, addToNegative: addResult }, 'Keyword paused and added to negative successfully'));
+});
+
+/**
+ * POST /api/qmate/ppc/bulk-pause
+ * Pause multiple keywords.
+ * Body: { keywordIds: string[], adType?: 'SP' | 'SB' | 'SD' }
+ */
+const bulkPauseAction = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { keywordIds, adType = 'SP' } = req.body || {};
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(new ApiError(400, 'User ID, country, and region are required'));
+    }
+
+    if (!Array.isArray(keywordIds) || keywordIds.length === 0) {
+        return res.status(400).json(new ApiError(400, 'keywordIds array is required and must not be empty'));
+    }
+
+    if (keywordIds.length > 10) {
+        return res.status(400).json(new ApiError(400, 'Maximum 10 keywords allowed per bulk action'));
+    }
+
+    const ids = keywordIds.map((id) => String(id)).filter(Boolean);
+    if (ids.length === 0) {
+        return res.status(400).json(new ApiError(400, 'At least one valid keywordId is required'));
+    }
+
+    const adTypeUpper = (adType || 'SP').toUpperCase();
+    if (!validAdTypes.includes(adTypeUpper)) {
+        return res.status(400).json(new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`));
+    }
+
+    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+    if (!clientId) {
+        return res.status(500).json(new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set'));
+    }
+
+    const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(userId, country, region);
+
+    logger.info('[QMateAction] Bulk pausing keywords', { count: ids.length, adType: adTypeUpper, userId });
+
+    const result = await pauseKeywords({
+        adType: adTypeUpper,
+        keywordIds: ids,
+        accessToken,
+        profileId,
+        region: resolvedRegion,
+        clientId,
+    });
+
+    const failed = Object.entries(result).find(([, v]) => v && v.success === false);
+    if (failed) {
+        const [, errObj] = failed;
+        return res.status(400).json(new ApiError(400, errObj.error || 'Failed to pause keywords', { result }));
+    }
+
+    return res.status(200).json(new ApiResponse(200, result, `${ids.length} keyword(s) paused successfully`));
+});
+
+/**
+ * POST /api/qmate/ppc/bulk-pause-and-add-to-negative
+ * Pause multiple keywords then add to negative.
+ * Body: { keywords: [{ keywordId, campaignId, adGroupId, keywordText, matchType? }], adType? }
+ */
+const bulkPauseAndAddToNegativeAction = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+    const { keywords: keywordsBody, adType = 'SP' } = req.body || {};
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(new ApiError(400, 'User ID, country, and region are required'));
+    }
+
+    if (!Array.isArray(keywordsBody) || keywordsBody.length === 0) {
+        return res.status(400).json(new ApiError(400, 'keywords array is required and must not be empty'));
+    }
+
+    if (keywordsBody.length > 10) {
+        return res.status(400).json(new ApiError(400, 'Maximum 10 keywords allowed per bulk action'));
+    }
+
+    const keywords = keywordsBody
+        .filter((k) => k && (k.keywordId != null && k.keywordId !== '') && k.campaignId && k.adGroupId && k.keywordText)
+        .map((k) => ({
+            keywordId: String(k.keywordId),
+            campaignId: String(k.campaignId),
+            adGroupId: String(k.adGroupId),
+            keywordText: String(k.keywordText).trim(),
+            matchType: (k.matchType || '').toLowerCase() === 'negativeexact' ? 'negativeExact' : 'negativePhrase',
+        }));
+
+    if (keywords.length === 0) {
+        return res.status(400).json(new ApiError(400, 'Each keyword must have keywordId, campaignId, adGroupId, and keywordText'));
+    }
+
+    const adTypeUpper = (adType || 'SP').toUpperCase();
+    if (!validAdTypes.includes(adTypeUpper)) {
+        return res.status(400).json(new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`));
+    }
+
+    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+    if (!clientId) {
+        return res.status(500).json(new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set'));
+    }
+
+    const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(userId, country, region);
+
+    const config = getConfig({ accessToken, profileId, region: resolvedRegion, clientId });
+
+    const keywordIds = keywords.map((k) => k.keywordId);
+
+    logger.info('[QMateAction] Bulk pause and add to negative', { count: keywordIds.length, userId });
+
+    const pauseResult = await pauseKeywords({
+        adType: adTypeUpper,
+        keywordIds,
+        accessToken,
+        profileId,
+        region: resolvedRegion,
+        clientId,
+    });
+
+    const pauseFailed = Object.entries(pauseResult).find(([, v]) => v && v.success === false);
+    if (pauseFailed) {
+        const [, errObj] = pauseFailed;
+        return res.status(400).json(new ApiError(400, errObj.error || 'Failed to pause keywords', { step: 'pause', result: pauseResult }));
+    }
+
+    const negativePayload = keywords.map((k) => ({
+        campaignId: k.campaignId,
+        adGroupId: k.adGroupId,
+        keywordText: k.keywordText,
+        matchType: k.matchType,
+    }));
+
+    let addResult;
+    try {
+        addResult = await addToNegative(config, negativePayload, { level: 'adGroup' });
+    } catch (err) {
+        logger.error('[QMateAction] Bulk add to negative failed', { message: err.message });
+        return res.status(400).json(new ApiError(400, err.message || 'Failed to add to negative (keywords were paused)', { step: 'addToNegative', pauseSucceeded: true }));
+    }
+
+    return res.status(200).json(new ApiResponse(200, { pause: pauseResult, addToNegative: addResult }, `${keywords.length} keyword(s) paused and added to negative successfully`));
+});
+
 module.exports = {
     generateSuggestion,
     applyFix,
     batchSuggestions,
-    lookupSku
+    lookupSku,
+    pauseKeywordAction,
+    addToNegativeAction,
+    pauseAndAddToNegativeAction,
+    bulkPauseAction,
+    bulkPauseAndAddToNegativeAction
 };

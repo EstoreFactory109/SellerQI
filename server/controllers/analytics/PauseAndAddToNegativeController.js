@@ -196,4 +196,124 @@ const pauseAndAddToNegative = asyncHandler(async (req, res) => {
   );
 });
 
-module.exports = { pauseAndAddToNegative };
+/**
+ * POST /api/pagewise/ads/pause-and-add-to-negative-bulk
+ * Body: {
+ *   keywords: Array<{ keywordId, campaignId, adGroupId, keywordText, matchType? }> (required, non-empty),
+ *   adType?: 'SP' | 'SB' | 'SD'
+ * }
+ * Runs async: pause all keywords in one call, then add all to negative in one call (no main-thread blocking).
+ */
+const pauseAndAddToNegativeBulk = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+  const country = req.country;
+  const region = req.region;
+  const { keywords: keywordsBody, adType = 'SP' } = req.body || {};
+
+  if (!userId || !country || !region) {
+    return res.status(400).json(
+      new ApiError(400, 'User ID, country, and region are required (set by auth and getLocation)')
+    );
+  }
+
+  if (!Array.isArray(keywordsBody) || keywordsBody.length === 0) {
+    return res.status(400).json(
+      new ApiError(400, 'keywords array is required and must not be empty')
+    );
+  }
+
+  const keywords = keywordsBody
+    .filter((k) => k && (k.keywordId != null && k.keywordId !== '') && k.campaignId && k.adGroupId && k.keywordText)
+    .map((k) => ({
+      keywordId: String(k.keywordId),
+      campaignId: String(k.campaignId),
+      adGroupId: String(k.adGroupId),
+      keywordText: String(k.keywordText).trim(),
+      matchType: (k.matchType || '').toLowerCase() === 'negativeexact' ? 'negativeExact' : 'negativePhrase',
+    }));
+
+  if (keywords.length === 0) {
+    return res.status(400).json(
+      new ApiError(400, 'Each keyword must have keywordId, campaignId, adGroupId, and keywordText')
+    );
+  }
+
+  const adTypeUpper = (adType || 'SP').toUpperCase();
+  if (!validAdTypes.includes(adTypeUpper)) {
+    return res.status(400).json(
+      new ApiError(400, `Invalid adType. Use one of: ${validAdTypes.join(', ')}`)
+    );
+  }
+
+  const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).json(
+      new ApiError(500, 'AMAZON_ADS_CLIENT_ID is not set in environment')
+    );
+  }
+
+  const { accessToken, profileId, region: resolvedRegion } = await resolveAdsCredentials(
+    userId,
+    country,
+    region
+  );
+
+  const config = getConfig({
+    accessToken,
+    profileId,
+    region: resolvedRegion,
+    clientId,
+  });
+
+  const keywordIds = keywords.map((k) => k.keywordId);
+
+  logger.info('[PauseAndAddToNegativeBulk] Step 1: Pausing keywords', { count: keywordIds.length, userId });
+
+  const pauseResult = await pauseKeywords({
+    adType: adTypeUpper,
+    keywordIds,
+    accessToken,
+    profileId,
+    region: resolvedRegion,
+    clientId,
+  });
+
+  const pauseFailed = Object.entries(pauseResult).find(([, v]) => v && v.success === false);
+  if (pauseFailed) {
+    const [, errObj] = pauseFailed;
+    return res.status(400).json(
+      new ApiError(400, errObj.error || 'Failed to pause keywords', { step: 'pause', result: pauseResult })
+    );
+  }
+
+  logger.info('[PauseAndAddToNegativeBulk] Step 2: Adding to negative', { count: keywords.length, userId });
+
+  const negativePayload = keywords.map((k) => ({
+    campaignId: k.campaignId,
+    adGroupId: k.adGroupId,
+    keywordText: k.keywordText,
+    matchType: k.matchType,
+  }));
+
+  let addResult;
+  try {
+    addResult = await addToNegative(config, negativePayload, { level: 'adGroup' });
+  } catch (err) {
+    logger.error('[PauseAndAddToNegativeBulk] Add to negative failed', { message: err.message });
+    return res.status(400).json(
+      new ApiError(400, err.message || 'Failed to add keywords to negative (keywords were paused successfully)', {
+        step: 'addToNegative',
+        pauseSucceeded: true,
+      })
+    );
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200, {
+      pause: pauseResult,
+      addToNegative: addResult,
+    }, `${keywords.length} keyword(s) paused and added to negative successfully`)
+  );
+});
+
+module.exports = { pauseAndAddToNegative, pauseAndAddToNegativeBulk };

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2, Check, Square, Minus } from 'lucide-react';
 import Calender from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
@@ -92,6 +92,37 @@ const createEmptyChartData = () => {
   }
   
   return emptyData;
+};
+
+const getWastedRowKey = (kw) => `${kw.keywordId ?? ''}-${kw.campaignId ?? ''}-${kw.adGroupId ?? ''}`;
+
+const MAX_BULK_KEYWORDS = 10;
+
+const StyledCheckbox = ({ checked, indeterminate, disabled, onChange, ariaLabel, title }) => {
+  const baseClasses = 'w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer';
+  const disabledClasses = disabled ? 'opacity-40 cursor-not-allowed' : '';
+  const checkedClasses = checked || indeterminate
+    ? 'bg-amber-500 border-amber-500'
+    : 'bg-[#161b22] border-[#30363d] hover:border-[#484f58]';
+
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={indeterminate ? 'mixed' : checked}
+      aria-label={ariaLabel}
+      title={title}
+      disabled={disabled}
+      onClick={() => !disabled && onChange && onChange(!checked)}
+      className={`${baseClasses} ${checkedClasses} ${disabledClasses}`}
+    >
+      {indeterminate ? (
+        <Minus className="w-3 h-3 text-white" strokeWidth={3} />
+      ) : checked ? (
+        <Check className="w-3 h-3 text-white" strokeWidth={3} />
+      ) : null}
+    </button>
+  );
 };
 
 // Reusable Pagination Component
@@ -202,7 +233,9 @@ const PPCDashboard = () => {
   const [pausingAndAddingKeywordId, setPausingAndAddingKeywordId] = useState(null);
   const [feedbackPopup, setFeedbackPopup] = useState({ show: false, type: 'success', message: '' });
   const [openWastedActionIndex, setOpenWastedActionIndex] = useState(null);
-  
+  const [selectedWastedKeys, setSelectedWastedKeys] = useState([]);
+  const [bulkWastedLoading, setBulkWastedLoading] = useState(null);
+
   const itemsPerPage = 10;
   
   const dispatch = useDispatch();
@@ -363,6 +396,23 @@ const PPCDashboard = () => {
   const wastedSpendData = useSelector(selectWastedSpendKeywords);
   const wastedSpendPagination = useSelector(selectWastedSpendPagination);
   const wastedSpendLoading = useSelector(selectWastedSpendLoading);
+
+  const selectedWastedRows = useMemo(
+    () => wastedSpendData.filter((r) => selectedWastedKeys.includes(getWastedRowKey(r))),
+    [wastedSpendData, selectedWastedKeys]
+  );
+  const canPauseCount = selectedWastedRows.filter((r) => r.keywordId != null && r.keywordId !== '').length;
+  const canAddToNegativeCount = selectedWastedRows.filter(
+    (r) => r.campaignId && r.adGroupId && r.keyword
+  ).length;
+  const canPauseAndAddCount = selectedWastedRows.filter(
+    (r) =>
+      r.keywordId != null &&
+      r.keywordId !== '' &&
+      r.campaignId &&
+      r.adGroupId &&
+      r.keyword
+  ).length;
   
   const noNegativesData = useSelector(selectNoNegativesCampaigns);
   const noNegativesPagination = useSelector(selectNoNegativesPagination);
@@ -478,6 +528,96 @@ const PPCDashboard = () => {
     } finally {
       setPausingAndAddingKeywordId(null);
       setOpenWastedActionIndex(null);
+    }
+  };
+
+  const handleBulkPause = async () => {
+    const toPause = selectedWastedRows.filter((r) => r.keywordId != null && r.keywordId !== '');
+    if (toPause.length === 0) {
+      setFeedbackPopup({ show: true, type: 'error', message: 'No selected keywords can be paused (missing keyword ID).' });
+      return;
+    }
+    setBulkWastedLoading('pause');
+    try {
+      await axiosInstance.post('/api/pagewise/ads/pause-keywords', {
+        keywordIds: toPause.map((r) => String(r.keywordId)),
+        adType: 'SP',
+      });
+      setSelectedWastedKeys([]);
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: `${toPause.length} keyword(s) paused successfully.` });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause keywords.';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setBulkWastedLoading(null);
+    }
+  };
+
+  const handleBulkAddToNegative = async () => {
+    const toAdd = selectedWastedRows.filter((r) => r.campaignId && r.adGroupId && r.keyword);
+    if (toAdd.length === 0) {
+      setFeedbackPopup({ show: true, type: 'error', message: 'No selected keywords have campaign/ad group data for adding to negative.' });
+      return;
+    }
+    setBulkWastedLoading('addToNegative');
+    try {
+      await axiosInstance.post('/api/pagewise/ads/add-to-negative', {
+        keywords: toAdd.map((r) => ({
+          campaignId: String(r.campaignId),
+          adGroupId: String(r.adGroupId),
+          keywordText: r.keyword,
+          matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+        })),
+        level: 'adGroup',
+      });
+      setSelectedWastedKeys([]);
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: `${toAdd.length} keyword(s) added to negative successfully.` });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to add keywords to negative.';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setBulkWastedLoading(null);
+    }
+  };
+
+  const handleBulkPauseAndAddToNegative = async () => {
+    const toProcess = selectedWastedRows.filter(
+      (r) =>
+        r.keywordId != null &&
+        r.keywordId !== '' &&
+        r.campaignId &&
+        r.adGroupId &&
+        r.keyword
+    );
+    if (toProcess.length === 0) {
+      setFeedbackPopup({ show: true, type: 'error', message: 'No selected keywords have full data for pause & add to negative.' });
+      return;
+    }
+    setBulkWastedLoading('pauseAndAdd');
+    try {
+      await axiosInstance.post('/api/pagewise/ads/pause-and-add-to-negative-bulk', {
+        keywords: toProcess.map((r) => ({
+          keywordId: String(r.keywordId),
+          campaignId: String(r.campaignId),
+          adGroupId: String(r.adGroupId),
+          keywordText: r.keyword,
+          matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+        })),
+        adType: 'SP',
+      });
+      setSelectedWastedKeys([]);
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
+      dispatch(fetchPPCTabCounts());
+      setFeedbackPopup({ show: true, type: 'success', message: `${toProcess.length} keyword(s) paused and added to negative successfully.` });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause and add to negative.';
+      setFeedbackPopup({ show: true, type: 'error', message: msg });
+    } finally {
+      setBulkWastedLoading(null);
     }
   };
 
@@ -2207,10 +2347,90 @@ const PPCDashboard = () => {
                       <div className="mb-2 mt-1 text-xs text-gray-400">
                         Keywords with high spend but low returns
                       </div>
+                      {selectedWastedKeys.length > 0 && (
+                        <div className="mb-2 flex flex-wrap items-center gap-2 py-2 px-3 rounded-md bg-[#21262d] border border-[#30363d]">
+                          <span className="text-xs text-gray-300">
+                            {selectedWastedKeys.length}/{MAX_BULK_KEYWORDS} selected
+                            {canPauseCount < selectedWastedKeys.length && (
+                              <span className="text-gray-500 ml-1">({canPauseCount} can pause, {canAddToNegativeCount} can add to negative)</span>
+                            )}
+                            {selectedWastedKeys.length >= MAX_BULK_KEYWORDS && (
+                              <span className="ml-2 text-amber-400">(max {MAX_BULK_KEYWORDS} keywords per bulk action)</span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedWastedKeys([])}
+                            className="text-xs text-gray-400 hover:text-gray-200"
+                          >
+                            Clear
+                          </button>
+                          <span className="text-gray-600">|</span>
+                          <button
+                            type="button"
+                            onClick={handleBulkPause}
+                            disabled={bulkWastedLoading !== null || canPauseCount === 0}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {bulkWastedLoading === 'pause' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
+                            Pause ({canPauseCount})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleBulkAddToNegative}
+                            disabled={bulkWastedLoading !== null || canAddToNegativeCount === 0}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-slate-500/20 text-slate-400 border border-slate-500/30 hover:bg-slate-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {bulkWastedLoading === 'addToNegative' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+                            Add to negative ({canAddToNegativeCount})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleBulkPauseAndAddToNegative}
+                            disabled={bulkWastedLoading !== null || canPauseAndAddCount === 0}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {bulkWastedLoading === 'pauseAndAdd' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                            {bulkWastedLoading === 'pauseAndAdd' ? 'Processing…' : 'Pause & add to negative'}
+                            {bulkWastedLoading !== 'pauseAndAdd' && ` (${canPauseAndAddCount})`}
+                          </button>
+                        </div>
+                      )}
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-[#30363d]">
+                              <th className="w-8 py-2 px-2 text-center">
+                                {wastedSpendData.length > 0 && (() => {
+                                  const selectableRows = wastedSpendData.filter((r) => r.keywordId != null && r.keywordId !== '');
+                                  const pageKeys = selectableRows.map(getWastedRowKey);
+                                  const selectedOnPage = pageKeys.filter((k) => selectedWastedKeys.includes(k)).length;
+                                  const allPageSelected = selectableRows.length > 0 && selectedOnPage === selectableRows.length;
+                                  const somePageSelected = selectedOnPage > 0 && selectedOnPage < selectableRows.length;
+                                  const remaining = MAX_BULK_KEYWORDS - selectedWastedKeys.length;
+                                  const atLimit = remaining <= 0;
+                                  return (
+                                    <StyledCheckbox
+                                      checked={allPageSelected}
+                                      indeterminate={somePageSelected}
+                                      disabled={atLimit && !allPageSelected && !somePageSelected}
+                                      ariaLabel={`Select page (up to ${MAX_BULK_KEYWORDS} total)`}
+                                      title={atLimit && !allPageSelected ? `Max ${MAX_BULK_KEYWORDS} keywords selected` : undefined}
+                                      onChange={(checked) => {
+                                        if (checked) {
+                                          setSelectedWastedKeys((prev) => {
+                                            const newKeys = pageKeys.filter((k) => !prev.includes(k));
+                                            const toAdd = newKeys.slice(0, MAX_BULK_KEYWORDS - prev.length);
+                                            return [...prev, ...toAdd];
+                                          });
+                                        } else {
+                                          setSelectedWastedKeys((prev) => prev.filter((k) => !pageKeys.includes(k)));
+                                        }
+                                      }}
+                                    />
+                                  );
+                                })()}
+                              </th>
                               <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
                               <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
                               <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
@@ -2221,10 +2441,10 @@ const PPCDashboard = () => {
                           </thead>
                           <tbody>
                             {wastedSpendLoading ? (
-                              <TableSkeletonRows columns={6} rows={5} />
+                              <TableSkeletonRows columns={7} rows={5} />
                             ) : wastedSpendData.length === 0 ? (
                               <tr>
-                                <td colSpan={6} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No wasted keywords found</div>
                                     <div className="text-xs">
@@ -2236,6 +2456,28 @@ const PPCDashboard = () => {
                             ) : (
                               wastedSpendData.map((keyword, idx) => (
                                 <tr key={idx} className="border-b border-[#30363d]">
+                                  <td className="w-8 py-2 px-2 text-center">
+                                    {keyword.keywordId != null && keyword.keywordId !== '' ? (() => {
+                                      const k = getWastedRowKey(keyword);
+                                      const isSelected = selectedWastedKeys.includes(k);
+                                      const atLimit = selectedWastedKeys.length >= MAX_BULK_KEYWORDS && !isSelected;
+                                      return (
+                                        <StyledCheckbox
+                                          checked={isSelected}
+                                          disabled={atLimit}
+                                          ariaLabel={`Select ${keyword.keyword}`}
+                                          title={atLimit ? `Max ${MAX_BULK_KEYWORDS} keywords allowed` : undefined}
+                                          onChange={() => {
+                                            setSelectedWastedKeys((prev) =>
+                                              prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]
+                                            );
+                                          }}
+                                        />
+                                      );
+                                    })() : (
+                                      <span className="text-gray-600">—</span>
+                                    )}
+                                  </td>
                                   <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {keyword.keyword}
                                   </td>

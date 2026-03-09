@@ -3742,6 +3742,37 @@ class QMateService {
                 hasContentActions: content_actions.length > 0
             });
 
+            // Extract wasted keywords if the response mentions wasted spend keywords
+            let wasted_keywords = undefined;
+            const questionLowerWasted = (question || '').toLowerCase();
+            const wastedKwPatterns = ['wasted', 'waste', 'zero sales keyword', 'keywords with no sales', 'wasted spend'];
+            const asksAboutWasted = wastedKwPatterns.some(p => questionLowerWasted.includes(p));
+            let wasted_keywords_total = 0;
+            let wasted_keywords_offset = 0;
+            if (asksAboutWasted && ppcData?.wastedSpendKeywords?.data && ppcData.wastedSpendKeywords.data.length > 0) {
+                // Handle pagination offset for "load more" requests
+                const wastedOffsetMatch = questionLowerWasted.match(/\(offset:\s*(\d+)\)/i);
+                wasted_keywords_offset = wastedOffsetMatch ? parseInt(wastedOffsetMatch[1]) : 0;
+                const wastedPageSize = 10;
+                const allWastedKeywords = ppcData.wastedSpendKeywords.data;
+                wasted_keywords_total = allWastedKeywords.length;
+                const slicedWasted = allWastedKeywords.slice(wasted_keywords_offset, wasted_keywords_offset + wastedPageSize);
+                
+                wasted_keywords = slicedWasted.map(kw => ({
+                    keyword: kw.keyword || kw.keywordText || '',
+                    keywordId: kw.keywordId || null,
+                    campaignId: kw.campaignId || null,
+                    campaignName: kw.campaignName || '',
+                    adGroupId: kw.adGroupId || null,
+                    adGroupName: kw.adGroupName || '',
+                    matchType: kw.matchType || '',
+                    spend: kw.spend || kw.cost || 0,
+                    clicks: kw.clicks || 0,
+                    impressions: kw.impressions || 0,
+                    status: kw.status || kw.state || 'ENABLED'
+                }));
+            }
+
             return {
                 status: 200,
                 answer_markdown,
@@ -3757,6 +3788,10 @@ class QMateService {
                 suggested_bullet_points: suggestedBulletPoints.length > 0 ? suggestedBulletPoints : undefined,
                 suggested_description: suggested_description || undefined,
                 suggested_backend_keywords: suggestedBackendKeywords || undefined,
+                // PPC Actions - wasted keywords for pause/add-to-negative actions
+                wasted_keywords: wasted_keywords,
+                wasted_keywords_total: wasted_keywords_total > 0 ? wasted_keywords_total : undefined,
+                wasted_keywords_offset: wasted_keywords_offset > 0 ? wasted_keywords_offset : undefined,
             };
 
         } catch (error) {

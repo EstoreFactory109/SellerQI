@@ -302,6 +302,339 @@ function ContentSuggestionsPanel({
   );
 }
 
+const MAX_QMATE_BULK_KEYWORDS = 10;
+
+/**
+ * WastedKeywordsPanel - Displays wasted spend keywords with action buttons
+ * Allows pause, add to negative, or both - individually or in bulk
+ */
+function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onActionComplete, onLoadMore }) {
+  const [selectedKeys, setSelectedKeys] = useState([]);
+  const [loadingAction, setLoadingAction] = useState(null);
+  const [actionResults, setActionResults] = useState({});
+  const [error, setError] = useState(null);
+
+  if (!Array.isArray(keywords) || keywords.length === 0) return null;
+
+  const getRowKey = (kw) => `${kw.keywordId || ''}-${kw.campaignId || ''}-${kw.adGroupId || ''}`;
+
+  const canPause = (kw) => kw.keywordId != null && kw.keywordId !== '';
+  const canAddToNegative = (kw) => kw.campaignId && kw.adGroupId && (kw.keyword || kw.keywordText);
+  const canPauseAndAdd = (kw) => canPause(kw) && canAddToNegative(kw);
+
+  const selectedRows = keywords.filter((kw) => selectedKeys.includes(getRowKey(kw)));
+  const canPauseCount = selectedRows.filter(canPause).length;
+  const canAddCount = selectedRows.filter(canAddToNegative).length;
+  const canPauseAndAddCount = selectedRows.filter(canPauseAndAdd).length;
+
+  const handleSinglePause = async (kw) => {
+    if (!canPause(kw)) return;
+    const key = getRowKey(kw);
+    setLoadingAction({ type: 'pause', key });
+    setError(null);
+    try {
+      await axiosInstance.post('/api/qmate/ppc/pause-keyword', {
+        keywordId: String(kw.keywordId),
+        adType: 'SP',
+      });
+      setActionResults((prev) => ({ ...prev, [key]: 'paused' }));
+      onActionComplete?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to pause keyword');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSingleAddToNegative = async (kw) => {
+    if (!canAddToNegative(kw)) return;
+    const key = getRowKey(kw);
+    setLoadingAction({ type: 'addToNegative', key });
+    setError(null);
+    try {
+      const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
+      await axiosInstance.post('/api/qmate/ppc/add-to-negative', {
+        campaignId: String(kw.campaignId),
+        adGroupId: String(kw.adGroupId),
+        keywordText: kw.keyword || kw.keywordText,
+        matchType,
+      });
+      setActionResults((prev) => ({ ...prev, [key]: 'negative' }));
+      onActionComplete?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to add to negative');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSinglePauseAndAdd = async (kw) => {
+    if (!canPauseAndAdd(kw)) return;
+    const key = getRowKey(kw);
+    setLoadingAction({ type: 'pauseAndAdd', key });
+    setError(null);
+    try {
+      const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
+      await axiosInstance.post('/api/qmate/ppc/pause-and-add-to-negative', {
+        keywordId: String(kw.keywordId),
+        campaignId: String(kw.campaignId),
+        adGroupId: String(kw.adGroupId),
+        keywordText: kw.keyword || kw.keywordText,
+        matchType,
+        adType: 'SP',
+      });
+      setActionResults((prev) => ({ ...prev, [key]: 'pausedAndNegative' }));
+      onActionComplete?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to pause and add to negative');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleBulkPause = async () => {
+    const toPause = selectedRows.filter(canPause);
+    if (toPause.length === 0) return;
+    setLoadingAction({ type: 'bulkPause' });
+    setError(null);
+    try {
+      await axiosInstance.post('/api/qmate/ppc/bulk-pause', {
+        keywordIds: toPause.map((kw) => String(kw.keywordId)),
+        adType: 'SP',
+      });
+      const newResults = {};
+      toPause.forEach((kw) => { newResults[getRowKey(kw)] = 'paused'; });
+      setActionResults((prev) => ({ ...prev, ...newResults }));
+      setSelectedKeys([]);
+      onActionComplete?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to pause keywords');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleBulkPauseAndAdd = async () => {
+    const toProcess = selectedRows.filter(canPauseAndAdd);
+    if (toProcess.length === 0) return;
+    setLoadingAction({ type: 'bulkPauseAndAdd' });
+    setError(null);
+    try {
+      await axiosInstance.post('/api/qmate/ppc/bulk-pause-and-add-to-negative', {
+        keywords: toProcess.map((kw) => ({
+          keywordId: String(kw.keywordId),
+          campaignId: String(kw.campaignId),
+          adGroupId: String(kw.adGroupId),
+          keywordText: kw.keyword || kw.keywordText,
+          matchType: (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+        })),
+        adType: 'SP',
+      });
+      const newResults = {};
+      toProcess.forEach((kw) => { newResults[getRowKey(kw)] = 'pausedAndNegative'; });
+      setActionResults((prev) => ({ ...prev, ...newResults }));
+      setSelectedKeys([]);
+      onActionComplete?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to pause and add to negative');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const totalWasted = keywords.reduce((sum, kw) => sum + (kw.spend || 0), 0);
+  const displayedCount = currentOffset + keywords.length;
+  const hasMore = totalCount && displayedCount < totalCount;
+
+  return (
+    <div className="mt-4 bg-[#161b22] border border-[#30363d] rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-400 text-lg">⚠️</span>
+          <span className="text-sm font-semibold text-gray-200">Wasted Spend Keywords</span>
+          <span className="text-xs text-gray-500">
+            (showing {keywords.length}{totalCount ? ` of ${totalCount}` : ''}, ${totalWasted.toFixed(2)} wasted on this page)
+          </span>
+        </div>
+      </div>
+
+      {/* Bulk action bar */}
+      {selectedKeys.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 py-2 px-3 rounded-md bg-[#21262d] border border-[#30363d]">
+          <span className="text-xs text-gray-300">
+            {selectedKeys.length}/{MAX_QMATE_BULK_KEYWORDS} selected
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedKeys([])}
+            className="text-xs text-gray-400 hover:text-gray-200"
+          >
+            Clear
+          </button>
+          <span className="text-gray-600">|</span>
+          <button
+            type="button"
+            onClick={handleBulkPause}
+            disabled={loadingAction !== null || canPauseCount === 0}
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loadingAction?.type === 'bulkPause' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            Pause ({canPauseCount})
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkPauseAndAdd}
+            disabled={loadingAction !== null || canPauseAndAddCount === 0}
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loadingAction?.type === 'bulkPauseAndAdd' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            Pause & Add to Negative ({canPauseAndAddCount})
+          </button>
+        </div>
+      )}
+
+      {/* Keywords table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-[#30363d] text-gray-400">
+              <th className="w-8 py-2 px-1 text-center">
+                <input
+                  type="checkbox"
+                  checked={keywords.filter(canPause).length > 0 && keywords.filter(canPause).every((kw) => selectedKeys.includes(getRowKey(kw)))}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      const selectable = keywords.filter(canPause).slice(0, MAX_QMATE_BULK_KEYWORDS).map(getRowKey);
+                      setSelectedKeys(selectable);
+                    } else {
+                      setSelectedKeys([]);
+                    }
+                  }}
+                  className="rounded border-[#30363d] bg-[#161b22] text-amber-500 focus:ring-amber-500/50"
+                />
+              </th>
+              <th className="text-left py-2 px-2">Keyword</th>
+              <th className="text-left py-2 px-2">Campaign</th>
+              <th className="text-right py-2 px-2">Spend</th>
+              <th className="text-center py-2 px-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {keywords.map((kw, idx) => {
+              const key = getRowKey(kw);
+              const isSelected = selectedKeys.includes(key);
+              const atLimit = selectedKeys.length >= MAX_QMATE_BULK_KEYWORDS && !isSelected;
+              const result = actionResults[key];
+              const isLoading = loadingAction?.key === key;
+
+              return (
+                <tr key={idx} className="border-b border-[#30363d]">
+                  <td className="py-2 px-1 text-center">
+                    {canPause(kw) ? (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={atLimit || !!result}
+                        onChange={() => {
+                          setSelectedKeys((prev) =>
+                            prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+                          );
+                        }}
+                        className="rounded border-[#30363d] bg-[#161b22] text-amber-500 focus:ring-amber-500/50 disabled:opacity-40"
+                      />
+                    ) : (
+                      <span className="text-gray-600">—</span>
+                    )}
+                  </td>
+                  <td className="py-2 px-2 text-gray-200">{kw.keyword || kw.keywordText || '—'}</td>
+                  <td className="py-2 px-2 text-gray-400">{kw.campaignName || '—'}</td>
+                  <td className="py-2 px-2 text-right text-red-400">${(kw.spend || 0).toFixed(2)}</td>
+                  <td className="py-2 px-2 text-center">
+                    {result ? (
+                      <span className="inline-flex items-center gap-1 text-green-400">
+                        <Check className="w-3.5 h-3.5" />
+                        {result === 'paused' && 'Paused'}
+                        {result === 'negative' && 'Added to Negative'}
+                        {result === 'pausedAndNegative' && 'Paused & Negative'}
+                      </span>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1">
+                        {canPause(kw) && (
+                          <button
+                            type="button"
+                            onClick={() => handleSinglePause(kw)}
+                            disabled={isLoading || loadingAction !== null}
+                            title="Pause keyword"
+                            className="p-1 rounded text-amber-400 hover:bg-amber-400/10 disabled:opacity-50"
+                          >
+                            {isLoading && loadingAction.type === 'pause' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <span className="text-xs">⏸</span>
+                            )}
+                          </button>
+                        )}
+                        {canAddToNegative(kw) && (
+                          <button
+                            type="button"
+                            onClick={() => handleSingleAddToNegative(kw)}
+                            disabled={isLoading || loadingAction !== null}
+                            title="Add to negative"
+                            className="p-1 rounded text-slate-400 hover:bg-slate-400/10 disabled:opacity-50"
+                          >
+                            {isLoading && loadingAction.type === 'addToNegative' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <X className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                        {canPauseAndAdd(kw) && (
+                          <button
+                            type="button"
+                            onClick={() => handleSinglePauseAndAdd(kw)}
+                            disabled={isLoading || loadingAction !== null}
+                            title="Pause & add to negative"
+                            className="p-1 rounded text-amber-400 hover:bg-amber-400/10 disabled:opacity-50 text-xs"
+                          >
+                            {isLoading && loadingAction.type === 'pauseAndAdd' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              '⏸+🚫'
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {error && (
+        <div className="mt-3 text-xs text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {hasMore && onLoadMore && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={() => onLoadMore(displayedCount)}
+            className="px-4 py-2 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-400/10 hover:bg-blue-400/20 rounded-lg transition-colors"
+          >
+            Load More ({totalCount - displayedCount} remaining)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MORNING_HEADLINES = [
   'Good morning — what should we focus on today?',
   'Let’s plan today’s Amazon moves',
@@ -683,6 +1016,47 @@ const QMate = () => {
     setAppliedFixKeys((prev) => new Set([...prev, key]));
   };
 
+  /** Load more wasted keywords for a specific message */
+  const handleLoadMoreWastedKeywords = async (messageId, offset) => {
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      const response = await axiosInstance.post('/api/qmate/chat', {
+        message: `show me the list of wasted spend keywords (offset: ${offset})`,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        dateRange: dashboardDateRange.startDate && dashboardDateRange.endDate ? {
+          startDate: dashboardDateRange.startDate,
+          endDate: dashboardDateRange.endDate,
+          calendarMode: dashboardDateRange.calendarMode
+        } : null
+      });
+
+      const payload = response?.data?.data || {};
+      const assistantPayload = payload.message || {};
+      
+      if (assistantPayload.wasted_keywords && assistantPayload.wasted_keywords.length > 0) {
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === messageId) {
+            return {
+              ...msg,
+              wastedKeywords: [...(msg.wastedKeywords || []), ...assistantPayload.wasted_keywords],
+              wastedKeywordsTotal: assistantPayload.wasted_keywords_total || msg.wastedKeywordsTotal,
+              wastedKeywordsOffset: offset,
+            };
+          }
+          return msg;
+        }));
+      }
+    } catch (err) {
+      console.error('[QMate] Failed to load more wasted keywords:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -757,6 +1131,10 @@ const QMate = () => {
         suggestedDescription: assistantPayload.suggested_description || null,
         suggestedBackendKeywords: assistantPayload.suggested_backend_keywords || null,
         loadMoreAvailable: assistantPayload.load_more_available || null,
+        wastedKeywords: assistantPayload.wasted_keywords || null,
+        wastedKeywordsTotal: assistantPayload.wasted_keywords_total || null,
+        wastedKeywordsOffset: assistantPayload.wasted_keywords_offset || 0,
+        ppcActions: assistantPayload.ppc_actions || null,
       };
 
       // Process content_actions if present
@@ -1021,7 +1399,14 @@ const QMate = () => {
                   >
                     <div className="text-sm leading-relaxed">
                       {message.role === 'assistant' ? (
-                        <QMateMessageContent key={message.id} content={message.content} />
+                        message.wastedKeywords && Array.isArray(message.wastedKeywords) && message.wastedKeywords.length > 0 ? (
+                          <p className="text-gray-300">
+                            Found <span className="font-semibold text-amber-400">{message.wastedKeywordsTotal || message.wastedKeywords.length}</span> wasted spend keywords. 
+                            You can take action on them below.
+                          </p>
+                        ) : (
+                          <QMateMessageContent key={message.id} content={message.content} />
+                        )
                       ) : (
                         <p className="whitespace-pre-wrap">{message.content}</p>
                       )}
@@ -1169,6 +1554,19 @@ const QMate = () => {
                         onApplySuccess={markFixApplied}
                         isApplying={actionLoading}
                         alreadyApplied={appliedFixKeys.has(`${message.id}-${message.contentActions?.[0]?.asin}-generic_keyword`)}
+                      />
+                    )}
+
+                    {/* Wasted Spend Keywords Panel - PPC Actions */}
+                    {message.role === 'assistant' && message.wastedKeywords && Array.isArray(message.wastedKeywords) && message.wastedKeywords.length > 0 && (
+                      <WastedKeywordsPanel
+                        keywords={message.wastedKeywords}
+                        totalCount={message.wastedKeywordsTotal}
+                        currentOffset={message.wastedKeywordsOffset || 0}
+                        onActionComplete={() => {
+                          console.log('[QMate] PPC action completed');
+                        }}
+                        onLoadMore={(offset) => handleLoadMoreWastedKeywords(message.id, offset)}
                       />
                     )}
                   </div>
