@@ -161,11 +161,56 @@ async function getFetchHistory(userId, country, region, limit = 10) {
     }
 }
 
+/**
+ * Get the latest usable fetch (completed or partial) for a user/country/region
+ * Used for UI visibility - shows last run that got some data
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @returns {Promise<Object|null>} Latest usable tracking entry or null
+ */
+async function getLatestUsableFetch(userId, country, region) {
+    try {
+        return await DataFetchTracking.findLatestUsable(userId, country, region);
+    } catch (error) {
+        logger.error('[DataFetchTracking] Error getting latest usable fetch', {
+            userId,
+            country,
+            region,
+            error: error.message
+        });
+        return null;
+    }
+}
+
+/**
+ * Get the most recent fetch (any status) for monitoring purposes
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @returns {Promise<Object|null>} Most recent tracking entry or null
+ */
+async function getMostRecentFetch(userId, country, region) {
+    try {
+        return await DataFetchTracking.findMostRecent(userId, country, region);
+    } catch (error) {
+        logger.error('[DataFetchTracking] Error getting most recent fetch', {
+            userId,
+            country,
+            region,
+            error: error.message
+        });
+        return null;
+    }
+}
+
 module.exports = {
     startTracking,
     completeTracking,
     failTracking,
     getLatestFetch,
-    getFetchHistory
+    getFetchHistory,
+    getLatestUsableFetch,
+    getMostRecentFetch
 };
 

@@ -96,10 +96,11 @@ async function getDashboardSummary(userId, country, region) {
                 .select('keywordsData')
                 .lean(),
             
-            // DataFetchTracking: Get actual date range from last fetch
-            DataFetchTracking.findOne({ User: userId, country, region, status: 'completed' })
+            // DataFetchTracking: Get actual date range from last usable fetch (completed or partial)
+            // Both 'completed' and 'partial' runs have valid data that can be used
+            DataFetchTracking.findOne({ User: userId, country, region, status: { $in: ['completed', 'partial'] } })
                 .sort({ fetchedAt: -1 })
-                .select('dataRange')
+                .select('dataRange status')
                 .lean(),
             
             // IssueSummary: Get precomputed issue counts for quick dashboard display
@@ -465,9 +466,9 @@ async function getDashboardPhase1(userId, country, region) {
             Seller.findOne({ User: userId })
                 .select('sellerAccount.country sellerAccount.region sellerAccount.products.status')
                 .lean(),
-            DataFetchTracking.findOne({ User: userId, country, region, status: 'completed' })
+            DataFetchTracking.findOne({ User: userId, country, region, status: { $in: ['completed', 'partial'] } })
                 .sort({ fetchedAt: -1 })
-                .select('dataRange')
+                .select('dataRange status')
                 .lean()
         ]);
 

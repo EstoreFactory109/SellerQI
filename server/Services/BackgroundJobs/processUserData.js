@@ -66,11 +66,13 @@ async function processUserData(userId) {
             const { country, region } = account;
             results.accountsProcessed++;
 
+            // Declare loggingHelper outside try block so it's accessible in catch
+            let loggingHelper = null;
+            
             try {
                 logger.info(`[processUserData] Processing account ${country}-${region} for user ${userId}`);
 
                 // Initialize logging session for this account
-                let loggingHelper = null;
                 try {
                     loggingHelper = new LoggingHelper(userId, region, country);
                     await loggingHelper.initSession();
@@ -84,6 +86,7 @@ async function processUserData(userId) {
                     logger.warn(`[processUserData] Failed to initialize logging session for ${userId}-${country}-${region}`, {
                         error: loggingError.message
                     });
+                    loggingHelper = null; // Ensure it's null if init failed
                 }
 
                 // Step 1: Fetch fresh data from all APIs using ScheduledIntegration service

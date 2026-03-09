@@ -133,16 +133,10 @@ class ScheduledIntegration {
             // Initialize TokenManager
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-            // Start tracking for calendar-affecting services
-            // ONLY track on Mon/Wed/Fri (days 1, 3, 5) when calendar-filtered services run:
-            // - mcpEconomicsData (Total Sales, Gross Profit, Fees, Refunds)
-            // - ppcMetricsAggregated (PPC Metrics)
-            // - ppcSpendsDateWise (Date-wise PPC Spend)
-            // - adsKeywordsPerformanceData (Keywords Performance)
-            // - searchKeywords (Search Terms)
-            // - ppcSpendsBySKU (Product-wise Sponsored Ads)
-            // - ppcUnitsSold (PPC Units Sold)
-            // - campaignData (Campaign Data)
+            // Start tracking ONLY on Mon/Wed/Fri when calendar-affecting services run
+            // Calendar-affecting services: mcpEconomicsData, ppcMetricsAggregated, ppcSpendsDateWise,
+            // adsKeywordsPerformanceData, searchKeywords, ppcSpendsBySKU, ppcUnitsSold, campaignData
+            // These are the only services whose data can be filtered by calendar date range
             const isCalendarAffectingDay = dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5; // Mon/Wed/Fri
             
             if (isCalendarAffectingDay) {
@@ -159,11 +153,6 @@ class ScheduledIntegration {
                     return `${year}-${month}-${day}`;
                 };
                 
-                // Note: All calendar-affecting services run together on Mon/Wed/Fri
-                // Services: mcpEconomicsData, ppcMetricsAggregated, ppcSpendsDateWise,
-                // adsKeywordsPerformanceData, searchKeywords, ppcSpendsBySKU, ppcUnitsSold, campaignData
-                // No need to track individual services - just the date range
-                
                 try {
                     trackingEntry = await DataFetchTrackingService.startTracking(
                         userId,
@@ -172,14 +161,14 @@ class ScheduledIntegration {
                         { startDate: formatDate(startDate), endDate: formatDate(endDate) },
                         loggingHelper?.sessionId || null
                     );
-                    logger.info('[ScheduledIntegration] Data fetch tracking started (Mon/Wed/Fri)', {
+                    logger.info('[ScheduledIntegration] Calendar tracking started (Mon/Wed/Fri)', {
                         trackingId: trackingEntry._id,
                         dayName: trackingEntry.dayName,
                         dayOfWeek: dayOfWeek,
                         dataRange: { startDate: formatDate(startDate), endDate: formatDate(endDate) }
                     });
                 } catch (trackingError) {
-                    logger.warn('[ScheduledIntegration] Failed to start tracking (non-critical)', {
+                    logger.warn('[ScheduledIntegration] Failed to start calendar tracking (non-critical)', {
                         error: trackingError.message,
                         userId,
                         Country,
@@ -187,7 +176,7 @@ class ScheduledIntegration {
                     });
                 }
             } else {
-                logger.info('[ScheduledIntegration] Skipping data fetch tracking (not Mon/Wed/Fri)', {
+                logger.info('[ScheduledIntegration] Skipping calendar tracking (not Mon/Wed/Fri)', {
                     dayOfWeek: dayOfWeek,
                     dayName: dayNames[dayOfWeek]
                 });
@@ -301,46 +290,53 @@ class ScheduledIntegration {
                 // Don't fail the entire process if history fails
             }
 
-            // Build error message if there are failures
+            // Build error message if there are any failures (partial or complete)
             let errorMessage = null;
-            if (!serviceSummary.overallSuccess) {
-                // All services failed (overallSuccess is false only when successful.length === 0)
-                if (serviceSummary.failed.length > 0) {
-                    const failedServices = serviceSummary.failed.map(f => f.service).join(', ');
+            if (serviceSummary.failed.length > 0) {
+                const failedServices = serviceSummary.failed.map(f => `${f.service}: ${f.error}`).join('; ');
+                if (!serviceSummary.overallSuccess) {
+                    // All services failed
                     errorMessage = `All services failed: ${failedServices}`;
                 } else {
-                    errorMessage = 'All services failed (unknown reason)';
+                    // Partial failure - some succeeded, some failed
+                    errorMessage = `Partial failure (${serviceSummary.failed.length}/${serviceSummary.totalServices} failed): ${failedServices}`;
                 }
             }
 
-            // Complete tracking for calendar-affecting services
+            // Complete calendar tracking (Mon/Wed/Fri only - trackingEntry only exists on those days)
             if (trackingEntry) {
                 try {
-                    if (serviceSummary.overallSuccess) {
+                    if (serviceSummary.failed.length === 0 && serviceSummary.successful.length > 0) {
+                        // All calendar services succeeded - mark as completed
                         await DataFetchTrackingService.completeTracking(trackingEntry._id);
-                        logger.info('[ScheduledIntegration] Data fetch tracking completed successfully', {
+                        logger.info('[ScheduledIntegration] Calendar tracking completed successfully', {
                             trackingId: trackingEntry._id,
                             dayName: trackingEntry.dayName,
-                            dataRange: trackingEntry.dataRange
+                            dataRange: trackingEntry.dataRange,
+                            successfulServices: serviceSummary.successful.length
                         });
                     } else if (serviceSummary.failed.length > 0 && serviceSummary.successful.length > 0) {
-                        // Partial success - mark as partial but still completed for date tracking purposes
+                        // Partial success - some calendar services failed, some succeeded
+                        // Mark as partial so calendar still has valid data from successful services
                         trackingEntry.status = 'partial';
                         trackingEntry.errorMessage = errorMessage;
                         await trackingEntry.save();
-                        logger.info('[ScheduledIntegration] Data fetch tracking completed with partial success', {
+                        logger.info('[ScheduledIntegration] Calendar tracking completed with partial success', {
                             trackingId: trackingEntry._id,
                             successfulServices: serviceSummary.successful.length,
-                            failedServices: serviceSummary.failed.length
+                            failedServices: serviceSummary.failed.length,
+                            failedServiceNames: serviceSummary.failed.map(f => f.service)
                         });
                     } else {
-                        await DataFetchTrackingService.failTracking(trackingEntry._id, errorMessage);
-                        logger.info('[ScheduledIntegration] Data fetch tracking marked as failed', {
-                            trackingId: trackingEntry._id
+                        // All calendar services failed - mark as failed
+                        await DataFetchTrackingService.failTracking(trackingEntry._id, errorMessage || 'All services failed');
+                        logger.info('[ScheduledIntegration] Calendar tracking marked as failed', {
+                            trackingId: trackingEntry._id,
+                            failedServices: serviceSummary.failed.length
                         });
                     }
                 } catch (trackingError) {
-                    logger.warn('[ScheduledIntegration] Failed to complete tracking (non-critical)', {
+                    logger.warn('[ScheduledIntegration] Failed to complete calendar tracking', {
                         error: trackingError.message,
                         trackingId: trackingEntry._id
                     });
@@ -387,16 +383,18 @@ class ScheduledIntegration {
                 await loggingHelper.endSession('failed');
             }
 
-            // Mark tracking as failed if it was started
+            // Mark calendar tracking as failed if it was started (only exists on Mon/Wed/Fri)
             if (trackingEntry) {
                 try {
-                    await DataFetchTrackingService.failTracking(trackingEntry._id, errorMessage);
-                    logger.info('[ScheduledIntegration] Data fetch tracking marked as failed due to unexpected error', {
-                        trackingId: trackingEntry._id
+                    await DataFetchTrackingService.failTracking(trackingEntry._id, `Fatal error: ${errorMessage}`);
+                    logger.info('[ScheduledIntegration] Calendar tracking marked as failed due to unexpected error', {
+                        trackingId: trackingEntry._id,
+                        error: errorMessage
                     });
                 } catch (trackingError) {
-                    logger.warn('[ScheduledIntegration] Failed to mark tracking as failed', {
-                        error: trackingError.message
+                    logger.warn('[ScheduledIntegration] Failed to mark calendar tracking as failed', {
+                        error: trackingError.message,
+                        trackingId: trackingEntry._id
                     });
                 }
             }

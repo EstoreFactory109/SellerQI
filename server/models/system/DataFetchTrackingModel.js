@@ -3,7 +3,7 @@
  * 
  * Tracks when calendar-affecting services run for each user/country/region.
  * 
- * ONLY tracks on Mon/Wed/Fri (days 1, 3, 5) when these services run:
+ * ONLY tracks on Mon/Wed/Fri (days 1, 3, 5) when calendar-affecting services run:
  * - mcpEconomicsData (Total Sales, Gross Profit, Fees, Refunds)
  * - ppcMetricsAggregated (PPC Metrics - SP, SB, SD)
  * - ppcSpendsDateWise (Date-wise PPC Spend)
@@ -15,6 +15,12 @@
  * 
  * These are the only services whose data can be filtered by calendar date range
  * in the frontend (Dashboard, Profitability, Sponsored Ads pages).
+ * 
+ * Status values:
+ * - 'started': Tracking entry created when Mon/Wed/Fri batch begins
+ * - 'completed': All calendar services ran successfully
+ * - 'partial': Some services failed, some succeeded (calendar still has valid data)
+ * - 'failed': All services failed (calendar should use previous successful run)
  */
 
 const mongoose = require('mongoose');
@@ -105,13 +111,34 @@ const dataFetchTrackingSchema = new mongoose.Schema({
 dataFetchTrackingSchema.index({ User: 1, country: 1, region: 1, fetchedAt: -1 });
 dataFetchTrackingSchema.index({ User: 1, country: 1, region: 1, status: 1 });
 
-// Static method to find latest fetch for a user/country/region
+// Static method to find latest fully completed fetch for a user/country/region
+// Used for calendar date range display (only shows fully successful runs)
 dataFetchTrackingSchema.statics.findLatest = function(userId, country, region) {
     return this.findOne({
         User: userId,
         country: country,
         region: region,
         status: 'completed'
+    }).sort({ fetchedAt: -1 });
+};
+
+// Static method to find latest usable fetch (completed or partial)
+// Used for UI visibility - shows last run that got some data
+dataFetchTrackingSchema.statics.findLatestUsable = function(userId, country, region) {
+    return this.findOne({
+        User: userId,
+        country: country,
+        region: region,
+        status: { $in: ['completed', 'partial'] }
+    }).sort({ fetchedAt: -1 });
+};
+
+// Static method to find the most recent run (any status) for monitoring
+dataFetchTrackingSchema.statics.findMostRecent = function(userId, country, region) {
+    return this.findOne({
+        User: userId,
+        country: country,
+        region: region
     }).sort({ fetchedAt: -1 });
 };
 

@@ -50,8 +50,12 @@ export default function PlansAndBilling() {
   const [freeTrialLoading, setFreeTrialLoading] = useState(false);
   const user = useSelector((state) => state.Auth.user);
 
-  // Show "Try 7 days for Free" card only for LITE users who have not been served a trial (hide for PRO and for LITE users whose servedTrial is true)
-  const showFreeTrialCard = currentPlan === 'LITE' && user?.servedTrial !== true;
+  // Show "Try 7 days for Free" card for:
+  // - LITE users who have never been served a trial
+  // - Cancelled users (so they can start a new trial and resubscribe)
+  const showFreeTrialCard =
+    currentPlan === 'LITE' &&
+    (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
   const dispatch = useDispatch();
   const navigate = useNavigate();
 

@@ -76,7 +76,8 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
 
         // SERVER-SIDE VALIDATION: Check if user has already used their trial
         if (trialPeriodDays !== undefined && trialPeriodDays !== null && parseInt(trialPeriodDays) > 0) {
-            if (user.servedTrial === true) {
+            // Allow cancelled users to start a new trial even if they've had one before
+            if (user.servedTrial === true && user.subscriptionStatus !== 'cancelled') {
                 logger.warn(`User ${userId} attempted to start trial again but has already used trial`);
                 return res.status(400).json(
                     new ApiResponse(400, null, 'You have already used your free trial. Please subscribe to continue.')

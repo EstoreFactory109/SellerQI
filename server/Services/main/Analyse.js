@@ -853,12 +853,13 @@ class AnalyseService {
 
         // Get calendar dates from DataFetchTracking (PRIMARY source - no calculation, just from database)
         // This tracks when calendar-affecting services actually ran
+        // Uses findLatestUsable to include both 'completed' and 'partial' runs (both have valid data)
         let dataStartDate = null;
         let dataEndDate = null;
         let trackingInfo = null;
         
         try {
-            const latestTracking = await DataFetchTracking.findLatest(userId, country, region);
+            const latestTracking = await DataFetchTracking.findLatestUsable(userId, country, region);
             if (latestTracking && latestTracking.dataRange) {
                 dataStartDate = latestTracking.dataRange.startDate;
                 dataEndDate = latestTracking.dataRange.endDate;
@@ -866,13 +867,15 @@ class AnalyseService {
                     fetchedAt: latestTracking.fetchedAt,
                     dayName: latestTracking.dayName,
                     dateString: latestTracking.dateString,
-                    timeString: latestTracking.timeString
+                    timeString: latestTracking.timeString,
+                    status: latestTracking.status
                 };
                 logger.info('Calendar dates from DataFetchTracking:', {
                     startDate: dataStartDate,
                     endDate: dataEndDate,
                     fetchedAt: latestTracking.fetchedAt,
-                    dayName: latestTracking.dayName
+                    dayName: latestTracking.dayName,
+                    status: latestTracking.status
                 });
             }
         } catch (trackingError) {
