@@ -16,7 +16,6 @@ const LeftNavSection = () => {
     const navigate=useNavigate();
     const location = useLocation();
     const [loader,setLoader]=useState(false)
-    const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
     const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
     const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
     
@@ -78,13 +77,6 @@ const LeftNavSection = () => {
     const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
     const isIssuesSection = isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product';
 
-    // Keep dropdown open if we're on issues or issues-by-product (not on product detail page)
-    React.useEffect(() => {
-        if (isIssuesSection) {
-            setIssuesDropdownOpen(true);
-        }
-    }, [isIssuesPage, location.pathname, isIssuesSection]);
-
     // Keep settings dropdown open if we're on settings page
     React.useEffect(() => {
         if (isSettingsPage) {
@@ -98,15 +90,6 @@ const LeftNavSection = () => {
             setSponsoredAdsDropdownOpen(true);
         }
     }, [isSponsoredAdsPage]);
-
-    // Handle Issues button click
-    const handleIssuesClick = () => {
-        if (!isIssuesPage) {
-            // If not on issues page, navigate to category
-            navigate('/seller-central-checker/issues?tab=category');
-        }
-        setIssuesDropdownOpen(!issuesDropdownOpen);
-    };
 
     // Handle Settings button click
     const handleSettingsClick = () => {
@@ -253,112 +236,28 @@ const LeftNavSection = () => {
                             )}
                         </NavLink>
                         
-                        {/* Issues with Dropdown - For PRO/AGENCY users and expired trial users */}
+                        {/* Account Issues - top-level link (Issues dropdown removed) */}
                         {(!isLiteUser || isPremiumLocked) && (
-                            <div className="space-y-0.5">
-                            <div
-                                className={`${menuItemClass} cursor-pointer ${
-                                    isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
-                                        ? activeMenuItemClass
-                                        : inactiveMenuItemClass
-                                }`}
-                                onClick={handleIssuesClick}
+                            <NavLink
+                                to="/seller-central-checker/issues?tab=account"
+                                className={({ isActive }) =>
+                                    `${menuItemClass} ${
+                                        isIssuesPage && currentTab === 'account'
+                                            ? activeMenuItemClass
+                                            : inactiveMenuItemClass
+                                    }`
+                                }
                             >
-                                <BadgeAlert className={`${iconClass} ${
-                                    isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
-                                        ? iconActiveClass
-                                        : iconInactiveClass
-                                }`} />
-                                <span className="font-medium flex-1">Issues</span>
-                                {isPremiumLocked && (
-                                    <Lock className="w-3.5 h-3.5 text-amber-500 mr-1" />
+                                {({ isActive }) => (
+                                    <>
+                                        <BadgeAlert className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
+                                        <span className="font-medium flex-1">Account Issues</span>
+                                        {isPremiumLocked && (
+                                            <Lock className="w-3.5 h-3.5 text-amber-500 mr-1" />
+                                        )}
+                                    </>
                                 )}
-                                <motion.div
-                                    animate={{ rotate: issuesDropdownOpen ? 90 : 0 }}
-                                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                                    className="flex items-center justify-center"
-                                >
-                                    <ChevronRight className={`${iconClass} opacity-70`}/>
-                                </motion.div>
-                            </div>
-                            
-                            <AnimatePresence>
-                                {issuesDropdownOpen && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: "auto" }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        transition={{ 
-                                            duration: 0.3, 
-                                            ease: "easeInOut",
-                                            opacity: { duration: 0.2 }
-                                        }}
-                                        className="ml-4 space-y-0.5 overflow-hidden"
-                                    >
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.15, duration: 0.2 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/issues?tab=category"
-                                                className={() =>
-                                                    `${dropdownItemClass} ${
-                                                        isIssuesPage && currentTab === 'category'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
-                                                    }`
-                                                }
-                                            >
-                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
-                                                Issues By Category
-                                            </NavLink>
-                                        </motion.div>
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.175, duration: 0.2 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/issues-by-product"
-                                                className={({ isActive }) =>
-                                                    `${dropdownItemClass} ${
-                                                        isActive
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
-                                                    }`
-                                                }
-                                            >
-                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
-                                                Issues By Product
-                                            </NavLink>
-                                        </motion.div>
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.2, duration: 0.2 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/issues?tab=account"
-                                                className={() =>
-                                                    `${dropdownItemClass} ${
-                                                        isIssuesPage && currentTab === 'account'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
-                                                    }`
-                                                }
-                                            >
-                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
-                                                Account Issues
-                                            </NavLink>
-                                        </motion.div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
+                            </NavLink>
                         )}
 
                         {/* Sponsored Ads with Dropdown - For PRO/AGENCY users and expired trial users */}

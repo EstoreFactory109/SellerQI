@@ -16,7 +16,6 @@ const LeftNavSection = () => {
     const navigate=useNavigate();
     const location = useLocation();
     const [loader,setLoader]=useState(false)
-    const [issuesDropdownOpen, setIssuesDropdownOpen] = useState(false);
     const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
     const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
 
@@ -76,13 +75,6 @@ const LeftNavSection = () => {
     const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
     const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
     
-    // Keep dropdown open if we're on any issues-related page
-    React.useEffect(() => {
-        if (isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product') {
-            setIssuesDropdownOpen(true);
-        }
-    }, [isIssuesPage, location.pathname]);
-
     // Keep settings dropdown open if we're on settings page
     React.useEffect(() => {
         if (isSettingsPage) {
@@ -96,15 +88,6 @@ const LeftNavSection = () => {
             setSponsoredAdsDropdownOpen(true);
         }
     }, [isSponsoredAdsPage]);
-
-    // Handle Issues button click
-    const handleIssuesClick = () => {
-        if (!isIssuesPage) {
-            // If not on issues page, navigate to category
-            navigate('/seller-central-checker/issues?tab=category');
-        }
-        setIssuesDropdownOpen(!issuesDropdownOpen);
-    };
 
     // Handle Settings button click
     const handleSettingsClick = () => {
@@ -272,117 +255,38 @@ const LeftNavSection = () => {
                                 </NavLink>
                             )}
 
-                            {/* Issues with Dropdown - For PRO/AGENCY users and expired trial users */}
+                            {/* Account Issues - top-level link (Issues dropdown removed) */}
                             {(!isLiteUser || isPremiumLocked) && (
-                                <div className="space-y-1">
-                                <div
-                                    className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
-                                        isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product'
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`}
-                                    onClick={handleIssuesClick}
+                                <NavLink
+                                    to="/seller-central-checker/issues?tab=account"
+                                    className={({ isActive }) =>
+                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
+                                            isIssuesPage && currentTab === 'account'
+                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
+                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
+                                        }`
+                                    }
                                 >
-                                    <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                        isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product' 
-                                            ? 'bg-white/20' 
-                                            : 'bg-orange-50 group-hover:bg-orange-100'
-                                    }`}>
-                                        <BadgeAlert className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                            isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product' 
-                                                ? 'text-white' 
-                                                : 'text-orange-600'
-                                        }`}/>
-                                    </div>
-                                    <span className="font-medium flex-1">Issues</span>
-                                    {isPremiumLocked && (
-                                        <Lock className="w-3 h-3 text-amber-500 mr-1" />
+                                    {({ isActive }) => (
+                                        <>
+                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
+                                                isActive
+                                                    ? 'bg-white/20' 
+                                                    : 'bg-orange-50 group-hover:bg-orange-100'
+                                            }`}>
+                                                <BadgeAlert className={`w-3.5 h-3.5 transition-colors duration-300 ${
+                                                    isActive
+                                                        ? 'text-white' 
+                                                        : 'text-orange-600'
+                                                }`}/>
+                                            </div>
+                                            <span className="font-medium flex-1">Account Issues</span>
+                                            {isPremiumLocked && (
+                                                <Lock className="w-3 h-3 text-amber-500 mr-1" />
+                                            )}
+                                        </>
                                     )}
-                                    <motion.div
-                                        animate={{ rotate: issuesDropdownOpen ? 90 : 0 }}
-                                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                                    >
-                                        <ChevronRight className="w-3 h-3 opacity-70"/>
-                                    </motion.div>
-                                </div>
-                                
-                                <AnimatePresence>
-                                    {issuesDropdownOpen && (
-                                        <motion.div
-                                            initial={{ opacity: 0, height: 0 }}
-                                            animate={{ opacity: 1, height: "auto" }}
-                                            exit={{ opacity: 0, height: 0 }}
-                                            transition={{ 
-                                                duration: 0.3, 
-                                                ease: "easeInOut",
-                                                opacity: { duration: 0.2 }
-                                            }}
-                                            className="ml-5 space-y-1 overflow-hidden"
-                                        >
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.15, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/issues?tab=category"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isIssuesPage && currentTab === 'category'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Issues By Category
-                                                </NavLink>
-                                            </motion.div>
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.175, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/issues-by-product"
-                                                    className={({ isActive }) =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isActive
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Issues By Product
-                                                </NavLink>
-                                            </motion.div>
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.2, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/issues?tab=account"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isIssuesPage && currentTab === 'account'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Account Issues
-                                                </NavLink>
-                                            </motion.div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
+                                </NavLink>
                             )}
 
                             {/* Sponsored Ads with Dropdown - For PRO/AGENCY users and expired trial users */}

@@ -35,6 +35,16 @@ const {
     getAccountHistoryData,
     getProductHistory,
     getComparisonDebugInfo,
+    // Per-ASIN product details endpoints
+    getProductBasicInfo,
+    getProductPerformance,
+    getProductIssues,
+    getProductPPCIssues,
+    // Product PPC keyword tables (paginated)
+    getProductWastedSpendKeywords,
+    getProductTopPerformingKeywords,
+    getProductSearchTermsZeroSales,
+    getProductPPCKeywordTabCounts,
     // v2 optimized endpoints
     getYourProductsInitialV2,
     getYourProductsByStatusV2,
@@ -292,6 +302,40 @@ router.get('/issues/products', auth, getLocation, analyseDataCache(600, 'issues-
 // ===== PRODUCT HISTORY (for single product trend graphs) =====
 // Returns historical performance data for a specific ASIN
 router.get('/product-history/:asin', auth, getLocation, validateAsinParam, getProductHistory);
+
+// ===== PER-ASIN PRODUCT DETAILS ENDPOINTS =====
+// These endpoints fetch data for a single ASIN when not present in cached issues-by-product data
+// No Redis cache - these are fast per-ASIN queries
+
+// GET /product/:asin/info - Basic product info (name, SKU, price, image, sales, profit, ratings)
+router.get('/product/:asin/info', auth, getLocation, validateAsinParam, getProductBasicInfo);
+
+// GET /product/:asin/performance - Performance metrics with optional comparison
+// Query params: comparison (none | wow | mom)
+router.get('/product/:asin/performance', auth, getLocation, validateAsinParam, getProductPerformance);
+
+// GET /product/:asin/issues - Full issues structure (ranking, conversion, inventory errors)
+router.get('/product/:asin/issues', auth, getLocation, validateAsinParam, getProductIssues);
+
+// GET /product/:asin/ppc-issues - PPC-related issues for the product
+// Returns: ad metrics (spend, sales, ACOS, CTR), detected issues, keywords, ad group breakdown
+router.get('/product/:asin/ppc-issues', auth, getLocation, validateAsinParam, getProductPPCIssues);
+
+// GET /product/:asin/ppc-wasted-spend - Wasted spend keywords for the product (paginated)
+// Query params: page, limit (default: 1, 10)
+router.get('/product/:asin/ppc-wasted-spend', auth, getLocation, validateAsinParam, getProductWastedSpendKeywords);
+
+// GET /product/:asin/ppc-top-keywords - Top performing keywords for the product (paginated)
+// Query params: page, limit (default: 1, 10)
+router.get('/product/:asin/ppc-top-keywords', auth, getLocation, validateAsinParam, getProductTopPerformingKeywords);
+
+// GET /product/:asin/ppc-zero-sales-search-terms - Search terms with zero sales for the product (paginated)
+// Query params: page, limit (default: 1, 10)
+router.get('/product/:asin/ppc-zero-sales-search-terms', auth, getLocation, validateAsinParam, getProductSearchTermsZeroSales);
+
+// GET /product/:asin/ppc-keyword-tab-counts - Tab counts for product PPC keyword tables
+// Returns: counts for wastedSpend, topPerforming, searchTermsZeroSales
+router.get('/product/:asin/ppc-keyword-tab-counts', auth, getLocation, validateAsinParam, getProductPPCKeywordTabCounts);
 
 // ===== COMPARISON DEBUG (for checking WoW/MoM data availability) =====
 // Returns counts of BuyBoxData and EconomicsMetrics documents

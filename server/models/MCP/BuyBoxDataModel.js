@@ -88,6 +88,12 @@ const buyBoxDataSchema = new mongoose.Schema({
             required: true
         }
     },
+    // Explicit day this dataset represents (for daily fetches)
+    date: {
+        type: String,
+        required: false,
+        index: true
+    },
     // Summary metrics
     totalProducts: {
         type: Number,
@@ -141,6 +147,7 @@ const buyBoxDataSchema = new mongoose.Schema({
 // Compound index for efficient queries
 buyBoxDataSchema.index({ User: 1, region: 1, 'dateRange.startDate': 1, 'dateRange.endDate': 1 });
 buyBoxDataSchema.index({ User: 1, region: 1, country: 1, createdAt: -1 });
+buyBoxDataSchema.index({ User: 1, region: 1, country: 1, date: 1 });
 
 // Method to get summary
 buyBoxDataSchema.methods.getSummary = function() {
@@ -149,6 +156,7 @@ buyBoxDataSchema.methods.getSummary = function() {
         productsWithBuyBox: this.productsWithBuyBox,
         productsWithoutBuyBox: this.productsWithoutBuyBox,
         productsWithLowBuyBox: this.productsWithLowBuyBox,
+        date: this.date,
         dateRange: this.dateRange,
         country: this.country
     };

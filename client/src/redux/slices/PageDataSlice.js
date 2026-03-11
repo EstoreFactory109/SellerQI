@@ -304,6 +304,25 @@ const initialState = {
         loading: false,
         error: null,
         lastFetched: null
+    },
+    // Per-ASIN Product Details (fallback when ASIN not in issues-by-product cache)
+    productDetails: {
+        byAsin: {}, // { [asin]: { info, performance, issues, ppcIssues, lastFetched } }
+        loading: {
+            info: false,
+            performance: false,
+            issues: false,
+            ppcIssues: false,
+            wastedSpendKeywords: false,
+            topPerformingKeywords: false,
+            searchTermsZeroSales: false,
+            keywordTabCounts: false
+        },
+        error: null,
+        // PPC Keyword Tables (paginated, per-ASIN)
+        keywordTables: {
+            // { [asin]: { wastedSpend: { data, pagination, totalWastedSpend }, topPerforming: { data, pagination }, searchTermsZeroSales: { data, pagination, totalWastedSpend }, tabCounts } }
+        }
     }
 };
 
@@ -922,6 +941,229 @@ export const fetchIssuesByProductData = createAsyncThunk(
             return { ...data, _comparison: comparison };
         } catch (error) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch issues by product data');
+        }
+    }
+);
+
+// ============================================================================
+// PER-ASIN PRODUCT DETAILS THUNKS
+// These thunks fetch data for a single ASIN when not present in issues-by-product cache
+// ============================================================================
+
+/**
+ * Fetch basic product info for a single ASIN
+ * @param {string} asin - The ASIN to fetch info for
+ */
+export const fetchProductBasicInfo = createAsyncThunk(
+    'pageData/fetchProductBasicInfo',
+    async (asin, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            
+            const normalizedAsin = asin.trim().toUpperCase();
+            const state = getState();
+            const cached = state.pageData?.productDetails?.byAsin?.[normalizedAsin];
+            
+            // Check cache
+            if (cached?.info && cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS) {
+                return { fromCache: true, asin: normalizedAsin, data: cached.info };
+            }
+            
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/info`);
+            return { asin: normalizedAsin, data: response.data.data };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch product info');
+        }
+    }
+);
+
+/**
+ * Fetch performance metrics for a single ASIN with optional comparison
+ * @param {Object} options - { asin: string, comparison: 'none' | 'wow' | 'mom' }
+ */
+export const fetchProductPerformance = createAsyncThunk(
+    'pageData/fetchProductPerformance',
+    async ({ asin, comparison = 'none' }, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            
+            const normalizedAsin = asin.trim().toUpperCase();
+            
+            // For performance, always fetch fresh when comparison changes
+            // Only use cache for 'none' comparison
+            if (comparison === 'none') {
+                const state = getState();
+                const cached = state.pageData?.productDetails?.byAsin?.[normalizedAsin];
+                
+                if (cached?.performance && cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS) {
+                    return { fromCache: true, asin: normalizedAsin, data: cached.performance };
+                }
+            }
+            
+            const url = `/api/pagewise/product/${normalizedAsin}/performance${comparison !== 'none' ? `?comparison=${comparison}` : ''}`;
+            const response = await axiosInstance.get(url);
+            return { asin: normalizedAsin, comparison, data: response.data.data };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch product performance');
+        }
+    }
+);
+
+/**
+ * Fetch full issues for a single ASIN (ranking, conversion, inventory)
+ * @param {string} asin - The ASIN to fetch issues for
+ */
+export const fetchProductIssues = createAsyncThunk(
+    'pageData/fetchProductIssues',
+    async (asin, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            
+            const normalizedAsin = asin.trim().toUpperCase();
+            const state = getState();
+            const cached = state.pageData?.productDetails?.byAsin?.[normalizedAsin];
+            
+            // Check cache
+            if (cached?.issues && cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS) {
+                return { fromCache: true, asin: normalizedAsin, data: cached.issues };
+            }
+            
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/issues`);
+            return { asin: normalizedAsin, data: response.data.data };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch product issues');
+        }
+    }
+);
+
+/**
+ * Fetch PPC issues for a single ASIN (PPC-specific issues + metrics)
+ * @param {string} asin - The ASIN to fetch PPC issues for
+ */
+export const fetchProductPPCIssues = createAsyncThunk(
+    'pageData/fetchProductPPCIssues',
+    async (asin, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            
+            const normalizedAsin = asin.trim().toUpperCase();
+            const state = getState();
+            const cached = state.pageData?.productDetails?.byAsin?.[normalizedAsin];
+            
+            // Check cache
+            if (cached?.ppcIssues && cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS) {
+                return { fromCache: true, asin: normalizedAsin, data: cached.ppcIssues };
+            }
+            
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/ppc-issues`);
+            return { asin: normalizedAsin, data: response.data.data };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch product PPC issues');
+        }
+    }
+);
+
+/**
+ * Fetch Product PPC Keyword Tab Counts (for tab badges)
+ * @param {string} asin - The ASIN to fetch tab counts for
+ */
+export const fetchProductPPCKeywordTabCounts = createAsyncThunk(
+    'pageData/fetchProductPPCKeywordTabCounts',
+    async (asin, { rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            const normalizedAsin = asin.trim().toUpperCase();
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/ppc-keyword-tab-counts`);
+            return { asin: normalizedAsin, data: response.data.data };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch keyword tab counts');
+        }
+    }
+);
+
+/**
+ * Fetch Product Wasted Spend Keywords (paginated, infinite scroll)
+ * @param {Object} params - { asin, page, limit, append }
+ */
+export const fetchProductWastedSpendKeywords = createAsyncThunk(
+    'pageData/fetchProductWastedSpendKeywords',
+    async ({ asin, page = 1, limit = 10, append = false }, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            const normalizedAsin = asin.trim().toUpperCase();
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/ppc-wasted-spend?page=${page}&limit=${limit}`);
+            return { 
+                asin: normalizedAsin, 
+                data: response.data.data.data,
+                pagination: response.data.data.pagination,
+                totalWastedSpend: response.data.data.totalWastedSpend,
+                append
+            };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch wasted spend keywords');
+        }
+    }
+);
+
+/**
+ * Fetch Product Top Performing Keywords (paginated, infinite scroll)
+ * @param {Object} params - { asin, page, limit, append }
+ */
+export const fetchProductTopPerformingKeywords = createAsyncThunk(
+    'pageData/fetchProductTopPerformingKeywords',
+    async ({ asin, page = 1, limit = 10, append = false }, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            const normalizedAsin = asin.trim().toUpperCase();
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/ppc-top-keywords?page=${page}&limit=${limit}`);
+            return { 
+                asin: normalizedAsin, 
+                data: response.data.data.data,
+                pagination: response.data.data.pagination,
+                append
+            };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch top performing keywords');
+        }
+    }
+);
+
+/**
+ * Fetch Product Search Terms with Zero Sales (paginated, infinite scroll)
+ * @param {Object} params - { asin, page, limit, append }
+ */
+export const fetchProductSearchTermsZeroSales = createAsyncThunk(
+    'pageData/fetchProductSearchTermsZeroSales',
+    async ({ asin, page = 1, limit = 10, append = false }, { getState, rejectWithValue }) => {
+        try {
+            if (!asin) {
+                return rejectWithValue('ASIN is required');
+            }
+            const normalizedAsin = asin.trim().toUpperCase();
+            const response = await axiosInstance.get(`/api/pagewise/product/${normalizedAsin}/ppc-zero-sales-search-terms?page=${page}&limit=${limit}`);
+            return { 
+                asin: normalizedAsin, 
+                data: response.data.data.data,
+                pagination: response.data.data.pagination,
+                totalWastedSpend: response.data.data.totalWastedSpend,
+                append
+            };
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to fetch search terms with zero sales');
         }
     }
 );
@@ -2780,6 +3022,197 @@ const pageDataSlice = createSlice({
             .addCase(fetchOptimizationProductsV3.rejected, (state, action) => {
                 state.yourProductsV3.optimization.loading = false;
                 state.yourProductsV3.optimization.error = action.payload;
+            })
+        
+        // =====================================================================
+        // Per-ASIN Product Details Reducers
+        // =====================================================================
+        
+        // Product Basic Info
+            .addCase(fetchProductBasicInfo.pending, (state) => {
+                state.productDetails.loading.info = true;
+                state.productDetails.error = null;
+            })
+            .addCase(fetchProductBasicInfo.fulfilled, (state, action) => {
+                state.productDetails.loading.info = false;
+                if (!action.payload?.fromCache) {
+                    const { asin, data } = action.payload;
+                    if (!state.productDetails.byAsin[asin]) {
+                        state.productDetails.byAsin[asin] = {};
+                    }
+                    state.productDetails.byAsin[asin].info = data;
+                    state.productDetails.byAsin[asin].lastFetched = Date.now();
+                }
+            })
+            .addCase(fetchProductBasicInfo.rejected, (state, action) => {
+                state.productDetails.loading.info = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product Performance
+            .addCase(fetchProductPerformance.pending, (state) => {
+                state.productDetails.loading.performance = true;
+                state.productDetails.error = null;
+            })
+            .addCase(fetchProductPerformance.fulfilled, (state, action) => {
+                state.productDetails.loading.performance = false;
+                if (!action.payload?.fromCache) {
+                    const { asin, data } = action.payload;
+                    if (!state.productDetails.byAsin[asin]) {
+                        state.productDetails.byAsin[asin] = {};
+                    }
+                    state.productDetails.byAsin[asin].performance = data;
+                    state.productDetails.byAsin[asin].lastFetched = Date.now();
+                }
+            })
+            .addCase(fetchProductPerformance.rejected, (state, action) => {
+                state.productDetails.loading.performance = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product Issues
+            .addCase(fetchProductIssues.pending, (state) => {
+                state.productDetails.loading.issues = true;
+                state.productDetails.error = null;
+            })
+            .addCase(fetchProductIssues.fulfilled, (state, action) => {
+                state.productDetails.loading.issues = false;
+                if (!action.payload?.fromCache) {
+                    const { asin, data } = action.payload;
+                    if (!state.productDetails.byAsin[asin]) {
+                        state.productDetails.byAsin[asin] = {};
+                    }
+                    state.productDetails.byAsin[asin].issues = data;
+                    state.productDetails.byAsin[asin].lastFetched = Date.now();
+                }
+            })
+            .addCase(fetchProductIssues.rejected, (state, action) => {
+                state.productDetails.loading.issues = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product PPC Issues
+            .addCase(fetchProductPPCIssues.pending, (state) => {
+                state.productDetails.loading.ppcIssues = true;
+                state.productDetails.error = null;
+            })
+            .addCase(fetchProductPPCIssues.fulfilled, (state, action) => {
+                state.productDetails.loading.ppcIssues = false;
+                if (!action.payload?.fromCache) {
+                    const { asin, data } = action.payload;
+                    if (!state.productDetails.byAsin[asin]) {
+                        state.productDetails.byAsin[asin] = {};
+                    }
+                    state.productDetails.byAsin[asin].ppcIssues = data;
+                    state.productDetails.byAsin[asin].lastFetched = Date.now();
+                }
+            })
+            .addCase(fetchProductPPCIssues.rejected, (state, action) => {
+                state.productDetails.loading.ppcIssues = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product PPC Keyword Tab Counts
+            .addCase(fetchProductPPCKeywordTabCounts.pending, (state) => {
+                state.productDetails.loading.keywordTabCounts = true;
+            })
+            .addCase(fetchProductPPCKeywordTabCounts.fulfilled, (state, action) => {
+                state.productDetails.loading.keywordTabCounts = false;
+                const { asin, data } = action.payload;
+                if (!state.productDetails.keywordTables[asin]) {
+                    state.productDetails.keywordTables[asin] = {};
+                }
+                state.productDetails.keywordTables[asin].tabCounts = data;
+            })
+            .addCase(fetchProductPPCKeywordTabCounts.rejected, (state, action) => {
+                state.productDetails.loading.keywordTabCounts = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product Wasted Spend Keywords (paginated)
+            .addCase(fetchProductWastedSpendKeywords.pending, (state) => {
+                state.productDetails.loading.wastedSpendKeywords = true;
+            })
+            .addCase(fetchProductWastedSpendKeywords.fulfilled, (state, action) => {
+                state.productDetails.loading.wastedSpendKeywords = false;
+                const { asin, data, pagination, totalWastedSpend, append } = action.payload;
+                if (!state.productDetails.keywordTables[asin]) {
+                    state.productDetails.keywordTables[asin] = {};
+                }
+                if (!state.productDetails.keywordTables[asin].wastedSpend) {
+                    state.productDetails.keywordTables[asin].wastedSpend = { data: [], pagination: null, totalWastedSpend: 0 };
+                }
+                if (append) {
+                    state.productDetails.keywordTables[asin].wastedSpend.data = [
+                        ...state.productDetails.keywordTables[asin].wastedSpend.data,
+                        ...data
+                    ];
+                } else {
+                    state.productDetails.keywordTables[asin].wastedSpend.data = data;
+                }
+                state.productDetails.keywordTables[asin].wastedSpend.pagination = pagination;
+                state.productDetails.keywordTables[asin].wastedSpend.totalWastedSpend = totalWastedSpend;
+            })
+            .addCase(fetchProductWastedSpendKeywords.rejected, (state, action) => {
+                state.productDetails.loading.wastedSpendKeywords = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product Top Performing Keywords (paginated)
+            .addCase(fetchProductTopPerformingKeywords.pending, (state) => {
+                state.productDetails.loading.topPerformingKeywords = true;
+            })
+            .addCase(fetchProductTopPerformingKeywords.fulfilled, (state, action) => {
+                state.productDetails.loading.topPerformingKeywords = false;
+                const { asin, data, pagination, append } = action.payload;
+                if (!state.productDetails.keywordTables[asin]) {
+                    state.productDetails.keywordTables[asin] = {};
+                }
+                if (!state.productDetails.keywordTables[asin].topPerforming) {
+                    state.productDetails.keywordTables[asin].topPerforming = { data: [], pagination: null };
+                }
+                if (append) {
+                    state.productDetails.keywordTables[asin].topPerforming.data = [
+                        ...state.productDetails.keywordTables[asin].topPerforming.data,
+                        ...data
+                    ];
+                } else {
+                    state.productDetails.keywordTables[asin].topPerforming.data = data;
+                }
+                state.productDetails.keywordTables[asin].topPerforming.pagination = pagination;
+            })
+            .addCase(fetchProductTopPerformingKeywords.rejected, (state, action) => {
+                state.productDetails.loading.topPerformingKeywords = false;
+                state.productDetails.error = action.payload;
+            })
+        
+        // Product Search Terms Zero Sales (paginated)
+            .addCase(fetchProductSearchTermsZeroSales.pending, (state) => {
+                state.productDetails.loading.searchTermsZeroSales = true;
+            })
+            .addCase(fetchProductSearchTermsZeroSales.fulfilled, (state, action) => {
+                state.productDetails.loading.searchTermsZeroSales = false;
+                const { asin, data, pagination, totalWastedSpend, append } = action.payload;
+                if (!state.productDetails.keywordTables[asin]) {
+                    state.productDetails.keywordTables[asin] = {};
+                }
+                if (!state.productDetails.keywordTables[asin].searchTermsZeroSales) {
+                    state.productDetails.keywordTables[asin].searchTermsZeroSales = { data: [], pagination: null, totalWastedSpend: 0 };
+                }
+                if (append) {
+                    state.productDetails.keywordTables[asin].searchTermsZeroSales.data = [
+                        ...state.productDetails.keywordTables[asin].searchTermsZeroSales.data,
+                        ...data
+                    ];
+                } else {
+                    state.productDetails.keywordTables[asin].searchTermsZeroSales.data = data;
+                }
+                state.productDetails.keywordTables[asin].searchTermsZeroSales.pagination = pagination;
+                state.productDetails.keywordTables[asin].searchTermsZeroSales.totalWastedSpend = totalWastedSpend;
+            })
+            .addCase(fetchProductSearchTermsZeroSales.rejected, (state, action) => {
+                state.productDetails.loading.searchTermsZeroSales = false;
+                state.productDetails.error = action.payload;
             });
     }
 });

@@ -125,48 +125,12 @@ const StyledCheckbox = ({ checked, indeterminate, disabled, onChange, ariaLabel,
   );
 };
 
-// Reusable Pagination Component
-const TablePagination = ({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }) => {
-  if (totalPages <= 1) return null;
-  
-  const startItem = (currentPage - 1) * itemsPerPage + 1;
-  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-  
-  return (
-    <div className="flex items-center justify-between mt-2 px-2 py-1.5 bg-[#21262d] border border-[#30363d] rounded">
-      <div className="text-xs text-gray-400 flex-1 min-w-0">
-        Showing {startItem} to {endItem} of {totalItems} results
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0 mx-auto">
-        <button
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-          className={`p-1 rounded border transition-colors ${
-            currentPage === 1
-              ? 'border-[#30363d] text-gray-500 cursor-not-allowed'
-              : 'border-[#30363d] text-gray-300 hover:bg-[#161b22]'
-          }`}
-        >
-          <ChevronLeft className="w-3 h-3" />
-        </button>
-        <span className="px-2 py-0.5 text-xs font-medium text-gray-300">
-          Page {currentPage} of {totalPages}
-        </span>
-        <button
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-          className={`p-1 rounded border transition-colors ${
-            currentPage === totalPages
-              ? 'border-[#30363d] text-gray-500 cursor-not-allowed'
-              : 'border-[#30363d] text-gray-300 hover:bg-[#161b22]'
-          }`}
-        >
-          <ChevronRight className="w-3 h-3" />
-        </button>
-      </div>
-      <div className="flex-1 min-w-0" aria-hidden />
-    </div>
-  );
+const getHasMoreFromPagination = (pagination) => {
+  if (!pagination) return false;
+  if (typeof pagination.hasMore === 'boolean') return pagination.hasMore;
+  const page = Number(pagination.page || 1);
+  const totalPages = Number(pagination.totalPages || 1);
+  return page < totalPages;
 };
 
 // Table Skeleton Component for loading states
@@ -220,10 +184,9 @@ const PPCDashboard = () => {
   // Flag to skip legacy calculations unless CSV export is needed
   const [computeLegacyData, setComputeLegacyData] = useState(false);
   
-  // Pagination states for each table (for client-side fallback)
+  // Pagination states for each table (used to track current loaded page)
   const [highAcosPage, setHighAcosPage] = useState(1);
   const [wastedSpendPage, setWastedSpendPage] = useState(1);
-  const [negativePage, setNegativePage] = useState(1);
   const [campaignsWithoutNegativePage, setCampaignsWithoutNegativePage] = useState(1);
   const [topPerformingPage, setTopPerformingPage] = useState(1);
   const [searchTermsPage, setSearchTermsPage] = useState(1);
@@ -240,36 +203,13 @@ const PPCDashboard = () => {
   
   const dispatch = useDispatch();
   
-  // API-based pagination handlers that fetch next page from server
-  const handleHighAcosPageChange = (newPage) => {
-    setHighAcosPage(newPage);
-    dispatch(fetchHighAcosCampaigns({ page: newPage, limit: itemsPerPage }));
-  };
-  
-  const handleWastedSpendPageChange = (newPage) => {
-    setWastedSpendPage(newPage);
-    dispatch(fetchWastedSpendKeywords({ page: newPage, limit: itemsPerPage }));
-  };
-  
-  const handleNoNegativesPageChange = (newPage) => {
-    setCampaignsWithoutNegativePage(newPage);
-    dispatch(fetchCampaignsWithoutNegatives({ page: newPage, limit: itemsPerPage }));
-  };
-  
-  const handleTopKeywordsPageChange = (newPage) => {
-    setTopPerformingPage(newPage);
-    dispatch(fetchTopPerformingKeywords({ page: newPage, limit: itemsPerPage }));
-  };
-  
-  const handleZeroSalesPageChange = (newPage) => {
-    setSearchTermsPage(newPage);
-    dispatch(fetchSearchTermsZeroSales({ page: newPage, limit: itemsPerPage }));
-  };
-  
-  const handleAutoInsightsPageChange = (newPage) => {
-    setAutoCampaignPage(newPage);
-    dispatch(fetchAutoCampaignInsights({ page: newPage, limit: itemsPerPage }));
-  };
+  // Infinite-scroll sentinels (one per tab table)
+  const highAcosSentinelRef = useRef(null);
+  const wastedSpendSentinelRef = useRef(null);
+  const noNegativesSentinelRef = useRef(null);
+  const topKeywordsSentinelRef = useRef(null);
+  const zeroSalesSentinelRef = useRef(null);
+  const autoInsightsSentinelRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -707,6 +647,132 @@ const PPCDashboard = () => {
     
     fetchTabData();
   }, [selectedTab, dispatch, highAcosCampaignsData.length, wastedSpendData.length, noNegativesData.length, topKeywordsData.length, zeroSalesData.length, autoInsightsData.length]);
+
+  // Infinite scroll: observe the sentinel for the active tab only
+  useEffect(() => {
+    const getActiveConfig = () => {
+      switch (selectedTab) {
+        case 0:
+          return {
+            ref: highAcosSentinelRef,
+            hasMore: getHasMoreFromPagination(highAcosPagination),
+            loading: highAcosLoading,
+            loadMore: () => {
+              const current = Number(highAcosPagination?.page || highAcosPage || 1);
+              const nextPage = current + 1;
+              setHighAcosPage(nextPage);
+              dispatch(fetchHighAcosCampaigns({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        case 1:
+          return {
+            ref: wastedSpendSentinelRef,
+            hasMore: getHasMoreFromPagination(wastedSpendPagination),
+            loading: wastedSpendLoading,
+            loadMore: () => {
+              const current = Number(wastedSpendPagination?.page || wastedSpendPage || 1);
+              const nextPage = current + 1;
+              setWastedSpendPage(nextPage);
+              dispatch(fetchWastedSpendKeywords({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        case 2:
+          return {
+            ref: noNegativesSentinelRef,
+            hasMore: getHasMoreFromPagination(noNegativesPagination),
+            loading: noNegativesLoading,
+            loadMore: () => {
+              const current = Number(noNegativesPagination?.page || campaignsWithoutNegativePage || 1);
+              const nextPage = current + 1;
+              setCampaignsWithoutNegativePage(nextPage);
+              dispatch(fetchCampaignsWithoutNegatives({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        case 3:
+          return {
+            ref: topKeywordsSentinelRef,
+            hasMore: getHasMoreFromPagination(topKeywordsPagination),
+            loading: topKeywordsLoading,
+            loadMore: () => {
+              const current = Number(topKeywordsPagination?.page || topPerformingPage || 1);
+              const nextPage = current + 1;
+              setTopPerformingPage(nextPage);
+              dispatch(fetchTopPerformingKeywords({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        case 4:
+          return {
+            ref: zeroSalesSentinelRef,
+            hasMore: getHasMoreFromPagination(zeroSalesPagination),
+            loading: zeroSalesLoading,
+            loadMore: () => {
+              const current = Number(zeroSalesPagination?.page || searchTermsPage || 1);
+              const nextPage = current + 1;
+              setSearchTermsPage(nextPage);
+              dispatch(fetchSearchTermsZeroSales({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        case 5:
+          return {
+            ref: autoInsightsSentinelRef,
+            hasMore: getHasMoreFromPagination(autoInsightsPagination),
+            loading: autoInsightsLoading,
+            loadMore: () => {
+              const current = Number(autoInsightsPagination?.page || autoCampaignPage || 1);
+              const nextPage = current + 1;
+              setAutoCampaignPage(nextPage);
+              dispatch(fetchAutoCampaignInsights({ page: nextPage, limit: itemsPerPage, append: true }));
+            }
+          };
+        default:
+          return null;
+      }
+    };
+
+    const active = getActiveConfig();
+    const el = active?.ref?.current;
+    if (!active || !el) return;
+
+    if (!active.hasMore) return;
+    if (active.loading) return;
+
+    let didTrigger = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (didTrigger) return;
+        didTrigger = true;
+        active.loadMore();
+      },
+      { root: null, rootMargin: '300px 0px', threshold: 0.01 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [
+    selectedTab,
+    dispatch,
+    itemsPerPage,
+    highAcosPagination,
+    wastedSpendPagination,
+    noNegativesPagination,
+    topKeywordsPagination,
+    zeroSalesPagination,
+    autoInsightsPagination,
+    highAcosLoading,
+    wastedSpendLoading,
+    noNegativesLoading,
+    topKeywordsLoading,
+    zeroSalesLoading,
+    autoInsightsLoading,
+    highAcosPage,
+    wastedSpendPage,
+    campaignsWithoutNegativePage,
+    topPerformingPage,
+    searchTermsPage,
+    autoCampaignPage
+  ]);
 
   // Get negativeKeywordsMetrics from Redux store
   const negativeKeywordsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.negativeKeywordsMetrics) || [];
@@ -2301,7 +2367,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {highAcosLoading ? (
+                            {highAcosLoading && highAcosCampaignsData.length === 0 ? (
                               <TableSkeletonRows columns={4} rows={5} />
                             ) : highAcosCampaignsData.length === 0 ? (
                               <tr>
@@ -2310,29 +2376,26 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              highAcosCampaignsData.map((campaign, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
-                                    {campaign.campaignName}
-                                  </td>
-                                  <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.spend || campaign.totalSpend, currency)}</td>
-                                  <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.sales || campaign.totalSales, currency)}</td>
-                                  <td className="w-1/5 py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
-                                    {(campaign.acos || 0).toFixed(2)}%
-                                  </td>
-                                </tr>
-                              ))
+                              <>
+                                {highAcosCampaignsData.map((campaign, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
+                                    <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
+                                      {campaign.campaignName}
+                                    </td>
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.spend || campaign.totalSpend, currency)}</td>
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.sales || campaign.totalSales, currency)}</td>
+                                    <td className="w-1/5 py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                      {(campaign.acos || 0).toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                                {highAcosLoading ? <TableSkeletonRows columns={4} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
                       </div>
-                      <TablePagination
-                        currentPage={highAcosPagination?.page || highAcosPage}
-                        totalPages={highAcosPagination?.totalPages || 1}
-                        onPageChange={handleHighAcosPageChange}
-                        totalItems={highAcosPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
+                      <div ref={highAcosSentinelRef} className="h-px w-full" />
                     </>
                   )}
                   
@@ -2440,7 +2503,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {wastedSpendLoading ? (
+                            {wastedSpendLoading && wastedSpendData.length === 0 ? (
                               <TableSkeletonRows columns={7} rows={5} />
                             ) : wastedSpendData.length === 0 ? (
                               <tr>
@@ -2454,8 +2517,9 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              wastedSpendData.map((keyword, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
+                              <>
+                                {wastedSpendData.map((keyword, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
                                   <td className="w-8 py-2 px-2 text-center">
                                     {keyword.keywordId != null && keyword.keywordId !== '' ? (() => {
                                       const k = getWastedRowKey(keyword);
@@ -2566,18 +2630,14 @@ const PPCDashboard = () => {
                                     </div>
                                   </td>
                                 </tr>
-                              ))
+                                ))}
+                                {wastedSpendLoading ? <TableSkeletonRows columns={7} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
-                      <TablePagination
-                        currentPage={wastedSpendPagination?.page || wastedSpendPage}
-                        totalPages={wastedSpendPagination?.totalPages || 1}
-                        onPageChange={handleWastedSpendPageChange}
-                        totalItems={wastedSpendPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
                       </div>
+                      <div ref={wastedSpendSentinelRef} className="h-px w-full" />
                     </>
                   )}
                   
@@ -2602,7 +2662,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {noNegativesLoading ? (
+                            {noNegativesLoading && noNegativesData.length === 0 ? (
                               <TableSkeletonRows columns={3} rows={5} />
                             ) : noNegativesData.length === 0 ? (
                               <tr>
@@ -2611,8 +2671,9 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              noNegativesData.map((row, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
+                              <>
+                                {noNegativesData.map((row, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
                                   <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
                                     {row.campaignName}
                                   </td>
@@ -2625,18 +2686,14 @@ const PPCDashboard = () => {
                                     </span>
                                   </td>
                                 </tr>
-                              ))
+                                ))}
+                                {noNegativesLoading ? <TableSkeletonRows columns={3} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
                       </div>
-                      <TablePagination
-                        currentPage={noNegativesPagination?.page || campaignsWithoutNegativePage}
-                        totalPages={noNegativesPagination?.totalPages || 1}
-                        onPageChange={handleNoNegativesPageChange}
-                        totalItems={noNegativesPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
+                      <div ref={noNegativesSentinelRef} className="h-px w-full" />
                     </>
                   )}
                   
@@ -2662,7 +2719,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {topKeywordsLoading ? (
+                            {topKeywordsLoading && topKeywordsData.length === 0 ? (
                               <TableSkeletonRows columns={7} rows={5} />
                             ) : topKeywordsData.length === 0 ? (
                               <tr>
@@ -2676,8 +2733,9 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              topKeywordsData.map((keyword, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
+                              <>
+                                {topKeywordsData.map((keyword, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
                                   <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {keyword.keyword}
                                   </td>
@@ -2700,18 +2758,14 @@ const PPCDashboard = () => {
                                     {(keyword.impressions || 0).toLocaleString()}
                                   </td>
                                 </tr>
-                              ))
+                                ))}
+                                {topKeywordsLoading ? <TableSkeletonRows columns={7} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
                       </div>
-                      <TablePagination
-                        currentPage={topKeywordsPagination?.page || topPerformingPage}
-                        totalPages={topKeywordsPagination?.totalPages || 1}
-                        onPageChange={handleTopKeywordsPageChange}
-                        totalItems={topKeywordsPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
+                      <div ref={topKeywordsSentinelRef} className="h-px w-full" />
                     </>
                   )}
                   
@@ -2739,7 +2793,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {zeroSalesLoading ? (
+                            {zeroSalesLoading && zeroSalesData.length === 0 ? (
                               <TableSkeletonRows columns={6} rows={5} />
                             ) : zeroSalesData.length === 0 ? (
                               <tr>
@@ -2748,8 +2802,9 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              zeroSalesData.map((term, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
+                              <>
+                                {zeroSalesData.map((term, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
                                   <td className="w-[22%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {term.searchTerm}
                                   </td>
@@ -2765,18 +2820,14 @@ const PPCDashboard = () => {
                                     {formatCurrencyWithLocale(term.spend, currency)}
                                   </td>
                                 </tr>
-                              ))
+                                ))}
+                                {zeroSalesLoading ? <TableSkeletonRows columns={6} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
                       </div>
-                      <TablePagination
-                        currentPage={zeroSalesPagination?.page || searchTermsPage}
-                        totalPages={zeroSalesPagination?.totalPages || 1}
-                        onPageChange={handleZeroSalesPageChange}
-                        totalItems={zeroSalesPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
+                      <div ref={zeroSalesSentinelRef} className="h-px w-full" />
                     </>
                   )}
                   
@@ -2803,7 +2854,7 @@ const PPCDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {autoInsightsLoading ? (
+                            {autoInsightsLoading && autoInsightsData.length === 0 ? (
                               <TableSkeletonRows columns={5} rows={5} />
                             ) : autoInsightsData.length === 0 ? (
                               <tr>
@@ -2812,8 +2863,9 @@ const PPCDashboard = () => {
                                 </td>
                               </tr>
                             ) : (
-                              autoInsightsData.map((insight, idx) => (
-                                <tr key={idx} className="border-b border-[#30363d]">
+                              <>
+                                {autoInsightsData.map((insight, idx) => (
+                                  <tr key={idx} className="border-b border-[#30363d]">
                                   <td className="w-[25%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {insight.searchTerm}
                                   </td>
@@ -2830,18 +2882,14 @@ const PPCDashboard = () => {
                                     {(insight.acos || 0).toFixed(2)}%
                                   </td>
                                 </tr>
-                              ))
+                                ))}
+                                {autoInsightsLoading ? <TableSkeletonRows columns={5} rows={3} /> : null}
+                              </>
                             )}
                           </tbody>
                         </table>
                       </div>
-                      <TablePagination
-                        currentPage={autoInsightsPagination?.page || autoCampaignPage}
-                        totalPages={autoInsightsPagination?.totalPages || 1}
-                        onPageChange={handleAutoInsightsPageChange}
-                        totalItems={autoInsightsPagination?.totalItems || 0}
-                        itemsPerPage={itemsPerPage}
-                      />
+                      <div ref={autoInsightsSentinelRef} className="h-px w-full" />
                     </>
                   )}
                 </motion.div>

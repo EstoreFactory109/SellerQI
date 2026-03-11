@@ -3,7 +3,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import { setPosition } from '../../redux/slices/MobileMenuSlice.js'
 import { markAsRead, markAllAsRead, setAlertsFromApi } from '../../redux/slices/notificationsSlice.js'
 import { setCurrency } from '../../redux/slices/currencySlice.js'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
 import { Building, Plus, ChevronRight, ChevronDown, Bell, User, Menu, ArrowLeftRight } from 'lucide-react'
 import axios from 'axios'
@@ -12,6 +12,7 @@ import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.
 
 const TopNav = () => {
     const navigate = useNavigate()
+    const location = useLocation()
     const marketplaces = {
         US: "United States",
         CA: "Canada",
@@ -226,8 +227,58 @@ const TopNav = () => {
         }
     }, [Country, Currency, dispatch])
 
+    // -------- Breadcrumbs: full path (every segment) --------
+    const pathname = location.pathname || ''
+    const staticSellerCheckerSegments = new Set([
+        'dashboard',
+        'qmate',
+        'profitibility-dashboard',
+        'ppc-dashboard',
+        'keyword-analysis',
+        'issues',
+        'issues-by-product',
+        'account-history',
+        'settings',
+        'reimbursement-dashboard',
+        'your-products',
+        'pre-analysis',
+        'tasks',
+        'ecommerce-calendar',
+        'notifications',
+        'notification-details',
+        'user-logging',
+        'consultation'
+    ])
+
+    let breadcrumbItems = []
+    if (pathname.startsWith('/seller-central-checker')) {
+        const fullPath = pathname.replace(/\/+$/, '')
+        const segments = fullPath.split('/').filter(Boolean)
+
+        if (segments.length >= 2) {
+            const leaf = segments[segments.length - 1]
+            if (segments.length === 2 && !staticSellerCheckerSegments.has(leaf)) {
+                // Product details: your-products > ASIN
+                breadcrumbItems = [
+                    { label: 'your-products', path: '/seller-central-checker/your-products' },
+                    { label: leaf }
+                ]
+            } else {
+                // Complete trail: every segment, each linkable except the last
+                segments.forEach((seg, i) => {
+                    const pathSoFar = '/' + segments.slice(0, i + 1).join('/')
+                    const isLast = i === segments.length - 1
+                    breadcrumbItems.push({
+                        label: seg,
+                        path: isLast ? null : pathSoFar
+                    })
+                })
+            }
+        }
+    }
+
     return (
-        <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between lg:justify-end p-10 lg:gap-7 gap-2 border-b border-[#30363d] bg-[#161b22] fixed top-0 z-50 lg:static">
+        <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between p-10 lg:gap-7 gap-2 border-b border-[#30363d] bg-[#161b22] fixed top-0 z-50 lg:static">
             {/* Enhanced Mobile Hamburger Button */}
             <button 
                 className="lg:hidden p-2 rounded-lg hover:bg-[#21262d] active:bg-[#30363d] transition-colors duration-200 touch-manipulation"
@@ -236,7 +287,39 @@ const TopNav = () => {
             >
                 <Menu className="w-6 h-6 text-gray-300" />
             </button>
-            <div className='flex items-center justify-end  lg:gap-7 gap-2 h-full'>
+            {/* Breadcrumb - desktop only */}
+            {breadcrumbItems.length > 0 && (
+                <div className="hidden lg:flex items-center min-w-0 flex-1 mr-4">
+                    <div className="flex items-center gap-0.5 px-3 py-1.5 rounded-lg bg-[#0d1117]/80 border border-[#30363d]/60 backdrop-blur-sm">
+                        {breadcrumbItems.map((item, index) => (
+                            <React.Fragment key={`${item.label}-${index}`}>
+                                {index > 0 && (
+                                    <ChevronRight className="w-3.5 h-3.5 text-[#484f58] flex-shrink-0 mx-0.5" aria-hidden />
+                                )}
+                                {item.path ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(item.path)}
+                                        title={item.label}
+                                        className="text-xs text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#21262d]/50 px-1.5 py-0.5 rounded transition-colors duration-150 truncate max-w-[180px]"
+                                    >
+                                        {item.label}
+                                    </button>
+                                ) : (
+                                    <span
+                                        title={item.label}
+                                        className="text-xs text-[#c9d1d9] font-medium px-1.5 py-0.5 truncate max-w-[220px]"
+                                    >
+                                        {item.label}
+                                    </span>
+                                )}
+                            </React.Fragment>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className='flex items-center justify-end lg:gap-7 gap-2 h-full'>
                 {/* Switch Client Button - First for Agency Admin viewing client */}
                 {isAgencyAdminViewingClient && (
                     <div className="relative mr-3">

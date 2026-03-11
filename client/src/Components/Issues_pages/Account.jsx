@@ -1,12 +1,28 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, AlertTriangle, CheckCircle, XCircle, Download, ChevronDown, Activity, Search, Filter } from 'lucide-react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import { fetchAccountIssues } from '../../redux/slices/PageDataSlice';
 import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
 export default function AccountHealthDashboard() {
-    const info = useSelector(state => state.Dashboard.DashBoardInfo)
-    console.log("info",info)
+    const dispatch = useDispatch();
+    
+    // Legacy dashboard data (backward compatibility)
+    const legacyInfo = useSelector(state => state.Dashboard.DashBoardInfo);
+    
+    // New paginated issues data from dedicated endpoint
+    const accountIssuesState = useSelector(state => state.pageData?.issuesPaginated?.account || {
+        data: null,
+        loading: false,
+        error: null,
+        lastFetched: null
+    });
+
+    // Prefer dedicated account-issues endpoint; fall back to legacy dashboard data
+    const info = accountIssuesState.data || legacyInfo;
+
+    console.log("info", info);
     const [showExportDropdown, setShowExportDropdown] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedFilter, setSelectedFilter] = useState('all')
@@ -14,7 +30,15 @@ export default function AccountHealthDashboard() {
 
     const AccountErrors = info?.AccountErrors;
 
-    console.log("AccountErrors",AccountErrors)
+    console.log("AccountErrors", AccountErrors);
+
+    // On first mount, if we don't have account issues in Redux, fetch from dedicated endpoint.
+    // This fixes the "first load works, reload empty" issue without breaking legacy behavior.
+    useEffect(() => {
+        if (!accountIssuesState.data && !accountIssuesState.loading) {
+            dispatch(fetchAccountIssues());
+        }
+    }, [accountIssuesState.data, accountIssuesState.loading, dispatch]);
 
     // Check if we have any data
     const hasData = info && AccountErrors && Object.keys(AccountErrors).length > 0;

@@ -298,6 +298,148 @@ async function getAsinIssues(userId, country, region, asin) {
 }
 
 /**
+ * Get FULL detailed issues for a specific ASIN - for ProductDetails page
+ * Returns the complete issue structure needed for the Product Details page:
+ * - rankingErrors (with TitleResult, BulletPoints, Description, charLim)
+ * - conversionErrors (imageResultErrorData, videoResultErrorData, etc.)
+ * - inventoryErrors (inventoryPlanningErrorData, strandedInventoryErrorData, etc.)
+ * 
+ * @param {string} userId - User ID
+ * @param {string} country - Country code
+ * @param {string} region - Region
+ * @param {string} asin - ASIN to get issues for
+ * @returns {Promise<Object>} Full ASIN issues with complete structure
+ */
+async function getFullAsinIssues(userId, country, region, asin) {
+    const startTime = Date.now();
+    
+    try {
+        const userObjectId = typeof userId === 'string' 
+            ? new mongoose.Types.ObjectId(userId) 
+            : userId;
+        
+        // Fetch productWiseError and rankingProductWiseErrors in parallel
+        const [productWiseErrors, rankingProductWiseErrors] = await Promise.all([
+            IssuesDataChunks.getFieldData(userObjectId, country, region, 'productWiseError'),
+            IssuesDataChunks.getFieldData(userObjectId, country, region, 'rankingProductWiseErrors')
+        ]);
+        
+        // Find the specific ASIN in productWiseError
+        const asinData = productWiseErrors?.find(p => 
+            (p.asin || '').trim().toUpperCase() === asin.trim().toUpperCase()
+        );
+        
+        // Find ranking errors for this ASIN
+        const rankingData = rankingProductWiseErrors?.find(p => 
+            (p.asin || '').trim().toUpperCase() === asin.trim().toUpperCase()
+        );
+        
+        // Build the full response structure that ProductDetails.jsx expects
+        const result = {
+            asin: asin.trim().toUpperCase(),
+            sku: asinData?.sku || null,
+            name: asinData?.name || asinData?.productName || rankingData?.name || null,
+            MainImage: asinData?.MainImage || asinData?.image || null,
+            price: asinData?.price || 0,
+            quantity: asinData?.quantity || 0,
+            sales: asinData?.sales || 0,
+            totalErrors: asinData?.totalErrors || 0,
+            
+            // Ranking errors structure (from rankingProductWiseErrors)
+            rankingErrors: rankingData ? {
+                asin: rankingData.asin,
+                data: rankingData.data || {
+                    TitleResult: rankingData.TitleResult || null,
+                    BulletPoints: rankingData.BulletPoints || null,
+                    Description: rankingData.Description || null,
+                    charLim: rankingData.charLim || null,
+                    dublicateWords: rankingData.dublicateWords || null
+                }
+            } : null,
+            
+            // Conversion errors structure
+            conversionErrors: asinData?.conversionErrors || {
+                imageResultErrorData: null,
+                videoResultErrorData: null,
+                productStarRatingResultErrorData: null,
+                productsWithOutBuyboxErrorData: null,
+                aplusErrorData: null,
+                brandStoryErrorData: null
+            },
+            
+            // Inventory errors structure
+            inventoryErrors: asinData?.inventoryErrors || {
+                inventoryPlanningErrorData: null,
+                strandedInventoryErrorData: null,
+                inboundNonComplianceErrorData: null,
+                replenishmentErrorData: null
+            },
+            
+            // Performance data if available
+            performance: asinData?.performance || null,
+            
+            // Comparison data if available
+            comparison: asinData?.comparison || null,
+            
+            // Error counts for summary
+            errorCounts: {
+                ranking: rankingData?.data?.TotalErrors || 0,
+                conversion: countConversionErrors(asinData?.conversionErrors),
+                inventory: countInventoryErrors(asinData?.inventoryErrors)
+            }
+        };
+        
+        logger.info('[QMateProductsService] Got full ASIN issues', {
+            userId, country, region, asin,
+            duration: Date.now() - startTime,
+            hasRankingErrors: !!result.rankingErrors,
+            hasConversionErrors: result.errorCounts.conversion > 0,
+            hasInventoryErrors: result.errorCounts.inventory > 0
+        });
+        
+        return {
+            success: true,
+            source: 'issues_data_chunks',
+            data: result
+        };
+        
+    } catch (error) {
+        logger.error('[QMateProductsService] Error getting full ASIN issues', {
+            error: error.message, userId, country, region, asin
+        });
+        return { success: false, error: error.message, data: null };
+    }
+}
+
+/**
+ * Count conversion errors from the structure
+ */
+function countConversionErrors(conversionErrors) {
+    if (!conversionErrors) return 0;
+    let count = 0;
+    if (conversionErrors.imageResultErrorData?.status === 'Error') count++;
+    if (conversionErrors.videoResultErrorData?.status === 'Error') count++;
+    if (conversionErrors.productStarRatingResultErrorData?.status === 'Error') count++;
+    if (conversionErrors.productsWithOutBuyboxErrorData?.status === 'Error') count++;
+    if (conversionErrors.aplusErrorData?.status === 'Error') count++;
+    if (conversionErrors.brandStoryErrorData?.status === 'Error') count++;
+    return count;
+}
+
+/**
+ * Count inventory errors from the structure
+ */
+function countInventoryErrors(inventoryErrors) {
+    if (!inventoryErrors) return 0;
+    let count = 0;
+    if (inventoryErrors.inventoryPlanningErrorData) count++;
+    if (inventoryErrors.strandedInventoryErrorData) count++;
+    if (inventoryErrors.inboundNonComplianceErrorData) count++;
+    if (inventoryErrors.replenishmentErrorData) count++;
+    return count;
+}
+
+/**
  * Get product listing quality analysis
  * 
  * @param {string} userId - User ID
@@ -870,6 +1012,7 @@ module.exports = {
     getProductReviewsData,
     getProductSalesData,
     getAsinIssues,
+    getFullAsinIssues,
     getListingQualityAnalysis,
     getProductsByIssueCategory,
     getProductCategorization,

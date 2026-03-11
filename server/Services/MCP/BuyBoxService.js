@@ -44,9 +44,12 @@ async function saveBuyBoxData(userId, region, country, buyBoxMetrics, queryId = 
             region,
             country,
             dateRange: buyBoxMetrics.dateRange,
+            date: buyBoxMetrics?.dateRange?.endDate || buyBoxMetrics?.dateRange?.startDate,
             totalProducts: buyBoxMetrics.totalProducts,
             productsWithoutBuyBox: buyBoxMetrics.productsWithoutBuyBox
         });
+
+        const effectiveDate = buyBoxMetrics?.dateRange?.endDate || buyBoxMetrics?.dateRange?.startDate || new Date().toISOString().split('T')[0];
 
         // Create new buybox data document
         const buyBoxData = new BuyBoxData({
@@ -57,6 +60,7 @@ async function saveBuyBoxData(userId, region, country, buyBoxMetrics, queryId = 
                 startDate: buyBoxMetrics.dateRange.startDate,
                 endDate: buyBoxMetrics.dateRange.endDate
             },
+            date: effectiveDate,
             totalProducts: buyBoxMetrics.totalProducts,
             productsWithBuyBox: buyBoxMetrics.productsWithBuyBox,
             productsWithoutBuyBox: buyBoxMetrics.productsWithoutBuyBox,
@@ -73,6 +77,7 @@ async function saveBuyBoxData(userId, region, country, buyBoxMetrics, queryId = 
             buyBoxDataId: savedData._id,
             userId,
             region,
+            date: savedData.date,
             productsWithoutBuyBox: savedData.productsWithoutBuyBox
         });
 

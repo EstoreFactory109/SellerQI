@@ -318,8 +318,7 @@ const YourProducts = () => {
       return;
     }
     
-    const totalItems = pagination.totalItems || 0;
-    if (products.length >= totalItems) return;
+    if (!pagination.hasMore) return;
     
     setLoadingMore(true);
     try {
@@ -515,8 +514,7 @@ const YourProducts = () => {
   const productFixedWidths = { asin: '14%', title: '28%', issues: '18%', view: '10%' };
   const optimizationFixedWidths = { asin: '14%', title: '28%', recommendation: '22%', view: '10%' };
   
-  const totalItems = pagination.totalItems || 0;
-  const hasMoreFromBackend = pagination.hasMore && products.length < totalItems;
+  const hasMoreFromBackend = pagination.hasMore;
 
   const handleSort = (key) => {
     setSortConfig(prev => ({
@@ -656,16 +654,16 @@ const YourProducts = () => {
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
                   <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Sellable</span>
+                  <span>Sellable Products</span>
                 </div>
                 <div className="text-lg font-bold text-white">{summary.activeProducts || 0}</div>
               </div>
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
                   <XCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Non-Sellable</span>
+                  <span>Non-Sellable Products</span>
                 </div>
-                <div className="text-lg font-bold text-white">{(summary.inactiveProducts || 0) + (summary.incompleteProducts || 0)}</div>
+                <div className="text-lg font-bold text-white">{(summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0)}</div>
               </div>
               <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
@@ -698,7 +696,7 @@ const YourProducts = () => {
             <div>
               <h3 className="text-xs font-semibold text-blue-300 mb-0.5">Customize table columns</h3>
               <p className="text-xs text-blue-400">
-                Use the <strong>Columns</strong> dropdown next to the search bar (on Sellable and Optimization tabs) to choose up to 2 extra columns.
+                Use the <strong>Columns</strong> dropdown next to the search bar (on Sellable Products and Optimization tabs) to choose up to 2 extra columns.
               </p>
             </div>
           </div>
@@ -803,11 +801,11 @@ const YourProducts = () => {
         {/* Tabs */}
         <div className="bg-[#161b22] rounded-t border border-b-0 border-[#30363d] px-2 flex gap-1 overflow-x-auto">
           {[
-            { key: 'active', label: 'Sellable', count: summary.activeProducts || 0 },
+            { key: 'active', label: 'Sellable Products', count: summary.activeProducts || 0 },
             { key: 'optimization', label: 'Optimization', count: null },
             { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus || 0 },
             { key: 'notTargetedInAds', label: 'Not Targeted to Ads', count: summary.productsNotTargetedInAds || 0 },
-            { key: 'nonSellable', label: 'Non-Sellable', count: (summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) }
+            { key: 'nonSellable', label: 'Non-Sellable Products', count: (summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0) }
           ].map(tab => (
             <button
               key={tab.key}

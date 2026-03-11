@@ -1592,6 +1592,362 @@ const getProductHistory = asyncHandler(async (req, res) => {
     }
 });
 
+// ============================================================================
+// PER-ASIN PRODUCT DETAILS ENDPOINTS
+// These endpoints fetch data for a single ASIN when not present in cached data
+// ============================================================================
+
+/**
+ * Get basic product info for a single ASIN
+ * Returns: name, SKU, price, image, sales, profit, ratings
+ */
+const getProductBasicInfo = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        logger.info(`[getProductBasicInfo] Fetching info for ASIN ${asin}, user ${userId}`);
+
+        const { getProductBasicInfo: fetchBasicInfo } = require('../../Services/Calculations/ProductBasicInfoService.js');
+        
+        const result = await fetchBasicInfo({
+            userId,
+            region: Region,
+            country: Country,
+            asin
+        });
+
+        if (!result.success) {
+            return res.status(404).json(
+                new ApiError(404, result.error || 'Product info not found')
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, result.data, "Product basic info retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductBasicInfo] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting product basic info: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get performance metrics for a single ASIN with optional comparison
+ * Query params: comparison (none | wow | mom)
+ */
+const getProductPerformance = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+    const comparison = req.query.comparison || 'none';
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        logger.info(`[getProductPerformance] Fetching performance for ASIN ${asin}, user ${userId}, comparison: ${comparison}`);
+
+        const { getProductPerformanceByAsin } = require('../../Services/Calculations/ProductPerformanceService.js');
+        
+        const result = await getProductPerformanceByAsin({
+            userId,
+            region: Region,
+            country: Country,
+            asin,
+            comparison
+        });
+
+        if (!result.success) {
+            return res.status(404).json(
+                new ApiError(404, result.error || 'Product performance not found')
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, result.data, "Product performance retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductPerformance] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting product performance: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get full issues for a single ASIN (ranking, conversion, inventory)
+ * Returns the complete structure needed by ProductDetails page
+ */
+const getProductIssues = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        logger.info(`[getProductIssues] Fetching issues for ASIN ${asin}, user ${userId}`);
+
+        const { getFullAsinIssues } = require('../../Services/AI/QMateProductsService.js');
+        
+        const result = await getFullAsinIssues(userId, Country, Region, asin);
+
+        if (!result.success) {
+            return res.status(404).json(
+                new ApiError(404, result.error || 'Product issues not found')
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, result.data, "Product issues retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductIssues] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting product issues: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * GET /product/:asin/ppc-issues
+ * 
+ * Returns PPC-related issues for a specific ASIN including:
+ * - Ad performance metrics (spend, sales, ACOS, CTR, etc.)
+ * - Detected issues (high ACOS, low impressions, wasted spend, etc.)
+ * - Keywords targeting this product's ad groups
+ * - Ad group breakdown with performance
+ * 
+ * This endpoint joins:
+ * - ProductWiseSponsoredAdsItem (ASIN-level PPC performance)
+ * - Keyword model (keywords per ad group)
+ * - adsKeywordsPerformance model (keyword performance metrics)
+ */
+const getProductPPCIssues = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        logger.info(`[getProductPPCIssues] Fetching PPC issues for ASIN ${asin}, user ${userId}`);
+
+        const { getProductPPCIssues: fetchProductPPCIssues } = require('../../Services/Calculations/ProductPPCIssuesService.js');
+        
+        const result = await fetchProductPPCIssues({
+            userId,
+            region: Region,
+            country: Country,
+            asin
+        });
+
+        if (!result.success) {
+            return res.status(404).json(
+                new ApiError(404, result.error || 'Product PPC issues not found')
+            );
+        }
+
+        return res.status(200).json(
+            new ApiResponse(200, result.data, "Product PPC issues retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductPPCIssues] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting product PPC issues: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get wasted spend keywords for a product (paginated)
+ */
+const getProductWastedSpendKeywords = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        const { getProductWastedSpendKeywords: fetchWastedSpend } = require('../../Services/Calculations/ProductPPCIssuesService.js');
+        
+        const result = await fetchWastedSpend({
+            userId,
+            region: Region,
+            country: Country,
+            asin,
+            page,
+            limit
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, result, "Wasted spend keywords retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductWastedSpendKeywords] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting wasted spend keywords: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get top performing keywords for a product (paginated)
+ */
+const getProductTopPerformingKeywords = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        const { getProductTopPerformingKeywords: fetchTopKeywords } = require('../../Services/Calculations/ProductPPCIssuesService.js');
+        
+        const result = await fetchTopKeywords({
+            userId,
+            region: Region,
+            country: Country,
+            asin,
+            page,
+            limit
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, result, "Top performing keywords retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductTopPerformingKeywords] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting top performing keywords: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get search terms with zero sales for a product (paginated)
+ */
+const getProductSearchTermsZeroSales = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        const { getProductSearchTermsZeroSales: fetchSearchTerms } = require('../../Services/Calculations/ProductPPCIssuesService.js');
+        
+        const result = await fetchSearchTerms({
+            userId,
+            region: Region,
+            country: Country,
+            asin,
+            page,
+            limit
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, result, "Search terms with zero sales retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductSearchTermsZeroSales] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting search terms with zero sales: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get tab counts for product PPC keyword tables
+ */
+const getProductPPCKeywordTabCounts = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const Region = req.region;
+    const Country = req.country;
+    const { asin } = req.params;
+
+    try {
+        if (!asin) {
+            return res.status(400).json(
+                new ApiError(400, "ASIN parameter is required")
+            );
+        }
+
+        const { getProductPPCKeywordTabCounts: fetchTabCounts } = require('../../Services/Calculations/ProductPPCIssuesService.js');
+        
+        const result = await fetchTabCounts({
+            userId,
+            region: Region,
+            country: Country,
+            asin
+        });
+
+        return res.status(200).json(
+            new ApiResponse(200, result, "Tab counts retrieved successfully")
+        );
+
+    } catch (error) {
+        logger.error("[getProductPPCKeywordTabCounts] Error:", error);
+        return res.status(500).json(
+            new ApiError(500, `Error getting tab counts: ${error.message}`)
+        );
+    }
+});
+
 /**
  * Debug endpoint: Check historical data availability for WoW/MoM comparison
  * Returns counts of BuyBoxData and EconomicsMetrics documents for the user
@@ -2348,7 +2704,7 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
             activeProductAsins,
             latestAdsItem
         ] = await Promise.all([
-            // 1. Count products by status from Seller model
+            // 1. Count products by status; for Active, split by quantity > 0 (sellable) vs 0 (non-sellable)
             Seller.aggregate([
                 { $match: { User: userObjectId } },
                 { $unwind: '$sellerAccount' },
@@ -2356,7 +2712,16 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
                 { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
                 {
                     $group: {
-                        _id: '$sellerAccount.products.status',
+                        _id: {
+                            status: { $toLower: '$sellerAccount.products.status' },
+                            isSellable: {
+                                $cond: [
+                                    { $eq: [{ $toLower: '$sellerAccount.products.status' }, 'active'] },
+                                    { $gt: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] },
+                                    null
+                                ]
+                            }
+                        },
                         count: { $sum: 1 }
                     }
                 }
@@ -2376,13 +2741,13 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
                 region: Region
             }).sort({ createdAt: -1 }).select('Products.has_brandstory').lean(),
             
-            // 4. Get all active product ASINs (for not-targeted count)
+            // 4. Get all sellable (Active with quantity > 0) product ASINs (for not-targeted count)
             Seller.aggregate([
                 { $match: { User: userObjectId } },
                 { $unwind: '$sellerAccount' },
                 { $match: { 'sellerAccount.region': Region } },
                 { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
-                { $match: { 'sellerAccount.products.status': { $regex: /^active$/i } } },
+                { $match: { 'sellerAccount.products.status': { $regex: /^active$/i }, $expr: { $gt: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] } } },
                 { $group: { _id: { $toUpper: '$sellerAccount.products.asin' } } },
                 { $project: { _id: 0, asin: '$_id' } }
             ]),
@@ -2395,18 +2760,23 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
             }).sort({ createdAt: -1 }).select('batchId').lean()
         ]);
 
-        // Parse product counts - normalize status keys to lowercase for case-insensitive matching
-        const countsMap = {};
+        // Parse product counts: _id is { status, isSellable }; sellable = Active & qty>0, zeroAvailability = Active & qty 0
+        let activeProducts = 0;
+        let inactiveProducts = 0;
+        let incompleteProducts = 0;
+        let zeroAvailabilityProducts = 0;
         let totalProducts = 0;
         productCounts.forEach(c => {
-            const normalizedStatus = (c._id || '').toLowerCase();
-            countsMap[normalizedStatus] = (countsMap[normalizedStatus] || 0) + c.count;
+            const status = c._id?.status || '';
+            const isSellable = c._id?.isSellable;
             totalProducts += c.count;
+            if (status === 'active') {
+                if (isSellable === true) activeProducts += c.count;
+                else if (isSellable === false) zeroAvailabilityProducts += c.count;
+                else activeProducts += c.count; // legacy: no isSellable
+            } else if (status === 'inactive') inactiveProducts += c.count;
+            else if (status === 'incomplete') incompleteProducts += c.count;
         });
-
-        const activeProducts = countsMap['active'] || 0;
-        const inactiveProducts = countsMap['inactive'] || 0;
-        const incompleteProducts = countsMap['incomplete'] || 0;
 
         // Count products with A+ (APPROVED or PUBLISHED) - used for summary and for "active without A+" count
         const asinsWithAPlusSet = new Set();
@@ -2418,7 +2788,7 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
             });
         }
         const productsWithAPlus = asinsWithAPlusSet.size;
-        // Without A+ count: active products only (matches the Without A+ tab which lists active only)
+        // Without A+ count: sellable (Active with qty>0) products only
         const activeAsinsList = (activeProductAsins || []).map(p => (p.asin || '').toUpperCase()).filter(Boolean);
         const productsWithoutAPlus = activeAsinsList.filter(asin => !asinsWithAPlusSet.has(asin)).length;
 
@@ -2458,6 +2828,7 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
                     activeProducts,
                     inactiveProducts,
                     incompleteProducts,
+                    zeroAvailabilityProducts,
                     productsWithAPlus,
                     productsWithoutAPlus,
                     hasBrandStory,
@@ -2495,13 +2866,13 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
 
-        // Single aggregation with $facet for count + paginated products
+        // Sellable only: Active with quantity > 0
         const pipeline = [
             { $match: { User: userObjectId } },
             { $unwind: '$sellerAccount' },
             { $match: { 'sellerAccount.region': Region } },
             { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
-            { $match: { 'sellerAccount.products.status': 'Active' } },
+            { $match: { 'sellerAccount.products.status': 'Active', $expr: { $gt: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] } } },
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -2538,7 +2909,7 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                     pagination: { page, limit, totalItems, totalPages: 0, hasMore: false },
                     country: Country,
                     region: Region
-                }, "Active products retrieved")
+                }, "Sellable products retrieved")
             );
         }
 
@@ -2801,14 +3172,20 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
 
-        // Single aggregation with $facet - matches both inactive and incomplete statuses
-        // Note: B2B pricing excluded as it's not relevant for non-sellable products
+        // Non-sellable: Inactive, Incomplete, or Active with quantity 0 (0 availability)
         const pipeline = [
             { $match: { User: userObjectId } },
             { $unwind: '$sellerAccount' },
             { $match: { 'sellerAccount.region': Region } },
             { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
-            { $match: { 'sellerAccount.products.status': { $regex: /^(inactive|incomplete)$/i } } },
+            {
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.status': { $regex: /^(inactive|incomplete)$/i } },
+                        { 'sellerAccount.products.status': { $regex: /^active$/i }, $expr: { $lte: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] } }
+                    ]
+                }
+            },
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -2818,6 +3195,10 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
                     ],
                     incompleteCount: [
                         { $match: { 'sellerAccount.products.status': { $regex: /^incomplete$/i } } },
+                        { $count: 'total' }
+                    ],
+                    zeroAvailabilityCount: [
+                        { $match: { 'sellerAccount.products.status': { $regex: /^active$/i }, $expr: { $lte: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] } } },
                         { $count: 'total' }
                     ],
                     products: [
@@ -2845,28 +3226,35 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
         const totalItems = result?.count[0]?.total || 0;
         const inactiveTotal = result?.inactiveCount[0]?.total || 0;
         const incompleteTotal = result?.incompleteCount[0]?.total || 0;
+        const zeroAvailabilityTotal = result?.zeroAvailabilityCount[0]?.total || 0;
         const products = result?.products || [];
 
-        // Map products to response format with proper status capitalization
-        const responseProducts = products.map(p => ({
-            asin: p.asin,
-            sku: p.sku,
-            title: p.itemName || '',
-            price: p.price || '0',
-            status: p.status?.toLowerCase() === 'inactive' ? 'Inactive' : 'Incomplete',
-            quantity: p.quantity ?? 0,
-            issues: Array.isArray(p.issues) ? p.issues : []
-        }));
+        // Map products to response format; for Active with qty 0, keep status Active and set issue to "0 availability"
+        const responseProducts = products.map(p => {
+            const statusLower = (p.status || '').toLowerCase();
+            const qty = p.quantity ?? 0;
+            const isZeroAvailability = statusLower === 'active' && qty <= 0;
+            const issues = isZeroAvailability ? ['This product has 0 availability (out of stock).'] : (Array.isArray(p.issues) ? p.issues : []);
+            return {
+                asin: p.asin,
+                sku: p.sku,
+                title: p.itemName || '',
+                price: p.price || '0',
+                status: statusLower === 'inactive' ? 'Inactive' : statusLower === 'incomplete' ? 'Incomplete' : 'Active',
+                quantity: qty,
+                issues
+            };
+        });
 
         const totalPages = Math.ceil(totalItems / limit);
         const elapsed = Date.now() - startTime;
-        logger.info(`[v3-non-sellable] Completed in ${elapsed}ms - ${responseProducts.length} products (${inactiveTotal} inactive, ${incompleteTotal} incomplete)`);
+        logger.info(`[v3-non-sellable] Completed in ${elapsed}ms - ${responseProducts.length} products (${inactiveTotal} inactive, ${incompleteTotal} incomplete, ${zeroAvailabilityTotal} 0 availability)`);
 
         return res.status(200).json(
             new ApiResponse(200, {
                 products: responseProducts,
                 pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
-                counts: { inactive: inactiveTotal, incomplete: incompleteTotal },
+                counts: { inactive: inactiveTotal, incomplete: incompleteTotal, zeroAvailability: zeroAvailabilityTotal },
                 country: Country,
                 region: Region
             }, "Non-Sellable products retrieved")
@@ -3289,6 +3677,16 @@ module.exports = {
     getAccountHistoryData,
     getProductHistory,
     getComparisonDebugInfo,
+    // Per-ASIN product details endpoints
+    getProductBasicInfo,
+    getProductPerformance,
+    getProductIssues,
+    getProductPPCIssues,
+    // Product PPC keyword tables (paginated)
+    getProductWastedSpendKeywords,
+    getProductTopPerformingKeywords,
+    getProductSearchTermsZeroSales,
+    getProductPPCKeywordTabCounts,
     // v2 optimized endpoints
     getYourProductsInitialV2,
     getYourProductsByStatusV2,

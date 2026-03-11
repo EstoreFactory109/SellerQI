@@ -56,7 +56,10 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
         // Build a map of date -> metrics for this ASIN
         const historyMap = new Map();
 
-        // Process BuyBoxData - extract metrics for this specific ASIN
+        // Process BuyBoxData - extract traffic metrics for this specific ASIN
+        // NOTE: Only use BuyBoxData for sessions, pageViews, conversionRate, buyBoxPercentage.
+        // Sales and unitsSold come from EconomicsMetrics (the authoritative financial source)
+        // to stay consistent with the profitability table and Total Sales card.
         buyBoxDocs.forEach(doc => {
             const dateKey = doc.dateRange?.endDate || doc.createdAt?.toISOString()?.split('T')[0] || 'unknown';
             const asinData = doc.asinBuyBoxData?.find(item => {
@@ -80,8 +83,6 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
                 existing.pageViews = asinData.pageViews || 0;
                 existing.conversionRate = asinData.unitSessionPercentage || 0;
                 existing.buyBoxPercentage = asinData.buyBoxPercentage || 0;
-                existing.sales = asinData.sales?.amount || 0;
-                existing.unitsSold = asinData.unitsOrdered || 0;
 
                 historyMap.set(dateKey, existing);
             }
@@ -92,37 +93,50 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
         for (const doc of economicsDocs) {
             const dateKey = doc.dateRange?.endDate || doc.createdAt?.toISOString()?.split('T')[0] || 'unknown';
             
-            // Check if this is a big account with data in separate collection
             const isBigAccount = doc.isBig === true;
             const hasEmptyAsinData = !doc.asinWiseSales || doc.asinWiseSales.length === 0;
             
-            let asinData = null;
-            
             if ((isBigAccount || hasEmptyAsinData) && doc._id) {
-                // Big account - fetch from separate collection
+                // Big account - use aggregation to get per-date sales for this ASIN
+                // Each AsinWiseSalesForBigAccounts document represents one date,
+                // so we extract per-date data points instead of aggregating into one
                 try {
-                    const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(doc._id);
-                    
-                    if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                        // Search through all date documents for this ASIN
-                        for (const asinDoc of bigAccountAsinDocs) {
-                            if (asinDoc.asinSales && Array.isArray(asinDoc.asinSales)) {
-                                const found = asinDoc.asinSales.find(item => {
-                                    const itemAsin = (item.asin || '').trim().toUpperCase();
-                                    return itemAsin === normalizedAsin;
-                                });
-                                if (found) {
-                                    // Aggregate sales/units across all dates for this metrics document
-                                    if (!asinData) {
-                                        asinData = {
-                                            sales: { amount: 0 },
-                                            unitsSold: 0
-                                        };
-                                    }
-                                    asinData.sales.amount += found.sales?.amount || 0;
-                                    asinData.unitsSold += found.unitsSold || 0;
-                                }
+                    const asinDateSales = await AsinWiseSalesForBigAccounts.aggregate([
+                        { $match: { metricsId: doc._id } },
+                        { $unwind: '$asinSales' },
+                        { $match: { 'asinSales.asin': normalizedAsin } },
+                        {
+                            $project: {
+                                _id: 0,
+                                date: '$date',
+                                sales: '$asinSales.sales.amount',
+                                unitsSold: '$asinSales.unitsSold'
                             }
+                        },
+                        { $sort: { date: 1 } }
+                    ]);
+                    
+                    if (asinDateSales && asinDateSales.length > 0) {
+                        for (const entry of asinDateSales) {
+                            const entryDateKey = entry.date || dateKey;
+                            const existing = historyMap.get(entryDateKey) || {
+                                date: entryDateKey,
+                                sessions: 0,
+                                pageViews: 0,
+                                conversionRate: 0,
+                                buyBoxPercentage: 0,
+                                sales: 0,
+                                unitsSold: 0
+                            };
+                            
+                            if (entry.sales) {
+                                existing.sales = entry.sales;
+                            }
+                            if (entry.unitsSold) {
+                                existing.unitsSold = entry.unitsSold;
+                            }
+                            
+                            historyMap.set(entryDateKey, existing);
                         }
                     }
                 } catch (error) {
@@ -134,32 +148,31 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
                 }
             } else {
                 // Regular account - use asinWiseSales from main document
-                asinData = doc.asinWiseSales?.find(item => {
+                const asinData = doc.asinWiseSales?.find(item => {
                     const itemAsin = (item.asin || '').trim().toUpperCase();
                     return itemAsin === normalizedAsin;
                 });
-            }
 
-            if (asinData) {
-                const existing = historyMap.get(dateKey) || {
-                    date: dateKey,
-                    sessions: 0,
-                    pageViews: 0,
-                    conversionRate: 0,
-                    buyBoxPercentage: 0,
-                    sales: 0,
-                    unitsSold: 0
-                };
+                if (asinData) {
+                    const existing = historyMap.get(dateKey) || {
+                        date: dateKey,
+                        sessions: 0,
+                        pageViews: 0,
+                        conversionRate: 0,
+                        buyBoxPercentage: 0,
+                        sales: 0,
+                        unitsSold: 0
+                    };
 
-                // Economics data is more accurate for sales
-                if (asinData.sales?.amount) {
-                    existing.sales = asinData.sales.amount;
+                    if (asinData.sales?.amount) {
+                        existing.sales = asinData.sales.amount;
+                    }
+                    if (asinData.unitsSold) {
+                        existing.unitsSold = asinData.unitsSold;
+                    }
+
+                    historyMap.set(dateKey, existing);
                 }
-                if (asinData.unitsSold) {
-                    existing.unitsSold = asinData.unitsSold;
-                }
-
-                historyMap.set(dateKey, existing);
             }
         }
 

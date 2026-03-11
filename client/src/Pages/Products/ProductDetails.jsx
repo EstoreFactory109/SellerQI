@@ -1,7 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector, useDispatch } from "react-redux";
 import { useParams } from 'react-router-dom';
-import { fetchIssuesByProductData } from '../../redux/slices/PageDataSlice';
+import { 
+    fetchIssuesByProductData,
+    fetchProductBasicInfo,
+    fetchProductPerformance,
+    fetchProductIssues,
+    fetchProductPPCIssues
+} from '../../redux/slices/PageDataSlice';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from "framer-motion";
 import * as ExcelJS from 'exceljs';
@@ -9,12 +15,13 @@ import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
-import { Box, AlertTriangle, TrendingUp, TrendingDown, LineChart as LineChartIcon, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Star, ArrowUpRight, ArrowDownRight, Minus, Eye, ShoppingCart, DollarSign, ImageOff } from 'lucide-react';
+import { Box, AlertTriangle, TrendingUp, TrendingDown, LineChart as LineChartIcon, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Star, ArrowUpRight, ArrowDownRight, Minus, Eye, ShoppingCart, DollarSign, ImageOff, CheckCircle } from 'lucide-react';
 import './ProductDetails.css';
 import { ProductDetailsPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import axiosInstance from '../../config/axios.config.js';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
+import ProductPPCIssuesTable from '../../Components/ProductDetails/ProductPPCIssuesTable.jsx';
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -79,6 +86,15 @@ const FormattedMessageComponent = ({ message }) => {
             )}
         </>
     );
+};
+
+const getRankingAttributeKeyFromIssueHeading = (issueHeading = '') => {
+    const lower = String(issueHeading).toLowerCase();
+    if (lower.startsWith('title')) return 'title';
+    if (lower.startsWith('bullet points')) return 'bulletpoints';
+    if (lower.startsWith('description')) return 'description';
+    if (lower.startsWith('backend keywords')) return 'backend';
+    return 'title';
 };
 
 // Reusable component for conversion issues
@@ -291,8 +307,37 @@ const Dashboard = () => {
     const info = useSelector((state) => state.Dashboard.DashBoardInfo);
     const issuesByProductLoading = useSelector((state) => state.pageData?.issuesByProduct?.loading);
     const currency = useSelector((state) => state.currency?.currency) || '$';
-    console.log("info: ",info)
+    const country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country ?? state.currency?.country);
+    const region = useSelector((state) => state.Dashboard?.DashBoardInfo?.Region);
+    
+    // Per-ASIN product details state (fallback when ASIN not in issues-by-product)
+    const productDetailsState = useSelector((state) => state.pageData?.productDetails);
+    const productDetailsLoading = productDetailsState?.loading;
+    
     const dropdownRef = useRef(null);
+
+    // Fix-it modal state (same behavior as Category issues page)
+    const [isFixModalOpen, setIsFixModalOpen] = useState(false);
+    const [fixContext, setFixContext] = useState({ asin: '', sku: '', title: '', attributeKey: 'title' });
+    const [fixForm, setFixForm] = useState({
+        title: '',
+        description: '',
+        bulletpoints: [''],
+        backendKeywords: ''
+    });
+    const [titleSuggestions, setTitleSuggestions] = useState([]);
+    const [generateTitleLoading, setGenerateTitleLoading] = useState(false);
+    const [generateTitleError, setGenerateTitleError] = useState(null);
+    const [applyLoading, setApplyLoading] = useState(false);
+    const [applyError, setApplyError] = useState(null);
+    const [applySuccessMessage, setApplySuccessMessage] = useState(null);
+    const applySuccessTimeoutRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (applySuccessTimeoutRef.current) clearTimeout(applySuccessTimeoutRef.current);
+        };
+    }, []);
     
     // Comparison state for WoW/MoM
     const [comparisonType, setComparisonType] = useState('none');
@@ -303,6 +348,9 @@ const Dashboard = () => {
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [historyError, setHistoryError] = useState(null);
     
+    // Track if we're using per-ASIN fallback
+    const [usingPerAsinFallback, setUsingPerAsinFallback] = useState(false);
+    
     // Comparison options
     const comparisonOptions = [
         { value: 'none', label: 'Day Over Day', shortLabel: 'DOD' },
@@ -310,11 +358,199 @@ const Dashboard = () => {
         { value: 'mom', label: 'Month Over Month', shortLabel: 'MoM' }
     ];
 
+    const { asin } = useParams();
+    const normalizedAsin = asin?.trim().toUpperCase();
+
     // Load issues-by-product data so we have enriched productWiseError (performance + recommendations).
     // This syncs to DashBoardInfo and ensures this detail page shows the Performance section.
     useEffect(() => {
         dispatch(fetchIssuesByProductData());
     }, [dispatch]);
+    
+    // Load per-ASIN PPC issues for this product
+    useEffect(() => {
+        if (normalizedAsin) {
+            dispatch(fetchProductPPCIssues(normalizedAsin));
+        }
+    }, [dispatch, normalizedAsin]);
+    
+    // Check if ASIN exists in issues-by-product data
+    const productFromIssuesByProduct = useMemo(() => {
+        return info?.productWiseError?.find(item => 
+            (item.asin || '').trim().toUpperCase() === normalizedAsin
+        );
+    }, [info?.productWiseError, normalizedAsin]);
+    
+    // Get per-ASIN cached data if available
+    const perAsinCachedData = useMemo(() => {
+        return productDetailsState?.byAsin?.[normalizedAsin] || null;
+    }, [productDetailsState?.byAsin, normalizedAsin]);
+
+    const openFixModal = useCallback((row) => {
+        setFixContext({
+            asin: row.asin || normalizedAsin || '',
+            sku: row.sku || '',
+            title: row.title || 'N/A',
+            attributeKey: row.attributeKey || getRankingAttributeKeyFromIssueHeading(row.issueHeading)
+        });
+        setFixForm({
+            title: '',
+            description: '',
+            bulletpoints: [''],
+            backendKeywords: ''
+        });
+        setTitleSuggestions([]);
+        setGenerateTitleError(null);
+        setApplyError(null);
+        setIsFixModalOpen(true);
+    }, [normalizedAsin]);
+
+    const closeFixModal = useCallback(() => {
+        setIsFixModalOpen(false);
+        setGenerateTitleError(null);
+        setApplyError(null);
+    }, []);
+
+    const handleFixSubmit = useCallback((e) => {
+        e.preventDefault();
+        setApplyError(null);
+
+        const dataToBeUpdated = fixContext.attributeKey === 'title'
+            ? 'title'
+            : fixContext.attributeKey === 'description'
+                ? 'description'
+                : fixContext.attributeKey === 'backend'
+                    ? 'generic_keyword'
+                    : 'bulletpoints';
+
+        let valueToBeUpdated;
+        if (dataToBeUpdated === 'title') {
+            valueToBeUpdated = fixForm.title?.trim() || '';
+        } else if (dataToBeUpdated === 'description') {
+            valueToBeUpdated = fixForm.description?.trim() || '';
+        } else if (dataToBeUpdated === 'generic_keyword') {
+            valueToBeUpdated = fixForm.backendKeywords?.trim() || '';
+        } else {
+            const bullets = Array.isArray(fixForm.bulletpoints) ? fixForm.bulletpoints : [fixForm.bulletpoints || ''];
+            valueToBeUpdated = bullets.map((b) => String(b ?? '').trim()).filter(Boolean);
+        }
+
+        if (dataToBeUpdated === 'title' && !valueToBeUpdated) return setApplyError('Please enter a title.');
+        if (dataToBeUpdated === 'description' && !valueToBeUpdated) return setApplyError('Please enter a description.');
+        if (dataToBeUpdated === 'generic_keyword' && !valueToBeUpdated) return setApplyError('Please enter backend keywords.');
+        if (dataToBeUpdated === 'bulletpoints' && (!valueToBeUpdated || (Array.isArray(valueToBeUpdated) && valueToBeUpdated.length === 0))) {
+            return setApplyError('Please enter at least one bullet point.');
+        }
+
+        const sku = fixContext.sku?.trim();
+        if (!sku) return setApplyError('SKU is required to update the listing.');
+        if (!country || !region) return setApplyError('Country and region are required. Please ensure you have selected a marketplace.');
+
+        setApplyLoading(true);
+        axiosInstance.post('/api/listings/update-product-content', {
+            sku,
+            country,
+            region,
+            dataToBeUpdated,
+            valueToBeUpdated
+        })
+            .then(() => {
+                closeFixModal();
+                // Refresh data so the "Applied" state can show up
+                dispatch(fetchIssuesByProductData({ forceRefresh: true }));
+                if (normalizedAsin) dispatch(fetchProductIssues(normalizedAsin));
+                setApplySuccessMessage('It will be displayed on your catalog once Amazon accepts it.');
+                if (applySuccessTimeoutRef.current) clearTimeout(applySuccessTimeoutRef.current);
+                applySuccessTimeoutRef.current = setTimeout(() => setApplySuccessMessage(null), 5000);
+            })
+            .catch((err) => {
+                const msg = err.response?.data?.message || err.message || 'Failed to update listing.';
+                setApplyError(msg);
+            })
+            .finally(() => setApplyLoading(false));
+    }, [fixContext.attributeKey, fixContext.sku, country, region, fixForm, closeFixModal, dispatch, normalizedAsin]);
+
+    const handleGenerate = useCallback((attribute) => {
+        setGenerateTitleError(null);
+        setGenerateTitleLoading(true);
+
+        const asinForAi = fixContext.asin || normalizedAsin || '';
+        const payload = { asin: asinForAi };
+
+        if (attribute === 'title') {
+            payload.attribute = 'title';
+            payload.title = fixForm.title || fixContext.title || '';
+        } else if (attribute === 'description') {
+            payload.attribute = 'description';
+            payload.description = fixForm.description || '';
+        } else if (attribute === 'bulletpoints') {
+            payload.attribute = 'bulletpoints';
+            payload.bulletpoints = Array.isArray(fixForm.bulletpoints) ? fixForm.bulletpoints : [fixForm.bulletpoints || ''];
+        } else {
+            payload.attribute = 'generic_keyword';
+            payload.backendKeywords = fixForm.backendKeywords || '';
+        }
+
+        axiosInstance.post('/api/ai/ranking-content', payload)
+            .then((res) => {
+                const data = res.data?.data || {};
+                if (attribute === 'title') {
+                    const titles = Array.isArray(data.titles) ? data.titles : [];
+                    if (titles.length > 0) {
+                        setTitleSuggestions(titles);
+                        setFixForm(prev => ({ ...prev, title: titles[0] }));
+                    }
+                } else if (attribute === 'description' && data.description) {
+                    setFixForm(prev => ({ ...prev, description: data.description }));
+                } else if (attribute === 'bulletpoints' && data.bulletpoints) {
+                    const arr = Array.isArray(data.bulletpoints) ? data.bulletpoints : [String(data.bulletpoints)];
+                    setFixForm(prev => ({ ...prev, bulletpoints: arr.length ? arr : [''] }));
+                } else if (attribute === 'backend' && data.keywords !== undefined) {
+                    setFixForm(prev => ({ ...prev, backendKeywords: data.keywords }));
+                }
+            })
+            .catch((err) => {
+                setGenerateTitleError(err.response?.data?.message || err.message || 'AI suggestion failed.');
+            })
+            .finally(() => setGenerateTitleLoading(false));
+    }, [fixContext.asin, fixContext.title, fixForm, normalizedAsin]);
+    
+    // Fallback: If ASIN not in issues-by-product cache and not loading, fetch per-ASIN data
+    useEffect(() => {
+        if (!normalizedAsin) return;
+        
+        // Wait for issues-by-product to finish loading
+        if (issuesByProductLoading) return;
+        
+        // If product found in issues-by-product, use that (existing flow)
+        if (productFromIssuesByProduct) {
+            setUsingPerAsinFallback(false);
+            return;
+        }
+        
+        // Product not in issues-by-product - check per-ASIN cache
+        const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+        if (perAsinCachedData?.info && perAsinCachedData?.issues && 
+            perAsinCachedData?.lastFetched && (Date.now() - perAsinCachedData.lastFetched) < CACHE_TTL_MS) {
+            setUsingPerAsinFallback(true);
+            return;
+        }
+        
+        // Fetch per-ASIN data in parallel
+        setUsingPerAsinFallback(true);
+        console.log('[ProductDetails] ASIN not in cache, fetching per-ASIN data:', normalizedAsin);
+        
+        dispatch(fetchProductBasicInfo(normalizedAsin));
+        dispatch(fetchProductPerformance({ asin: normalizedAsin, comparison: comparisonType }));
+        dispatch(fetchProductIssues(normalizedAsin));
+    }, [normalizedAsin, issuesByProductLoading, productFromIssuesByProduct, dispatch, comparisonType, perAsinCachedData]);
+    
+    // Re-fetch performance when comparison type changes (for per-ASIN fallback)
+    useEffect(() => {
+        if (!usingPerAsinFallback || !normalizedAsin || comparisonType === 'none') return;
+        
+        dispatch(fetchProductPerformance({ asin: normalizedAsin, comparison: comparisonType }));
+    }, [comparisonType, usingPerAsinFallback, normalizedAsin, dispatch]);
 
     useEffect(() => {
         function handleClickOutside(e) {
@@ -327,8 +563,6 @@ const Dashboard = () => {
             document.removeEventListener("mousedown", handleClickOutside);
         }
     }, [])
-
-    const { asin } = useParams();
     
     // Map comparison type to graph granularity
     const getGranularity = (type) => {
@@ -391,20 +625,255 @@ const Dashboard = () => {
     // This uses EconomicsMetrics as primary source, which is more accurate
     const profitabilityProduct = info?.profitibilityData?.find(item => item.asin === asin);
     
+            // Build product from per-ASIN fallback data if available
+    const buildProductFromPerAsinData = useCallback(() => {
+        if (!perAsinCachedData?.info || !perAsinCachedData?.issues) return null;
+        
+        const infoData = perAsinCachedData.info;
+        const issuesData = perAsinCachedData.issues;
+                const performanceData = perAsinCachedData.performance;
+        
+                return {
+            asin: normalizedAsin,
+            sku: infoData.sku || issuesData.sku,
+            name: infoData.name || issuesData.name,
+            MainImage: infoData.mainImage || issuesData.MainImage,
+            price: infoData.price || 0,
+            quantity: infoData.unitsSold || 0,
+            sales: infoData.sales || 0,
+            totalErrors: issuesData.totalErrors || 0,
+                    // Map performance data
+                    performance: performanceData?.performance ? {
+                        sessions: performanceData.performance.sessions || 0,
+                        pageViews: performanceData.performance.pageViews || 0,
+                        conversionRate: performanceData.performance.conversionRate || 0,
+                        buyBoxPercentage: performanceData.performance.buyBoxPercentage || 0,
+                        sales: performanceData.performance.sales || 0,
+                        unitsSold: performanceData.performance.unitsSold || 0,
+                        grossProfit: performanceData.performance.grossProfit || 0,
+                        ppcSpend: performanceData.performance.ppcSpend || 0,
+                        ppcSales: performanceData.performance.ppcSales || 0,
+                        acos: performanceData.performance.acos
+                    } : null,
+            // Map comparison data
+            comparison: performanceData?.comparison || null,
+            // Map issues data
+            rankingErrors: issuesData.rankingErrors || null,
+            conversionErrors: issuesData.conversionErrors || {},
+            inventoryErrors: issuesData.inventoryErrors || {}
+        };
+    }, [perAsinCachedData, normalizedAsin]);
+    
+    // Effective product: prefer issues-by-product cache, fallback to per-ASIN data
+    const effectiveProduct = useMemo(() => {
+        if (product) return product;
+        if (usingPerAsinFallback) return buildProductFromPerAsinData();
+        return null;
+    }, [product, usingPerAsinFallback, buildProductFromPerAsinData]);
+    
     // Use sales and quantity from profitibilityData (same as profitability dashboard)
-    // Falls back to productWiseError if profitibilityData not available
-    const sales = profitabilityProduct?.sales ?? product?.sales ?? 0;
-    const quantity = profitabilityProduct?.quantity ?? product?.quantity ?? 0;
+    // Falls back to productWiseError/perAsinData if profitibilityData not available
+    const sales = profitabilityProduct?.sales ?? effectiveProduct?.sales ?? 0;
+    const quantity = profitabilityProduct?.quantity ?? effectiveProduct?.quantity ?? 0;
     
     // Update product with ranking data and accurate sales/quantity from profitibilityData
-    const updatedProduct = product ? {
-        ...product,
+    const updatedProduct = effectiveProduct ? {
+        ...effectiveProduct,
         // Use sales and quantity from profitibilityData (same source as profitability dashboard)
         quantity: quantity,
         sales: sales,
-        // Add ranking data from rankingProductWiseErrors array
-        rankingErrors: rankingProduct || undefined
+        // Add ranking data from rankingProductWiseErrors array (or from per-ASIN issues)
+        rankingErrors: rankingProduct || effectiveProduct?.rankingErrors || undefined
     } : null;
+
+    const rankingTableRows = useMemo(() => {
+        if (!updatedProduct?.rankingErrors?.data) return [];
+
+        const asin = updatedProduct.asin;
+        const sku = updatedProduct.sku || '';
+        const title = updatedProduct.name || updatedProduct.Title || 'N/A';
+        const fixedAttributes = updatedProduct.fixedAttributes || {};
+        const rows = [];
+
+        const pushRow = (sectionLabel, issueLabel, messageObj, howToSolve) => {
+            if (!messageObj) return;
+            const issueHeading = `${sectionLabel} | ${issueLabel}`;
+            const attributeKey = getRankingAttributeKeyFromIssueHeading(issueHeading);
+            const isFixed = attributeKey === 'title'
+                ? !!fixedAttributes.title?.fixed
+                : attributeKey === 'description'
+                    ? !!fixedAttributes.description?.fixed
+                    : attributeKey === 'bulletpoints'
+                        ? !!fixedAttributes.bulletpoints?.fixed
+                        : attributeKey === 'backend'
+                            ? !!fixedAttributes.generic_keyword?.fixed
+                            : false;
+            rows.push({
+                asin,
+                sku,
+                title,
+                issueHeading,
+                attributeKey,
+                isFixed,
+                message: messageObj,
+                solution: howToSolve
+            });
+        };
+
+        const titleData = updatedProduct.rankingErrors.data.TitleResult;
+        if (titleData?.charLim?.status === 'Error') {
+            pushRow('Title', 'Character Limit', titleData.charLim.Message, titleData.charLim.HowTOSolve);
+        }
+        if (titleData?.RestictedWords?.status === 'Error') {
+            pushRow('Title', 'Restricted Words', titleData.RestictedWords.Message, titleData.RestictedWords.HowTOSolve);
+        }
+        if (titleData?.checkSpecialCharacters?.status === 'Error') {
+            pushRow('Title', 'Special Characters', titleData.checkSpecialCharacters.Message, titleData.checkSpecialCharacters.HowTOSolve);
+        }
+
+        const bulletData = updatedProduct.rankingErrors.data.BulletPoints;
+        if (bulletData?.charLim?.status === 'Error') {
+            pushRow('Bullet Points', 'Character Limit', bulletData.charLim.Message, bulletData.charLim.HowTOSolve);
+        }
+        if (bulletData?.RestictedWords?.status === 'Error') {
+            pushRow('Bullet Points', 'Restricted Words', bulletData.RestictedWords.Message, bulletData.RestictedWords.HowTOSolve);
+        }
+        if (bulletData?.checkSpecialCharacters?.status === 'Error') {
+            pushRow('Bullet Points', 'Special Characters', bulletData.checkSpecialCharacters.Message, bulletData.checkSpecialCharacters.HowTOSolve);
+        }
+
+        const descData = updatedProduct.rankingErrors.data.Description;
+        if (descData?.charLim?.status === 'Error') {
+            pushRow('Description', 'Character Limit', descData.charLim.Message, descData.charLim.HowTOSolve);
+        }
+        if (descData?.RestictedWords?.status === 'Error') {
+            pushRow('Description', 'Restricted Words', descData.RestictedWords.Message, descData.RestictedWords.HowTOSolve);
+        }
+        if (descData?.checkSpecialCharacters?.status === 'Error') {
+            pushRow('Description', 'Special Characters', descData.checkSpecialCharacters.Message, descData.checkSpecialCharacters.HowTOSolve);
+        }
+
+        const backendData = updatedProduct.rankingErrors.data.charLim;
+        if (backendData?.status === 'Error') {
+            pushRow('Backend Keywords', 'Character Limit', backendData.Message, backendData.HowTOSolve);
+        }
+
+        return rows;
+    }, [updatedProduct]);
+
+    const conversionTableRows = useMemo(() => {
+        const errors = updatedProduct?.conversionErrors;
+        if (!errors) return [];
+
+        const asin = updatedProduct.asin;
+        const sku = updatedProduct.sku || '';
+        const title = updatedProduct.name || updatedProduct.Title || 'N/A';
+        const rows = [];
+
+        const pushRow = (heading, subheading, errorObj) => {
+            if (!errorObj || errorObj.status !== 'Error') return;
+            rows.push({
+                asin,
+                sku,
+                title,
+                issueHeading: `${heading} | ${subheading}`,
+                message: errorObj.Message,
+                solution: errorObj.HowToSolve
+            });
+        };
+
+        pushRow('Images', 'Image Issue', errors.imageResultErrorData);
+        pushRow('Videos', 'Video Issue', errors.videoResultErrorData);
+        pushRow('Rating', 'Star Rating Issue', errors.productStarRatingResultErrorData);
+        pushRow('Buy Box', 'Product without Buy Box', errors.productsWithOutBuyboxErrorData);
+        pushRow('A Plus', 'A+ Content Issue', errors.aplusErrorData);
+        pushRow('Brand Story', 'Brand Story Issue', errors.brandStoryErrorData);
+
+        return rows;
+    }, [updatedProduct]);
+
+    const inventoryTableRows = useMemo(() => {
+        const errors = updatedProduct?.inventoryErrors;
+        if (!errors) return [];
+
+        const asin = updatedProduct.asin;
+        const sku = updatedProduct.sku || '';
+        const title = updatedProduct.name || updatedProduct.Title || 'N/A';
+        const rows = [];
+
+        if (errors.inventoryPlanningErrorData) {
+            const planning = errors.inventoryPlanningErrorData;
+            if (planning.longTermStorageFees?.status === 'Error') {
+                rows.push({
+                    asin,
+                    sku,
+                    title,
+                    issueHeading: 'Inventory Planning | Long-Term Storage Fees',
+                    message: planning.longTermStorageFees.Message,
+                    solution: planning.longTermStorageFees.HowToSolve
+                });
+            }
+            if (planning.unfulfillable?.status === 'Error') {
+                rows.push({
+                    asin,
+                    sku,
+                    title,
+                    issueHeading: 'Inventory Planning | Unfulfillable Inventory',
+                    message: planning.unfulfillable.Message,
+                    solution: planning.unfulfillable.HowToSolve
+                });
+            }
+        }
+
+        if (errors.strandedInventoryErrorData) {
+            rows.push({
+                asin,
+                sku,
+                title,
+                issueHeading: 'Stranded Inventory | Product Not Listed',
+                message: errors.strandedInventoryErrorData.Message,
+                solution: errors.strandedInventoryErrorData.HowToSolve
+            });
+        }
+
+        if (errors.inboundNonComplianceErrorData) {
+            rows.push({
+                asin,
+                sku,
+                title,
+                issueHeading: 'Inbound Non-Compliance | Shipment Issue',
+                message: errors.inboundNonComplianceErrorData.Message,
+                solution: errors.inboundNonComplianceErrorData.HowToSolve
+            });
+        }
+
+        if (errors.replenishmentErrorData) {
+            if (Array.isArray(errors.replenishmentErrorData)) {
+                errors.replenishmentErrorData.forEach((error) => {
+                    rows.push({
+                        asin,
+                        sku,
+                        title,
+                        issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
+                        message: error.Message,
+                        solution: error.HowToSolve
+                    });
+                });
+            } else {
+                const error = errors.replenishmentErrorData;
+                rows.push({
+                    asin,
+                    sku,
+                    title,
+                    issueHeading: `Replenishment | Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`,
+                    message: error.Message,
+                    solution: error.HowToSolve
+                });
+            }
+        }
+
+        return rows;
+    }, [updatedProduct]);
     
     // Generate client-side recommendations using accurate profitabilityProduct data
     // This replaces backend recommendations which may have stale/incorrect data
@@ -522,13 +991,23 @@ const Dashboard = () => {
         }
     }, []);
 
-    // Show skeleton while loading issues-by-product data (first load or refresh)
+    // Check if per-ASIN data is still loading
+    const isPerAsinLoading = productDetailsLoading?.info || productDetailsLoading?.issues;
+    
+    // Show skeleton while loading issues-by-product data OR per-ASIN fallback data
     // so we never flash "Product Not Found" before data arrives
     if (issuesByProductLoading || !info) {
         return <ProductDetailsPageSkeleton />;
     }
+    
+    // If ASIN not found in issues-by-product, but we're fetching per-ASIN data, show skeleton
+    if (!product && isPerAsinLoading) {
+        return <ProductDetailsPageSkeleton />;
+    }
 
-    if (!info.productWiseError || info.productWiseError.length === 0) {
+    // Only show "No Product Data" if there's truly no data anywhere
+    // AND we're not using per-ASIN fallback
+    if (!info.productWiseError?.length && !usingPerAsinFallback) {
         return (
             <div className="flex items-center justify-center h-screen">
                 <div className="text-center p-6">
@@ -1108,7 +1587,7 @@ const Dashboard = () => {
                                     <p className="text-sm font-bold text-gray-100">{Number(updatedProduct.quantity || 0).toLocaleString()}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-gray-400 font-medium mb-0.5">Revenue</p>
+                                    <p className="text-xs text-gray-400 font-medium mb-0.5">Total Sales</p>
                                     <p className="text-sm font-bold text-gray-100">{formatCurrencyWithLocale(updatedProduct.sales || 0, currency)}</p>
                                 </div>
                                 <div>
@@ -1148,24 +1627,7 @@ const Dashboard = () => {
                                 <span className="text-xs text-gray-400 hidden sm:inline">Metrics, recommendations & trends</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">Compare:</span>
-                                <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                <select
-                                    value={comparisonType}
-                                    onChange={(e) => handleComparisonChange(e.target.value)}
-                                    disabled={isLoadingComparison}
-                                    className="px-2 py-1.5 border border-[#30363d] rounded text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-[#161b22] disabled:opacity-50 min-w-[140px]"
-                                >
-                                    {comparisonOptions.map(option => (
-                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                    ))}
-                                </select>
-                                {isLoadingComparison && (
-                                    <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                                )}
-                                {comparisonType !== 'none' && !isLoadingComparison && updatedProduct?.comparison?.hasComparison && (
-                                    <span className="text-xs text-green-400 shrink-0">{comparisonType === 'wow' ? 'WoW' : 'MoM'} active</span>
-                                )}
+                                {/* Comparison dropdown removed */}
                             </div>
                         </div>
 
@@ -1187,7 +1649,7 @@ const Dashboard = () => {
                                     </div>
                                 )}
                                 
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3 mb-4">
                                     {/* Sessions */}
                                     <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
                                         <p className="text-xs text-gray-400 mb-1">Sessions</p>
@@ -1250,6 +1712,14 @@ const Dashboard = () => {
                                             />
                                         )}
                                     </div>
+
+                                    {/* PPC Sales */}
+                                    <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                        <p className="text-xs text-gray-400 mb-1">PPC Sales (30 days)</p>
+                                        <p className="text-lg font-bold text-gray-100">
+                                            {formatCurrencyWithLocale(updatedProduct.performance?.ppcSales ?? 0, currency)}
+                                        </p>
+                                    </div>
                                     
                                     {/* ACOS */}
                                     <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
@@ -1265,6 +1735,16 @@ const Dashboard = () => {
                                                 isPercentagePoint={true}
                                             />
                                         )}
+                                    </div>
+
+                                    {/* PPC Impressions / Clicks */}
+                                    <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                        <p className="text-xs text-gray-400 mb-1">PPC Impressions / Clicks (30 days)</p>
+                                        <p className="text-lg font-bold text-gray-100">
+                                            {perAsinCachedData?.ppcIssues?.ppcMetrics
+                                                ? `${(perAsinCachedData.ppcIssues.ppcMetrics.impressions ?? 0).toLocaleString()} / ${(perAsinCachedData.ppcIssues.ppcMetrics.clicks ?? 0).toLocaleString()}`
+                                                : 'N/A'}
+                                        </p>
                                     </div>
                                 </div>
                                 
@@ -1498,29 +1978,42 @@ const Dashboard = () => {
                         <div className="bg-[#21262d] rounded border border-[#30363d] overflow-hidden mt-2">
                             <div className="px-2 py-1.5 border-b border-[#30363d] flex items-center gap-2">
                                 <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                <h3 className="text-xs font-semibold text-gray-300">Recommendations</h3>
-                                <span className="text-xs text-gray-400">Performance suggestions</span>
+                                <h3 className="text-xs font-semibold text-gray-300">Performance suggestions</h3>
                             </div>
                             <div className="p-2">
                                 {clientRecommendations && clientRecommendations.length > 0 ? (
-                                    <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1 flex flex-col gap-2">
-                                        {clientRecommendations.map((rec, idx) => (
-                                            <li key={idx} className="mb-4">
-                                                <div className="flex justify-between items-center">
-                                                    <p className="w-[40vw] text-gray-300">
-                                                        <b className="text-gray-200">{rec.shortLabel}: </b>
-                                                        {rec.message}
-                                                        {rec.reason && (
-                                                            <>
-                                                                <br />
-                                                                <span className="text-gray-500 mt-1 block">{rec.reason}</span>
-                                                            </>
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            </li>
-                                        ))}
-                                    </ul>
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-xs text-gray-300 table-fixed">
+                                            <thead>
+                                                <tr className="bg-[#161b22] border-b border-[#30363d]">
+                                                    <th className="px-2 py-1 text-left font-semibold text-gray-300 w-1/4 uppercase tracking-wider">Problems In Performance</th>
+                                                    <th className="px-2 py-1 text-left font-semibold text-gray-300 w-1/5 uppercase tracking-wider">Recommendation</th>
+                                                    <th className="px-2 py-1 text-left font-semibold text-gray-300 w-[55%] uppercase tracking-wider">Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {clientRecommendations.map((rec, idx) => (
+                                                    <tr key={idx} className="border-b border-[#30363d] last:border-b-0 text-gray-200">
+                                                        <td className="px-2 py-1 align-top">
+                                                            <p className="text-xs text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/30 leading-relaxed break-words">
+                                                                {rec.reason || 'No specific guidance — monitor performance and keep optimizing.'}
+                                                            </p>
+                                                        </td>
+                                                        <td className="px-2 py-1 align-top">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                                                                {rec.shortLabel}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-2 py-1 align-top">
+                                                            <p className="text-xs text-gray-300 leading-relaxed break-words">
+                                                                {rec.message}
+                                                            </p>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 ) : (
                                     <div className="py-3 flex items-center gap-2 text-gray-400">
                                         <Star className="w-4 h-4 text-green-400 shrink-0" />
@@ -1550,376 +2043,383 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div className="p-2 space-y-3">
-                {/* Ranking Issues subsection */}
-                <div className="bg-[#21262d] rounded border border-[#30363d] overflow-hidden">
-                    <div className="px-2 py-1.5 border-b border-[#30363d] flex items-center gap-2">
-                        <TrendingUp className="w-3 h-3 text-red-400 shrink-0" />
-                        <h3 className="text-xs font-semibold text-gray-300">Ranking Issues</h3>
-                        <span className="text-xs text-gray-400">Search ranking optimization</span>
-                    </div>
-                    <div className="p-2 space-y-2">
-                        {(updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error") && (<div>
-                            <p className="font-semibold text-xs text-gray-300">Titles</p>
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1">
-                                {
-                                    updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.Message} /></p>
-                                                <button className="px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-1 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "Title")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
+                            {/* Issues summary tables (same format as Issues by Category) */}
+                            {rankingTableRows.length > 0 && (
+                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+                                        <div className="flex items-center gap-2">
+                                            <TrendingUp className="w-4 h-4 text-red-400" />
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-100">Ranking Issues</h3>
+                                                <p className="text-xs text-gray-400">Title, bullets, description & backend keywords</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="w-full">
+                                        <table className="w-full table-fixed">
+                                            <thead>
+                                                <tr className="bg-[#21262d]">
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Details</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/4">How to Solve</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-24">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[#30363d]">
+                                                {rankingTableRows.map((row, idx) => (
+                                                    <tr key={idx} className="text-sm text-gray-200 border-b border-[#30363d]">
+                                                        <td className="py-2 px-2 align-top">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30">
+                                                                {row.issueHeading}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-gray-300 leading-relaxed break-words">
+                                                                <FormattedMessageComponent message={row.message} />
+                                                            </p>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">
+                                                                {row.solution}
+                                                            </p>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-middle">
+                                                            {row.isFixed ? (
+                                                                <div className="flex items-center justify-center">
+                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                                                    <CheckCircle className="w-3 h-3" />
+                                                                    Applied
+                                                                    </span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center justify-center">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-white bg-blue-600 border border-blue-500/60 hover:bg-blue-500 active:bg-blue-600 active:translate-y-[0.5px] transition-[background-color,border-color,transform] focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+                                                                        onClick={() => openFixModal(row)}
+                                                                    >
+                                                                        <span className="text-[12px] leading-none text-white" aria-hidden>✓</span>
+                                                                        Fix it
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {conversionTableRows.length > 0 && (
+                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+                                        <div className="flex items-center gap-2">
+                                            <LineChart className="w-4 h-4 text-blue-400" />
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-100">Conversion Issues</h3>
+                                                <p className="text-xs text-gray-400">Images, videos, rating, buy box, A+ & brand story</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="w-full">
+                                        <table className="w-full table-fixed">
+                                            <thead>
+                                                <tr className="bg-[#21262d]">
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Details</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/4">How to Solve</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[#30363d]">
+                                                {conversionTableRows.map((row, idx) => (
+                                                    <tr key={idx} className="text-sm text-gray-200 border-b border-[#30363d]">
+                                                        <td className="py-2 px-2 align-top">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30">
+                                                                {row.issueHeading}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-gray-300 leading-relaxed break-words">
+                                                                <FormattedMessageComponent message={row.message} />
+                                                            </p>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">
+                                                                {row.solution}
+                                                            </p>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* PPC Issues (per-ASIN, backend-calculated and accurate) - placed after Conversion issues */}
+                            {perAsinCachedData?.ppcIssues && (
+                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+                                        <div className="flex items-center gap-2">
+                                            <LineChartIcon className="w-4 h-4 text-blue-400" />
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-100">PPC Issues</h3>
+                                                <p className="text-xs text-gray-400">Ad spend, ACOS, low impressions & wasted keywords</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-2">
+                                        <ProductPPCIssuesTable 
+                                            data={perAsinCachedData.ppcIssues}
+                                            currency={currency}
+                                            asin={normalizedAsin}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {inventoryTableRows.length > 0 && (
+                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+                                        <div className="flex items-center gap-2">
+                                            <PackageOpen className="w-4 h-4 text-yellow-400" />
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-100">Inventory Issues</h3>
+                                                <p className="text-xs text-gray-400">Planning, stranded, inbound & replenishment risks</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="w-full">
+                                        <table className="w-full table-fixed">
+                                            <thead>
+                                                <tr className="bg-[#21262d]">
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-1/4">Issue Details</th>
+                                                    <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-2/4">How to Solve</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[#30363d]">
+                                                {inventoryTableRows.map((row, idx) => (
+                                                    <tr key={idx} className="text-sm text-gray-200 border-b border-[#30363d]">
+                                                        <td className="py-2 px-2 align-top">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30">
+                                                                {row.issueHeading}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-gray-300 leading-relaxed break-words">
+                                                                <FormattedMessageComponent message={row.message} />
+                                                            </p>
+                                                        </td>
+                                                        <td className="py-2 px-2 align-top">
+                                                            <p className="text-xs text-green-400 bg-green-500/10 p-2 rounded border border-green-500/30 leading-relaxed break-words">
+                                                                {row.solution}
+                                                            </p>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Fix It Modal (Ranking) */}
+                            <AnimatePresence>
+                                {isFixModalOpen && (
+                                    <motion.div
+                                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
+                                    >
+                                        <motion.div
+                                            className="bg-[#0d1117] border border-[#30363d] rounded-lg w-full max-w-lg mx-2 p-4 shadow-xl"
+                                            initial={{ scale: 0.9, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            exit={{ scale: 0.9, opacity: 0 }}
+                                        >
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div>
+                                                    <h2 className="text-sm font-bold text-gray-100">Fix Ranking Issues</h2>
+                                                    <p className="text-xs text-gray-400 mt-0.5">
+                                                        ASIN: <span className="font-mono">{fixContext.asin}</span>
+                                                        {fixContext.sku && (
+                                                            <>
+                                                                {' · '}
+                                                                SKU: <span className="font-mono">{fixContext.sku}</span>
+                                                            </>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    className="text-gray-400 hover:text-gray-200 text-xs"
+                                                    onClick={closeFixModal}
+                                                >
+                                                    Close
                                                 </button>
                                             </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300' style={TitleSolution === "charLim"
-                                                ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
-                                                : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
-                                            }>{updatedProduct.rankingErrors?.data?.TitleResult?.charLim?.HowTOSolve}</div>
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestrictedWords", "Title")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div
-                                                className='bg-[#21262d] border border-[#30363d] mt-2 justify-center items-center transition-all duration-700 ease-in-out text-xs text-gray-300'
-                                                style={TitleSolution === "RestrictedWords"
-                                                    ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" }
-                                                    : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }
-                                                }
-                                            >
-                                                {updatedProduct.rankingErrors?.data?.TitleResult?.RestictedWords?.HowTOSolve}
-                                            </div>
 
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "Title")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={TitleSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve}</div>
-                                        </li>
-                                    )
-                                }
-                            </ul>
+                                            <form className="space-y-3" onSubmit={handleFixSubmit}>
+                                                {fixContext.attributeKey === 'title' && (
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-300 mb-1">New Title</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                            placeholder="Enter optimized product title"
+                                                            value={fixForm.title}
+                                                            onChange={(e) => setFixForm(prev => ({ ...prev, title: e.target.value }))}
+                                                        />
+                                                        {titleSuggestions.length > 0 && (
+                                                            <div className="mt-2 space-y-1">
+                                                                <p className="text-[11px] text-gray-400">Suggestions</p>
+                                                                <div className="space-y-1">
+                                                                    {titleSuggestions.slice(0, 5).map((t, i) => (
+                                                                        <button
+                                                                            key={i}
+                                                                            type="button"
+                                                                            className="w-full text-left text-[11px] px-2 py-1 rounded border border-[#30363d] bg-[#0d1117] hover:bg-[#161b22] text-gray-200"
+                                                                            onClick={() => setFixForm(prev => ({ ...prev, title: t }))}
+                                                                        >
+                                                                            {t}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="mt-2">
+                                                            <button
+                                                                type="button"
+                                                                className="px-2 py-1 rounded text-[11px] font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50"
+                                                                onClick={() => handleGenerate('title')}
+                                                                disabled={generateTitleLoading}
+                                                            >
+                                                                {generateTitleLoading ? 'Generating…' : 'Generate with AI'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                        </div>)}
+                                                {fixContext.attributeKey === 'description' && (
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-300 mb-1">New Description</label>
+                                                        <textarea
+                                                            className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
+                                                            placeholder="Enter optimized product description"
+                                                            value={fixForm.description}
+                                                            onChange={(e) => setFixForm(prev => ({ ...prev, description: e.target.value }))}
+                                                        />
+                                                        <div className="mt-2">
+                                                            <button
+                                                                type="button"
+                                                                className="px-2 py-1 rounded text-[11px] font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50"
+                                                                onClick={() => handleGenerate('description')}
+                                                                disabled={generateTitleLoading}
+                                                            >
+                                                                {generateTitleLoading ? 'Generating…' : 'Generate with AI'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                        {(updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error") && (<div >
-                            <p className="font-semibold text-xs text-gray-300">Bullet Points</p>
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1">
-                                {
-                                    updatedProduct.rankingErrors?.data?.BulletPoints?.charLim?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center mb-4'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "BulletPoints")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints.charLim?.HowTOSolve}</div>
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.status === "Error" && (
-                                        <li className='mb-4' >
-                                            <div className='flex justify-between items-center '>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestictedWords", "BulletPoints")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.RestictedWords?.HowTOSolve}</div>
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "BulletPoints")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex justify-center items-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BulletSoltion === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}>{updatedProduct.rankingErrors?.data?.BulletPoints?.checkSpecialCharacters?.HowTOSolve}</div>
-                                        </li>
-                                    )
-                                }
-                            </ul>
-                        </div>)}
+                                                {fixContext.attributeKey === 'bulletpoints' && (
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-300 mb-1">New Bullet Points</label>
+                                                        <div className="space-y-2">
+                                                            {(fixForm.bulletpoints || ['']).map((b, i) => (
+                                                                <input
+                                                                    key={i}
+                                                                    type="text"
+                                                                    className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                                    placeholder={`Bullet ${i + 1}`}
+                                                                    value={b}
+                                                                    onChange={(e) => setFixForm(prev => {
+                                                                        const next = Array.isArray(prev.bulletpoints) ? [...prev.bulletpoints] : [''];
+                                                                        next[i] = e.target.value;
+                                                                        return { ...prev, bulletpoints: next };
+                                                                    })}
+                                                                />
+                                                            ))}
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    className="px-2 py-1 rounded text-[11px] font-medium bg-[#21262d] text-gray-200 border border-[#30363d] hover:bg-[#161b22]"
+                                                                    onClick={() => setFixForm(prev => ({ ...prev, bulletpoints: [...(Array.isArray(prev.bulletpoints) ? prev.bulletpoints : ['']), ''] }))}
+                                                                >
+                                                                    Add bullet
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="px-2 py-1 rounded text-[11px] font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50"
+                                                                    onClick={() => handleGenerate('bulletpoints')}
+                                                                    disabled={generateTitleLoading}
+                                                                >
+                                                                    {generateTitleLoading ? 'Generating…' : 'Generate with AI'}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                        {(updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" || updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error") && (<div >
-                            <p className="font-semibold text-xs text-gray-300">Description</p>
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1">
-                                {
-                                    updatedProduct.rankingErrors?.data?.Description?.charLim?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "Description")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.charLim?.HowTOSolve}</p></div>
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Restricted Words: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("RestictedWords", "Description")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "RestictedWords" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.RestictedWords?.HowTOSolve}</p></div>
-                                        </li>
-                                    )
-                                }
-                                {
-                                    updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Special Characters: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("checkSpecialCharacters", "Description")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={DescriptionSolution === "checkSpecialCharacters" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.Description?.checkSpecialCharacters?.HowTOSolve}</p></div>
-                                        </li>
-                                    )
-                                }
+                                                {fixContext.attributeKey === 'backend' && (
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-300 mb-1">Backend Keywords</label>
+                                                        <textarea
+                                                            className="w-full px-2 py-1.5 rounded border border-[#30363d] bg-[#161b22] text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
+                                                            placeholder="Enter backend keywords"
+                                                            value={fixForm.backendKeywords}
+                                                            onChange={(e) => setFixForm(prev => ({ ...prev, backendKeywords: e.target.value }))}
+                                                        />
+                                                        <div className="mt-2">
+                                                            <button
+                                                                type="button"
+                                                                className="px-2 py-1 rounded text-[11px] font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50"
+                                                                onClick={() => handleGenerate('backend')}
+                                                                disabled={generateTitleLoading}
+                                                            >
+                                                                {generateTitleLoading ? 'Generating…' : 'Generate with AI'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                            </ul>
-                        </div>)}
+                                                {generateTitleError && (
+                                                    <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-2 py-1">
+                                                        {generateTitleError}
+                                                    </div>
+                                                )}
+                                                {applyError && (
+                                                    <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-2 py-1">
+                                                        {applyError}
+                                                    </div>
+                                                )}
 
-                        {(updatedProduct.rankingErrors?.data?.charLim?.status === "Error") && (<div>
-                            <p className="font-semibold text-xs text-gray-300">Backend Keywords</p>
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1">
-                                {
-                                    updatedProduct.rankingErrors?.data?.charLim?.status === "Error" && (
-                                        <li className='mb-4'>
-                                            <div className='flex justify-between items-center'>
-                                                <p className='w-[40vw] text-gray-300'><b className="text-gray-200">Character Limit: </b><FormattedMessageComponent message={updatedProduct.rankingErrors?.data?.charLim?.Message} /></p>
-                                                <button className="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded text-xs flex items-center justify-center gap-2 text-gray-300 hover:bg-[#161b22] transition-all" onClick={() => openCloseSol("charLim", "BackendKeyWords")}>
-                                                    How to solve
-                                                    <ChevronDown className='w-[7px] h-[7px] text-gray-400 shrink-0' />
-                                                </button>
-                                            </div>
-                                            <div className='bg-[#21262d] border border-[#30363d] mt-2 flex items-center justify-center text-xs text-gray-300 transition-all duration-700 ease-in-out' style={BackendKeyWords === "charLim" ? { opacity: 1, maxHeight: "200px", minHeight: "80px", display: "flex",padding:"2rem" } : { opacity: 0, maxHeight: "0px", minHeight: "0px", overflow: "hidden", display: "flex" }}><p className='w-[80%] text-gray-300'>{updatedProduct.rankingErrors?.data?.charLim?.HowTOSolve}</p></div>
-                                        </li>
-                                    )
-                                }
-
-
-                            </ul>
-                        </div>)}
-                    </div>
-                </div>
-
-                {/* Conversion Issues subsection */}
-                {hasAnyConversionError && (
-                    <div className="bg-[#21262d] rounded border border-[#30363d] overflow-hidden">
-                        <div className="px-2 py-1.5 border-b border-[#30363d] flex items-center gap-2">
-                            <LineChartIcon className="w-3 h-3 text-blue-400 shrink-0" />
-                            <h3 className="text-xs font-semibold text-gray-300">Conversion Issues</h3>
-                            <span className="text-xs text-gray-400">Product appeal & conversion</span>
-                        </div>
-                        <div className="p-2">
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1 flex flex-col gap-2">
-                                {product.conversionErrors?.imageResultErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Images Issue"
-                                        message={product.conversionErrors?.imageResultErrorData.Message}
-                                        solutionKey="Image"
-                                        solutionContent={product.conversionErrors?.imageResultErrorData.HowToSolve}
-                                        stateValue={imageSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "Image")}
-                                    />
+                                                <div className="flex items-center justify-end gap-2 pt-1">
+                                                    <button
+                                                        type="button"
+                                                        className="px-3 py-1.5 rounded text-xs font-medium bg-[#21262d] text-gray-200 border border-[#30363d] hover:bg-[#161b22]"
+                                                        onClick={closeFixModal}
+                                                        disabled={applyLoading}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        type="submit"
+                                                        className="px-3 py-1.5 rounded text-xs font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                                                        disabled={applyLoading}
+                                                    >
+                                                        {applyLoading ? 'Applying…' : 'Apply'}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </motion.div>
+                                    </motion.div>
                                 )}
-                                {product.conversionErrors?.videoResultErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Video Issue"
-                                        message={product.conversionErrors?.videoResultErrorData.Message}
-                                        solutionKey="Video"
-                                        solutionContent={product.conversionErrors?.videoResultErrorData.HowToSolve}
-                                        stateValue={videoSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "Video")}
-                                    />
-                                )}
-                                {product.conversionErrors?.productStarRatingResultErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Star Rating Issue"
-                                        message={product.conversionErrors?.productStarRatingResultErrorData.Message}
-                                        solutionKey="ProductStarRating"
-                                        solutionContent={product.conversionErrors?.productStarRatingResultErrorData.HowToSolve}
-                                        stateValue={productStarRatingSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "ProductStarRating")}
-                                    />
-                                )}
-                                {product.conversionErrors?.productsWithOutBuyboxErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Product without Buy Box"
-                                        message={product.conversionErrors?.productsWithOutBuyboxErrorData.Message}
-                                        solutionKey="ProductsWithOutBuybox"
-                                        solutionContent={product.conversionErrors?.productsWithOutBuyboxErrorData.HowToSolve}
-                                        stateValue={productsWithOutBuyboxSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "ProductsWithOutBuybox")}
-                                    />
-                                )}
-                                {product.conversionErrors?.aplusErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Aplus Issue"
-                                        message={product.conversionErrors?.aplusErrorData.Message}
-                                        solutionKey="Aplus"
-                                        solutionContent={product.conversionErrors?.aplusErrorData.HowToSolve}
-                                        stateValue={aplusSolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "Aplus")}
-                                    />
-                                )}
-                                {product.conversionErrors?.brandStoryErrorData?.status === "Error" && (
-                                    <IssueItem
-                                        label="Brand Story Issue"
-                                        message={product.conversionErrors?.brandStoryErrorData.Message}
-                                        solutionKey="BrandStory"
-                                        solutionContent={product.conversionErrors?.brandStoryErrorData.HowToSolve}
-                                        stateValue={brandStorySolution}
-                                        toggleFunc={(val) => openCloseSolutionConversion(val, "BrandStory")}
-                                    />
-                                )}
-                            </ul>
-                        </div>
-                    </div>
-                )}
-
-                {/* Inventory Issues subsection */}
-                {hasAnyInventoryError && (
-                    <div className="bg-[#21262d] rounded border border-[#30363d] overflow-hidden">
-                        <div className="px-2 py-1.5 border-b border-[#30363d] flex items-center gap-2">
-                            <Box className="w-3 h-3 text-green-400 shrink-0" />
-                            <h3 className="text-xs font-semibold text-gray-300">Inventory Issues</h3>
-                            <span className="text-xs text-gray-400">Inventory & warehouse</span>
-                        </div>
-                        <div className="p-2">
-                            <ul className="ml-2 text-xs text-gray-300 space-y-1 mt-1 flex flex-col gap-2">
-                                {/* Inventory Planning Issues */}
-                                {product.inventoryErrors?.inventoryPlanningErrorData && (
-                                    <>
-                                        {product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees?.status === "Error" && (
-                                            <IssueItem
-                                                label="Long-Term Storage Fees"
-                                                message={product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees.Message}
-                                                solutionKey="LongTermStorage"
-                                                solutionContent={product.inventoryErrors?.inventoryPlanningErrorData.longTermStorageFees.HowToSolve}
-                                                stateValue={inventoryPlanningSolution}
-                                                toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
-                                            />
-                                        )}
-                                        {product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable?.status === "Error" && (
-                                            <IssueItem
-                                                label="Unfulfillable Inventory"
-                                                message={product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable.Message}
-                                                solutionKey="Unfulfillable"
-                                                solutionContent={product.inventoryErrors?.inventoryPlanningErrorData.unfulfillable.HowToSolve}
-                                                stateValue={inventoryPlanningSolution}
-                                                toggleFunc={(val) => openCloseSolutionInventory(val, "InventoryPlanning")}
-                                            />
-                                        )}
-                                    </>
-                                )}
-
-                                {/* Stranded Inventory Issues */}
-                                {product.inventoryErrors?.strandedInventoryErrorData && (
-                                    <IssueItem
-                                        label="Stranded Inventory"
-                                        message={product.inventoryErrors?.strandedInventoryErrorData.Message}
-                                        solutionKey="StrandedInventory"
-                                        solutionContent={product.inventoryErrors?.strandedInventoryErrorData.HowToSolve}
-                                        stateValue={strandedInventorySolution}
-                                        toggleFunc={(val) => openCloseSolutionInventory(val, "StrandedInventory")}
-                                    />
-                                )}
-
-                                {/* Inbound Non-Compliance Issues */}
-                                {product.inventoryErrors?.inboundNonComplianceErrorData && (
-                                    <IssueItem
-                                        label="Inbound Non-Compliance"
-                                        message={product.inventoryErrors?.inboundNonComplianceErrorData.Message}
-                                        solutionKey="InboundNonCompliance"
-                                        solutionContent={product.inventoryErrors?.inboundNonComplianceErrorData.HowToSolve}
-                                        stateValue={inboundNonComplianceSolution}
-                                        toggleFunc={(val) => openCloseSolutionInventory(val, "InboundNonCompliance")}
-                                    />
-                                )}
-
-                                {/* Replenishment/Restock Issues - handles single or multiple errors */}
-                                {product.inventoryErrors?.replenishmentErrorData && (
-                                    Array.isArray(product.inventoryErrors.replenishmentErrorData) ? (
-                                        // Multiple errors for same ASIN (different SKUs)
-                                        product.inventoryErrors.replenishmentErrorData.map((error, idx) => {
-                                            const recommendedQty = error.recommendedReplenishmentQty || error.data || null;
-                                            const messageWithQty = recommendedQty !== null && recommendedQty !== undefined && recommendedQty > 0
-                                                ? `${error.Message} <span class="font-bold">Recommended Restock Quantity: ${recommendedQty} units</span>`
-                                                : error.Message;
-                                            return (
-                                                <IssueItem
-                                                    key={`replenishment-${idx}`}
-                                                    label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
-                                                    message={error.Message}
-                                                    recommendedQty={recommendedQty}
-                                                    solutionKey={`Replenishment-${idx}`}
-                                                    solutionContent={error.HowToSolve}
-                                                    stateValue={replenishmentSolution}
-                                                    toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
-                                                />
-                                            );
-                                        })
-                                    ) : (
-                                        // Single error
-                                        (() => {
-                                            const error = product.inventoryErrors.replenishmentErrorData;
-                                            const recommendedQty = error.recommendedReplenishmentQty || error.data || null;
-                                            return (
-                                                <IssueItem
-                                                    label={`Low Inventory Risk ${error.sku ? `(SKU: ${error.sku})` : ''}`}
-                                                    message={error.Message}
-                                                    recommendedQty={recommendedQty}
-                                                    solutionKey="Replenishment"
-                                                    solutionContent={error.HowToSolve}
-                                                    stateValue={replenishmentSolution}
-                                                    toggleFunc={(val) => openCloseSolutionInventory(val, "Replenishment")}
-                                                />
-                                            );
-                                        })()
-                                    )
-                                )}
-                            </ul>
-                        </div>
-                    </div>
-                )}
+                            </AnimatePresence>
                         </div>
                     </div>
                 </motion.div>

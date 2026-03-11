@@ -19,6 +19,7 @@ import {
   Check,
   X as XIcon,
   Ban,
+  Download,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
@@ -136,6 +137,38 @@ const ManageAccounts = () => {
   const openDropdownButtonRef = useRef(null);
   const DROPDOWN_MENU_WIDTH = 160;
   const DROPDOWN_MENU_HEIGHT = 124;
+
+  const handleExportCsv = async () => {
+    try {
+      const response = await axiosInstance.get('/app/auth/admin/accounts/export', {
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      // Try to use filename from Content-Disposition header if present
+      const disposition = response.headers['content-disposition'] || response.headers['Content-Disposition'];
+      let filename = 'accounts-export.csv';
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export accounts CSV:', err);
+      alert('Failed to export accounts CSV. Please try again.');
+    }
+  };
 
   // Helper functions to check API connection status (defined before useMemo)
   const getSpApiConnectionStatus = (user) => {
@@ -901,12 +934,13 @@ const ManageAccounts = () => {
             );
           })()}
 
-          {/* Search and Filter Bar */}
+          {/* Search, Filters, and Actions */}
           {!loading && !error && (
             <>
               <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
                 <div className="flex flex-col gap-4">
-                  <div className="flex flex-col lg:flex-row gap-3">
+                  {/* Top row: search + export button */}
+                  <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
                     <div className="flex-1 relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                       <input
@@ -917,6 +951,18 @@ const ManageAccounts = () => {
                         className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 placeholder-gray-500"
                       />
                     </div>
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export CSV
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col lg:flex-row gap-3">
                     <div className="lg:w-48 relative">
                       <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                       <input

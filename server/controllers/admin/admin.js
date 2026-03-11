@@ -15,6 +15,102 @@ const RazorpayService = require('../../Services/Razorpay/RazorpayService.js');
 const StripeService = require('../../Services/Stripe/StripeService.js');
 
 /**
+ * Export all accounts as CSV
+ * Uses the same aggregation as getAllAccounts to avoid loading heavy fields.
+ * Protected route - requires superAdmin access.
+ */
+const exportAllAccountsCsv = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    // Verify admin exists and has superAdmin access
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        const accounts = await UserModel.aggregate([
+            {
+                $project: {
+                    firstName: 1,
+                    lastName: 1,
+                    email: 1,
+                    phone: 1,
+                    accessType: 1,
+                    packageType: 1,
+                    subscriptionStatus: 1,
+                    createdAt: 1
+                }
+            },
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        const header = [
+            'First Name',
+            'Last Name',
+            'Email',
+            'Phone Number',
+            'Access Type',
+            'Package Type',
+            'Subscription Status',
+            'Created At'
+        ];
+
+        const escapeCsv = (value) => {
+            if (value === null || value === undefined) return '';
+            const str = String(value);
+            if (str.includes('"') || str.includes(',') || str.includes('\n')) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        };
+
+        // Format date as DD/MM/YYYY
+        const formatDateDDMMYYYY = (dateVal) => {
+            if (!dateVal) return '';
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return '';
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
+
+        const rows = accounts.map(acc => [
+            escapeCsv(acc.firstName),
+            escapeCsv(acc.lastName),
+            escapeCsv(acc.email),
+            escapeCsv(acc.phone),
+            escapeCsv(acc.accessType),
+            escapeCsv(acc.packageType),
+            escapeCsv(acc.subscriptionStatus),
+            escapeCsv(formatDateDDMMYYYY(acc.createdAt))
+        ].join(','));
+
+        const csvContent = [header.join(','), ...rows].join('\n');
+
+        const filename = `accounts-export-${new Date().toISOString().split('T')[0]}.csv`;
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.status(200).send(csvContent);
+    } catch (error) {
+        logger.error(new ApiError(500, `Error exporting accounts CSV: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to export accounts CSV"));
+    }
+});
+
+/**
  * SuperAdmin Login Controller
  * Handles authentication for superAdmin users only
  */
@@ -836,5 +932,6 @@ module.exports = {
     deleteUser,
     getPaymentLogs,
     getAllPaymentLogs,
-    cancelUserSubscription
+    cancelUserSubscription,
+    exportAllAccountsCsv
 };

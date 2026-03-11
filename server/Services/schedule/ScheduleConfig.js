@@ -125,16 +125,8 @@ const MON_WED_FRI_FUNCTIONS = {
     }
 };
 
-// Tuesday, Thursday, Saturday, Sunday - MCP BuyBox Data (excludes Mon/Wed/Fri when ads reports run)
-const OTHER_DAYS_FUNCTIONS = {
-    'mcpBuyBoxData': {
-        service: require('../MCP/MCPBuyBoxIntegration.js'),
-        functionName: 'fetchAndStoreBuyBoxData',
-        description: 'MCP BuyBox Data',
-        requiresRefreshToken: true,
-        apiDataKey: 'mcpBuyBoxData'
-    }
-};
+// Previously Tue/Thu/Sat/Sun only — now empty since BuyBox moved to DAILY_FUNCTIONS
+const OTHER_DAYS_FUNCTIONS = {};
 
 // Saturday (weekly) - Reimbursement data fetching and calculation functions
 // Note: Data fetching functions run first to ensure fresh data for calculations
@@ -260,6 +252,14 @@ const DAILY_FUNCTIONS = {
         description: 'Product Issues',
         apiDataKey: 'productIssues',
         isCalculationService: true
+    },
+    // MCP BuyBox Data - fetches yesterday's traffic data daily
+    'mcpBuyBoxData': {
+        service: require('../MCP/MCPBuyBoxIntegration.js'),
+        functionName: 'fetchAndStoreBuyBoxData',
+        description: 'MCP BuyBox Data',
+        requiresRefreshToken: true,
+        apiDataKey: 'mcpBuyBoxData'
     }
 };
 

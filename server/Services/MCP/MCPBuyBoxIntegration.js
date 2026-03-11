@@ -22,8 +22,8 @@ const LoggingHelper = require('../../utils/LoggingHelper.js');
  * @param {string} refreshToken - SP-API refresh token
  * @param {string} region - Region (NA, EU, FE)
  * @param {string} country - Country/Marketplace code (US, CA, UK, etc.)
- * @param {string} startDate - Start date (YYYY-MM-DD), defaults to 30 days ago
- * @param {string} endDate - End date (YYYY-MM-DD), defaults to today
+ * @param {string} startDate - Start date (YYYY-MM-DD), defaults to yesterday
+ * @param {string} endDate - End date (YYYY-MM-DD), defaults to yesterday
  * @returns {Promise<Object>} Result with success status and data
  */
 async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, startDate = null, endDate = null) {
@@ -51,17 +51,13 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             };
         }
 
-        // Calculate date range if not provided (default to last 30 days ending yesterday)
+        // Calculate date range if not provided (default to yesterday only)
         // Amazon data has a 24-hour delay, so we fetch up to yesterday
         const now = new Date();
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1); // Yesterday
         const defaultEndDate = endDate || yesterday.toISOString().split('T')[0];
-        const defaultStartDate = startDate || (() => {
-            const start = new Date(yesterday);
-            start.setDate(start.getDate() - 30); // 30 days before yesterday
-            return start.toISOString().split('T')[0];
-        })();
+        const defaultStartDate = startDate || defaultEndDate; // Same day (yesterday)
 
         logger.info('Building BuyBox query', {
             startDate: defaultStartDate,
