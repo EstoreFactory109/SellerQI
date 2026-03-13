@@ -1,7 +1,6 @@
 const getReport = require('../../Services/Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
 const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredentials.js');
 const getshipment = require('../../Services/Sp_API/shipment.js');
-const puppeteer = require("puppeteer");
 const { generateAccessToken, generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
 const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
 const { getKeywordPerformanceReport } = require('../../Services/AmazonAds/GetWastedSpendKeywords.js');
@@ -66,83 +65,6 @@ const getTotalSales = async (req, res) => {
 }
 
 
-
-
-
-
-const getReviewData = async (req, res) => {
-    try {
-      const url = "https://www.amazon.com/dp/B008KJEYLO"; // replace with your ASIN
-  
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
-  
-      const page = await browser.newPage();
-  
-      await page.setUserAgent(
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110 Safari/537.36"
-      );
-      await page.setExtraHTTPHeaders({ "accept-language": "en-US,en;q=0.9" });
-  
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 0 });
-  
-      // Scroll to load lazy content
-      await page.evaluate(() => window.scrollBy(0, 1500));
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-  
-    
-  
-      // ✅ Get basic product data
-      const productData = await page.evaluate(() => {
-        const title = document.querySelector("#productTitle")?.innerText.trim() || null;
-  
-        const about = Array.from(document.querySelectorAll("#feature-bullets li span"))
-          .map((el) => el.innerText.trim())
-          .filter(Boolean);
-  
-        const description =
-          document.querySelector("#productDescription")?.innerText.trim() ||
-          document.querySelector("#aplus")?.innerText.trim() ||
-          null;
-  
-        const imageData = document.querySelector("#imgTagWrapperId img")?.getAttribute("data-a-dynamic-image");
-        const images = imageData ? Object.keys(JSON.parse(imageData)) : [];
-  
-        const starRatingContent = document.querySelector(".a-icon-alt")?.innerText.trim() || null;
-        const starRating=Number(starRatingContent.split(" ")[0]);
-        const totalRatingsContent = document.querySelector("#acrCustomerReviewText")?.innerText.trim() || null;
-        const totalRatings=Number(totalRatingsContent.split(" ")[0].replace(/,/g, ""))
-        
-        const reviewCountElement =
-          document.querySelectorAll("#cm-cr-dp-review-list > li").length 
-
-          const videoCount=document.querySelector("#videoCount")?.innerText.trim()||null;
-         
-
-        return {
-          title,
-          about,
-          description,
-          images,
-          starRating,
-          totalRatings,
-          reviewCountElement,
-          videoCount
-        };
-      });
-  
-      await browser.close();
-  
-      return res.status(200).json({
-        productData
-      });
-    } catch (error) {
-      console.error("Scraping error:", error);
-      return res.status(500).json({ error: error.message });
-    }
-  };
 
 
 
@@ -2664,7 +2586,7 @@ const testStoreIssuesSummaryAndChunks = async (req, res) => {
 };
 
 module.exports = { testReport, getTotalSales, 
-   getReviewData, testAmazonAds,
+   testAmazonAds,
    testGetCampaigns,testGetAdGroups,
    testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
    testKeywordRecommendationsFromDB,
