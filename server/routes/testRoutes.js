@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {testReport,getTotalSales,getReviewData,testAmazonAds,
+const {testReport,getTotalSales,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
@@ -16,7 +16,6 @@ const { testPauseKeywords, testArchiveKeywords, getPauseArchiveKeywordsInfo } = 
     
 router.post('/testreport',testReport);
 router.get('/totalsales',getTotalSales);
-router.get('/getReviewData',getReviewData)
 router.post('/testAmazonAds',testAmazonAds)
 router.post('/testGetCampaigns',testGetCampaigns)
 router.post('/testGetAdGroups',testGetAdGroups)
