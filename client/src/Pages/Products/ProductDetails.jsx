@@ -15,7 +15,7 @@ import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import 'react-lazy-load-image-component/src/effects/blur.css';
-import { Box, AlertTriangle, TrendingUp, TrendingDown, LineChart as LineChartIcon, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Star, ArrowUpRight, ArrowDownRight, Minus, Eye, ShoppingCart, DollarSign, ImageOff, CheckCircle } from 'lucide-react';
+import { Box, AlertTriangle, TrendingUp, TrendingDown, LineChart as LineChartIcon, Calendar, Download, ChevronDown, FileText, FileSpreadsheet, Star, ArrowUpRight, ArrowDownRight, Minus, Eye, ShoppingCart, DollarSign, ImageOff, CheckCircle, PackageOpen } from 'lucide-react';
 import './ProductDetails.css';
 import { ProductDetailsPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -582,7 +582,13 @@ const Dashboard = () => {
             setHistoryError(null);
             try {
                 const granularity = getGranularity(comparisonType);
-                const response = await axiosInstance.get(`/api/pagewise/product-history/${asin}?granularity=${granularity}`);
+                const params = new URLSearchParams();
+                params.set('granularity', granularity);
+                // For daily charts on the product details page, limit to last 7 days
+                if (granularity === 'daily') {
+                    params.set('limit', '7');
+                }
+                const response = await axiosInstance.get(`/api/pagewise/product-history/${asin}?${params.toString()}`);
                 setHistoryData(response.data.data);
             } catch (error) {
                 console.error('Error fetching product history:', error);
@@ -2157,28 +2163,6 @@ const Dashboard = () => {
                                     </div>
                                 </div>
                             )}
-                            
-                            {/* PPC Issues (per-ASIN, backend-calculated and accurate) - placed after Conversion issues */}
-                            {perAsinCachedData?.ppcIssues && (
-                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
-                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
-                                        <div className="flex items-center gap-2">
-                                            <LineChartIcon className="w-4 h-4 text-blue-400" />
-                                            <div>
-                                                <h3 className="text-sm font-bold text-gray-100">PPC Issues</h3>
-                                                <p className="text-xs text-gray-400">Ad spend, ACOS, low impressions & wasted keywords</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="p-2">
-                                        <ProductPPCIssuesTable 
-                                            data={perAsinCachedData.ppcIssues}
-                                            currency={currency}
-                                            asin={normalizedAsin}
-                                        />
-                                    </div>
-                                </div>
-                            )}
 
                             {inventoryTableRows.length > 0 && (
                                 <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
@@ -2222,6 +2206,28 @@ const Dashboard = () => {
                                                 ))}
                                             </tbody>
                                         </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Keywords Optimization (per-ASIN, backend-calculated and accurate) - placed after Inventory issues */}
+                            {perAsinCachedData?.ppcIssues && (
+                                <div className="bg-[#161b22] rounded border border-[#30363d] overflow-hidden">
+                                    <div className="bg-[#21262d] px-2 py-2 border-b border-[#30363d]">
+                                        <div className="flex items-center gap-2">
+                                            <LineChartIcon className="w-4 h-4 text-blue-400" />
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-100">Keywords Optimization</h3>
+                                                <p className="text-xs text-gray-400">Ad spend, ACOS, low impressions & wasted keywords</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-2">
+                                        <ProductPPCIssuesTable 
+                                            data={perAsinCachedData.ppcIssues}
+                                            currency={currency}
+                                            asin={normalizedAsin}
+                                        />
                                     </div>
                                 </div>
                             )}

@@ -13,17 +13,40 @@ const {
 } = require('./DataKioskService.js');
 const { calculateBuyBoxMetrics } = require('../Calculations/BuyBoxCalculation.js');
 const { saveBuyBoxData, getLatestBuyBoxData } = require('./BuyBoxService.js');
+const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const logger = require('../../utils/Logger.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 
 /**
- * Fetch buybox data from MCP Data Kiosk API and store in database
+ * Generate an array of ISO date strings (YYYY-MM-DD) ending at `endDaysAgo`
+ * and going back `count` days.
+ * E.g. getLastNDates(7, 2) on March 12 → ['2026-03-03','2026-03-04',...,'2026-03-10']
+ */
+function getLastNDates(count, endDaysAgo = 2) {
+    const dates = [];
+    const now = new Date();
+    for (let i = count - 1 + endDaysAgo; i >= endDaysAgo; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        dates.push(d.toISOString().split('T')[0]);
+    }
+    return dates;
+}
+
+/**
+ * Fetch buybox data from MCP Data Kiosk API and store in database.
+ *
+ * First-run detection (only when called without explicit dates):
+ *   If no BuyBoxData with totalProducts > 0 exists for this user+region+country,
+ *   backfills the last 7 days (day-by-day) to bootstrap historical data.
+ *   Subsequent calls fetch a single day (2 days ago).
+ *
  * @param {string} userId - User ID
  * @param {string} refreshToken - SP-API refresh token
  * @param {string} region - Region (NA, EU, FE)
  * @param {string} country - Country/Marketplace code (US, CA, UK, etc.)
- * @param {string} startDate - Start date (YYYY-MM-DD), defaults to yesterday
- * @param {string} endDate - End date (YYYY-MM-DD), defaults to yesterday
+ * @param {string} startDate - Start date (YYYY-MM-DD), null = auto-detect
+ * @param {string} endDate - End date (YYYY-MM-DD), null = auto-detect
  * @returns {Promise<Object>} Result with success status and data
  */
 async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, startDate = null, endDate = null) {
@@ -51,13 +74,34 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             };
         }
 
-        // Calculate date range if not provided (default to yesterday only)
-        // Amazon data has a 24-hour delay, so we fetch up to yesterday
+        // When no explicit dates are provided, auto-detect first-run vs scheduled.
+        // Check if ANY BuyBoxData document exists (even empty ones) to avoid
+        // re-triggering the 7-day backfill on every scheduled run for accounts
+        // that genuinely have zero traffic.
+        if (!startDate && !endDate) {
+            const existingData = await BuyBoxData.findOne({
+                User: userId,
+                region: region,
+                country: country
+            }).lean();
+
+            if (!existingData) {
+                // First fetch ever — backfill last 7 days (day-by-day)
+                logger.info('No existing BuyBox data found — running first-time 7-day backfill', {
+                    userId, region, country
+                });
+                return await backfillBuyBoxData(userId, refreshToken, region, country, 7);
+            }
+        }
+
+        // Regular single-day fetch
+        // Amazon Data Kiosk needs ~24-48h to process Sales & Traffic data,
+        // so we default to 2 days ago (yesterday's data is usually not ready yet)
         const now = new Date();
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1); // Yesterday
-        const defaultEndDate = endDate || yesterday.toISOString().split('T')[0];
-        const defaultStartDate = startDate || defaultEndDate; // Same day (yesterday)
+        const twoDaysAgo = new Date(now);
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        const defaultEndDate = endDate || twoDaysAgo.toISOString().split('T')[0];
+        const defaultStartDate = startDate || defaultEndDate;
 
         logger.info('Building BuyBox query', {
             startDate: defaultStartDate,
@@ -439,6 +483,69 @@ async function fetchAndStoreBuyBoxData(userId, refreshToken, region, country, st
             data: null
         };
     }
+}
+
+/**
+ * Backfill BuyBox data for the last N days (day-by-day).
+ * Used on first integration when no BuyBox data exists yet.
+ * Each day is fetched individually so we get one BuyBoxData document per day.
+ *
+ * @param {string} userId - User ID
+ * @param {string} refreshToken - SP-API refresh token
+ * @param {string} region - Region (NA, EU, FE)
+ * @param {string} country - Country/Marketplace code
+ * @param {number} days - Number of days to backfill (default 7)
+ * @returns {Promise<Object>} Result of the last successful fetch (or error)
+ */
+async function backfillBuyBoxData(userId, refreshToken, region, country, days = 7) {
+    const dates = getLastNDates(days, 2); // ending 2 days ago
+    logger.info('BuyBox backfill starting', { userId, region, country, days, dates });
+
+    let lastSuccessResult = null;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const day of dates) {
+        try {
+            const result = await fetchAndStoreBuyBoxData(userId, refreshToken, region, country, day, day);
+            if (result?.success) {
+                successCount++;
+                lastSuccessResult = result;
+                logger.info('BuyBox backfill day succeeded', {
+                    userId, region, country, day,
+                    totalProducts: result.data?.totalProducts
+                });
+            } else {
+                failCount++;
+                logger.warn('BuyBox backfill day returned failure', {
+                    userId, region, country, day, error: result?.error
+                });
+            }
+        } catch (error) {
+            failCount++;
+            logger.error('BuyBox backfill day threw', {
+                userId, region, country, day, error: error.message
+            });
+        }
+    }
+
+    logger.info('BuyBox backfill completed', {
+        userId, region, country, days,
+        successCount, failCount
+    });
+
+    if (lastSuccessResult) {
+        return {
+            ...lastSuccessResult,
+            message: `Backfill completed: ${successCount}/${days} days succeeded`
+        };
+    }
+
+    return {
+        success: false,
+        error: `Backfill failed: 0/${days} days succeeded`,
+        data: null
+    };
 }
 
 /**

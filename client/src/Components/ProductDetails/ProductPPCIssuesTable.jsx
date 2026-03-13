@@ -581,11 +581,10 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
                 </div>
             )}
 
-            {/* Keyword Tables (Campaign Audit style with pagination) */}
+            {/* Keyword tables (Campaign Audit style with pagination) */}
             {data?.hasAds && (
                 <div className="bg-[#0d1117] border border-[#30363d] rounded-lg overflow-hidden">
                     <div className="px-4 pt-3 border-b border-[#30363d]">
-                        <h3 className="text-sm font-medium text-gray-100 mb-2">Keyword Analysis</h3>
                         <div className="relative">
                             <div
                                 className="flex gap-6 overflow-x-auto pb-2 no-scrollbar"

@@ -211,6 +211,98 @@ function parseAlertsTestBody(req, res) {
 }
 
 /**
+ * POST /api/alerts/testReviewRequests
+ * Body: {
+ *   userId: string,
+ *   country: string,
+ *   region: 'NA' | 'EU' | 'FE',
+ *   marketplaceId: string
+ * }
+ *
+ * Looks up the seller account for the given user/country/region, then runs the
+ * review request flow (Amazon "Request a review" API) for that seller.
+ * Does NOT create an alert document; it only sends review requests and returns
+ * counts of sent / skipped / failed based on the SolicitationLog.
+ */
+const testReviewRequests = asyncHandler(async (req, res) => {
+  const parsed = parseAlertsTestBody(req, res);
+  if (!parsed) return;
+
+  const { userId, country, region } = parsed;
+  const marketplaceId = req.body.marketplaceId;
+
+  if (!marketplaceId) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, 'marketplaceId is required (e.g., A1PA6795UKMFR9 for DE)'));
+  }
+
+  const sellerCentral = await Seller.findOne({ User: userId }).sort({ createdAt: -1 }).lean();
+  if (!sellerCentral?.sellerAccount?.length) {
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, 'Seller account not found for the provided userId'));
+  }
+
+  const sellerAccount = sellerCentral.sellerAccount.find(
+    (acc) => acc.country === country && acc.region === region
+  );
+  if (!sellerAccount) {
+    return res
+      .status(404)
+      .json(
+        new ApiResponse(
+          404,
+          null,
+          'Seller account not found for the provided country/region for this user'
+        )
+      );
+  }
+
+  const clientId = sellerAccount.clientId || sellerAccount.spClientId || process.env.SPAPI_CLIENT_ID;
+  const clientSecret =
+    sellerAccount.clientSecret || sellerAccount.spClientSecret || process.env.SPAPI_CLIENT_SECRET;
+  const refreshToken =
+    sellerAccount.spiRefreshToken || sellerAccount.spRefreshToken || sellerAccount.refreshToken;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return res.status(400).json(
+      new ApiResponse(
+        400,
+        null,
+        'SP-API LWA client credentials or refresh token not found for this seller account. Connect Amazon Seller Central first.'
+      )
+    );
+  }
+
+  const { runReviewRequestFlow } = require('../../Services/Alerts/review/reviewRequestFlow.js');
+
+  try {
+    const result = await runReviewRequestFlow({
+      sellerId: sellerAccount.sellerId || sellerCentral.sellerId || String(userId),
+      clientId,
+      clientSecret,
+      refreshToken,
+      marketplaceId,
+    });
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, result, 'Review request flow completed for this seller'));
+  } catch (error) {
+    return res
+      .status(500)
+      .json(
+        new ApiResponse(
+          500,
+          null,
+          error?.message || 'Failed to run review request flow for this seller'
+        )
+      );
+  }
+});
+
+/**
  * POST /api/alerts/test
  * Body: { userId, country, region }
  * Runs product content + negative reviews and buybox missing alerts. Each service stores alerts and sends email when it creates alerts.
@@ -693,4 +785,5 @@ module.exports = {
   testStrandedInventoryAlerts,
   testInboundShipmentAlerts,
   testInventoryAlerts,
+  testReviewRequests,
 };

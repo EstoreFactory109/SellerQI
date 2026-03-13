@@ -37,6 +37,7 @@ const {
   testStrandedInventoryAlerts,
   testInboundShipmentAlerts,
   testInventoryAlerts,
+  testReviewRequests,
 } = require('../controllers/alerts/AlertsController.js');
 const { unsubscribeAlertsByEmail } = require('../controllers/alerts/AlertsSubscriptionController.js');
 
@@ -58,5 +59,6 @@ router.post('/testLowInventory', testLowInventoryAlerts);
 router.post('/testStrandedInventory', testStrandedInventoryAlerts);
 router.post('/testInboundShipment', testInboundShipmentAlerts);
 router.post('/testInventoryAlerts', testInventoryAlerts);
+router.post('/testReviewRequests', testReviewRequests);
 
 module.exports = router;
