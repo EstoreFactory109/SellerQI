@@ -176,25 +176,51 @@ const FetchingTokens = () => {
         console.log("Authorization Code:", amazonAdsAuthCode);
         
 
-        // Step 1: Generate and save the ads tokens
-        const response = await axiosInstance.post('/app/token/generateAdsTokens', {
-          authCode: amazonAdsAuthCode,
-        });
+        // Check if this is an agency flow (context stored before OAuth redirect)
+        const agencyAdsConnectRaw = localStorage.getItem('agencyAdsConnect');
+        const agencyAdsConnect = agencyAdsConnectRaw ? JSON.parse(agencyAdsConnectRaw) : null;
+
+        let response;
+
+        if (agencyAdsConnect && agencyAdsConnect.clientId) {
+          // Agency flow: use the agency-safe endpoint that authenticates via AdminToken
+          console.log("Agency flow detected — using generateAdsTokensForClient");
+          response = await axiosInstance.post('/app/token/generateAdsTokensForClient', {
+            authCode: amazonAdsAuthCode,
+            clientId: agencyAdsConnect.clientId,
+            country: agencyAdsConnect.country,
+            region: agencyAdsConnect.region,
+          });
+        } else {
+          // Normal pro/individual flow — unchanged
+          response = await axiosInstance.post('/app/token/generateAdsTokens', {
+            authCode: amazonAdsAuthCode,
+          });
+        }
 
         console.log("Token generation response:", response);
         
         if (response.status === 200 && response.data) {
           console.log("Amazon Ads tokens generated and saved successfully");
           
-          // Clear the amazonAdsLoading flag
+          // Clear the amazonAdsLoading flag and agency context
           localStorage.removeItem('amazonAdsLoading');
+
+          if (agencyAdsConnect) {
+            localStorage.removeItem('agencyAdsConnect');
+
+            // Agency flow: redirect back to the agency client's profile-selection page
+            const agencyRegion = agencyAdsConnect.region || 'NA';
+            const agencyBasePath = `/agency/${encodeURIComponent(agencyAdsConnect.agencyName)}/client/${agencyAdsConnect.clientId}`;
+            navigate(`${agencyBasePath}/profile-selection?region=${agencyRegion}`);
+            return;
+          }
           
           // Get the stored marketplace info to determine region
           const selectedMarketplace = JSON.parse(localStorage.getItem('selectedMarketplace') || '{}');
           const region = selectedMarketplace.region || 'NA';
           
           // Step 2: Pre-fetch the profile IDs before redirecting
-          // This ensures data is loaded before the user sees the page
           console.log("Fetching profile IDs...");
           let profileData = null;
           
@@ -217,7 +243,6 @@ const FetchingTokens = () => {
             }
           } catch (profileError) {
             console.warn("Could not pre-fetch profile IDs:", profileError);
-            // Continue anyway - the profile selection page will retry
           }
           
           // Step 3: Navigate to profile selection page with pre-fetched data

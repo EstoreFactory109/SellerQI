@@ -49,9 +49,10 @@ axiosInstance.interceptors.response.use(
     // Skip refresh for refresh-token endpoint to avoid infinite loop
     const isRefreshRequest = requestUrl.includes('/app/refresh-token');
     
-    // Check if we're already on connect-accounts page
+    // Check if we're on pages that handle their own auth errors
     const isFromConnectAccounts = currentPath.includes('/connect-accounts') || 
-                                  currentPath.includes('/connect-to-amazon');
+                                  currentPath.includes('/connect-to-amazon') ||
+                                  currentPath.includes('/auth/callback');
     
     // Handle 401 Unauthorized errors - try to refresh token first
     if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !originalRequest._retry) {

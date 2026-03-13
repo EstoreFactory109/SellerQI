@@ -460,6 +460,18 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       region: marketplaceConfig.region,
       adsUrl: marketplaceConfig.adsUrl
     }));
+
+    // Store agency context so the OAuth callback can use the agency-safe endpoint
+    if (isAgencyContext && clientId) {
+      localStorage.setItem('agencyAdsConnect', JSON.stringify({
+        clientId,
+        country: countryCode || 'US',
+        region: marketplaceConfig.region,
+        agencyName,
+      }));
+    } else {
+      localStorage.removeItem('agencyAdsConnect');
+    }
     
     try {
       // Get the ads client ID from environment variable

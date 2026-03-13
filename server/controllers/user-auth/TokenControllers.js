@@ -379,6 +379,74 @@ const generateAmazonAdsTokens = asyncHandler(async (req, res) => {
     }
 })
 
+/**
+ * Agency-safe version of generateAmazonAdsTokens.
+ * Authenticates via AdminToken (agency owner) instead of IBEXAccessToken/IBEXLocationToken.
+ * Accepts clientId, country, and region explicitly in the request body.
+ * Pro user flow is completely untouched — this endpoint is agency-only.
+ */
+const generateAdsTokensForClient = asyncHandler(async (req, res) => {
+    const agencyOwnerId = req.adminId;
+    const { authCode, clientId, country, region } = req.body;
+
+    if (!agencyOwnerId) {
+        return res.status(401).json(new ApiResponse(401, "", "AdminToken is required for this endpoint"));
+    }
+    if (!authCode) {
+        return res.status(400).json(new ApiResponse(400, "", "Authorization code is missing"));
+    }
+    if (!clientId || !country || !region) {
+        return res.status(400).json(new ApiResponse(400, "", "clientId, country, and region are required"));
+    }
+
+    const UserModel = require('../../models/user-auth/userModel.js');
+
+    const agencyOwner = await UserModel.findById(agencyOwnerId);
+    if (!agencyOwner || agencyOwner.packageType !== 'AGENCY') {
+        return res.status(403).json(new ApiResponse(403, "", "Only agency accounts can use this endpoint"));
+    }
+
+    const client = await UserModel.findOne({
+        _id: clientId,
+        $or: [{ agencyId: agencyOwnerId }, { adminId: agencyOwnerId }]
+    });
+    if (!client) {
+        return res.status(404).json(new ApiResponse(404, "", "Client not found or does not belong to your agency"));
+    }
+
+    try {
+        const tokenData = await generateAdsRefreshToken(authCode, region);
+        if (!tokenData || !tokenData.refreshToken) {
+            logger.error("No refresh token received from generateAdsRefreshToken (agency flow)");
+            return res.status(500).json(new ApiResponse(500, "", "Failed to generate ads refresh token"));
+        }
+
+        const sellerCentral = await Seller.findOne({ User: clientId }).sort({ createdAt: -1 });
+        if (!sellerCentral) {
+            return res.status(404).json(new ApiResponse(404, "", "SellerCentral not found for this client"));
+        }
+
+        const sellerAccount = sellerCentral.sellerAccount.find(
+            account => account.country === country && account.region === region
+        );
+        if (!sellerAccount) {
+            return res.status(404).json(new ApiResponse(404, "", "Seller account not found for the specified region and country"));
+        }
+
+        sellerAccount.adsRefreshToken = tokenData.refreshToken;
+        await sellerCentral.save();
+
+        logger.info(`Agency ${agencyOwnerId} connected Ads for client ${clientId} (${country}/${region})`);
+        return res.status(200).json(new ApiResponse(200, sellerAccount, "Amazon Ads tokens generated successfully"));
+    } catch (error) {
+        logger.error(`Error in generateAdsTokensForClient: ${error.message}`);
+        if (error.statusCode) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, "", error.message));
+        }
+        return res.status(500).json(new ApiResponse(500, "", `Failed to generate ads refresh token: ${error.message}`));
+    }
+});
+
 // Delete only Amazon Ads refresh token for the current location
 const deleteAmazonAdsRefreshToken = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -426,6 +494,7 @@ module.exports = {
     addNewSellerCentralAccount,
     saveDetailsOfOtherAccounts,
     generateAmazonAdsTokens,
+    generateAdsTokensForClient,
     deleteAmazonAdsRefreshToken,
     deleteAllSellerRefreshTokens
 }

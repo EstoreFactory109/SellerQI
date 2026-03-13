@@ -2,6 +2,7 @@ const {
   generateSPAPITokens,
   SaveAllDetails,
   generateAmazonAdsTokens,
+  generateAdsTokensForClient,
   saveDetailsOfOtherAccounts,
   deleteAmazonAdsRefreshToken,
   deleteAllSellerRefreshTokens
@@ -10,6 +11,7 @@ const {
   getSellerAccountsForUser,
 } = require('../controllers/user-auth/AccountIntegrationController.js');
 const auth =require('../middlewares/Auth/auth.js')
+const agencyAuth = require('../middlewares/Auth/agencyAuth.js');
 const {getLocation}=require('../middlewares/Auth/getLocation.js');
 const express=require('express');
 const router=express.Router();
@@ -17,6 +19,7 @@ const router=express.Router();
 router.post('/generateSPAPITokens', auth, getLocation, generateSPAPITokens);
 router.post('/SaveAllDetails', auth, SaveAllDetails);
 router.post('/generateAdsTokens', auth, getLocation, generateAmazonAdsTokens);
+router.post('/generateAdsTokensForClient', agencyAuth, generateAdsTokensForClient);
 router.post('/saveDetailsOfOtherAccounts', auth, getLocation, saveDetailsOfOtherAccounts);
 
 // Fresh seller accounts for Account Integrations page (no cached dashboard data)
