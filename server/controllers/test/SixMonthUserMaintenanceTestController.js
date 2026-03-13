@@ -8,6 +8,7 @@ const {
     sendSixMonthAccountWarning,
 } = require('../../Services/Email/SendSixMonthAccountWarning.js');
 const { sendAccountSuspendedEmail } = require('../../Services/Email/SendAccountSuspendedEmail.js');
+const { resolveRecipientEmail } = require('../../Services/Email/resolveRecipientEmail.js');
 
 const {
     isUserConnectedToSpApiOrAds,
@@ -167,7 +168,8 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
     let suspensionEmailError = null;
 
     if (matchesServiceCriteria || force) {
-        const userEmail = user.email;
+        // Resolve agency email before deletion (user must still exist in DB)
+        const userEmail = await resolveRecipientEmail(user.email, user._id);
         const userFirstName = user.firstName;
         const userLastName = user.lastName;
         const userIdStr = user._id.toString();

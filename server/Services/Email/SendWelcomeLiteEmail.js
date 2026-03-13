@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -12,6 +13,8 @@ const isValidEmail = (email) => {
 };
 
 const sendWelcomeLiteEmail = async (email, firstName, connectAccountUrl, userId = null) => {
+    email = await resolveRecipientEmail(email, userId);
+
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
     const adminEmail = process.env.ADMIN_EMAIL_ID 
         ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()

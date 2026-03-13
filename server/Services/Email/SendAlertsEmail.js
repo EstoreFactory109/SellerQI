@@ -11,6 +11,7 @@ const path = require('path');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
 const User = require('../../models/user-auth/userModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 
 const ALERTS_EMAIL_TEMPLATE_PATH = path.join(__dirname, '..', '..', 'Emails', 'AlertsEmailTemplate.html');
 const DEFAULT_ALERTS_URL =
@@ -169,6 +170,8 @@ function buildSummaryRowsHtml(payload) {
  * @returns {Promise<string|false>} messageId on success, false on failure
  */
 async function sendAlertsEmail(email, firstName, alertsPayload, alertsDashboardUrl = DEFAULT_ALERTS_URL, userId = null, options = {}) {
+  email = await resolveRecipientEmail(email, userId);
+
   // Only send to users who are subscribed to alerts (when userId is provided we check; missing/true = send)
   if (userId) {
     const user = await User.findById(userId).select('subscribedToAlerts').lean();

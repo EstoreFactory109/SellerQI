@@ -9,7 +9,7 @@
  * - Friday (5)
  *
  * Responsibilities:
- * - Iterate all verified users who are subscribedToAlerts !== false
+ * - Iterate all verified users (alerts are always stored; emails only for subscribed users)
  * - For each seller account (country/region), run ALL alert services:
  *   - Product content change + negative reviews + A+ missing (detectAndStoreAlerts)
  *   - Buy box missing (detectAndStoreBuyBoxMissingAlerts)
@@ -149,7 +149,8 @@ async function processAccountAlerts({ user, userId, email, firstName, account })
 
   const totalAlerts = productContentCount + negativeReviewsCount + aplusCount + buyBoxCount + lowCount + strandedCount + inboundCount + salesDropCount;
 
-  if (totalAlerts > 0 && email) {
+  const isSubscribed = user.subscribedToAlerts !== false;
+  if (totalAlerts > 0 && email && isSubscribed) {
     try {
       await sendAlertsEmail(
         email,
@@ -182,16 +183,16 @@ async function processAllUsersAlerts() {
 
   await dbConnect();
 
-  // Only run for subscribed users (missing field defaults true; migration backfills it).
-  const subscribedUsers = await User.find({ isVerified: true, subscribedToAlerts: { $ne: false } })
+  // Run for ALL verified users — alerts are always stored in the DB.
+  // subscribedToAlerts only controls whether the summary email is sent.
+  const allVerifiedUsers = await User.find({ isVerified: true })
     .select('_id email firstName subscribedToAlerts')
     .lean();
 
-  const userById = new Map(subscribedUsers.map((u) => [String(u._id), u]));
-  logger.info('[AlertsWorker] Subscribed verified users loaded', { count: subscribedUsers.length });
+  const userById = new Map(allVerifiedUsers.map((u) => [String(u._id), u]));
+  logger.info('[AlertsWorker] Verified users loaded', { count: allVerifiedUsers.length });
 
-  // Load sellers for those users only
-  const sellers = await Seller.find({ User: { $in: subscribedUsers.map((u) => u._id) } })
+  const sellers = await Seller.find({ User: { $in: allVerifiedUsers.map((u) => u._id) } })
     .select('User sellerAccount')
     .lean();
 
@@ -284,12 +285,15 @@ async function manualRun() {
 if (require.main === module) {
   (async () => {
     try {
-      logger.info('[AlertsWorker] Starting alerts worker...');
-      await dbConnect();
-      setupAlertsCron();
-      logger.info('[AlertsWorker] Alerts worker is running');
+      // Prevent unhandled rejections from killing the long-running cron process
+      process.on('unhandledRejection', (reason) => {
+        logger.error('[AlertsWorker] Unhandled rejection (non-fatal)', { error: reason?.message || reason });
+      });
 
-      // Graceful shutdown handlers
+      process.on('uncaughtException', (err) => {
+        logger.error('[AlertsWorker] Uncaught exception', { error: err?.message, stack: err?.stack });
+      });
+
       process.on('SIGINT', () => {
         logger.info('[AlertsWorker] Received SIGINT. Shutting down gracefully...');
         process.exit(0);
@@ -299,6 +303,11 @@ if (require.main === module) {
         logger.info('[AlertsWorker] Received SIGTERM. Shutting down gracefully...');
         process.exit(0);
       });
+
+      logger.info('[AlertsWorker] Starting alerts worker...');
+      await dbConnect();
+      setupAlertsCron();
+      logger.info('[AlertsWorker] Alerts worker is running — waiting for cron to fire');
     } catch (err) {
       logger.error('[AlertsWorker] Failed to start', { error: err?.message, stack: err?.stack });
       process.exit(1);

@@ -4,6 +4,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const { sendSixMonthAccountWarning } = require('../Email/SendSixMonthAccountWarning.js');
 const { sendAccountSuspendedEmail } = require('../Email/SendAccountSuspendedEmail.js');
+const { resolveRecipientEmail } = require('../Email/resolveRecipientEmail.js');
 const { deleteUserById } = require('../User/deleteUserService.js');
 const { enqueueFullUserDataPurge } = require('./deleteUserQueue.js');
 
@@ -206,10 +207,11 @@ async function deleteStaleLiteUsersWithoutIntegration() {
             eligible++;
 
             // Capture email/name before deletion (for suspension email after)
-            const userEmail = user.email;
             const userFirstName = user.firstName;
             const userLastName = user.lastName;
             const userIdStr = user._id.toString();
+            // Resolve agency email before deletion (user must still exist in DB)
+            const userEmail = await resolveRecipientEmail(user.email, user._id);
 
             // Suspend: delete User + Seller immediately (no waiting)
             await deleteUserById(user._id);

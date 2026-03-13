@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +11,8 @@ let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..'
 
 
 const sendWeeklyEmailToUser = async (firstName,Email,marketPlace,brandName,healthScore,rankingErrors,conversionErrors,accountErrors,profitabilityErrors,sponsoredAdsErrors,inventoryErrors,totalIssues,totalActiveProducts, userId = null) => {
+    Email = await resolveRecipientEmail(Email, userId);
+
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
     const adminEmail = process.env.ADMIN_EMAIL_ID 
         ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()

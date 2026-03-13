@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -20,6 +21,8 @@ const trialExpirationTemplate = fs.readFileSync(
  * @returns {Promise<string|boolean>} - Message ID on success, false on failure
  */
 const sendTrialExpirationReminder = async (email, firstName, lastName, trialEndsDate, userId = null) => {
+    email = await resolveRecipientEmail(email, userId);
+
     // Calculate days remaining
     const today = new Date();
     today.setHours(0, 0, 0, 0);

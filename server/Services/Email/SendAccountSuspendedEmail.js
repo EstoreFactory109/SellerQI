@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 
 const accountSuspendedTemplate = fs.readFileSync(
     path.join(__dirname, '..', '..', 'Emails', 'AccountSuspendedTemplate.html'),
@@ -20,7 +21,9 @@ const accountSuspendedTemplate = fs.readFileSync(
  * @param {string} params.lastName
  * @returns {Promise<{ success: boolean, messageId?: string, error?: string }>}
  */
-const sendAccountSuspendedEmail = async ({ email, firstName, lastName }) => {
+const sendAccountSuspendedEmail = async ({ email, firstName, lastName, userId = null }) => {
+    email = await resolveRecipientEmail(email, userId);
+
     const userName = `${firstName || ''} ${lastName || ''}`.trim() || 'there';
 
     const signupUrl = process.env.SIGNUP_URL || process.env.LOGIN_URL || 'https://members.sellerqi.com/';

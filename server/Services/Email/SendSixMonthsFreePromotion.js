@@ -9,6 +9,7 @@ const path = require('path');
 const dbConnect = require('../../config/dbConn.js');
 const User = require('../../models/user-auth/userModel.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 
 // Read the email template
 const sixMonthsFreeTemplate = fs.readFileSync(
@@ -51,10 +52,12 @@ const sendSixMonthsFreePromotion = async () => {
         // Send email to each user
         for (const user of users) {
             try {
+                const recipientEmail = await resolveRecipientEmail(user.email, user._id);
+
                 // Create email log entry
                 const emailLog = new EmailLogs({
                     emailType: 'OTHER',
-                    receiverEmail: user.email,
+                    receiverEmail: recipientEmail,
                     receiverId: user._id,
                     status: 'PENDING',
                     subject: "🎉 6 Months Free - Our Gift to You!",
@@ -79,14 +82,14 @@ const sendSixMonthsFreePromotion = async () => {
                 // Send email
                 const info = await transporter.sendMail({
                     from: 'support@sellerqi.com',
-                    to: user.email,
+                    to: recipientEmail,
                     subject: "🎉 6 Months Free - Our Gift to You!",
                     html: emailContent,
                 });
 
                 // Mark email as sent
                 await emailLog.markAsSent();
-                console.log(`✅ Email sent successfully to ${user.email} (${customerName})`);
+                console.log(`✅ Email sent successfully to ${recipientEmail} (${customerName})`);
                 successCount++;
 
             } catch (error) {
@@ -96,8 +99,8 @@ const sendSixMonthsFreePromotion = async () => {
                 // Mark email as failed if log exists
                 try {
                     const emailLog = await EmailLogs.findOne({
-                        receiverEmail: user.email,
-                        emailType: 'SIX_MONTHS_FREE_PROMOTION',
+                        receiverId: user._id,
+                        emailType: 'OTHER',
                         status: 'PENDING'
                     });
                     if (emailLog) {

@@ -76,6 +76,7 @@ const AdminEmailLogs = () => {
               <option value="USER_REGISTERED">User Registered</option>
               <option value="ANALYSIS_READY">Analysis Ready</option>
               <option value="WEEKLY_REPORT">Weekly Report</option>
+              <option value="ALERTS">Alerts</option>
               <option value="OTHER">Other</option>
             </select>
             <select

@@ -3,6 +3,7 @@ const dns = require('dns');
 const { promisify } = require('util');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +14,8 @@ let ReminderEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..', 'Ema
 
 
 const RemiderEmail = async (Email, days, userName, upgradeUrl, userId = null) => {
+    Email = await resolveRecipientEmail(Email, userId);
+
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
     const adminEmail = process.env.ADMIN_EMAIL_ID 
         ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()

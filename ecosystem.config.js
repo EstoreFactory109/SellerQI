@@ -168,7 +168,7 @@ module.exports = {
             }
         },
         {
-            // Alerts Worker - Runs on Sunday and Wednesday at 06:00 UTC (cron: 0 6 * * 0,3)
+            // Alerts Worker - Runs Mon/Wed/Fri at 06:00 UTC (cron: 0 6 * * 1,3,5)
             // Runs all alert services and sends a single summary email per subscribed user
             name: 'alerts-worker',
             script: './server/Services/BackgroundJobs/alertsWorker.js',
@@ -177,17 +177,17 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 TIMEZONE: process.env.TIMEZONE || 'UTC',
-                ALERTS_WORKER_CRON: process.env.ALERTS_WORKER_CRON || '0 6 * * 0,3',
+                ALERTS_WORKER_CRON: process.env.ALERTS_WORKER_CRON || '0 6 * * 1,3,5',
             },
             error_file: './logs/pm2-alerts-worker-error.log',
             out_file: './logs/pm2-alerts-worker-out.log',
             log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
             merge_logs: true,
             autorestart: true,
-            max_restarts: 5,
+            max_restarts: 50,
+            restart_delay: 5000,
             min_uptime: '10s',
             max_memory_restart: '768M',
-            // Graceful shutdown timeout (30 seconds for cron-based worker)
             kill_timeout: 30 * 1000,
             watch: false,
             env_production: {

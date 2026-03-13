@@ -1,168 +1,29 @@
 /**
  * OptimizationService.js
- * 
+ *
  * Self-contained service for the Optimization tab.
- * Fetches all required data and generates recommendations in the backend.
- * Does NOT depend on frontend state or other heavy services like Analyse/analyseData.
- * 
+ * Fetches all required data, computes WoW comparison for trend scenarios,
+ * and generates scenario-based recommendations via ScenarioRecommendationService.
+ *
  * Data sources:
  * - Seller model: Active products (asin, sku, name)
  * - BuyBoxData: Sessions, pageViews, conversionRate
- * - EconomicsMetrics: Sales, grossProfit, fees (embedded or AsinWiseSalesForBigAccounts)
+ * - EconomicsMetrics: Sales, grossProfit, fees
  * - ProductWiseSponsoredAds: PPC spend, ACOS
+ * - ProductPerformanceComparisonService: WoW trend data
  */
 
 const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const mongoose = require('mongoose');
 const { aggregateProductPerformance, enrichProductsWithPerformance } = require('./ProductPerformanceService.js');
+const { evaluateScenarios, buildMetrics } = require('./ScenarioRecommendationService.js');
+const { fetchAndEnrichWithComparison } = require('./ProductPerformanceComparisonService.js');
 
 /**
- * Generate recommendations for a single product based on profitability and performance data
- * 
- * @param {Object} profitability - Profitability metrics (sales, grossProfit, ads, amzFee, etc.)
- * @param {Object} performance - Performance metrics (sessions, conversionRate, acos, etc.)
- * @param {string} currency - Currency symbol (default: '$')
- * @returns {Array} Array of recommendation objects
- */
-const generateProductRecommendations = (profitability, performance, currency = '$') => {
-    const recommendations = [];
-    
-    const sales = profitability?.sales || 0;
-    const grossProfit = profitability?.grossProfit || 0;
-    const adsSpend = profitability?.ads || 0;
-    const amzFee = profitability?.amzFee || 0;
-    const profitMargin = sales > 0 ? (grossProfit / sales) * 100 : 0;
-    const acos = (adsSpend > 0 && sales > 0) ? (adsSpend / sales) * 100 : 0;
-    
-    // Profitability-based recommendations
-    if (profitability) {
-        if (grossProfit < 0) {
-            recommendations.push({
-                shortLabel: 'Review Profitability',
-                message: 'Product is operating at a loss. Consider reviewing pricing, reducing PPC spend, or negotiating better costs.',
-                reason: `Gross profit is ${currency}${grossProfit.toFixed(2)} (loss)`
-            });
-        } else if (profitMargin < 10 && sales > 0) {
-            recommendations.push({
-                shortLabel: 'Low Profit Margin',
-                message: 'Product has low profit margin. Consider increasing price or reducing costs.',
-                reason: `Profit margin is ${profitMargin.toFixed(1)}% (below 10% threshold)`
-            });
-        }
-        
-        if (adsSpend > 0 && acos > 30) {
-            recommendations.push({
-                shortLabel: 'Optimize PPC',
-                message: 'Advertising cost of sale is high. Review and optimize keyword targeting and bids.',
-                reason: `ACOS is ${acos.toFixed(1)}% (above 30% threshold)`
-            });
-        }
-        
-        if (adsSpend > grossProfit && grossProfit > 0) {
-            recommendations.push({
-                shortLabel: 'Reduce PPC Spend',
-                message: 'PPC spend is consuming most of the profit margin. Consider reducing ad spend or improving conversion.',
-                reason: `PPC spend (${currency}${adsSpend.toFixed(2)}) exceeds gross profit (${currency}${grossProfit.toFixed(2)})`
-            });
-        }
-        
-        if (amzFee > 0 && sales > 0) {
-            const feePercentage = (amzFee / sales) * 100;
-            if (feePercentage > 40) {
-                recommendations.push({
-                    shortLabel: 'Review Fees',
-                    message: 'Amazon fees are consuming a large portion of revenue. Consider FBA alternatives or product bundling.',
-                    reason: `Amazon fees are ${feePercentage.toFixed(1)}% of sales`
-                });
-            }
-        }
-    }
-    
-    // Performance-based recommendations
-    if (performance?.conversionRate !== undefined && performance.conversionRate < 5 && performance.conversionRate > 0) {
-        recommendations.push({
-            shortLabel: 'Improve Conversion',
-            message: 'Conversion rate is below average. Optimize listing images, description, and reviews.',
-            reason: `Conversion rate is ${performance.conversionRate.toFixed(1)}% (below 5% threshold)`
-        });
-    }
-    
-    // ACOS from performance (fallback if profitability ACOS wasn't checked)
-    if (!profitability && performance?.acos !== undefined && performance.acos > 30) {
-        recommendations.push({
-            shortLabel: 'Optimize PPC',
-            message: 'Advertising cost of sale is high. Review and optimize keyword targeting and bids.',
-            reason: `ACOS is ${performance.acos.toFixed(1)}% (above 30% threshold)`
-        });
-    }
-    
-    // Low sessions recommendation
-    if (performance?.sessions !== undefined && performance.sessions < 50 && performance.sessions > 0) {
-        recommendations.push({
-            shortLabel: 'Increase Traffic',
-            message: 'Product has low traffic. Consider increasing PPC spend or improving keywords.',
-            reason: `Only ${performance.sessions} sessions in the period`
-        });
-    }
-    
-    return recommendations;
-};
-
-/**
- * Build performance map from BuyBox and SponsoredAds data
- * 
- * @param {Object} buyBoxData - BuyBox data document
- * @param {Array} sponsoredAdsArray - Array of sponsored ads data
- * @returns {Map} Map of ASIN -> performance metrics
- */
-const buildPerformanceMap = (buyBoxData, sponsoredAdsArray) => {
-    const performanceMap = new Map();
-    
-    // Extract BuyBox metrics (sessions, pageViews, conversionRate)
-    const buyBoxItems = buyBoxData?.Items || buyBoxData?.items || [];
-    buyBoxItems.forEach(item => {
-        const asin = (item.asin || item.childAsin || '').trim();
-        if (!asin) return;
-        
-        const sessions = item.sessions || 0;
-        const pageViews = item.pageViews || item.browserPageViews || 0;
-        const unitsSold = item.unitsOrdered || item.unitsSold || 0;
-        const conversionRate = sessions > 0 ? (unitsSold / sessions) * 100 : 0;
-        
-        performanceMap.set(asin, {
-            sessions,
-            pageViews,
-            unitsSold,
-            conversionRate
-        });
-    });
-    
-    // Merge sponsored ads metrics (ppcSpend, ppcSales, acos)
-    sponsoredAdsArray.forEach(item => {
-        const asin = (item.asin || item.advertisedAsin || '').trim();
-        if (!asin) return;
-        
-        const ppcSpend = item.spend || item.cost || 0;
-        const ppcSales = item.sales || item.attributedSales || 0;
-        const acos = ppcSales > 0 ? (ppcSpend / ppcSales) * 100 : 0;
-        
-        const existing = performanceMap.get(asin) || {};
-        performanceMap.set(asin, {
-            ...existing,
-            ppcSpend,
-            ppcSales,
-            acos
-        });
-    });
-    
-    return performanceMap;
-};
-
-/**
- * Build profitability map from Economics data
- * Handles both standard accounts (embedded asinWiseSales) and big accounts (separate collection)
- * 
+ * Build profitability map from Economics data.
+ * Handles both standard accounts (embedded asinWiseSales) and big accounts (separate collection).
+ *
  * @param {Object} economicsData - Economics metrics document
  * @returns {Promise<Map>} Map of ASIN -> profitability metrics
  */
@@ -299,24 +160,45 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
     
     // Step 6: Enrich products with performance using the existing service
     const productsWithPerformance = enrichProductsWithPerformance(allProducts, performanceMap);
-    
-    // Step 7: Add profitability and generate recommendations for each product
-    const enrichedProducts = productsWithPerformance.map(product => {
+
+    // Step 6b: Fetch WoW comparison data for trend-based scenarios
+    let productsWithComparison = productsWithPerformance;
+    try {
+        const compResult = await fetchAndEnrichWithComparison({
+            userId,
+            region,
+            country,
+            comparisonType: 'wow',
+            currentBuyBoxData: buyBoxData,
+            currentEconomicsData: economicsData,
+            products: productsWithPerformance,
+        });
+        productsWithComparison = compResult.products;
+        logger.info(`[OptimizationService] Comparison enrichment done — ${compResult.comparisonMeta?.hasComparison ? 'with' : 'without'} trend data`);
+    } catch (compErr) {
+        logger.warn(`[OptimizationService] Comparison fetch failed, continuing without trend data: ${compErr.message}`);
+    }
+
+    // Step 7: Evaluate scenario-based recommendations for each product
+    const enrichedProducts = productsWithComparison.map(product => {
         const asin = (product.asin || '').trim();
         const profitability = profitabilityMap.get(asin) || null;
         const performance = product.performance || {};
-        const recommendations = generateProductRecommendations(profitability, performance, currency);
-        
+        const comparison = product.comparison || null;
+
+        const metrics = buildMetrics({ performance, profitability });
+        const recommendations = evaluateScenarios(metrics, comparison);
+
         return {
             asin: product.asin,
             sku: product.sku,
             name: product.name || '',
             title: product.name || '',
             status: product.status || 'Active',
-            performance: performance,
-            profitability: profitability,
-            recommendations: recommendations,
-            primaryRecommendation: recommendations.length > 0 ? recommendations[0] : null
+            performance,
+            profitability,
+            recommendations,
+            primaryRecommendation: recommendations.length > 0 ? recommendations[0] : null,
         };
     });
     
@@ -345,7 +227,5 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
 
 module.exports = {
     getOptimizationProducts,
-    generateProductRecommendations,
-    buildPerformanceMap,
-    buildProfitabilityMap
+    buildProfitabilityMap,
 };

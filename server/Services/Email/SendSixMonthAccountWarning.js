@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
+const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 
 // HTML template for six-month warning
 const sixMonthWarningTemplate = fs.readFileSync(
@@ -28,6 +29,8 @@ const sixMonthWarningTemplate = fs.readFileSync(
  * @returns {Promise<{ success: boolean, messageId?: string, error?: string }>}
  */
 const sendSixMonthAccountWarning = async ({ email, firstName, lastName, userId = null, registeredAt }) => {
+    email = await resolveRecipientEmail(email, userId);
+
     const userName = `${firstName} ${lastName}`.trim();
 
     // Construct URLs from env or use sensible fallbacks
