@@ -52,7 +52,8 @@ axiosInstance.interceptors.response.use(
     // Check if we're on pages that handle their own auth errors
     const isFromConnectAccounts = currentPath.includes('/connect-accounts') || 
                                   currentPath.includes('/connect-to-amazon') ||
-                                  currentPath.includes('/auth/callback');
+                                  currentPath.includes('/auth/callback') ||
+                                  currentPath.startsWith('/agency/');
     
     // Handle 401 Unauthorized errors - try to refresh token first
     if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !originalRequest._retry) {
@@ -88,6 +89,15 @@ axiosInstance.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError);
         isRefreshing = false;
+
+        // Agency routes: redirect to agency-login instead of regular login
+        const isAgencyRoute = currentPath.startsWith('/agency/') || currentPath.startsWith('/manage-agency');
+        if (isAgencyRoute) {
+          if (currentPath !== '/agency-login') {
+            window.location.href = '/agency-login';
+          }
+          return Promise.reject(refreshError);
+        }
 
         // If this was an admin route, clear admin auth and redirect to admin login to avoid redirect loop
         const isAdminRoute = currentPath.startsWith('/manage-accounts') || requestUrl.includes('/admin/');
