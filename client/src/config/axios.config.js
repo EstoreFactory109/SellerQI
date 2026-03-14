@@ -53,7 +53,8 @@ axiosInstance.interceptors.response.use(
     const isFromConnectAccounts = currentPath.includes('/connect-accounts') || 
                                   currentPath.includes('/connect-to-amazon') ||
                                   currentPath.includes('/auth/callback') ||
-                                  currentPath.startsWith('/agency/');
+                                  currentPath.startsWith('/agency/') ||
+                                  currentPath.startsWith('/manage-agency');
     
     // Handle 401 Unauthorized errors - try to refresh token first
     if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !originalRequest._retry) {

@@ -398,7 +398,7 @@ const ProfileIDSelection = ({ isAgencyContext = false, clientId = null, agencyNa
             console.warn('[ProfileIDSelection] Agency: integration trigger failed (non-blocking):', integrationError.message);
           }
           setWaitingForAnalysis(false);
-          navigate('/manage-agency-users', { replace: true });
+          window.location.href = '/manage-agency-users';
           return;
         }
         
