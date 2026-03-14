@@ -11,7 +11,7 @@ import stripeService from '../../services/stripeService.js';
 import razorpayService from '../../services/razorpayService.js';
 
 
-const ProfileIDSelection = ({ isAgencyContext = false, clientId = null, agencyName = '' }) => {
+const ProfileIDSelection = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [searchParams] = useSearchParams();
@@ -30,8 +30,6 @@ const ProfileIDSelection = ({ isAgencyContext = false, clientId = null, agencyNa
   const timeoutRef = useRef(null); // Ref for timeout
   const userData = useSelector(state => state.Auth?.user); // Get user data for premium access check
 
-  const agencyBasePath = (isAgencyContext && clientId && agencyName) ? `/agency/${encodeURIComponent(agencyName)}/client/${clientId}` : '';
-  
   // Check if profile data was passed via navigation state (pre-fetched)
   const prefetchedProfileData = location.state?.profileData;
   
@@ -248,18 +246,8 @@ const ProfileIDSelection = ({ isAgencyContext = false, clientId = null, agencyNa
     });
   };
 
-  // Navigate to payment based on country (or skip payment for agency context)
   const navigateToPayment = async () => {
     try {
-      // For agency context, skip payment entirely and redirect to manage-agency-users
-      // Agency clients are managed by the agency owner, no individual payment required
-      if (isAgencyContext) {
-        console.log('[ProfileIDSelection] Agency context detected - skipping payment, redirecting to manage-agency-users');
-        setWaitingForAnalysis(false);
-        navigate('/manage-agency-users', { replace: true });
-        return;
-      }
-      
       // Debug: Log Redux userData
       console.log('[ProfileIDSelection] navigateToPayment called');
       console.log('[ProfileIDSelection] Redux userData:', userData);
@@ -369,39 +357,6 @@ const ProfileIDSelection = ({ isAgencyContext = false, clientId = null, agencyNa
         setProfileId('');
         setCurrencyCode('');
 
-        // Agency flow: trigger integration, then redirect to manage-agency-users
-        if (isAgencyContext) {
-          console.log('[ProfileIDSelection] Agency context — triggering integration for client');
-          setWaitingForAnalysis(true);
-          try {
-            const activeResponse = await axiosInstance.get('/api/integration/active');
-            let jobId = null;
-            if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
-              const existingStatus = activeResponse.data.data.status?.toLowerCase();
-              if (['active', 'running', 'waiting', 'delayed'].includes(existingStatus)) {
-                console.log('[ProfileIDSelection] Agency: job already in progress');
-                setWaitingForAnalysis(false);
-                navigate('/manage-agency-users', { replace: true });
-                return;
-              }
-            }
-            const triggerResponse = await axiosInstance.post('/api/integration/trigger');
-            if (triggerResponse.status === 202 || triggerResponse.status === 200) {
-              jobId = triggerResponse.data.data.jobId;
-              console.log('[ProfileIDSelection] Agency: integration triggered, jobId:', jobId);
-            }
-            if (jobId) {
-              await waitForJobToStart(jobId);
-              console.log('[ProfileIDSelection] Agency: analysis started, redirecting to manage-agency-users');
-            }
-          } catch (integrationError) {
-            console.warn('[ProfileIDSelection] Agency: integration trigger failed (non-blocking):', integrationError.message);
-          }
-          setWaitingForAnalysis(false);
-          window.location.href = '/manage-agency-users';
-          return;
-        }
-        
         // Trigger integration job and wait for it to start, then navigate to payment
         try {
           console.log('[ProfileIDSelection] Triggering integration job...');
