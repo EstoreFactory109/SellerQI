@@ -113,6 +113,13 @@ axiosInstance.interceptors.response.use(
         }
 
         // Refresh failed - clear auth and redirect to login
+        // But NOT for agency users — they should go to /agency-login
+        const adminAccessType = localStorage.getItem('adminAccessType');
+        if (adminAccessType === 'enterpriseAdmin') {
+          window.location.href = '/agency-login';
+          return Promise.reject(refreshError);
+        }
+
         localStorage.removeItem("isAuth");
 
         // Redirect to login only if we're not already on the login page
