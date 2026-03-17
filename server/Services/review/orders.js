@@ -31,7 +31,7 @@ function getDateRange() {
   yesterday.setHours(23, 59, 59, 0);
 
   const startDate = new Date(yesterday);
-  startDate.setDate(yesterday.getDate() - 30);
+  startDate.setDate(yesterday.getDate() - 15);
   startDate.setHours(0, 0, 0, 0);
 
   return {

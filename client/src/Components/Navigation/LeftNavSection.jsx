@@ -10,6 +10,9 @@ import BeatLoader from "react-spinners/BeatLoader";
 import { AnimatePresence, motion } from "framer-motion";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 
+// Set to true to show Recent Orders in the left nav
+const SHOW_RECENT_ORDERS_NAV = false;
+
 const LeftNavSection = () => {
 
     const dispatch = useDispatch();
@@ -173,6 +176,26 @@ const LeftNavSection = () => {
                                     <>
                                         <LayoutDashboard className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
                                         <span className="font-medium flex-1">Dashboard</span>
+                                        {isPremiumLocked && (
+                                            <Lock className="w-3.5 h-3.5 text-amber-500" />
+                                        )}
+                                    </>
+                                )}
+                            </NavLink>
+                        )}
+
+                        {/* Recent Orders - paginated orders list (hidden via SHOW_RECENT_ORDERS_NAV) */}
+                        {SHOW_RECENT_ORDERS_NAV && (!isLiteUser || isPremiumLocked) && (
+                            <NavLink
+                                to="/seller-central-checker/recent-orders"
+                                className={({ isActive }) =>
+                                    `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <Clock8 className={`${iconClass} ${isActive ? iconActiveClass : iconInactiveClass}`} />
+                                        <span className="font-medium flex-1">Recent Orders</span>
                                         {isPremiumLocked && (
                                             <Lock className="w-3.5 h-3.5 text-amber-500" />
                                         )}

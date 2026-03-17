@@ -1,12 +1,18 @@
 const mongoose = require("mongoose");
 const Seller = require("../../models/user-auth/sellerCentralModel.js");
-const { fetchOrders } = require("../../Services/review/orders.js");
 const { generateAccessToken } = require("../../Services/Sp_API/GenerateTokens.js");
 const { marketplaceConfig, URIs, spapiRegions } = require("../../controllers/config/config.js");
 const getTemporaryCredentials = require("../../utils/GenerateTemporaryCredentials.js");
+const {
+  fetchAndStoreReviewOrders,
+} = require("../../Services/review/reviewAggregationService.js");
+const {
+  processReviewRequests,
+} = require("../../Services/review/reviewRequestSenderService.js");
 
 /**
- * Test controller: Fetch last 30 days of Shipped orders for a particular user
+ * Test controller: Fetch last 7 days of Shipped orders for a particular user,
+ * then fetch ordered product details for each order and return combined data.
  * Fully aligned with app flow:
  * - Accepts userId, country, region
  * - Looks up sellerAccount for that location
@@ -121,14 +127,23 @@ const testGetLast30DaysOrders = async (req, res) => {
       });
     }
 
-    // 5) Call orders service with per-user config + temp AWS creds
-    const orders = await fetchOrders(accessToken, {
+    // 5) Build SP-API + AWS config passed into review aggregation service
+    const awsConfig = {
       marketplaceId,
       endpoint,
       awsAccessKeyId: tempCreds.AccessKey,
       awsSecretAccessKey: tempCreds.SecretKey,
       awsRegion,
       awsSessionToken: tempCreds.SessionToken,
+    };
+
+    // 6) Delegate to common review aggregation service (fetch + store)
+    const { totalOrders, orders } = await fetchAndStoreReviewOrders({
+      userId: userIdQuery,
+      country,
+      region,
+      accessToken,
+      awsConfig,
     });
 
     return res.status(200).json({
@@ -136,7 +151,7 @@ const testGetLast30DaysOrders = async (req, res) => {
       userId,
       country,
       region,
-      totalOrders: orders.length,
+      totalOrders,
       orders,
     });
   } catch (error) {
@@ -148,7 +163,146 @@ const testGetLast30DaysOrders = async (req, res) => {
   }
 };
 
+/**
+ * Test controller: Process unsent review requests from the last 2 fetch batches.
+ * For eligible orders -> send. For ineligible -> re-check, then send if now eligible.
+ * Body: { userId, country, region }
+ */
+const testSendReviewRequests = async (req, res) => {
+  try {
+    const { userId, country, region } = req.body;
+
+    if (!userId || !country || !region) {
+      return res.status(400).json({
+        success: false,
+        error: "userId, country, and region are required",
+      });
+    }
+
+    console.log("[testSendReviewRequests] Params:", { userId, country, region });
+
+    let userIdQuery = userId;
+    if (typeof userId === "string" && mongoose.Types.ObjectId.isValid(userId)) {
+      userIdQuery = new mongoose.Types.ObjectId(userId);
+    }
+
+    const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 }).lean();
+    if (!sellerCentral?.sellerAccount?.length) {
+      return res.status(404).json({
+        success: false,
+        error: "Seller account not found for the provided userId",
+      });
+    }
+
+    const sellerAccount = sellerCentral.sellerAccount.find(
+      (acc) => acc.country === country && acc.region === region
+    );
+    if (!sellerAccount) {
+      return res.status(404).json({
+        success: false,
+        error: `Seller account not found for country=${country}, region=${region}`,
+      });
+    }
+
+    const spiRefreshToken =
+      sellerAccount.spiRefreshToken || sellerAccount.spRefreshToken || sellerAccount.refreshToken;
+
+    if (!spiRefreshToken) {
+      return res.status(400).json({
+        success: false,
+        error: "SP-API refresh token not found for this seller account.",
+      });
+    }
+
+    const accessToken = await generateAccessToken(userIdQuery, spiRefreshToken);
+    if (!accessToken) {
+      return res.status(500).json({
+        success: false,
+        error: "Failed to generate SP-API access token.",
+      });
+    }
+
+    let marketplaceId =
+      sellerAccount.marketplaceId ||
+      (Array.isArray(sellerAccount.marketplaceIds) ? sellerAccount.marketplaceIds[0] : null) ||
+      process.env.DEFAULT_MARKETPLACE_ID ||
+      marketplaceConfig[country] ||
+      marketplaceConfig[country?.toUpperCase()];
+
+    if (!marketplaceId) {
+      return res.status(400).json({
+        success: false,
+        error: "Marketplace ID not found for this seller account or country.",
+      });
+    }
+
+    const spRegion = region || "NA";
+    let endpoint = URIs?.[spRegion];
+    const awsRegion = spapiRegions[spRegion];
+
+    if (!endpoint) {
+      const defaultURIs = {
+        NA: "https://sellingpartnerapi-na.amazon.com",
+        EU: "https://sellingpartnerapi-eu.amazon.com",
+        FE: "https://sellingpartnerapi-fe.amazon.com",
+      };
+      endpoint = defaultURIs[spRegion];
+    }
+
+    if (endpoint && !/^https?:\/\//i.test(endpoint)) {
+      endpoint = `https://${endpoint}`;
+    }
+
+    if (!endpoint || !awsRegion) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported SP-API region: ${spRegion}. Valid values: NA, EU, FE.`,
+      });
+    }
+
+    const tempCreds = await getTemporaryCredentials(awsRegion);
+    if (!tempCreds?.AccessKey || !tempCreds?.SecretKey || !tempCreds?.SessionToken) {
+      return res.status(500).json({
+        success: false,
+        error: "Failed to obtain temporary AWS credentials for SP-API signing.",
+      });
+    }
+
+    const awsConfig = {
+      marketplaceId,
+      endpoint,
+      awsAccessKeyId: tempCreds.AccessKey,
+      awsSecretAccessKey: tempCreds.SecretKey,
+      awsRegion,
+      awsSessionToken: tempCreds.SessionToken,
+    };
+
+    const summary = await processReviewRequests({
+      userId: userIdQuery,
+      country,
+      region,
+      accessToken,
+      awsConfig,
+    });
+
+    return res.status(200).json({
+      success: true,
+      userId,
+      country,
+      region,
+      ...summary,
+    });
+  } catch (error) {
+    console.error("Error in testSendReviewRequests:", error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to process review requests",
+    });
+  }
+};
+
 module.exports = {
   testGetLast30DaysOrders,
+  testSendReviewRequests,
 };
 

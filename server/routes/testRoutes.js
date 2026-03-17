@@ -13,8 +13,8 @@ const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/tes
 // Pause / Archive Keywords - Test controller for pausing or archiving Amazon Ads keywords
 const { testPauseKeywords, testArchiveKeywords, getPauseArchiveKeywordsInfo } = require('../controllers/test/PauseArchiveKeywordsTestController.js')
 
-// Review Orders - Fetch last 30 days orders (Shipped)
-const { testGetLast30DaysOrders } = require('../controllers/test/ReviewOrdersTestController.js')
+// Review Orders - Fetch orders + Send review requests
+const { testGetLast30DaysOrders, testSendReviewRequests } = require('../controllers/test/ReviewOrdersTestController.js')
 
     
 router.post('/testreport',testReport);
@@ -58,6 +58,9 @@ router.post('/testAlerts', testAlerts)  // Body: { userId, country, region }
 
 // Review Orders - Fetch last 30 days Shipped orders via SP-API
 router.post('/testLast30DaysOrders', testGetLast30DaysOrders)  // Body: { userId, country, region }
+
+// Review Requests - Process unsent review requests from last 2 fetch batches
+router.post('/testSendReviewRequests', testSendReviewRequests)  // Body: { userId, country, region }
 
 // All Ads Services - Calls all Amazon Ads APIs in one request (PPC Spends, Keywords Performance, Campaigns, Ad Groups, Search Keywords, etc.)
 router.post('/testAllAdsServices', testAllAdsServices)  // Body: { userId, country, region }

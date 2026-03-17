@@ -181,7 +181,7 @@ const AgencyProfileIDSelectionPage = () => {
             if (['active', 'running', 'waiting', 'delayed'].includes(existingStatus)) {
               console.log('[AgencyProfileID] Job already in progress');
               setWaitingForAnalysis(false);
-              window.location.href = '/manage-agency-users';
+              window.location.href = '/agency-analysing-account';
               return;
             }
           }
@@ -202,7 +202,7 @@ const AgencyProfileIDSelectionPage = () => {
         }
 
         setWaitingForAnalysis(false);
-        window.location.href = '/manage-agency-users';
+        window.location.href = '/agency-analysing-account';
       }
     } catch (error) {
       console.error('Error saving profile ID:', error);

@@ -21,6 +21,7 @@ import PackageRouteWrapper from './Layout/PackageRouteWrapper.jsx';
 import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
 import ProfitibilityDashboard from './Pages/Dashboard/ProfitibilityDashboard.jsx';
+import RecentOrders from './Pages/Dashboard/RecentOrders.jsx';
 import PPCDashboard from './Pages/Dashboard/PPCDashboard.jsx';
 import KeywordAnalysisDashboard from './Pages/Dashboard/KeywordAnalysisDashboard.jsx';
 import EmailVerificationForNewPassword from './Pages/Auth/EmailVerificationForNewPassword.jsx';
@@ -56,6 +57,7 @@ import AgencyClientLayout from './Layout/AgencyClientLayout.jsx';
 import AgencyClientConnectToAmazon from './Pages/Agency/Client/AgencyClientConnectToAmazon.jsx';
 import AgencyClientConnectAccounts from './Pages/Agency/Client/AgencyClientConnectAccounts.jsx';
 import AgencyClientProfileSelection from './Pages/Agency/Client/AgencyClientProfileSelection.jsx';
+import AgencyAnalysingAccount from './Pages/Agency/Client/AgencyAnalysingAccount.jsx';
 import ManageAccountsLayout from './Layout/ManageAccountsLayout.jsx';
 import ManageAccounts from './Pages/Account/ManageAccounts.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
@@ -107,6 +109,7 @@ const App = () => {
           <Route path='connect-accounts' element={<AgencyClientConnectAccounts />} />
           <Route path='profile-selection' element={<AgencyClientProfileSelection />} />
         </Route>
+        <Route path='/agency-analysing-account' element={<AgencyAnalysingAccount />} />
         <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
           <Route index element={<ManageAccounts />} />
           <Route path='subscription' element={<AdminSubscription />} />
@@ -157,6 +160,7 @@ const App = () => {
           }>
 
             <Route path='dashboard' element={<DashBoard />} />
+            <Route path='recent-orders' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
