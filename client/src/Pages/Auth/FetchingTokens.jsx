@@ -90,8 +90,20 @@ const FetchingTokens = () => {
           // Set a flag to indicate SP-API connection was just completed
           sessionStorage.setItem('sp_api_just_connected', 'true');
           
-          // Navigate to connect-accounts page
-          navigate('/connect-accounts')
+          // Check if this was an agency flow and redirect accordingly
+          const agencySpApiConnectRaw = localStorage.getItem('agencySpApiConnect');
+          const agencySpApiConnect = agencySpApiConnectRaw ? JSON.parse(agencySpApiConnectRaw) : null;
+
+          if (agencySpApiConnect && agencySpApiConnect.clientId && agencySpApiConnect.agencyName) {
+            localStorage.removeItem('agencySpApiConnect');
+            const agencyBasePath = `/agency/${encodeURIComponent(agencySpApiConnect.agencyName)}/client/${agencySpApiConnect.clientId}`;
+            const country = agencySpApiConnect.country || 'US';
+            const agencyRegion = agencySpApiConnect.region || 'NA';
+            navigate(`${agencyBasePath}/connect-accounts?country=${country}&region=${agencyRegion}&spApiConnected=true`);
+          } else {
+            localStorage.removeItem('agencySpApiConnect');
+            navigate('/connect-accounts');
+          }
         }
       } catch (error) {
         console.error("Error generating tokens:", error);

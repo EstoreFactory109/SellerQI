@@ -402,6 +402,17 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       region: marketplaceConfig.region,
       sellerCentralUrl: marketplaceConfig.sellerCentralUrl
     }));
+
+    if (isAgencyContext && clientId && agencyName) {
+      localStorage.setItem('agencySpApiConnect', JSON.stringify({
+        clientId,
+        country: countryCode || 'US',
+        region: marketplaceConfig.region,
+        agencyName,
+      }));
+    } else {
+      localStorage.removeItem('agencySpApiConnect');
+    }
   
     try {
       // Get the application ID from environment variable
