@@ -25,12 +25,9 @@ import axiosInstance from '../config/axios.config';
  * @returns {Object} Calculated dashboard data from backend
  */
 const analyseData = async (data, userId) => {
-    console.log("analyseData called - fetching pre-calculated data from backend");
-    
     try {
         // Fetch pre-calculated dashboard data from the new backend endpoint
         const response = await axiosInstance.get('/api/pagewise/dashboard');
-        console.log("Dashboard data received from backend");
         return response.data.data;
     } catch (error) {
         console.error("Error fetching dashboard data:", error);

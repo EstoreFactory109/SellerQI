@@ -140,8 +140,6 @@ export default function Login() {
 
         // Check if accounts are connected
         const user = response.data.data;
-        console.log("user: ",user);
-        
         const spApiConnected = isSpApiConnected(user);
         const isSuperAdmin = user?.accessType === 'superAdmin';
         const adsAccountConnected = isAdsAccountConnected(user);
@@ -153,27 +151,21 @@ export default function Login() {
           localStorage.removeItem('userAccessType');
         }
         
-        console.log('Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
-        
         // Flow: Super admins go to manage-accounts. Regular users go to analyse-account page.
         if (isSuperAdmin) {
           // Super admin → redirect to manage-accounts page
-          console.log('Login: Super admin - redirecting to manage-accounts');
           navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
           // Both accounts connected → redirect to analyse-account page
           // Dashboard access will be determined by FirstAnalysisDone status on that page
-          console.log('Login: Both accounts connected - redirecting to analyse-account');
           navigate('/analyse-account');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
-          console.log('Login: Accounts not connected - redirecting to connect-to-amazon');
           navigate('/connect-to-amazon');
         }
       }
     } catch (error) {
       console.error('Login error:', error);
-      console.log("error.response?.data?.message: ",error.response?.data?.message);
       if (error.response?.status === 401) {
         if(error.response?.data?.message === "User not verified"){
           navigate('/verify-email', { state: { email: formData.email } });
@@ -205,7 +197,6 @@ export default function Login() {
     setGoogleLoading(true);
     try {
       const response = await googleAuthService.handleGoogleSignIn();
-      console.log("response: ",response.statusCode);
       if (response.statusCode === 200) {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
@@ -227,21 +218,16 @@ export default function Login() {
           localStorage.removeItem('userAccessType');
         }
         
-        console.log('Google Login: spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin);
-        
         // Flow: Super admins go to manage-accounts. Regular users go to analyse-account page.
         if (isSuperAdmin) {
           // Super admin → redirect to manage-accounts page
-          console.log('Google Login: Super admin - redirecting to manage-accounts');
           navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
           // Both accounts connected → redirect to analyse-account page
           // Dashboard access will be determined by FirstAnalysisDone status on that page
-          console.log('Google Login: Both accounts connected - redirecting to analyse-account');
           navigate('/analyse-account');
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
-          console.log('Google Login: Accounts not connected - redirecting to connect-to-amazon');
           navigate('/connect-to-amazon');
         }
         

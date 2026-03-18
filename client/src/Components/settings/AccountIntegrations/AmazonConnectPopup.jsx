@@ -3,6 +3,7 @@ import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
 import {useNavigate} from 'react-router-dom'
 import { Search, ChevronDown, Link } from 'lucide-react';
+import { devLog } from "../../../utils/devLogger.js";
 
 // Complete list of Amazon marketplaces with region mapping
 const COUNTRY_DATA = [
@@ -73,15 +74,14 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
       setRegion(country.region);
       setIsDropdownOpen(false);
       setSearchQuery("");
-      
-      // Debug logging for region detection
-      console.log("=== Country Selection Debug ===");
-      console.log("Selected Country:", country.name);
-      console.log("Country Code:", countryCode);
-      console.log("Auto-detected Region:", country.region);
-      console.log("Region Name:", REGION_NAMES[country.region]);
-      console.log("Marketplace ID:", country.marketplaceId);
-      console.log("===============================");
+
+      devLog("AmazonConnectPopup country select:", {
+        countryName: country.name,
+        countryCode,
+        region: country.region,
+        regionName: REGION_NAMES[country.region],
+        marketplaceId: country.marketplaceId,
+      });
     }
   };
 
@@ -95,7 +95,7 @@ const AmazonConnectPopup = ({ closeAddAccount}) => {
     
     setLoading(true);
     try {
-      console.log("Submitting with region:", region, "and country:", marketPlace);
+      devLog("AmazonConnectPopup submit:", { region, country: marketPlace });
       
       const response = await axios.post(
         `${import.meta.env.VITE_BASE_URI}/app/token/saveDetailsOfOtherAccounts`,

@@ -171,6 +171,11 @@ const userSchema = new mongoose.Schema(
       FirstAnalysisDone: {
         type: Boolean,
         default: false
+      },
+      reviewRequestAuthStatus: {
+        type: Boolean,
+        default: false,
+        index: true,
       }
     },
     {

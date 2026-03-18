@@ -57,17 +57,11 @@ export default function ProductTable() {
   // Calculate quantities from GetOrderData
   const asinQuantities = calculateAsinQuantities(getOrderData);
   
-  // Debug logging
-  console.log('ProductTable - GetOrderData length:', getOrderData.length);
-  console.log('ProductTable - Calculated ASIN quantities:', asinQuantities);
-  
   // Update products with calculated quantities
   const allProductsWithUpdatedQuantities = allProducts.map(product => ({
     ...product,
     quantity: asinQuantities[product.asin] || 0
   }));
-
-  console.log('ProductTable - Updated products with quantities:', allProductsWithUpdatedQuantities.map(p => ({ asin: p.asin, oldQuantity: allProducts.find(op => op.asin === p.asin)?.quantity, newQuantity: p.quantity })));
 
   const itemsPerPage = 10;
   const [currentPage, setCurrentPage] = useState(1);

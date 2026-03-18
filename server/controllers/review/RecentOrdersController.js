@@ -1,5 +1,6 @@
 const ReviewOrder = require("../../models/review/ReviewOrderModel");
 const ReviewOrderItem = require("../../models/review/ReviewOrderItemModel");
+const User = require("../../models/user-auth/userModel");
 
 /**
  * GET /api/review/recent-orders
@@ -140,8 +141,100 @@ const getOrderItems = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/review/review-auth-status
+ * Returns the current reviewRequestAuthStatus for the logged-in user.
+ */
+const getReviewAuthStatus = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Missing userId." });
+    }
+
+    const user = await User.findById(userId)
+      .select({ reviewRequestAuthStatus: 1 })
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      reviewRequestAuthStatus: !!user.reviewRequestAuthStatus,
+    });
+  } catch (error) {
+    console.error("Error in getReviewAuthStatus:", error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to fetch review auth status",
+    });
+  }
+};
+
+/**
+ * PATCH /api/review/review-auth-status
+ * Body: { enabled: boolean }
+ * Toggles reviewRequestAuthStatus for the logged-in user.
+ */
+const toggleReviewAuthStatus = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Missing userId." });
+    }
+
+    const { enabled } = req.body;
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        error: "'enabled' must be a boolean (true or false).",
+      });
+    }
+
+    const user = await User.findById(userId).select({
+      packageType: 1,
+      subscriptionStatus: 1,
+      isInTrialPeriod: 1,
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    if (
+      enabled &&
+      user.packageType === "LITE" &&
+      !user.isInTrialPeriod
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "Upgrade to PRO to enable automatic review requests.",
+      });
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      reviewRequestAuthStatus: enabled,
+    });
+
+    return res.status(200).json({
+      success: true,
+      reviewRequestAuthStatus: enabled,
+    });
+  } catch (error) {
+    console.error("Error in toggleReviewAuthStatus:", error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to update review auth status",
+    });
+  }
+};
+
 module.exports = {
   getRecentOrders,
   getOrderItems,
+  getReviewAuthStatus,
+  toggleReviewAuthStatus,
 };
 

@@ -1378,6 +1378,7 @@ const activateFreeTrial = asyncHandler(async (req, res) => {
         user.packageType = 'PRO';
         user.subscriptionStatus = 'trialing'; // Mark as trialing, not active (active is for paid Pro)
         user.servedTrial = true; // Mark that user has been served a trial
+        user.reviewRequestAuthStatus = true;
         await user.save();
 
         logger.info(`User ${userId} activated 7-day free trial. Trial ends on ${trialEndsDate}`);

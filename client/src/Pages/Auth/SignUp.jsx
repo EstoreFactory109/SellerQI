@@ -22,6 +22,7 @@ import googleAuthService from '../../services/googleAuthService.js';
 import { countryCodesData } from '../../utils/countryCodesData.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
+import { devLog } from '../../utils/devLogger.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
@@ -307,7 +308,7 @@ const SignUp = () => {
                 'PRO',
                 // Success callback
                 (result) => {
-                  console.log('Razorpay trial started:', result);
+                  devLog('Razorpay trial started:', result);
                   if (result?.isTrialing) {
                     dispatch(updateTrialStatus({
                       packageType: result.planType || 'PRO',
@@ -343,7 +344,7 @@ const SignUp = () => {
                 'PRO',
                 // Success callback
                 (result) => {
-                  console.log('Razorpay payment successful:', result);
+                  devLog('Razorpay payment successful:', result);
                   navigate(`/subscription-success?gateway=razorpay&isNewSignup=true`);
                 },
                 // Error callback

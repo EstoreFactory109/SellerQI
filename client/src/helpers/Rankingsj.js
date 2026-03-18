@@ -109,7 +109,6 @@ const checkTitle = (str) => {
     }
 
     const SpecialCharacters=checkSpecialCharacters(str)
-    console.log(SpecialCharacters)
 
     if (SpecialCharacters.length>0) {
         errorCount++;
@@ -390,7 +389,6 @@ const getRankings = (ProductDetails) => {
         };
     }
 
-    console.log(ProductDetails.product_title)
     const titleResult = checkTitle(ProductDetails.product_title);
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);
@@ -406,9 +404,6 @@ const getRankings = (ProductDetails) => {
         TotalErrors: totalErrorNumbers,
         TotalPossibleErrors: 9
     };
-
-    console.log("Final Result: ",finalResult)
-
     return finalResult;
 }
 

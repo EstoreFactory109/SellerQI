@@ -119,8 +119,6 @@ const Profitiblity = (totalSales, productWiseSponsoredAds, productWiseFBAData, F
     // Convert map to array
     const profitibilityData = Array.from(profitabilityMap.values());
 
-    console.log("profitibilityData: ",profitibilityData)
-    
     return profitibilityData;
 }
 

@@ -10,6 +10,7 @@
 
 import { useEffect, useCallback, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { devWarn } from '../utils/devLogger.js';
 import {
     fetchDashboardData,
     fetchDashboardSummary,
@@ -87,7 +88,7 @@ const usePageData = (pageName, autoFetch = true) => {
         if (fetchAction) {
             dispatch(fetchAction());
         } else {
-            console.warn(`No fetch action found for page: ${pageName}`);
+            devWarn(`No fetch action found for page: ${pageName}`);
         }
     }, [dispatch, fetchAction, pageName]);
 

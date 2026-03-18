@@ -17,81 +17,78 @@
  */
 
 const cron = require('node-cron');
-const { enqueueUser, enqueueUsers, getQueueStats } = require('./producer.js');
+const { enqueueScheduledAccountJob, getQueueStats } = require('./producer.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const logger = require('../../utils/Logger.js');
 
 /**
- * Enqueue users that need daily updates
- * 
- * This function:
- * 1. Gets users whose scheduled hour matches current hour
- * 2. Filters users who haven't been updated today (ensures daily processing since different services run on different days)
- * 3. Enqueues each user ID (one job per user)
- * 4. Returns summary statistics
- * 
+ * Enqueue per-account phased scheduled jobs for users that need daily updates.
+ *
+ * New architecture: one INIT phase job per seller account (country/region).
+ * Each INIT job chains through phases independently, so different accounts
+ * for the same user can run concurrently and a crash only affects one account.
+ *
  * @returns {Promise<Object>} Summary of enqueued jobs
  */
 async function enqueueUsersForDailyUpdate() {
     try {
-        logger.info('[CronProducer] Starting daily update enqueue process');
+        logger.info('[CronProducer] Starting daily update enqueue process (phased, per-account)');
 
-        // Get users that need updates (same logic as before)
         const usersNeedingUpdate = await UserSchedulingService.getUsersNeedingDailyUpdate();
         logger.info(`[CronProducer] Found ${usersNeedingUpdate.length} users needing daily updates`);
 
         if (usersNeedingUpdate.length === 0) {
             logger.info('[CronProducer] No users need updates at this time');
-            return {
-                success: true,
-                usersFound: 0,
-                enqueued: 0,
-                skipped: 0,
-                failed: 0
-            };
+            return { success: true, usersFound: 0, accountsEnqueued: 0, accountsSkipped: 0, accountsFailed: 0 };
         }
 
-        // Extract user IDs
-        const userIds = usersNeedingUpdate
-            .map(schedule => schedule.userId?._id?.toString())
-            .filter(id => id); // Remove null/undefined
+        let accountsEnqueued = 0;
+        let accountsSkipped = 0;
+        let accountsFailed = 0;
 
-        if (userIds.length === 0) {
-            logger.warn('[CronProducer] No valid user IDs found');
-            return {
-                success: true,
-                usersFound: usersNeedingUpdate.length,
-                enqueued: 0,
-                skipped: 0,
-                failed: 0
-            };
+        for (const schedule of usersNeedingUpdate) {
+            const userId = schedule.userId?._id?.toString();
+            if (!userId) continue;
+
+            try {
+                const seller = await Seller.findOne({ User: userId });
+                if (!seller || !seller.sellerAccount || seller.sellerAccount.length === 0) {
+                    logger.warn(`[CronProducer] No seller accounts found for user ${userId}`);
+                    continue;
+                }
+
+                for (const account of seller.sellerAccount) {
+                    if (!account.country || !account.region) continue;
+
+                    try {
+                        const result = await enqueueScheduledAccountJob(userId, account.country, account.region);
+                        if (result.success) {
+                            accountsEnqueued++;
+                        } else {
+                            accountsSkipped++;
+                        }
+                    } catch (accountError) {
+                        accountsFailed++;
+                        logger.error(`[CronProducer] Failed to enqueue ${userId} ${account.country}-${account.region}:`, accountError.message);
+                    }
+                }
+            } catch (userError) {
+                logger.error(`[CronProducer] Error processing user ${userId}:`, userError.message);
+            }
         }
 
-        logger.info(`[CronProducer] Enqueuing ${userIds.length} users for processing`);
-
-        // Enqueue all users (producer handles duplicate detection)
-        const enqueueResult = await enqueueUsers(userIds, {
-            batchSize: 50, // Process in batches of 50
-            enqueuedBy: 'cron-daily-update'
-        });
-
-        // Get queue statistics
         const queueStats = await getQueueStats();
 
-        logger.info(`[CronProducer] Daily update enqueue completed:`, {
+        logger.info('[CronProducer] Daily update enqueue completed (phased)', {
             usersFound: usersNeedingUpdate.length,
-            enqueued: enqueueResult.enqueued,
-            skipped: enqueueResult.skipped,
-            failed: enqueueResult.failed,
+            accountsEnqueued,
+            accountsSkipped,
+            accountsFailed,
             queueStats
         });
 
-        return {
-            success: true,
-            usersFound: usersNeedingUpdate.length,
-            ...enqueueResult,
-            queueStats
-        };
+        return { success: true, usersFound: usersNeedingUpdate.length, accountsEnqueued, accountsSkipped, accountsFailed, queueStats };
 
     } catch (error) {
         logger.error('[CronProducer] Error in daily update enqueue process:', error);
@@ -122,7 +119,7 @@ function setupDailyUpdateCron(options = {}) {
         try {
             logger.info('[CronProducer] Running hourly enqueue job');
             const result = await enqueueUsersForDailyUpdate();
-            logger.info(`[CronProducer] Hourly enqueue completed: ${result.enqueued} users enqueued`);
+            logger.info(`[CronProducer] Hourly enqueue completed: ${result.accountsEnqueued} accounts enqueued`);
         } catch (error) {
             logger.error('[CronProducer] Error in hourly enqueue job:', error);
         }

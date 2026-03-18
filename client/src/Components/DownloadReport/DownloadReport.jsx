@@ -40,7 +40,6 @@ const DownloadReport = ({
     const downloadExcel = async () => {
         try {
             const exportData = prepareExportData();
-            console.log('Export data for Excel:', exportData);
             
             if (!exportData || exportData.length === 0) {
                 alert('No data available for export');
@@ -98,7 +97,6 @@ const DownloadReport = ({
             const buffer = await workbook.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
             saveAs(blob, fileName);
-            console.log('Excel download completed:', fileName);
         } catch (error) {
             console.error('Error downloading Excel:', error);
             alert('Error downloading Excel file. Please check console for details.');
@@ -110,7 +108,6 @@ const DownloadReport = ({
     const downloadCSV = () => {
         try {
             const exportData = prepareExportData();
-            console.log('Export data for CSV:', exportData);
             
             if (!exportData || exportData.length === 0) {
                 alert('No data available for export');
@@ -136,7 +133,6 @@ const DownloadReport = ({
             const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             saveAs(blob, fileName);
-            console.log('CSV download completed:', fileName);
         } catch (error) {
             console.error('Error downloading CSV:', error);
             alert('Error downloading CSV file. Please check console for details.');

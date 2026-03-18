@@ -79,7 +79,6 @@ const TopNav = () => {
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
-    console.log(sellerAccount)
 
     const switchAccount = async (country,region) => {
         try{
@@ -90,13 +89,12 @@ const TopNav = () => {
                 country:country,
                 region:region
             }
-           console.log("switchAccount data: ",data)
             const response=await axios.post(`${import.meta.env.VITE_BASE_URI}/app/switch-account`,data,{withCredentials:true})
             if(response.status===200){
                 window.location.href = "/seller-central-checker/dashboard";
             }
         }catch(error){
-            console.log(error)
+            console.error(error)
             setIsLoading(false);
         }
     }
@@ -140,7 +138,6 @@ const TopNav = () => {
 
     const openDropDownfnc = () => {
         openDropDown === false ? setOpenDropDown(true) : setOpenDropDown(false)
-        console.log(openDropDown)
     }
 
     // Helper function to format timestamp

@@ -37,24 +37,10 @@ const UserLogging = () => {
   const adminAccessType = localStorage.getItem('adminAccessType');
   const isSuperAdmin = isAdminLoggedIn && adminAccessType === 'superAdmin';
 
-  // Debug logging for UserLogging page access
-  console.log('🔍 UserLogging Debug - User data:', {
-    user: user,
-    accessType: user?.accessType,
-    packageType: user?.packageType,
-    isAdminLoggedIn: isAdminLoggedIn,
-    adminAccessType: adminAccessType,
-    isSuperAdmin: isSuperAdmin,
-    userKeys: user ? Object.keys(user) : 'No user object'
-  });
-
   // If not super admin, redirect to dashboard or login
   if (!isSuperAdmin) {
-    console.log('❌ Access denied - redirecting to dashboard');
     return <Navigate to="/seller-central-checker/dashboard" replace />;
   }
-
-  console.log('✅ Access granted - rendering UserLogging page');
 
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(false);
@@ -80,43 +66,29 @@ const UserLogging = () => {
   // Success rate calculation functions
   const calculateSessionSuccessRate = (session) => {
     if (!session) {
-      console.log('No session data provided');
       return 0;
     }
     
-    console.log('Session data for success rate calculation:', {
-      sessionId: session.sessionId,
-      sessionStatus: session.sessionStatus,
-      overallSummary: session.overallSummary
-    });
-    
     // First try to use the backend-calculated success rate
     if (session.overallSummary?.successRate !== undefined && session.overallSummary?.successRate !== null) {
-      console.log('Using backend success rate:', session.overallSummary.successRate);
       return session.overallSummary.successRate;
     }
     
     // Fallback to frontend calculation
     if (!session.overallSummary) {
-      console.log('No overallSummary found, returning 0');
       return 0;
     }
     
     const { successfulFunctions = 0, totalFunctions = 0 } = session.overallSummary;
-    console.log('Calculating from functions:', { successfulFunctions, totalFunctions });
     
     if (totalFunctions === 0) return 0;
     
     const calculatedRate = Math.round((successfulFunctions / totalFunctions) * 100);
-    console.log('Calculated success rate:', calculatedRate);
     return calculatedRate;
   };
 
   const calculateOverallStats = (sessionsData) => {
-    console.log('Calculating overall stats for sessions:', sessionsData);
-    
     if (!sessionsData || !Array.isArray(sessionsData) || sessionsData.length === 0) {
-      console.log('No sessions data provided, returning default stats');
       return {
         totalSessions: 0,
         successfulSessions: 0,
@@ -139,12 +111,6 @@ const UserLogging = () => {
     let sessionsWithFunctionData = 0;
 
     sessionsData.forEach((session, index) => {
-      console.log(`Processing session ${index + 1}:`, {
-        sessionId: session.sessionId,
-        sessionStatus: session.sessionStatus,
-        overallSummary: session.overallSummary
-      });
-      
       // Count session statuses
       switch (session.sessionStatus) {
         case 'completed':
@@ -189,10 +155,8 @@ const UserLogging = () => {
     let successRate = 0;
     if (sessionsWithFunctionData > 0) {
       successRate = Math.round(totalFunctionSuccessRate / sessionsWithFunctionData);
-      console.log('Using function-based success rate:', successRate);
     } else if (totalSessions > 0) {
       successRate = Math.round((successfulSessions / totalSessions) * 100);
-      console.log('Using session-status-based success rate:', successRate);
     }
     
     const avgDuration = sessionsWithDuration > 0 ? Math.round(totalDuration / sessionsWithDuration) : 0;
@@ -219,8 +183,6 @@ const UserLogging = () => {
       totalErrors,
       period: `Last ${dateFilter} days`
     };
-    
-    console.log('Final calculated stats:', result);
     return result;
   };
 

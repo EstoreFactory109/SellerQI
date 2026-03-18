@@ -10,6 +10,7 @@ import Calender from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../utils/dateUtils.js';
+import { devLog, devWarn } from '../../utils/devLogger.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../redux/slices/PPCMetricsSlice.js';
 import { usePhasedProfitabilityData } from '../../hooks/usePageData.js';
@@ -262,11 +263,11 @@ const ProfitabilityDashboard = () => {
       return itemDate >= start && itemDate <= end;
     });
     
-    console.log('=== Profitability Dashboard: Filtered DateWise Total Costs ===');
-    console.log('Selected Date Range:', { startDate, endDate });
-    console.log('Original dateWiseTotalCosts length:', dateWiseTotalCosts.length);
-    console.log('Filtered dateWiseTotalCosts length:', filtered.length);
-    console.log('Total filtered cost:', filtered.reduce((sum, item) => sum + (item.totalCost || 0), 0));
+    devLog('=== Profitability Dashboard: Filtered DateWise Total Costs ===');
+    devLog('Selected Date Range:', { startDate, endDate });
+    devLog('Original dateWiseTotalCosts length:', dateWiseTotalCosts.length);
+    devLog('Filtered dateWiseTotalCosts length:', filtered.length);
+    devLog('Total filtered cost:', filtered.reduce((sum, item) => sum + (item.totalCost || 0), 0));
     
     return filtered;
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
@@ -396,7 +397,7 @@ const ProfitabilityDashboard = () => {
     // Generate approximate daily data by distributing totals evenly (shows as straight line)
     // This is the worst-case fallback when no actual daily data exists
     if (economicsMetrics?.totalSales?.amount && economicsMetrics?.dateRange?.startDate && economicsMetrics?.dateRange?.endDate) {
-      console.log('Using economicsMetrics totals to generate chart data (even distribution - last resort)');
+      devLog('Using economicsMetrics totals to generate chart data (even distribution - last resort)');
       
       const startDate = new Date(economicsMetrics.dateRange.startDate);
       const endDate = new Date(economicsMetrics.dateRange.endDate);
@@ -504,35 +505,35 @@ const ProfitabilityDashboard = () => {
       // PRIMARY: Use PPC spent from the filtered API response for consistency
       // This ensures the same value is shown regardless of how the date range was selected
       adSpend = Number(filteredData.ppcSpent.amount || 0);
-      console.log('=== Profitability Dashboard: Using filtered API PPC spend for consistency ===');
-      console.log('Filtered API ad spend:', adSpend);
+      devLog('=== Profitability Dashboard: Using filtered API PPC spend for consistency ===');
+      devLog('Filtered API ad spend:', adSpend);
     } else if (isDateRangeSelected) {
       // FALLBACK: Use filtered PPCMetrics data when date range is selected
       const filteredPPCSpend = getFilteredPPCSpend();
       if (filteredPPCSpend > 0) {
         adSpend = filteredPPCSpend;
-        console.log('=== Profitability Dashboard: Using filtered PPCMetrics spend ===');
-        console.log('Filtered PPCMetrics ad spend:', adSpend);
+        devLog('=== Profitability Dashboard: Using filtered PPCMetrics spend ===');
+        devLog('Filtered PPCMetrics ad spend:', adSpend);
       } else if (filteredDateWiseTotalCosts.length > 0) {
         // FALLBACK: Use legacy filtered data
         adSpend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
-        console.log('=== Profitability Dashboard: Using legacy filtered spend data ===');
-        console.log('Legacy filtered ad spend:', adSpend);
+        devLog('=== Profitability Dashboard: Using legacy filtered spend data ===');
+        devLog('Legacy filtered ad spend:', adSpend);
       }
     } else {
       // PRIMARY: Use PPCMetrics model summary (no date filtering)
       if (ppcSummary?.totalSpend > 0) {
         adSpend = ppcSummary.totalSpend;
-        console.log('=== Profitability Dashboard: Using PPCMetrics model as PRIMARY ===');
-        console.log('PPCMetrics totalSpend:', adSpend);
+        devLog('=== Profitability Dashboard: Using PPCMetrics model as PRIMARY ===');
+        devLog('PPCMetrics totalSpend:', adSpend);
       } else {
         // FALLBACK: Use legacy sponsoredAdsMetrics
         const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
         adSpend = adsPPCSpend > 0 ? adsPPCSpend : Number(filteredAccountFinance?.ProductAdsPayment || 0);
-        console.log('=== Profitability Dashboard: Using legacy data as FALLBACK ===');
-        console.log('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
-        console.log('ProductAdsPayment:', filteredAccountFinance?.ProductAdsPayment || 0);
-        console.log('Final ad spend used:', adSpend);
+        devLog('=== Profitability Dashboard: Using legacy data as FALLBACK ===');
+        devLog('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
+        devLog('ProductAdsPayment:', filteredAccountFinance?.ProductAdsPayment || 0);
+        devLog('Final ad spend used:', adSpend);
       }
     }
     
@@ -586,8 +587,8 @@ const ProfitabilityDashboard = () => {
       
       if (productAmazonFees > 0) {
         amazonFees = productAmazonFees;
-        console.log('=== Profitability Dashboard: Using product-wise fees fallback ===');
-        console.log('Product Amazon Fees:', amazonFees);
+        devLog('=== Profitability Dashboard: Using product-wise fees fallback ===');
+        devLog('Product Amazon Fees:', amazonFees);
       }
     }
     
@@ -604,27 +605,27 @@ const ProfitabilityDashboard = () => {
       const filteredPPCSales = getFilteredPPCSales();
       if (filteredPPCSales > 0) {
         ppcSales = filteredPPCSales;
-        console.log('=== Profitability Dashboard: Using filtered PPCMetrics sales ===');
-        console.log('Filtered PPCMetrics sales:', ppcSales);
+        devLog('=== Profitability Dashboard: Using filtered PPCMetrics sales ===');
+        devLog('Filtered PPCMetrics sales:', ppcSales);
       } else if (filteredDateWiseTotalCosts.length > 0) {
         // FALLBACK: Use legacy filtered data
         ppcSales = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (parseFloat(item.sales) || 0), 0);
-        console.log('=== Profitability Dashboard: Using legacy filtered sales data ===');
-        console.log('Legacy filtered sales:', ppcSales);
+        devLog('=== Profitability Dashboard: Using legacy filtered sales data ===');
+        devLog('Legacy filtered sales:', ppcSales);
       }
     } else {
       // PRIMARY: Use PPCMetrics model summary (no date filtering)
       if (ppcSummary?.totalSales > 0 || ppcSummary?.totalSpend > 0) {
         ppcSales = ppcSummary.totalSales || 0;
         acos = ppcSummary.overallAcos || 0;
-        console.log('=== Profitability Dashboard: Using PPCMetrics model for PPC Sales ===');
-        console.log('PPCMetrics totalSales:', ppcSales);
-        console.log('PPCMetrics overallAcos:', acos);
+        devLog('=== Profitability Dashboard: Using PPCMetrics model for PPC Sales ===');
+        devLog('PPCMetrics totalSales:', ppcSales);
+        devLog('PPCMetrics overallAcos:', acos);
       } else {
         // FALLBACK: Use legacy sponsoredAdsMetrics
         ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-        console.log('=== Profitability Dashboard: Using legacy data for PPC Sales ===');
-        console.log('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
+        devLog('=== Profitability Dashboard: Using legacy data for PPC Sales ===');
+        devLog('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
       }
     }
     
@@ -646,8 +647,8 @@ const ProfitabilityDashboard = () => {
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
     try {
-      console.log('=== Starting profitability data preparation ===');
-      console.log('Input data check:', {
+      devLog('=== Starting profitability data preparation ===');
+      devLog('Input data check:', {
         infoExists: !!info,
         metricsExists: !!metrics,
         chartDataExists: !!chartData,
@@ -687,13 +688,13 @@ const ProfitabilityDashboard = () => {
       csvData.push(['='.repeat(50)]);
       
                     // Calculate key executive insights
-       console.log('Step 1: Starting executive insights calculation');
+       devLog('Step 1: Starting executive insights calculation');
        const executiveTotalRevenue = Array.isArray(chartData) ? chartData.reduce((sum, item) => sum + (item?.totalSales || 0), 0) : 0;
        const executiveTotalCosts = Array.isArray(chartData) ? chartData.reduce((sum, item) => sum + (item?.spend || 0), 0) : 0;
        const executiveOverallProfitMargin = executiveTotalRevenue > 0 ? ((executiveTotalRevenue - executiveTotalCosts) / executiveTotalRevenue) * 100 : 0;
        const executiveProfitabilityData = info?.profitibilityData || [];
-       console.log('Step 1 completed: Revenue:', executiveTotalRevenue, 'Costs:', executiveTotalCosts);
-                    console.log('Step 2: Starting product categorization');
+       devLog('Step 1 completed: Revenue:', executiveTotalRevenue, 'Costs:', executiveTotalCosts);
+                    devLog('Step 2: Starting product categorization');
        const criticalProducts = Array.isArray(executiveProfitabilityData) ? executiveProfitabilityData.filter(product => {
          if (!product || typeof product !== 'object') return false;
          const cogsPerUnit = (cogsValues && cogsValues[product.asin]) || 0;
@@ -743,7 +744,7 @@ const ProfitabilityDashboard = () => {
        }).length : 0;
        
        const healthyProducts = executiveProfitabilityData.length - criticalProducts - warningProducts;
-       console.log('Step 2 completed: Critical:', criticalProducts, 'Warning:', warningProducts, 'Healthy:', healthyProducts);
+       devLog('Step 2 completed: Critical:', criticalProducts, 'Warning:', warningProducts, 'Healthy:', healthyProducts);
        
        csvData.push(['Business Health Status:', executiveOverallProfitMargin > 15 ? 'HEALTHY' : executiveOverallProfitMargin > 5 ? 'CAUTION' : 'CRITICAL']);
        csvData.push(['Overall Profit Margin:', `${executiveOverallProfitMargin.toFixed(2)}%`]);
@@ -778,23 +779,23 @@ const ProfitabilityDashboard = () => {
       csvData.push([]);
     
     // Add metrics summary (with COGS adjustments)
-    console.log('Step 3: Processing metrics');
+    devLog('Step 3: Processing metrics');
     csvData.push(['Key Metrics (COGS-Adjusted)']);
     if (Array.isArray(metrics) && metrics.length > 0) {
       metrics.forEach((metric, index) => {
         if (metric && typeof metric === 'object' && metric.label && metric.value) {
           csvData.push([metric.label, metric.value]);
         } else {
-          console.warn('Invalid metric at index', index, metric);
+          devWarn('Invalid metric at index', index, metric);
         }
       });
     } else {
       csvData.push(['No metrics data available']);
     }
-    console.log('Step 3 completed: Metrics processed');
+    devLog('Step 3 completed: Metrics processed');
     
          // Add comprehensive COGS analysis
-     console.log('Step 4: Processing COGS analysis');
+     devLog('Step 4: Processing COGS analysis');
      let totalCOGS = 0;
      let totalCOGSProducts = 0;
      let productsWithCOGS = 0;
@@ -825,11 +826,11 @@ const ProfitabilityDashboard = () => {
              productsWithoutCOGS++;
            }
          } else {
-           console.warn('Invalid product in COGS analysis at index', index, product);
+           devWarn('Invalid product in COGS analysis at index', index, product);
          }
        });
      }
-     console.log('Step 4 completed: COGS analysis processed');
+     devLog('Step 4 completed: COGS analysis processed');
     
     csvData.push(['COGS Analysis Summary']);
     csvData.push(['Total COGS Deducted', `${currency}${totalCOGS.toFixed(2)}`]);

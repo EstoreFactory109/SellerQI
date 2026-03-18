@@ -241,6 +241,9 @@ async function executePhase(phase, userId, region, country, phaseData) {
         case PHASES.BATCH_3_4:
             return await Integration.executeBatch3And4Phase(userId, region, country, phaseData);
         
+        case PHASES.REVIEW_ORDERS:
+            return await Integration.executeReviewOrdersPhase(userId, region, country, phaseData);
+        
         case PHASES.LISTING_ITEMS:
             return await Integration.executeListingItemsPhase(userId, region, country, phaseData);
         

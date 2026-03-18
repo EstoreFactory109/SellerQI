@@ -9,7 +9,6 @@ const initialState = {
     initialState,
     reducers: {
       updateImageLink: (state, action) => {
-        console.log(action.payload)
         state.imageLink = action.payload;
       },
     },

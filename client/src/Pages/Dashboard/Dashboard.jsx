@@ -15,6 +15,7 @@ import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
 import { parseLocalDate } from '../../utils/dateUtils.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
+import { devLog } from '../../utils/devLogger.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -197,12 +198,12 @@ const Dashboard = () => {
     const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
     const cpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
     
-    console.log('=== Dashboard: Calculated filtered PPC Summary ===');
-    console.log('Date range:', dashboardInfo.startDate, 'to', dashboardInfo.endDate);
-    console.log('Filtered data points:', filteredMetrics.length);
-    console.log('Total Spend:', totalSpend);
-    console.log('Total Sales:', totalSales);
-    console.log('Calculated ACOS:', overallAcos.toFixed(2) + '%');
+    devLog('=== Dashboard: Calculated filtered PPC Summary ===');
+    devLog('Date range:', dashboardInfo.startDate, 'to', dashboardInfo.endDate);
+    devLog('Filtered data points:', filteredMetrics.length);
+    devLog('Total Spend:', totalSpend);
+    devLog('Total Sales:', totalSales);
+    devLog('Calculated ACOS:', overallAcos.toFixed(2) + '%');
     
     return {
       totalSpend,
@@ -245,10 +246,10 @@ const Dashboard = () => {
       return itemDate >= startDate && itemDate <= endDate;
     });
     
-    console.log('=== Dashboard: Filtered adsKeywordsPerformanceData ===');
-    console.log('Date range:', dashboardInfo?.startDate, 'to', dashboardInfo?.endDate);
-    console.log('Original length:', adsKeywordsPerformanceDataRaw.length);
-    console.log('Filtered length:', filtered.length);
+    devLog('=== Dashboard: Filtered adsKeywordsPerformanceData ===');
+    devLog('Date range:', dashboardInfo?.startDate, 'to', dashboardInfo?.endDate);
+    devLog('Original length:', adsKeywordsPerformanceDataRaw.length);
+    devLog('Filtered length:', filtered.length);
     
     return filtered;
   }, [adsKeywordsPerformanceDataRaw, isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
@@ -260,10 +261,10 @@ const Dashboard = () => {
   useEffect(() => {
     const calendarMode = dashboardInfo?.calendarMode || 'default';
     
-    console.log('=== Dashboard: Calendar Mode Update ===');
-    console.log('Calendar mode:', calendarMode);
-    console.log('Start date:', dashboardInfo?.startDate);
-    console.log('End date:', dashboardInfo?.endDate);
+    devLog('=== Dashboard: Calendar Mode Update ===');
+    devLog('Calendar mode:', calendarMode);
+    devLog('Start date:', dashboardInfo?.startDate);
+    devLog('End date:', dashboardInfo?.endDate);
 
     const formatDate = (date) => {
       const dateObj = date instanceof Date ? date : new Date(date);
@@ -288,7 +289,7 @@ const Dashboard = () => {
       
       const period = `${formatDate(startDateObj)} - ${formatDate(endDateObj)}`;
       setSelectedPeriod(period);
-      console.log('Dashboard showing date range from database:', period);
+      devLog('Dashboard showing date range from database:', period);
     }
     // If no dates from database yet, keep the default "Last 30 Days" label
     // The actual dates will be set once Phase 1 data loads from DataFetchTracking
@@ -438,7 +439,6 @@ const Dashboard = () => {
   const totalProducts = dashboardInfo?.TotalProduct?.length || 0;
   
   // Store filtered orders array where status is Shipped, Unshipped, or PartiallyShipped
-  console.log("dashboardInfo?.GetOrderData: ", dashboardInfo?.GetOrderData);
   const totalOrders = dashboardInfo?.GetOrderData?.filter(order => 
     order?.orderStatus === 'Shipped' || 
     order?.orderStatus === 'Unshipped' || 

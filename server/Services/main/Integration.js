@@ -2941,6 +2941,77 @@ class Integration {
     }
 
     /**
+     * Execute Phase: Review Orders
+     * Fetches recent shipped orders and their items from SP-API, upserts into ReviewOrder/ReviewOrderItem.
+     * Does NOT check eligibility (that's the scheduled worker's job).
+     */
+    static async executeReviewOrdersPhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[Integration:ReviewOrdersPhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) {
+                return { success: false, error: config.error, statusCode: config.statusCode };
+            }
+
+            const { Base_URI, Marketplace_Id, regionConfig } = config;
+
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) {
+                return { success: false, error: sellerDataResult.error, statusCode: sellerDataResult.statusCode };
+            }
+
+            const { RefreshToken, AdsRefreshToken } = sellerDataResult;
+
+            const credentialsResult = await this.generateCredentials(regionConfig, null);
+            if (!credentialsResult.success) {
+                return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
+            }
+
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+            if (!tokenResult.success) {
+                return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
+            }
+
+            const { AccessToken } = tokenResult;
+            const credentials = credentialsResult.credentials;
+
+            const awsConfig = {
+                marketplaceId: Marketplace_Id,
+                endpoint: Base_URI,
+                awsAccessKeyId: credentials.AccessKey,
+                awsSecretAccessKey: credentials.SecretKey,
+                awsRegion: regionConfig,
+                awsSessionToken: credentials.SessionToken,
+            };
+
+            const { ingestReviewOrders } = require('../review/reviewIngestionService.js');
+
+            const result = await ingestReviewOrders({
+                userId,
+                country: Country,
+                region: Region,
+                accessToken: AccessToken,
+                awsConfig,
+            });
+
+            logger.info(`[Integration:ReviewOrdersPhase] Done — ingested: ${result.ingested}, failed: ${result.failed}`);
+
+            return {
+                success: true,
+                dataForNextPhase: {},
+            };
+        } catch (error) {
+            logger.error(`[Integration:ReviewOrdersPhase] Failed for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500,
+            };
+        }
+    }
+
+    /**
      * Execute Phase 4: Listing Items
      * Processes individual listing items (most time-consuming part)
      * 

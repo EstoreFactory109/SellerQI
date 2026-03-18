@@ -19,6 +19,7 @@ const PHASES = {
     INIT: 'init',
     BATCH_1_2: 'batch_1_2',
     BATCH_3_4: 'batch_3_4',
+    REVIEW_ORDERS: 'review_orders',
     LISTING_ITEMS: 'listing_items',
     FINALIZE: 'finalize'
 };
@@ -28,6 +29,7 @@ const PHASE_ORDER = [
     PHASES.INIT,
     PHASES.BATCH_1_2,
     PHASES.BATCH_3_4,
+    PHASES.REVIEW_ORDERS,
     PHASES.LISTING_ITEMS,
     PHASES.FINALIZE
 ];
@@ -168,6 +170,7 @@ function getPhaseDescription(phase) {
         [PHASES.INIT]: 'Initializing - validating user and fetching product catalog',
         [PHASES.BATCH_1_2]: 'Fetching performance reports and inventory data',
         [PHASES.BATCH_3_4]: 'Fetching shipments, economics, and keyword data',
+        [PHASES.REVIEW_ORDERS]: 'Fetching recent orders for review requests',
         [PHASES.LISTING_ITEMS]: 'Processing individual product listings',
         [PHASES.FINALIZE]: 'Finalizing - clearing cache and sending notifications'
     };

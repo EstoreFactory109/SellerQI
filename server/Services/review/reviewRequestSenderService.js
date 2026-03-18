@@ -2,23 +2,24 @@ const ReviewOrder = require("../../models/review/ReviewOrderModel");
 const { sendReviewRequest } = require("./requests");
 const { checkReviewEligibility } = require("./reviewRequestEligibility");
 
+const MIN_ORDER_AGE_DAYS = 5;
+const MAX_ORDER_AGE_DAYS = 30;
+const ELIGIBILITY_RECHECK_HOURS = 24;
+
 /**
- * Processes unsent review requests from the last 2 fetch batches for a user.
+ * Processes unsent review requests for a user.
  *
- * Flow per order:
- *  1. If canRequestReview === true  -> send request -> mark sent/failed
- *  2. If canRequestReview !== true  -> re-check eligibility via SP-API
- *     a. Now eligible  -> update canRequestReview, send request -> mark sent/failed
- *     b. Still not eligible -> update eligibility data, leave status as-is
+ * Query: reviewRequestStatus=not_requested, purchaseDate within 5–30 day window,
+ * and nextEligibilityCheckAt <= now (or null).
  *
- * Memory-safe: uses Mongoose .cursor() to stream one doc at a time.
+ * Uses Mongoose .cursor() for memory safety.
  *
  * @param {Object} params
  * @param {ObjectId} params.userId
  * @param {string}   params.country
  * @param {string}   params.region
- * @param {string}   params.accessToken - LWA access token
- * @param {Object}   params.awsConfig   - SP-API + AWS SigV4 config
+ * @param {string}   params.accessToken
+ * @param {Object}   params.awsConfig
  * @returns {Promise<Object>} summary counts
  */
 async function processReviewRequests({
@@ -28,35 +29,24 @@ async function processReviewRequests({
   accessToken,
   awsConfig,
 }) {
-  // 1) Find the last 2 distinct fetchBatchIds for this user/location
-  const batchIds = await ReviewOrder.distinct("fetchBatchId", {
-    User: userId,
-    country,
-    region,
-    fetchBatchId: { $ne: null },
-  });
+  const now = new Date();
 
-  // Sort descending (ISO strings sort lexicographically) and take last 2
-  batchIds.sort((a, b) => (a > b ? -1 : a < b ? 1 : 0));
-  const last2Batches = batchIds.slice(0, 2);
+  const minDate = new Date(now);
+  minDate.setDate(minDate.getDate() - MAX_ORDER_AGE_DAYS);
 
-  // Build filter: orders from last 2 batches OR orders that have no batchId yet (legacy data)
-  const batchFilter =
-    last2Batches.length > 0
-      ? { $or: [{ fetchBatchId: { $in: last2Batches } }, { fetchBatchId: null }] }
-      : {};
+  const maxDate = new Date(now);
+  maxDate.setDate(maxDate.getDate() - MIN_ORDER_AGE_DAYS);
 
-  console.log(
-    `[processReviewRequests] Batches: ${last2Batches.length ? last2Batches.join(", ") : "(none — processing all legacy orders)"}`
-  );
-
-  // 2) Stream orders one at a time using cursor (memory-safe)
   const cursor = ReviewOrder.find({
     User: userId,
     country,
     region,
     reviewRequestStatus: "not_requested",
-    ...batchFilter,
+    purchaseDate: { $gte: minDate, $lte: maxDate },
+    $or: [
+      { nextEligibilityCheckAt: { $lte: now } },
+      { nextEligibilityCheckAt: null },
+    ],
   })
     .sort({ purchaseDate: -1 })
     .cursor();
@@ -64,6 +54,7 @@ async function processReviewRequests({
   const summary = {
     processed: 0,
     sent: 0,
+    alreadySent: 0,
     reChecked: 0,
     stillIneligible: 0,
     failed: 0,
@@ -79,7 +70,6 @@ async function processReviewRequests({
 
     try {
       if (order.canRequestReview) {
-        // Already eligible -> send directly
         const result = await sendReviewRequest(
           accessToken,
           amazonOrderId,
@@ -95,10 +85,25 @@ async function processReviewRequests({
                 reviewRequestLastSentAt: new Date(),
                 reviewRequestError: null,
               },
+              $inc: { sendAttemptCount: 1 },
             }
           );
           summary.sent++;
           console.log(`  -> Sent successfully`);
+        } else if (result.alreadySent) {
+          await ReviewOrder.updateOne(
+            { _id: order._id },
+            {
+              $set: {
+                reviewRequestStatus: "sent",
+                reviewRequestLastSentAt: new Date(),
+                reviewRequestError: "Sent externally (via Seller Central)",
+              },
+              $inc: { sendAttemptCount: 1 },
+            }
+          );
+          summary.alreadySent++;
+          console.log(`  -> Already sent externally (Seller Central)`);
         } else {
           await ReviewOrder.updateOne(
             { _id: order._id },
@@ -107,13 +112,13 @@ async function processReviewRequests({
                 reviewRequestStatus: "failed",
                 reviewRequestError: result.error || `HTTP ${result.status}`,
               },
+              $inc: { sendAttemptCount: 1 },
             }
           );
           summary.failed++;
           console.log(`  -> Send failed: ${result.error}`);
         }
       } else {
-        // Not eligible yet -> re-check eligibility
         summary.reChecked++;
 
         await sleep(5000);
@@ -131,7 +136,6 @@ async function processReviewRequests({
         const nowEligible = Array.isArray(actions) && actions.length > 0;
 
         if (nowEligible) {
-          // Became eligible -> update flag, then send
           await ReviewOrder.updateOne(
             { _id: order._id },
             {
@@ -140,6 +144,7 @@ async function processReviewRequests({
                 eligibilityLastCheckedAt: new Date(),
                 eligibilityResponse,
               },
+              $inc: { eligibilityCheckCount: 1 },
             }
           );
 
@@ -160,10 +165,25 @@ async function processReviewRequests({
                   reviewRequestLastSentAt: new Date(),
                   reviewRequestError: null,
                 },
+                $inc: { sendAttemptCount: 1 },
               }
             );
             summary.sent++;
             console.log(`  -> Re-checked: now eligible, sent successfully`);
+          } else if (result.alreadySent) {
+            await ReviewOrder.updateOne(
+              { _id: order._id },
+              {
+                $set: {
+                  reviewRequestStatus: "sent",
+                  reviewRequestLastSentAt: new Date(),
+                  reviewRequestError: "Sent externally (via Seller Central)",
+                },
+                $inc: { sendAttemptCount: 1 },
+              }
+            );
+            summary.alreadySent++;
+            console.log(`  -> Re-checked: already sent externally (Seller Central)`);
           } else {
             await ReviewOrder.updateOne(
               { _id: order._id },
@@ -172,24 +192,34 @@ async function processReviewRequests({
                   reviewRequestStatus: "failed",
                   reviewRequestError: result.error || `HTTP ${result.status}`,
                 },
+                $inc: { sendAttemptCount: 1 },
               }
             );
             summary.failed++;
-            console.log(`  -> Re-checked: now eligible, but send failed: ${result.error}`);
+            console.log(
+              `  -> Re-checked: now eligible, but send failed: ${result.error}`
+            );
           }
         } else {
-          // Still not eligible -> update eligibility data only, leave status as not_requested
+          const nextCheck = new Date();
+          nextCheck.setHours(nextCheck.getHours() + ELIGIBILITY_RECHECK_HOURS);
+
           await ReviewOrder.updateOne(
             { _id: order._id },
             {
               $set: {
                 eligibilityLastCheckedAt: new Date(),
                 eligibilityResponse,
+                canRequestReview: false,
+                nextEligibilityCheckAt: nextCheck,
               },
+              $inc: { eligibilityCheckCount: 1 },
             }
           );
           summary.stillIneligible++;
-          console.log(`  -> Re-checked: still not eligible`);
+          console.log(
+            `  -> Re-checked: still not eligible, next check at ${nextCheck.toISOString()}`
+          );
         }
       }
     } catch (err) {
@@ -204,13 +234,15 @@ async function processReviewRequests({
         {
           $set: {
             reviewRequestStatus: "failed",
-            reviewRequestError: err.message || "Unexpected error during review request processing",
+            reviewRequestError:
+              err.message ||
+              "Unexpected error during review request processing",
           },
+          $inc: { sendAttemptCount: 1 },
         }
       ).catch(() => {});
     }
 
-    // Rate-limit delay between orders
     await sleep(5000);
   }
 

@@ -1,13 +1,14 @@
 import axios from 'axios';
+import { devLog, devWarn } from '../utils/devLogger.js';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 // Debug logging for troubleshooting (remove after setup is working)
 if (!GOOGLE_CLIENT_ID) {
   console.error('❌ VITE_GOOGLE_CLIENT_ID is not set in environment variables');
-  console.log('🔍 Available env vars:', Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')));
+  devLog('🔍 Available env vars:', Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')));
 } else {
-  console.log('✅ Google Client ID loaded successfully');
+  devLog('✅ Google Client ID loaded successfully');
 }
 
 class GoogleAuthService {
@@ -29,9 +30,8 @@ class GoogleAuthService {
         script.defer = true;
         
         script.onload = () => {
-          console.log('✅ Google Identity Services loaded successfully');
-          console.log('🌐 Current origin:', window.location.origin);
-          console.log('🔑 Client ID:', GOOGLE_CLIENT_ID);
+          devLog('✅ Google Identity Services loaded successfully');
+          devLog('🌐 Current origin:', window.location.origin);
           this.isInitialized = true;
           resolve();
         };
@@ -43,7 +43,7 @@ class GoogleAuthService {
         
         document.head.appendChild(script);
       } else {
-        console.log('✅ Google Identity Services already available');
+        devLog('✅ Google Identity Services already available');
         this.isInitialized = true;
         resolve();
       }
@@ -57,15 +57,15 @@ class GoogleAuthService {
     
     return new Promise((resolve, reject) => {
       try {
-        console.log('🚀 Initializing Google Sign-In...');
+        devLog('🚀 Initializing Google Sign-In...');
         
         // Initialize with proper callback
         window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: (response) => {
-            console.log('📝 Google callback response:', response);
+            devLog('📝 Google callback received');
             if (response.credential) {
-              console.log('✅ Google ID token received');
+              devLog('✅ Google ID token received');
               resolve(response.credential);
             } else if (response.error) {
               console.error('🚫 Google Sign-In Error:', response.error);
@@ -83,13 +83,13 @@ class GoogleAuthService {
           cancel_on_tap_outside: false
         });
 
-        console.log('📋 Trying Google One Tap prompt...');
+        devLog('📋 Trying Google One Tap prompt...');
         
         // Try One Tap first
         window.google.accounts.id.prompt((notification) => {
-          console.log('📢 Prompt notification:', notification);
+          devLog('📢 Prompt notification received');
           if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            console.warn('⚠️ Google One Tap not displayed:', notification.getNotDisplayedReason());
+            devWarn('⚠️ Google One Tap not displayed:', notification.getNotDisplayedReason());
             // Fallback to hidden button that auto-clicks
             this.createHiddenButtonAndAutoClick().then(resolve).catch(reject);
           }
@@ -104,7 +104,7 @@ class GoogleAuthService {
   async createHiddenButtonAndAutoClick() {
     return new Promise((resolve, reject) => {
       try {
-        console.log('🚀 Creating hidden Google button and auto-clicking...');
+        devLog('🚀 Creating hidden Google button and auto-clicking...');
         
         // Create a hidden container for the button
         const hiddenContainer = document.createElement('div');
@@ -132,7 +132,7 @@ class GoogleAuthService {
             }
             
             if (response.credential) {
-              console.log('✅ Google ID token received from hidden button');
+              devLog('✅ Google ID token received from hidden button');
               resolve(response.credential);
             } else {
               console.error('❌ No credential received from hidden button');
@@ -150,13 +150,13 @@ class GoogleAuthService {
           text: 'signin_with'
         });
 
-        console.log('📋 Hidden Google button rendered, auto-clicking...');
+        devLog('📋 Hidden Google button rendered, auto-clicking...');
 
         // Auto-click the button after a short delay
         setTimeout(() => {
           const googleButton = buttonDiv.querySelector('button') || buttonDiv.querySelector('div[role="button"]');
           if (googleButton) {
-            console.log('🔄 Auto-clicking hidden Google button...');
+            devLog('🔄 Auto-clicking hidden Google button...');
             googleButton.click();
           } else {
             console.error('❌ Could not find Google button to auto-click');
@@ -174,7 +174,7 @@ class GoogleAuthService {
   async authenticateWithBackend(idToken, isSignUp = false,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
     try {
       const endpoint = isSignUp ? '/app/google-register' : '/app/google-login';
-      console.log(`📤 Sending to backend: ${endpoint}`);
+      devLog(`📤 Sending to backend: ${endpoint}`);
       
       const response = await axios.post(
         `${import.meta.env.VITE_BASE_URI}${endpoint}`,
@@ -182,7 +182,7 @@ class GoogleAuthService {
         { withCredentials: true }
       );
       
-      console.log('✅ Backend response:', response.data);
+      devLog('✅ Backend authentication succeeded');
       return response.data;
     } catch (error) {
       console.error('❌ Backend authentication failed:', error);
@@ -193,11 +193,11 @@ class GoogleAuthService {
   // Method to handle complete Google sign-in flow
   async handleGoogleSignIn() {
     try {
-      console.log('🔐 Starting Google Sign-In flow...');
+      devLog('🔐 Starting Google Sign-In flow...');
       const idToken = await this.signIn();
-      console.log('🎟️ Got ID token, authenticating with backend...');
+      devLog('🎟️ Got ID token, authenticating with backend...');
       const result = await this.authenticateWithBackend(idToken, false);
-      console.log('✅ Google Sign-In completed successfully');
+      devLog('✅ Google Sign-In completed successfully');
       return result;
     } catch (error) {
       console.error('❌ Google sign-in failed:', error);
@@ -208,11 +208,11 @@ class GoogleAuthService {
   // Method to handle complete Google sign-up flow
   async handleGoogleSignUp(packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
     try {
-      console.log('📝 Starting Google Sign-Up flow...');
+      devLog('📝 Starting Google Sign-Up flow...');
       const idToken = await this.signIn();
-      console.log('🎟️ Got ID token, registering with backend...');
+      devLog('🎟️ Got ID token, registering with backend...');
       const result = await this.authenticateWithBackend(idToken, true,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate);
-      console.log('✅ Google Sign-Up completed successfully');
+      devLog('✅ Google Sign-Up completed successfully');
       return result;
     } catch (error) {
       console.error('❌ Google sign-up failed:', error);

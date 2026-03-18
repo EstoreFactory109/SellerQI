@@ -14,6 +14,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axiosInstance from '../../config/axios.config';
 import { setDashboardInfo } from './DashboardSlice';
+import { devLog, devWarn } from '../../utils/devLogger.js';
 
 // Cache TTL: 1 hour (aligned with backend cache)
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -1639,7 +1640,7 @@ export const fetchYourProductsData = createAsyncThunk(
             
             // If reset is true, always fetch fresh data (bypass cache)
             if (reset) {
-                console.log('[Redux] Reset flag set - fetching fresh data from database');
+                devLog('[Redux] Reset flag set - fetching fresh data from database');
                 const response = await axiosInstance.get('/api/pagewise/your-products', {
                     params: { page, limit, summaryOnly, status }
                 });
@@ -1654,7 +1655,7 @@ export const fetchYourProductsData = createAsyncThunk(
                 const cacheRecent = cached?.lastFetched && (Date.now() - cached.lastFetched) < CACHE_TTL_MS;
                 
                 if (hasCached && cacheRecent && cached.issuesData !== undefined) {
-                    console.log('[Redux] Using per-status cached data (no database call):', {
+                    devLog('[Redux] Using per-status cached data (no database call):', {
                         status,
                         cacheKey,
                         productsCount: cached.products.length,
@@ -1663,7 +1664,7 @@ export const fetchYourProductsData = createAsyncThunk(
                     return { ...cached, fromCache: true };
                 }
                 
-                console.log('[Redux] Cache miss for status - fetching from database:', {
+                devLog('[Redux] Cache miss for status - fetching from database:', {
                     requestedStatus: status,
                     cacheKey,
                     hasCached: !!cached,
@@ -1675,7 +1676,7 @@ export const fetchYourProductsData = createAsyncThunk(
             if (append) {
                 // Fetch the requested page from backend with status filter
                 // IMPORTANT: Ensure we're passing the correct page number to the backend
-                console.log('[Redux] Load More - Fetching page:', {
+                devLog('[Redux] Load More - Fetching page:', {
                     requestedPage: page,
                     limit,
                     status,
@@ -1709,7 +1710,7 @@ export const fetchYourProductsData = createAsyncThunk(
                     
                     // Verify we got new products
                     if (uniqueNewProducts.length === 0 && newData.products && newData.products.length > 0) {
-                        console.warn('[Redux] Load More - All new products were duplicates!', {
+                        devWarn('[Redux] Load More - All new products were duplicates!', {
                             requestedPage: page,
                             backendReturnedCount: newData.products.length,
                             existingCount: existingData.products.length,
@@ -1718,7 +1719,7 @@ export const fetchYourProductsData = createAsyncThunk(
                         });
                     }
                     
-                console.log('[Redux] Load More - Merging products:', {
+                devLog('[Redux] Load More - Merging products:', {
                     hasExistingData: !!existingData,
                     existingCount: existingData.products.length,
                     newCount: newData.products?.length || 0,
@@ -1750,7 +1751,7 @@ export const fetchYourProductsData = createAsyncThunk(
                 }
                 
                 // If no existing data, just return new data (shouldn't happen in normal flow)
-                console.warn('[Redux] Load More - No existing data to merge with', {
+                devWarn('[Redux] Load More - No existing data to merge with', {
                     hasExistingData: !!existingData,
                     hasProducts: !!existingData?.products,
                     isArray: Array.isArray(existingData?.products),
@@ -1797,11 +1798,11 @@ export const fetchYourProductsInitialV2 = createAsyncThunk(
             
             // Use cached data if fresh (15 min TTL)
             if (lastFetched && (Date.now() - lastFetched) < 15 * 60 * 1000) {
-                console.log('[v2 Redux] Using cached initial data');
+                devLog('[v2 Redux] Using cached initial data');
                 return { fromCache: true };
             }
             
-            console.log('[v2 Redux] Fetching initial data (summary + first 20 Active)');
+            devLog('[v2 Redux] Fetching initial data (summary + first 20 Active)');
             const response = await axiosInstance.get('/api/pagewise/your-products-v2/initial', {
                 params: { limit }
             });
@@ -1837,12 +1838,12 @@ export const fetchYourProductsByStatusV2 = createAsyncThunk(
             if (page === 1 && !append) {
                 const lastFetched = statusData?.lastFetched;
                 if (lastFetched && (Date.now() - lastFetched) < 15 * 60 * 1000 && statusData?.products?.length > 0) {
-                    console.log(`[v2 Redux] Using cached ${status} products`);
+                    devLog(`[v2 Redux] Using cached ${status} products`);
                     return { ...statusData, status, fromCache: true };
                 }
             }
             
-            console.log(`[v2 Redux] Fetching ${status} products page ${page}`);
+            devLog(`[v2 Redux] Fetching ${status} products page ${page}`);
             
             const response = await axiosInstance.get('/api/pagewise/your-products-v2/products', {
                 params: { status, page, limit }
@@ -1896,11 +1897,11 @@ export const fetchYourProductsSummaryV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.summary;
             
             if (existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.data) {
-                console.log('[v3 Redux] Using cached summary');
+                devLog('[v3 Redux] Using cached summary');
                 return { fromCache: true, data: existing.data };
             }
             
-            console.log('[v3 Redux] Fetching summary');
+            devLog('[v3 Redux] Fetching summary');
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/summary');
             return response.data.data;
         } catch (error) {
@@ -1925,11 +1926,11 @@ export const fetchYourProductsActiveV3 = createAsyncThunk(
             
             // For page 1, check cache
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Active products');
+                devLog('[v3 Redux] Using cached Active products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Active products page ${page}`);
+            devLog(`[v3 Redux] Fetching Active products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/active', {
                 params: { page, limit }
             });
@@ -1973,11 +1974,11 @@ export const fetchYourProductsInactiveV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.inactive;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Inactive products');
+                devLog('[v3 Redux] Using cached Inactive products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Inactive products page ${page}`);
+            devLog(`[v3 Redux] Fetching Inactive products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/inactive', {
                 params: { page, limit }
             });
@@ -2020,11 +2021,11 @@ export const fetchYourProductsIncompleteV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.incomplete;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Incomplete products');
+                devLog('[v3 Redux] Using cached Incomplete products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Incomplete products page ${page}`);
+            devLog(`[v3 Redux] Fetching Incomplete products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/incomplete', {
                 params: { page, limit }
             });
@@ -2067,11 +2068,11 @@ export const fetchYourProductsNonSellableV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.nonSellable;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Non-Sellable products');
+                devLog('[v3 Redux] Using cached Non-Sellable products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Non-Sellable products page ${page}`);
+            devLog(`[v3 Redux] Fetching Non-Sellable products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/non-sellable', {
                 params: { page, limit }
             });
@@ -2115,11 +2116,11 @@ export const fetchYourProductsWithoutAPlusV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.withoutAPlus;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Without A+ products');
+                devLog('[v3 Redux] Using cached Without A+ products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Without A+ products page ${page}`);
+            devLog(`[v3 Redux] Fetching Without A+ products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/without-aplus', {
                 params: { page, limit }
             });
@@ -2162,11 +2163,11 @@ export const fetchYourProductsNotTargetedInAdsV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.notTargetedInAds;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Not Targeted in Ads products');
+                devLog('[v3 Redux] Using cached Not Targeted in Ads products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Not Targeted in Ads products page ${page}`);
+            devLog(`[v3 Redux] Fetching Not Targeted in Ads products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/not-targeted-in-ads', {
                 params: { page, limit }
             });
@@ -2212,11 +2213,11 @@ export const fetchOptimizationProductsV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.optimization;
             
             if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
-                console.log('[v3 Redux] Using cached Optimization products');
+                devLog('[v3 Redux] Using cached Optimization products');
                 return { fromCache: true };
             }
             
-            console.log(`[v3 Redux] Fetching Optimization products page ${page}`);
+            devLog(`[v3 Redux] Fetching Optimization products page ${page}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/optimization', {
                 params: { page, limit }
             });

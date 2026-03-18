@@ -165,13 +165,6 @@ export default function PlansAndBilling() {
           setCurrentPlan('LITE');
         }
         setSubscriptionStatus(user.subscriptionStatus || 'active');
-        
-        // Debug logging
-        console.log('🔍 PlansAndBilling - User subscription check:', {
-          packageType: user.packageType,
-          isInTrialPeriod: userIsInTrial,
-          currentPlan: user.packageType === 'PRO' && !userIsInTrial ? 'PRO' : (user.packageType === 'AGENCY' ? 'AGENCY' : 'LITE')
-        });
       }
 
       // Try to get detailed subscription info
@@ -180,7 +173,6 @@ export default function PlansAndBilling() {
         setUserSubscription(subscription);
       } catch (error) {
         // If no subscription exists, user is on LITE plan
-        console.log('No subscription found, user on LITE plan');
       }
     } catch (error) {
       console.error('Error fetching subscription:', error);

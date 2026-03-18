@@ -431,7 +431,8 @@ class RazorpayService {
             const updateData = {
                 packageType: planType,
                 subscriptionStatus: isTrialing ? 'trialing' : 'active',
-                isInTrialPeriod: isTrialing
+                isInTrialPeriod: isTrialing,
+                reviewRequestAuthStatus: true,
             };
 
             // Set trial end date and mark served trial when user authorized payment method for free trial
@@ -823,7 +824,8 @@ class RazorpayService {
                 await User.findByIdAndUpdate(dbSubscription.userId, {
                     packageType: dbSubscription.planType,
                     subscriptionStatus: 'active',
-                    isInTrialPeriod: false
+                    isInTrialPeriod: false,
+                    reviewRequestAuthStatus: true,
                 });
 
                 if (wasInTrial) {
@@ -986,7 +988,8 @@ class RazorpayService {
                     packageType: 'LITE',
                     subscriptionStatus: 'cancelled',
                     isInTrialPeriod: false, // Reset trial status
-                    accessType: 'user' // Reset accessType
+                    accessType: 'user', // Reset accessType
+                    reviewRequestAuthStatus: false,
                 });
 
                 logger.info(`Subscription cancelled via webhook: ${subscriptionId}`);
@@ -1334,7 +1337,8 @@ class RazorpayService {
                     packageType: 'LITE',
                     subscriptionStatus: 'cancelled',
                     isInTrialPeriod: false,
-                    accessType: 'user'
+                    accessType: 'user',
+                    reviewRequestAuthStatus: false,
                 });
 
                 logger.info(`Subscription completed all cycles, user ${dbSubscription.userId} downgraded to LITE`);
@@ -1427,7 +1431,8 @@ class RazorpayService {
                 subscriptionStatus: 'cancelled',
                 isInTrialPeriod: false, // Reset trial status
                 trialEndsDate: null, // Clear trial end date
-                accessType: 'user' // Reset accessType
+                accessType: 'user', // Reset accessType
+                reviewRequestAuthStatus: false,
             });
 
             logger.info(`Razorpay subscription cancelled for user: ${userId}, subscription: ${subscription.razorpaySubscriptionId}, wasTrialing: ${wasTrialing}`);

@@ -83,27 +83,45 @@ class UserSchedulingService {
     }
 
     /**
-     * Update the last daily update timestamp for a user
+     * Update the last daily update timestamp for a specific account.
+     * Only sets the user-level lastDailyUpdate when ALL accounts have
+     * been updated today. This prevents the cron from skipping remaining
+     * accounts when the first account finishes (which would happen if we
+     * set the user-level timestamp immediately).
      */
     static async markDailyUpdateComplete(userId, country, region) {
         try {
-            const updateData = {
-                lastDailyUpdate: new Date(),
-                'sellerAccounts.$[elem].lastDailyUpdate': new Date()
-            };
+            const now = new Date();
 
+            // Step 1: Update only the per-account lastDailyUpdate
             await UserUpdateSchedule.updateOne(
                 { userId },
-                { $set: updateData },
-                { 
-                    arrayFilters: [{ 
-                        'elem.country': country, 
-                        'elem.region': region 
-                    }]
-                }
+                { $set: { 'sellerAccounts.$[elem].lastDailyUpdate': now } },
+                { arrayFilters: [{ 'elem.country': country, 'elem.region': region }] }
             );
 
-            logger.info(`Marked daily comprehensive update complete for user ${userId}, ${country}-${region}`);
+            logger.info(`Marked account update complete for user ${userId}, ${country}-${region}`);
+
+            // Step 2: Check if ALL accounts for this user are now done today
+            const schedule = await UserUpdateSchedule.findOne({ userId });
+            if (schedule && schedule.sellerAccounts && schedule.sellerAccounts.length > 0) {
+                const startOfToday = new Date(Date.UTC(
+                    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0
+                ));
+
+                const allDone = schedule.sellerAccounts.every(acct => {
+                    if (!acct.country || !acct.region) return true;
+                    return acct.lastDailyUpdate && acct.lastDailyUpdate >= startOfToday;
+                });
+
+                if (allDone) {
+                    await UserUpdateSchedule.updateOne(
+                        { userId },
+                        { $set: { lastDailyUpdate: now } }
+                    );
+                    logger.info(`All accounts updated today for user ${userId} - marked user-level lastDailyUpdate`);
+                }
+            }
         } catch (error) {
             logger.error(`Error marking daily update complete for user ${userId}:`, error);
         }

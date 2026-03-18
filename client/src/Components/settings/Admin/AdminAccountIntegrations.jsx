@@ -91,7 +91,6 @@ const AdminAccountIntegrations = () => {
 
   const handleViewClient = (clientId) => {
     // TODO: Navigate to client details or switch to client context
-    console.log('View client:', clientId);
   };
 
   const handleRemoveClient = async (clientId) => {

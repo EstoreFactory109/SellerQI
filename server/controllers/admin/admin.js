@@ -792,7 +792,8 @@ const cancelUserSubscription = asyncHandler(async (req, res) => {
                 packageType: 'LITE',
                 subscriptionStatus: 'cancelled',
                 isInTrialPeriod: false,
-                trialEndsDate: null
+                trialEndsDate: null,
+                reviewRequestAuthStatus: false,
             });
 
             logger.info(`SuperAdmin ${adminId} cancelled subscription for user ${userId} (no active subscription found, status updated)`);

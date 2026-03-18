@@ -24,11 +24,13 @@ require('dotenv').config();
 const { Worker } = require('bullmq');
 const { getQueueRedisConnection } = require('../../config/queueRedisConn.js');
 const { processUserData } = require('./processUserData.js');
-const { QUEUE_NAME } = require('./queue.js');
+const { QUEUE_NAME, getQueue } = require('./queue.js');
 const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
+const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
+const scheduledPhases = require('./scheduledPhases.js');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
@@ -177,6 +179,77 @@ async function runWithLockExtension(job, asyncFn) {
 }
 
 /**
+ * Process a phased scheduled job (new architecture).
+ * Executes one phase, then enqueues the next phase as a separate BullMQ job.
+ */
+async function processScheduledPhase(job) {
+    const { userId, phase, country, region, parentJobId, phaseData } = job.data;
+    const jobStartTime = Date.now();
+    const effectiveParentJobId = parentJobId || job.id;
+
+    logger.info(`[Worker:${WORKER_NAME}] Starting scheduled phase ${phase} for user ${userId}, ${country}-${region}`);
+
+    await updateJobStatus(job.id, userId, 'running', {
+        startedAt: new Date().toISOString(),
+        workerName: WORKER_NAME,
+        metadata: { country, region, phase, parentJobId: effectiveParentJobId }
+    });
+
+    let result;
+    switch (phase) {
+        case scheduledPhases.PHASES.INIT:
+            result = await ScheduledIntegration.executeScheduledInitPhase(userId, region, country);
+            break;
+        case scheduledPhases.PHASES.BATCH_1_2:
+            result = await ScheduledIntegration.executeScheduledBatch1And2Phase(userId, region, country, phaseData || {});
+            break;
+        case scheduledPhases.PHASES.BATCH_3_4:
+            result = await ScheduledIntegration.executeScheduledBatch3And4Phase(userId, region, country, phaseData || {});
+            break;
+        case scheduledPhases.PHASES.CALC_REVIEW:
+            result = await ScheduledIntegration.executeScheduledCalcReviewPhase(userId, region, country, phaseData || {});
+            break;
+        case scheduledPhases.PHASES.FINALIZE:
+            result = await ScheduledIntegration.executeScheduledFinalizePhase(userId, region, country, phaseData || {});
+            break;
+        default:
+            throw new Error(`Unknown scheduled phase: ${phase}`);
+    }
+
+    if (!result.success) {
+        throw new Error(result.error || `Phase ${phase} failed`);
+    }
+
+    const duration = Date.now() - jobStartTime;
+    const nextPhase = scheduledPhases.getNextPhase(phase);
+
+    if (nextPhase) {
+        const nextJobData = scheduledPhases.createNextPhaseJobData(nextPhase, job.data, result);
+        const nextJobId = scheduledPhases.generatePhaseJobId(effectiveParentJobId, nextPhase);
+
+        const queue = getQueue();
+        await queue.add('process-user-data', nextJobData, {
+            jobId: nextJobId,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 60000 },
+            timeout: 2 * 60 * 60 * 1000
+        });
+
+        logger.info(`[Worker:${WORKER_NAME}] Phase ${phase} completed, enqueued next: ${nextPhase}`, { userId, duration, nextJobId });
+    } else {
+        logger.info(`[Worker:${WORKER_NAME}] All scheduled phases completed for user ${userId}, ${country}-${region}`, { duration });
+    }
+
+    await updateJobStatus(job.id, userId, 'completed', {
+        completedAt: new Date().toISOString(),
+        duration,
+        metadata: { country, region, phase, nextPhase, parentJobId: effectiveParentJobId }
+    });
+
+    return { success: true, phase, nextPhase, duration, completed: !nextPhase };
+}
+
+/**
  * Initialize connections and create worker
  */
 async function startWorker() {
@@ -187,32 +260,48 @@ async function startWorker() {
     const worker = new Worker(
         QUEUE_NAME,
         async (job) => {
-            const { userId } = job.data;
+            const { userId, phase, country, region } = job.data;
             const jobStartTime = Date.now();
 
-            logger.info(`[Worker:${WORKER_NAME}] Starting job ${job.id} for user ${userId}`);
+            // Phased scheduled job (new architecture)
+            if (phase && scheduledPhases.isValidPhase(phase)) {
+                try {
+                    return await runWithLockExtension(job, () => processScheduledPhase(job));
+                } catch (phaseError) {
+                    const duration = Date.now() - jobStartTime;
+                    logger.error(`[Worker:${WORKER_NAME}] Scheduled phase ${phase} failed for user ${userId}, ${country}-${region}:`, phaseError);
+
+                    await updateJobStatus(job.id, userId, 'failed', {
+                        failedAt: new Date().toISOString(),
+                        duration,
+                        error: phaseError.message,
+                        stack: phaseError.stack,
+                        attemptNumber: job.attemptsMade + 1,
+                        maxAttempts: job.opts.attempts,
+                        metadata: { country, region, phase, parentJobId: job.data.parentJobId }
+                    });
+
+                    throw phaseError;
+                }
+            }
+
+            // Legacy monolithic job (backward compatible)
+            logger.info(`[Worker:${WORKER_NAME}] Starting legacy job ${job.id} for user ${userId}`);
 
             try {
-                // Update job status to 'running'
                 await updateJobStatus(job.id, userId, 'running', {
                     startedAt: new Date().toISOString(),
                     workerName: WORKER_NAME
                 });
 
-                // Update job progress
                 await job.updateProgress(10);
 
-                // Call the core business logic function with lock extension
-                // This prevents job stalling during long-running API calls
-                // The lock is extended every 15 minutes to keep the job alive
                 const result = await runWithLockExtension(job, async () => {
                     return await processUserData(userId);
                 });
 
-                // Update job progress
                 await job.updateProgress(90);
 
-                // Update job status to 'completed'
                 await updateJobStatus(job.id, userId, 'completed', {
                     completedAt: new Date().toISOString(),
                     duration: Date.now() - jobStartTime,
@@ -222,7 +311,6 @@ async function startWorker() {
                     errors: result.errors
                 });
 
-                // Update final progress
                 await job.updateProgress(100);
 
                 logger.info(`[Worker:${WORKER_NAME}] Job ${job.id} completed successfully for user ${userId}`, {
@@ -231,7 +319,6 @@ async function startWorker() {
                     accountsSucceeded: result.accountsSucceeded
                 });
 
-                // Return result for job completion tracking
                 return {
                     success: result.success,
                     accountsProcessed: result.accountsProcessed,
@@ -245,7 +332,6 @@ async function startWorker() {
 
                 logger.error(`[Worker:${WORKER_NAME}] Job ${job.id} failed for user ${userId}:`, error);
 
-                // Update job status to 'failed'
                 await updateJobStatus(job.id, userId, 'failed', {
                     failedAt: new Date().toISOString(),
                     duration,
@@ -255,35 +341,29 @@ async function startWorker() {
                     maxAttempts: job.opts.attempts
                 });
 
-                // Re-throw to trigger BullMQ retry mechanism
                 throw error;
             }
         },
         {
             connection,
-            prefix: 'bullmq', // Same prefix as queue
-            concurrency: WORKER_CONCURRENCY, // Process N jobs concurrently
-            // Lock duration: 2 hours - prevents immediate stalling when worker crashes
-            // Without this, BullMQ uses default 30 seconds which causes stalls on worker restart
+            prefix: 'bullmq',
+            concurrency: WORKER_CONCURRENCY,
             lockDuration: LOCK_DURATION,
-            // Stall detection: Set to 4 hours to accommodate long-running report API jobs
-            // Jobs can take hours waiting for report API responses, so we need a longer interval
-            stallInterval: 4 * 60 * 60 * 1000, // 4 hours in milliseconds
-            maxStalledCount: 2, // Allow 2 stalls before failing (handles worker restarts)
+            // Reduced from 4 hours to 10 minutes: phased jobs are shorter and
+            // stall detection needs to be fast enough to recover orphaned jobs
+            stallInterval: 10 * 60 * 1000,
+            maxStalledCount: 3,
             limiter: {
-                // Optional: Rate limiting
-                max: 10, // Max 10 jobs
-                duration: 60000 // Per minute
+                max: 10,
+                duration: 60000
             },
-            // Remove completed jobs after shorter period (optimized for memory)
             removeOnComplete: {
-                age: 2 * 3600, // 2 hours (matches queue config)
-                count: 100 // Keep last 100 (matches queue config)
+                age: 2 * 3600,
+                count: 100
             },
-            // Remove failed jobs after shorter period
             removeOnFail: {
-                age: 24 * 3600, // 1 day (matches queue config)
-                count: 500 // Keep last 500 (matches queue config)
+                age: 24 * 3600,
+                count: 500
             }
         }
     );

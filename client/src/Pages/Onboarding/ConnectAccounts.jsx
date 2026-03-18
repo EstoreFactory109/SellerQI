@@ -17,6 +17,7 @@ import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import stripeService from '../../services/stripeService.js';
 import razorpayService from '../../services/razorpayService.js';
+import { devLog, devWarn } from '../../utils/devLogger.js';
 
 // Marketplace configuration mapping
 const MARKETPLACE_CONFIG = {
@@ -179,14 +180,14 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     const checkAuth = async () => {
       // If not authenticated, redirect to login
       if (!isAuthenticated) {
-        console.log('ConnectAccounts: Not authenticated - redirecting to login');
+        devLog('ConnectAccounts: Not authenticated - redirecting to login');
         navigate('/', { replace: true });
         return;
       }
 
       // Allow all authenticated users to proceed (skip pricing check)
       // New signups with LITE package can connect accounts first, then pay later
-      console.log('ConnectAccounts: User authenticated - allowing access');
+      devLog('ConnectAccounts: User authenticated - allowing access');
       setCheckingSubscription(false);
     };
 
@@ -199,7 +200,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       // If SP-API connection status is passed via URL (from Account Integrations page),
       // use that directly to avoid unnecessary checks
       if (spApiConnectedFromUrl) {
-        console.log('ConnectAccounts: SP-API connected status from URL parameter');
+        devLog('ConnectAccounts: SP-API connected status from URL parameter');
         setIsSpApiConnectedState(true);
         setIsSellerCentralConnected(true);
         setCheckingSpApi(false);
@@ -240,7 +241,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
           acc => acc.country === countryCode && acc.region === region
         );
         if (specificAccount && specificAccount.SpAPIrefreshTokenStatus) {
-          console.log('ConnectAccounts: SP-API connected for specific account from Redux');
+          devLog('ConnectAccounts: SP-API connected for specific account from Redux');
           setIsSpApiConnectedState(true);
           setIsSellerCentralConnected(true);
           setCheckingSpApi(false);
@@ -535,10 +536,10 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
         axiosInstance.get('/app/logout', { withCredentials: true }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Logout timeout')), 3000))
       ]);
-      console.log('Logout API call successful');
+      devLog('Logout API call successful');
     } catch (error) {
       // Log error but continue with logout process
-      console.log('Logout API call result:', error.response?.status || error.message);
+      devLog('Logout API call result:', error.response?.status || error.message);
       // Continue with logout even if API call fails
     }
     
@@ -566,7 +567,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
           const statusResponse = await axiosInstance.get(`/api/integration/status/${jobId}`);
           const status = statusResponse.data.data.status?.toLowerCase();
           
-          console.log(`[ConnectAccounts] Job status check: ${status}`);
+          devLog(`[ConnectAccounts] Job status check: ${status}`);
           
           if (status === 'active' || status === 'running') {
             // Job started - clear polling and resolve
@@ -578,7 +579,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            console.log('[ConnectAccounts] Job has started processing');
+            devLog('[ConnectAccounts] Job has started processing');
             resolve(true);
             return;
           }
@@ -593,7 +594,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            console.log('[ConnectAccounts] Job already completed');
+            devLog('[ConnectAccounts] Job already completed');
             resolve(true);
             return;
           }
@@ -623,7 +624,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            console.warn('[ConnectAccounts] Timeout waiting for job to start, proceeding anyway');
+            devWarn('[ConnectAccounts] Timeout waiting for job to start, proceeding anyway');
             resolve(true); // Proceed anyway
             return;
           }
@@ -665,16 +666,16 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       // For agency context, skip payment entirely and go to profile selection
       // Agency clients are managed by the agency owner, no individual payment required
       if (isAgencyContext) {
-        console.log('[ConnectAccounts] Agency context detected - skipping payment, navigating to profile selection');
+        devLog('[ConnectAccounts] Agency context detected - skipping payment, navigating to profile selection');
         setWaitingForAnalysis(false);
         navigate(`${agencyBasePath}/profile-selection?region=${region || 'NA'}`);
         return;
       }
       
       // Debug: Log Redux userData
-      console.log('[ConnectAccounts] navigateToPayment called');
-      console.log('[ConnectAccounts] Redux userData:', userData);
-      console.log('[ConnectAccounts] Redux userData details:', {
+      devLog('[ConnectAccounts] navigateToPayment called');
+      devLog('[ConnectAccounts] Redux userData:', userData);
+      devLog('[ConnectAccounts] Redux userData details:', {
         packageType: userData?.packageType,
         subscriptionStatus: userData?.subscriptionStatus,
         isInTrialPeriod: userData?.isInTrialPeriod,
@@ -683,10 +684,10 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       
       // First check Redux state for premium access
       const hasPremiumFromRedux = hasPremiumAccess(userData);
-      console.log('[ConnectAccounts] hasPremiumAccess(userData) result:', hasPremiumFromRedux);
+      devLog('[ConnectAccounts] hasPremiumAccess(userData) result:', hasPremiumFromRedux);
       
       if (hasPremiumFromRedux) {
-        console.log('[ConnectAccounts] User already has premium access (from Redux), skipping payment...');
+        devLog('[ConnectAccounts] User already has premium access (from Redux), skipping payment...');
         setWaitingForAnalysis(false);
         navigate('/analyse-account');
         return;
@@ -695,13 +696,13 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       // Fetch fresh user data from API to ensure we have the latest subscription status
       // This handles cases where Redux state might be stale
       try {
-        console.log('[ConnectAccounts] Fetching fresh user data to verify subscription status...');
+        devLog('[ConnectAccounts] Fetching fresh user data to verify subscription status...');
         const profileResponse = await axiosInstance.get('/app/profile');
-        console.log('[ConnectAccounts] Profile API response:', profileResponse);
+        devLog('[ConnectAccounts] Profile API response:', profileResponse);
         
         if (profileResponse?.status === 200 && profileResponse.data?.data) {
           const freshUserData = profileResponse.data.data;
-          console.log('[ConnectAccounts] Fresh user data:', {
+          devLog('[ConnectAccounts] Fresh user data:', {
             packageType: freshUserData.packageType,
             subscriptionStatus: freshUserData.subscriptionStatus,
             isInTrialPeriod: freshUserData.isInTrialPeriod,
@@ -710,19 +711,19 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
           
           // Check fresh data for premium access (PRO, AGENCY, or active trial)
           const hasPremiumFromApi = hasPremiumAccess(freshUserData);
-          console.log('[ConnectAccounts] hasPremiumAccess(freshUserData) result:', hasPremiumFromApi);
+          devLog('[ConnectAccounts] hasPremiumAccess(freshUserData) result:', hasPremiumFromApi);
           
           if (hasPremiumFromApi) {
-            console.log('[ConnectAccounts] User already has premium access (from fresh API data), skipping payment...');
+            devLog('[ConnectAccounts] User already has premium access (from fresh API data), skipping payment...');
             setWaitingForAnalysis(false);
             navigate('/analyse-account');
             return;
           }
         } else {
-          console.log('[ConnectAccounts] Profile API returned unexpected response:', profileResponse?.status);
+          devLog('[ConnectAccounts] Profile API returned unexpected response:', profileResponse?.status);
         }
       } catch (profileError) {
-        console.warn('[ConnectAccounts] Could not fetch fresh profile data, proceeding with Redux state:', profileError);
+        devWarn('[ConnectAccounts] Could not fetch fresh profile data, proceeding with Redux state:', profileError);
         // Continue with payment flow if we can't fetch fresh data
       }
       
@@ -730,7 +731,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       const country = await detectCountry();
       const isIndianUser = country === 'IN';
       
-      console.log(`[ConnectAccounts] Detected country: ${country}, navigating to payment...`);
+      devLog(`[ConnectAccounts] Detected country: ${country}, navigating to payment...`);
       
       if (isIndianUser) {
         // India: Use Razorpay with 7-day trial
@@ -739,7 +740,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
           'PRO',
           // Success callback
           (result) => {
-            console.log('Razorpay trial started:', result);
+            devLog('Razorpay trial started:', result);
             navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
           },
           // Error callback
@@ -772,7 +773,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     }
 
     try {
-      console.log('[ConnectAccounts] Skip clicked - triggering integration job...');
+      devLog('[ConnectAccounts] Skip clicked - triggering integration job...');
       setWaitingForAnalysis(true);
       
       let jobId = null;
@@ -784,7 +785,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
         // Job already exists
         jobId = activeResponse.data.data.jobId;
         const existingStatus = activeResponse.data.data.status?.toLowerCase();
-        console.log('[ConnectAccounts] Active job already exists:', existingStatus);
+        devLog('[ConnectAccounts] Active job already exists:', existingStatus);
         
         // If already active or completed, proceed immediately
         if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'completed') {
@@ -797,7 +798,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
         
         if (triggerResponse.status === 202 || triggerResponse.status === 200) {
           jobId = triggerResponse.data.data.jobId;
-          console.log('[ConnectAccounts] Integration job triggered successfully, jobId:', jobId);
+          devLog('[ConnectAccounts] Integration job triggered successfully, jobId:', jobId);
         } else {
           throw new Error('Failed to trigger integration job');
         }
@@ -805,9 +806,9 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       
       // Wait for job to start (status becomes 'active')
       if (jobId) {
-        console.log('[ConnectAccounts] Waiting for job to start...');
+        devLog('[ConnectAccounts] Waiting for job to start...');
         await waitForJobToStart(jobId);
-        console.log('[ConnectAccounts] Job started, navigating to payment...');
+        devLog('[ConnectAccounts] Job started, navigating to payment...');
         await navigateToPayment();
       } else {
         throw new Error('No job ID received');

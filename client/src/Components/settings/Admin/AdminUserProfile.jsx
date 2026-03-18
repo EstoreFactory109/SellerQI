@@ -154,7 +154,6 @@ export default function AdminUserProfile() {
     e.preventDefault();
     
     if (!validateForm()) {
-      console.log("Form validation failed");
       return;
     }
 
@@ -177,7 +176,6 @@ export default function AdminUserProfile() {
           whatsapp: whatsapp,
           email: email
         }));
-        console.log("Profile updated successfully");
       }
     } catch (error) {
       console.error("Error updating profile:", error);

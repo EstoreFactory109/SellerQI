@@ -5,8 +5,6 @@ export const handleAnalysisComplete = (dashboardData, isFirstTimeAnalysis = fals
   try {
     // Trigger the appropriate notifications
     triggerAnalysisNotifications(dashboardData, isFirstTimeAnalysis);
-    
-    console.log('Analysis notifications triggered successfully');
   } catch (error) {
     console.error('Error triggering analysis notifications:', error);
   }

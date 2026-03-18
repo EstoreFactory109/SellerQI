@@ -122,6 +122,15 @@ const MON_WED_FRI_FUNCTIONS = {
         description: 'MCP Economics Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpEconomicsData'
+    },
+    // Review Order Ingestion - fetches recent shipped orders + items from SP-API
+    'reviewOrderIngestion': {
+        service: require('../review/scheduledReviewIngestionProcessor.js'),
+        functionName: 'scheduledReviewIngestion',
+        description: 'Review Order Ingestion',
+        apiDataKey: 'reviewOrderIngestion',
+        isCalculationService: true,
+        runOrder: 97
     }
 };
 
@@ -260,6 +269,15 @@ const DAILY_FUNCTIONS = {
         description: 'MCP BuyBox Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpBuyBoxData'
+    },
+    // Review Request Sender - checks eligibility + sends solicitations for unsent orders (5-30 day window)
+    'reviewRequestSender': {
+        service: require('../review/scheduledReviewRequestProcessor.js'),
+        functionName: 'scheduledReviewRequestSender',
+        description: 'Review Request Sender',
+        apiDataKey: 'reviewRequestSender',
+        isCalculationService: true,
+        runOrder: 98
     }
 };
 

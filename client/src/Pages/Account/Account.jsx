@@ -15,13 +15,6 @@ const AccountHistoryPanel = () => {
   const legacyHistoryInfo = useSelector(state => state.History.HistoryInfo || []);
   const historyInfo = accountHistoryPageData?.accountHistory || legacyHistoryInfo;
 
-  console.log("🔍 ACCOUNT HISTORY PAGE DATA:");
-  console.log("History Info:", historyInfo);
-  console.log("Number of history records:", historyInfo.length);
-  console.log("Account history loading:", accountHistoryLoading);
-
-
-
   return (
     <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>

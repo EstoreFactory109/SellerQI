@@ -31,7 +31,7 @@ async function sendReviewRequest(
   if (!endpoint) throw new Error("endpoint is required");
   if (!marketplaceId) throw new Error("marketplaceId is required");
 
-  const url = `${endpoint}/solicitations/v1/orders/${orderId}/solicitations/productReview?marketplaceIds=${marketplaceId}`;
+  const url = `${endpoint}/solicitations/v1/orders/${orderId}/solicitations/productReviewAndSellerFeedback?marketplaceIds=${marketplaceId}`
 
   const headers = signRequest({
     method: "POST",
@@ -53,11 +53,20 @@ async function sendReviewRequest(
   }
 
   const errorData = await response.json().catch(() => ({}));
+  const errorMessage = errorData?.errors?.[0]?.message || "Unknown error";
+
+  // Amazon returns 403 + "not available for this amazonOrderId" when the
+  // solicitation was already sent (e.g. manually via Seller Central).
+  const alreadySent =
+    response.status === 403 &&
+    /not available for this/i.test(errorMessage);
+
   return {
     success: false,
+    alreadySent,
     orderId,
     status: response.status,
-    error: errorData?.errors?.[0]?.message || "Unknown error",
+    error: errorMessage,
   };
 }
 

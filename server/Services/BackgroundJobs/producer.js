@@ -14,6 +14,10 @@
 
 const { getQueue } = require('./queue.js');
 const logger = require('../../utils/Logger.js');
+const scheduledPhasesModule = require('./scheduledPhases.js');
+const { PHASES } = scheduledPhasesModule;
+
+const MAX_SCHEDULED_JOB_AGE = 8 * 60 * 60 * 1000; // 8 hours - safety net for orphaned phase jobs
 
 /**
  * Enqueue a single user for data processing
@@ -203,9 +207,91 @@ async function removeJob(jobId) {
     }
 }
 
+/**
+ * Enqueue a per-account scheduled INIT phase job (new phased architecture).
+ *
+ * Uses a deterministic job ID so we can check for duplicates by exact ID
+ * instead of scanning all jobs. Also applies a max-age safety net: if the
+ * existing job is older than MAX_SCHEDULED_JOB_AGE, it is removed and a
+ * fresh one is created (prevents jobs orphaned by worker crashes from
+ * blocking the user forever).
+ *
+ * @param {string} userId
+ * @param {string} country
+ * @param {string} region
+ * @returns {Promise<Object>}
+ */
+async function enqueueScheduledAccountJob(userId, country, region) {
+    try {
+        const queue = getQueue();
+
+        if (!userId || !country || !region) {
+            throw new Error('userId, country, and region are all required');
+        }
+
+        const parentJobId = `scheduled-${userId}-${country}-${region}`;
+        const initJobId = `${parentJobId}-${PHASES.INIT}`;
+
+        const allPhaseIds = scheduledPhasesModule.getAllPhaseJobIds(parentJobId);
+        // Also check the parent ID itself (safety)
+        const idsToCheck = [parentJobId, ...allPhaseIds];
+
+        for (const jid of idsToCheck) {
+            const existingJob = await queue.getJob(jid);
+            if (!existingJob) continue;
+
+            const state = await existingJob.getState();
+
+            if (state === 'waiting' || state === 'active' || state === 'delayed') {
+                const jobAge = Date.now() - existingJob.timestamp;
+
+                if (jobAge > MAX_SCHEDULED_JOB_AGE) {
+                    logger.warn(`[Producer] Removing stale scheduled job ${jid} for user ${userId} ${country}-${region} (age: ${Math.round(jobAge / 3600000)}h, state: ${state})`);
+                    try { await existingJob.remove(); } catch (re) { logger.warn(`[Producer] Could not remove stale job ${jid}: ${re.message}`); }
+                } else {
+                    logger.info(`[Producer] Scheduled job already in progress for ${userId} ${country}-${region} (jobId: ${jid}, state: ${state}, age: ${Math.round(jobAge / 60000)}min)`);
+                    return { success: false, message: 'Account already has a scheduled job in progress', jobId: jid, state };
+                }
+            } else if (state === 'completed' || state === 'failed') {
+                try { await existingJob.remove(); } catch (re) { logger.warn(`[Producer] Could not remove old job ${jid}: ${re.message}`); }
+            } else {
+                logger.warn(`[Producer] Removing job ${jid} with unexpected state: ${state}`);
+                try { await existingJob.remove(); } catch (re) { logger.warn(`[Producer] Could not remove job ${jid}: ${re.message}`); }
+            }
+        }
+
+        // Create the INIT phase job
+        const jobData = {
+            userId: userId.toString(),
+            country,
+            region,
+            phase: PHASES.INIT,
+            parentJobId,
+            enqueuedAt: new Date().toISOString(),
+            enqueuedBy: 'cron-scheduled',
+            phaseData: {}
+        };
+
+        const job = await queue.add('process-user-data', jobData, {
+            jobId: initJobId,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 60000 },
+            timeout: 2 * 60 * 60 * 1000
+        });
+
+        logger.info(`[Producer] Enqueued scheduled INIT for ${userId} ${country}-${region} (jobId: ${job.id})`);
+        return { success: true, jobId: job.id, userId, country, region, state: 'waiting' };
+
+    } catch (error) {
+        logger.error(`[Producer] Failed to enqueue scheduled job for ${userId} ${country}-${region}:`, error);
+        throw error;
+    }
+}
+
 module.exports = {
     enqueueUser,
     enqueueUsers,
+    enqueueScheduledAccountJob,
     getQueueStats,
     removeJob
 };

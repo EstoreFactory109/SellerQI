@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axiosInstance from "../../config/axios.config";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
+import { devLog, devWarn } from "../../utils/devLogger.js";
 
 const FetchingTokens = () => {
   const [showAccessText, setShowAccessText] = useState(true);
@@ -50,12 +51,7 @@ const FetchingTokens = () => {
       hasProcessed.current = true;
 
       try {
-        console.log("Processing SP-API authorization callback...");
-        console.log("Authorization Code:", authCode);
-        console.log("State Parameter:", state);
-        if (sellingPartnerId) {
-          console.log("Selling Partner ID:", sellingPartnerId);
-        }
+        devLog("Processing SP-API authorization callback...");
 
         // Validate state parameter (should match what was sent initially)
         const storedState = sessionStorage.getItem('spapi_oauth_state');
@@ -74,7 +70,7 @@ const FetchingTokens = () => {
         });
         
         if (response.status === 200 && response.data) {
-          console.log("Tokens generated successfully");
+          devLog("Tokens generated successfully");
           
           // Store any necessary data from the response
           // The API returns ApiResponse structure: { statusCode, data, message }
@@ -184,8 +180,7 @@ const FetchingTokens = () => {
       hasProcessed.current = true;
 
       try {
-        console.log("Processing Amazon Ads authorization callback...");
-        console.log("Authorization Code:", amazonAdsAuthCode);
+        devLog("Processing Amazon Ads authorization callback...");
         
 
         // Check if this is an agency flow (context stored before OAuth redirect)
@@ -196,7 +191,7 @@ const FetchingTokens = () => {
 
         if (agencyAdsConnect && agencyAdsConnect.clientId) {
           // Agency flow: use the agency-safe endpoint that authenticates via AdminToken
-          console.log("Agency flow detected — using generateAdsTokensForClient");
+          devLog("Agency flow detected — using generateAdsTokensForClient");
           response = await axiosInstance.post('/app/token/generateAdsTokensForClient', {
             authCode: amazonAdsAuthCode,
             clientId: agencyAdsConnect.clientId,
@@ -210,10 +205,10 @@ const FetchingTokens = () => {
           });
         }
 
-        console.log("Token generation response:", response);
+        devLog("Token generation response:", response);
         
         if (response.status === 200 && response.data) {
-          console.log("Amazon Ads tokens generated and saved successfully");
+          devLog("Amazon Ads tokens generated and saved successfully");
           
           // Clear the amazonAdsLoading flag and agency context
           localStorage.removeItem('amazonAdsLoading');
@@ -233,7 +228,7 @@ const FetchingTokens = () => {
           const region = selectedMarketplace.region || 'NA';
           
           // Step 2: Pre-fetch the profile IDs before redirecting
-          console.log("Fetching profile IDs...");
+          devLog("Fetching profile IDs...");
           let profileData = null;
           
           try {
@@ -250,11 +245,11 @@ const FetchingTokens = () => {
                   currency: String(scope.currencyCode || 'Unknown'),
                   country: String(scope.countryCode || scope.country_code || scope.country || 'Unknown')
                 }));
-                console.log("Profile IDs fetched successfully:", profileData.length, "profiles");
+                devLog("Profile IDs fetched successfully:", profileData.length, "profiles");
               }
             }
           } catch (profileError) {
-            console.warn("Could not pre-fetch profile IDs:", profileError);
+            devWarn("Could not pre-fetch profile IDs:", profileError);
           }
           
           // Step 3: Navigate to profile selection page with pre-fetched data

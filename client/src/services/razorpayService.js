@@ -1,4 +1,5 @@
 import axiosInstance from '../config/axios.config.js';
+import { devLog, devWarn } from '../utils/devLogger.js';
 
 class RazorpayService {
     constructor() {
@@ -64,12 +65,12 @@ class RazorpayService {
             if (keyId) {
                 const keyType = keyId.startsWith('rzp_test_') ? 'TEST' : 
                                keyId.startsWith('rzp_live_') ? 'LIVE' : 'UNKNOWN';
-                console.log(`Received Razorpay ${keyType} key from backend: ${keyId.substring(0, 15)}...`);
+                devLog(`Received Razorpay ${keyType} key from backend: ${keyId.substring(0, 15)}...`);
             }
             
             // Log trial info if applicable
             if (response.data.data?.hasTrial) {
-                console.log(`Razorpay subscription with ${response.data.data.trialDays}-day trial. Trial ends: ${response.data.data.trialEndsAt}`);
+                devLog(`Razorpay subscription with ${response.data.data.trialDays}-day trial. Trial ends: ${response.data.data.trialEndsAt}`);
             }
             
             return response.data.data;
@@ -124,7 +125,7 @@ class RazorpayService {
             
             // Log warning if live key is detected in what appears to be a development environment
             if (keyId.startsWith('rzp_live_') && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-                console.warn('⚠️ WARNING: Using LIVE Razorpay key in localhost! This should be a TEST key.');
+                devWarn('⚠️ WARNING: Using LIVE Razorpay key in localhost! This should be a TEST key.');
             }
 
             // Configure Razorpay options for subscription
@@ -144,7 +145,7 @@ class RazorpayService {
                 },
                 modal: {
                     ondismiss: () => {
-                        console.log('Razorpay checkout closed');
+                        devLog('Razorpay checkout closed');
                         if (onError) {
                             onError({ message: 'Payment cancelled by user' });
                         }

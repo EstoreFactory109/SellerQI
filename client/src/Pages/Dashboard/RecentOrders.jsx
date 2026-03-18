@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 
@@ -143,6 +143,9 @@ const RecentOrders = () => {
   const [error, setError] = useState(null);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
 
+  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
+  const [autoSendLoading, setAutoSendLoading] = useState(true);
+
   const pageRef = useRef(0);
   const hasMoreRef = useRef(true);
   const loadingRef = useRef(false);
@@ -190,6 +193,46 @@ const RecentOrders = () => {
     }
   }, [fetchNextPage]);
 
+  // Fetch auto-send toggle status
+  useEffect(() => {
+    const fetchAuthStatus = async () => {
+      try {
+        const res = await axios.get(
+          `${import.meta.env.VITE_BASE_URI}/api/review/review-auth-status`,
+          { withCredentials: true }
+        );
+        if (res?.data?.success) {
+          setAutoSendEnabled(!!res.data.reviewRequestAuthStatus);
+        }
+      } catch {
+        // leave default false
+      } finally {
+        setAutoSendLoading(false);
+      }
+    };
+    fetchAuthStatus();
+  }, []);
+
+  const handleToggleAutoSend = async () => {
+    const newValue = !autoSendEnabled;
+    setAutoSendLoading(true);
+    try {
+      const res = await axios.patch(
+        `${import.meta.env.VITE_BASE_URI}/api/review/review-auth-status`,
+        { enabled: newValue },
+        { withCredentials: true }
+      );
+      if (res?.data?.success) {
+        setAutoSendEnabled(res.data.reviewRequestAuthStatus);
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Failed to update';
+      setError(msg);
+    } finally {
+      setAutoSendLoading(false);
+    }
+  };
+
   // Scroll-based pagination: listen on the real scrollable ancestor
   useEffect(() => {
     const sentinel = bottomRef.current;
@@ -227,8 +270,25 @@ const RecentOrders = () => {
     <div className="min-h-screen w-full bg-[#0b0b0f] text-gray-100">
       <div className="max-w-6xl mx-auto px-4 py-6">
         <div className="bg-[#111827] border border-[#1f2937] rounded-xl overflow-hidden shadow-lg shadow-black/40">
-          <div className="px-4 py-3 border-b border-[#1f2937] bg-[#020617]">
+          <div className="px-4 py-3 border-b border-[#1f2937] bg-[#020617] flex items-center justify-between">
             <h1 className="text-lg font-semibold text-gray-100">Recent Orders</h1>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400">Auto Review Requests</span>
+              <button
+                onClick={handleToggleAutoSend}
+                disabled={autoSendLoading}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  autoSendEnabled ? 'bg-emerald-500' : 'bg-zinc-600'
+                } ${autoSendLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform transition-transform duration-200 ease-in-out ${
+                    autoSendEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -257,9 +317,8 @@ const RecentOrders = () => {
                       : '—';
 
                   return (
-                    <>
+                    <Fragment key={id}>
                       <tr
-                        key={id}
                         className={`border-b border-[#111827] hover:bg-[#020617]/60 transition-colors cursor-pointer ${isExpanded ? 'bg-[#020617]/40' : ''}`}
                         onClick={() => toggleExpand(order.amazonOrderId)}
                       >
@@ -278,11 +337,15 @@ const RecentOrders = () => {
                               ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40'
                               : 'bg-zinc-700/40 text-zinc-300 border border-zinc-600/60'
                           }`}>
-                            {order.canRequestReview ? 'Yes' : 'No'}
+                            {order.canRequestReview ? 'Can be sent' : "can't send Yet"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-700/40 text-slate-200 border border-slate-600/60">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            order.reviewRequestStatus === 'sent'
+                              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-slate-700/40 text-slate-200 border border-slate-600/60'
+                          }`}>
                             {order.reviewRequestStatus || 'not_requested'}
                           </span>
                         </td>
@@ -290,7 +353,7 @@ const RecentOrders = () => {
                       {isExpanded && (
                         <OrderItemsPanel key={`items-${order.amazonOrderId}`} amazonOrderId={order.amazonOrderId} />
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
 

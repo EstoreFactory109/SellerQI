@@ -78,6 +78,7 @@ async function downgradeExpiredManualTrials() {
                     packageType: 'LITE',
                     subscriptionStatus: 'inactive',
                     isInTrialPeriod: false,
+                    reviewRequestAuthStatus: false,
                     // Keep servedTrial = true so they can't get another free trial
                     // Keep trialEndsDate for historical reference
                 });

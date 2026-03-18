@@ -164,13 +164,6 @@ export default function IndiaBilling() {
           setCurrentPlan('LITE');
         }
         setSubscriptionStatus(user.subscriptionStatus || 'active');
-        
-        // Debug logging
-        console.log('🔍 IndiaBilling - User subscription check:', {
-          packageType: user.packageType,
-          isInTrialPeriod: userIsInTrial,
-          currentPlan: user.packageType === 'PRO' && !userIsInTrial ? 'PRO' : (user.packageType === 'AGENCY' ? 'AGENCY' : 'LITE')
-        });
       }
 
       // Try to get detailed subscription info from Razorpay
@@ -178,7 +171,6 @@ export default function IndiaBilling() {
         const subscription = await razorpayService.getSubscription();
         setUserSubscription(subscription);
       } catch (error) {
-        console.log('No Razorpay subscription found');
       }
     } catch (error) {
       console.error('Error fetching subscription:', error);

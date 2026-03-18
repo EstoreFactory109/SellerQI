@@ -7,7 +7,7 @@ const GetIP = async ()=>{
         const ip= ipResponse.data.ip;
         return ip;
     }catch(error){
-        console.log(error);
+        console.error(error);
         return false
     }
 }

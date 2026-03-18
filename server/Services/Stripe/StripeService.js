@@ -390,6 +390,7 @@ class StripeService {
                 packageType: planType,
                 subscriptionStatus: stripeSubscription.status,
                 isInTrialPeriod: isTrialing, // Set based on Stripe subscription status
+                reviewRequestAuthStatus: true,
             };
             
             // If subscription is in trial, set trial end date and mark that user has been served a trial
@@ -752,7 +753,8 @@ class StripeService {
                     packageType: 'LITE',
                     subscriptionStatus: 'cancelled',
                     isInTrialPeriod: false,
-                    trialEndsDate: null
+                    trialEndsDate: null,
+                    reviewRequestAuthStatus: false,
                 });
             }
 

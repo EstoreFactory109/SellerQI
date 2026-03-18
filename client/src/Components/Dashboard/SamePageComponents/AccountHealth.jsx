@@ -8,7 +8,6 @@ import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 const AccountHealth = () => {
 const info = useSelector(state => state.Dashboard?.DashBoardInfo)
 const [tooltip,setToolTip] = useState(false)  
-console.log(info)
 const navigatie = useNavigate()
 
   const healthPercentage = info?.accountHealthPercentage?.Percentage || 0;

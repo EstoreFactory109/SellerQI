@@ -1,12 +1,14 @@
 // Simple encryption/decryption utility for localStorage
 // Note: This is basic encryption. For production, consider using a more robust solution
 
+import { devWarn } from './devLogger.js';
+
 // Get encryption key from environment variable or use a default (not recommended for production)
 const ENCRYPTION_KEY = import.meta.env.VITE_COGS_ENCRYPTION_KEY || 'ibex-cogs-default-key-2024-please-change-this';
 
 // Validate encryption key
 if (!import.meta.env.VITE_COGS_ENCRYPTION_KEY) {
-  console.warn('⚠️ Warning: Using default encryption key. Please set VITE_COGS_ENCRYPTION_KEY in your .env file for better security.');
+  devWarn('⚠️ Warning: Using default encryption key. Please set VITE_COGS_ENCRYPTION_KEY in your .env file for better security.');
 }
 
 // Simple XOR encryption

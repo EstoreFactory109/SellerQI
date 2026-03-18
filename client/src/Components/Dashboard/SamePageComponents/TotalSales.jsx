@@ -209,7 +209,6 @@ const TotalSales = () => {
   ];
 
   const handleNavigateToProfitability = (itemName) => {
-    console.log(`Navigating to profitability dashboard from: ${itemName}`);
     navigate('/seller-central-checker/profitibility-dashboard');
   };
 

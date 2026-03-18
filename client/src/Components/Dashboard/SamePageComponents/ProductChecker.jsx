@@ -7,7 +7,6 @@ import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 
 const ProductChecker = ({ loading = false }) => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
-   console.log(info)
    const navigate = useNavigate()
    
    // Get error counts from Redux with better fallbacks - these are now pre-calculated during analysis
@@ -30,7 +29,6 @@ const ProductChecker = ({ loading = false }) => {
      if (info?.second) tempArr.push(info.second);
      if (info?.third) tempArr.push(info.third);
      if (info?.fourth) tempArr.push(info.fourth);
-     console.log("Product errors data:", tempArr);
      setProductErrors(tempArr)
    }, [info])
  
@@ -41,7 +39,6 @@ const ProductChecker = ({ loading = false }) => {
   
   // Calculate total errors
   const totalErrors = seriesData.reduce((sum, value) => sum + (value || 0), 0);
-  console.log("totalErrors",totalErrors)
   
   const [chartData, setChartData] = useState({
     series: seriesData, // Data values

@@ -110,6 +110,22 @@ const ReviewOrderSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Scheduler: when to next check eligibility (backoff-aware)
+    nextEligibilityCheckAt: {
+      type: Date,
+      index: true,
+    },
+
+    // Retry / attempt tracking
+    sendAttemptCount: {
+      type: Number,
+      default: 0,
+    },
+    eligibilityCheckCount: {
+      type: Number,
+      default: 0,
+    },
+
     // Processing flags for jobs
     isArchived: {
       type: Boolean,
@@ -145,6 +161,14 @@ ReviewOrderSchema.index({
   User: 1,
   reviewRequestStatus: 1,
   eligibilityLastCheckedAt: -1,
+});
+
+// Scheduled worker query: unsent orders within eligibility window
+ReviewOrderSchema.index({
+  User: 1,
+  reviewRequestStatus: 1,
+  purchaseDate: -1,
+  nextEligibilityCheckAt: 1,
 });
 
 module.exports = mongoose.model("ReviewOrder", ReviewOrderSchema);

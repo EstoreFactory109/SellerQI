@@ -253,7 +253,7 @@ const AnalysingAccount = () => {
     try {
       await axiosInstance.get('/app/logout', { withCredentials: true });
     } catch (error) {
-      console.warn('Logout API:', error?.response?.status || error?.message);
+      console.error('Logout API:', error?.response?.status || error?.message);
     }
     clearAuthCache();
     localStorage.removeItem('isAuth');

@@ -18,29 +18,16 @@ const ExpectedReimbursement = () => {
       try {
         setLoading(true)
         setError(null)
-        console.log('[ExpectedReimbursement] Fetching reimbursement summary...')
         const response = await getReimbursementSummary()
-        console.log('[ExpectedReimbursement] Reimbursement response:', response)
         
         if (response && response.data) {
           setReimbursementData(response.data)
-          console.log('[ExpectedReimbursement] Reimbursement data set:', {
-            totalRecoverable: response.data.totalRecoverable,
-            totalRecoverableMonth: response.data.totalRecoverableMonth
-          })
         } else {
-          console.warn('[ExpectedReimbursement] Invalid response format:', response)
           setReimbursementData(null)
           setError('Invalid response format from server')
         }
       } catch (err) {
         console.error('[ExpectedReimbursement] Error fetching reimbursement data:', err)
-        console.error('[ExpectedReimbursement] Error details:', {
-          message: err.message,
-          response: err.response?.data,
-          status: err.response?.status,
-          statusText: err.response?.statusText
-        })
         setError(err.response?.data?.message || err.message || 'Failed to fetch reimbursement data')
         setReimbursementData(null)
       } finally {

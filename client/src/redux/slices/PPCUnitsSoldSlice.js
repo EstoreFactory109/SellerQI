@@ -7,6 +7,7 @@
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axiosInstance from '../../config/axios.config';
+import { devLog } from '../../utils/devLogger.js';
 
 const initialState = {
     // Latest units sold data (default: 30 days)
@@ -60,15 +61,15 @@ export const fetchPPCUnitsSoldByDateRange = createAsyncThunk(
     'ppcUnitsSold/fetchByDateRange',
     async ({ startDate, endDate }, { rejectWithValue }) => {
         try {
-            console.log('=== Fetching PPC Units Sold by Date Range ===');
-            console.log('Start Date:', startDate);
-            console.log('End Date:', endDate);
+            devLog('=== Fetching PPC Units Sold by Date Range ===');
+            devLog('Start Date:', startDate);
+            devLog('End Date:', endDate);
             
             const response = await axiosInstance.get('/api/pagewise/ppc-units-sold/filter', {
                 params: { startDate, endDate }
             });
             
-            console.log('API Response:', response.data);
+            devLog('API Response:', response.data);
             
             const responseData = response.data?.data;
             

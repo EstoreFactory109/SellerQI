@@ -39,7 +39,6 @@ const AdminSupport = () => {
     
     try {
       // TODO: Submit support ticket
-      console.log('Submitting ticket:', ticketForm);
       await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
       
       // Reset form

@@ -863,8 +863,10 @@ class ScheduledIntegration {
         const {
             AccessToken, AdsAccessToken, marketplaceIds, userId, Base_URI,
             Country, Region, ProfileId, RefreshToken, AdsRefreshToken,
-            productData, dataToSend, loggingHelper, dayOfWeek
+            productData, dataToSend, loggingHelper, dayOfWeek,
+            _batchFilter
         } = params;
+        const runBatch = (n) => !_batchFilter || _batchFilter.includes(n);
 
         const apiData = {};
         
@@ -933,10 +935,18 @@ class ScheduledIntegration {
         const fifthBatchPromises = [];
         const fifthBatchServiceNames = [];
 
+        // Sixth batch: Review order ingestion (fetches orders + items into DB)
+        const sixthBatchPromises = [];
+        const sixthBatchServiceNames = [];
+
+        // Seventh batch: Review request sender (must run AFTER ingestion completes)
+        const seventhBatchPromises = [];
+        const seventhBatchServiceNames = [];
+
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
             // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise, PPC Metrics Aggregated
-            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'].includes(functionKey)) {
+            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated', 'ppcUnitsSold'].includes(functionKey)) {
                 return 1;
             }
             // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursement Data & Calculations
@@ -956,8 +966,16 @@ class ScheduledIntegration {
             }
             // Batch 5: Calculation services (run after all API fetches complete)
             // These are marked with isCalculationService: true in ScheduleConfig
-            if (['issueSummary', 'productIssues'].includes(functionKey)) {
+            if (['issueSummary', 'productIssues', 'issuesData'].includes(functionKey)) {
                 return 5;
+            }
+            // Batch 6: Review order ingestion (must complete before sender)
+            if (functionKey === 'reviewOrderIngestion') {
+                return 6;
+            }
+            // Batch 7: Review request sender (runs after ingestion finishes)
+            if (functionKey === 'reviewRequestSender') {
+                return 7;
             }
             // Default to batch 2 if function key is not recognized
             logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
@@ -987,6 +1005,14 @@ class ScheduledIntegration {
                 case 5:
                     fifthBatchPromises.push(promise);
                     fifthBatchServiceNames.push(description);
+                    break;
+                case 6:
+                    sixthBatchPromises.push(promise);
+                    sixthBatchServiceNames.push(description);
+                    break;
+                case 7:
+                    seventhBatchPromises.push(promise);
+                    seventhBatchServiceNames.push(description);
                     break;
             }
         };
@@ -1031,6 +1057,12 @@ class ScheduledIntegration {
             if (!serviceFunction || typeof serviceFunction !== 'function') {
                 logger.error(`Function not found or invalid for ${functionKey}. functionName: ${functionName}, isDefaultExport: ${functionConfig.isDefaultExport}`);
                 apiData[dataKey] = { success: false, data: null, error: `Function not found for ${functionKey}` };
+                continue;
+            }
+
+            // Skip functions whose batch is filtered out (phased execution)
+            const batchNum = getBatchNumber(functionKey);
+            if (!runBatch(batchNum)) {
                 continue;
             }
 
@@ -1216,8 +1248,6 @@ class ScheduledIntegration {
                     promise = serviceFunction(userId, Country, Region);
                 }
 
-                // Assign to appropriate batch based on function key
-                const batchNum = getBatchNumber(functionKey);
                 addToBatch(functionKey, functionConfig, promise, batchNum);
 
             } catch (setupError) {
@@ -1229,7 +1259,7 @@ class ScheduledIntegration {
         // Execute batches sequentially (same as Integration.js)
         
         // First Batch
-        if (firstBatchPromises.length > 0) {
+        if (firstBatchPromises.length > 0 && runBatch(1)) {
             const firstBatchResults = await Promise.allSettled(firstBatchPromises);
             let resultIndex = 0;
             
@@ -1291,7 +1321,7 @@ class ScheduledIntegration {
         // Get campaign and ad group IDs (needed for batch 3 and 4)
         let campaignIdArray = [];
         let adGroupIdArray = [];
-        try {
+        if (runBatch(2) || runBatch(3) || runBatch(4)) try {
             const idsResult = await this.getCampaignAndAdGroupIds(
                 apiData.ppcSpendsBySKU || { success: false }, userId, Region, Country
             );
@@ -1307,7 +1337,7 @@ class ScheduledIntegration {
         }
 
         // Second Batch
-        if (secondBatchPromises.length > 0) {
+        if (secondBatchPromises.length > 0 && runBatch(2)) {
             logger.info("Second Batch Starts");
             const secondBatchResults = await Promise.allSettled(secondBatchPromises);
             let resultIndex = 0;
@@ -1330,7 +1360,7 @@ class ScheduledIntegration {
         logger.info("Second Batch Ends");
 
         // Third Batch
-        if (thirdBatchPromises.length > 0) {
+        if (thirdBatchPromises.length > 0 && runBatch(3)) {
             logger.info("Third Batch Starts");
             const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
             let resultIndex = 0;
@@ -1372,7 +1402,7 @@ class ScheduledIntegration {
         logger.info("Third Batch Ends");
 
         // Fourth Batch
-        if (fourthBatchPromises.length > 0) {
+        if (fourthBatchPromises.length > 0 && runBatch(4)) {
             logger.info("Fourth Batch Starts");
             const fourthBatchResults = await Promise.allSettled(fourthBatchPromises);
             let resultIndex = 0;
@@ -1394,7 +1424,7 @@ class ScheduledIntegration {
         logger.info("Fourth Batch Ends");
 
         // Fifth Batch: Calculation services (run after all API fetches complete)
-        if (fifthBatchPromises.length > 0) {
+        if (fifthBatchPromises.length > 0 && runBatch(5)) {
             logger.info("Fifth Batch (Calculation Services) Starts");
             const fifthBatchResults = await Promise.allSettled(fifthBatchPromises);
             let resultIndex = 0;
@@ -1428,6 +1458,74 @@ class ScheduledIntegration {
             }
         }
         logger.info("Fifth Batch (Calculation Services) Ends");
+
+        // Sixth Batch: Review order ingestion (must finish before sender)
+        if (sixthBatchPromises.length > 0 && runBatch(6)) {
+            logger.info("Sixth Batch (Review Order Ingestion) Starts");
+            const sixthBatchResults = await Promise.allSettled(sixthBatchPromises);
+            let resultIndex = 0;
+
+            for (const serviceName of sixthBatchServiceNames) {
+                const functionKey = Object.keys(scheduledFunctions).find(key =>
+                    scheduledFunctions[key].description === serviceName
+                );
+                if (functionKey && resultIndex < sixthBatchResults.length) {
+                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
+                    if (!apiData[dataKey]) {
+                        const result = sixthBatchResults[resultIndex];
+                        if (result.status === 'fulfilled') {
+                            const value = result.value;
+                            if (value && typeof value === 'object' && 'success' in value) {
+                                apiData[dataKey] = value;
+                            } else if (value) {
+                                apiData[dataKey] = { success: true, data: value, error: null };
+                            } else {
+                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
+                            }
+                        } else {
+                            const errorMsg = result.reason?.message || 'Promise rejected';
+                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
+                        }
+                    }
+                    resultIndex++;
+                }
+            }
+        }
+        logger.info("Sixth Batch (Review Order Ingestion) Ends");
+
+        // Seventh Batch: Review request sender (runs after ingestion completes)
+        if (seventhBatchPromises.length > 0 && runBatch(7)) {
+            logger.info("Seventh Batch (Review Request Sender) Starts");
+            const seventhBatchResults = await Promise.allSettled(seventhBatchPromises);
+            let resultIndex = 0;
+
+            for (const serviceName of seventhBatchServiceNames) {
+                const functionKey = Object.keys(scheduledFunctions).find(key =>
+                    scheduledFunctions[key].description === serviceName
+                );
+                if (functionKey && resultIndex < seventhBatchResults.length) {
+                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
+                    if (!apiData[dataKey]) {
+                        const result = seventhBatchResults[resultIndex];
+                        if (result.status === 'fulfilled') {
+                            const value = result.value;
+                            if (value && typeof value === 'object' && 'success' in value) {
+                                apiData[dataKey] = value;
+                            } else if (value) {
+                                apiData[dataKey] = { success: true, data: value, error: null };
+                            } else {
+                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
+                            }
+                        } else {
+                            const errorMsg = result.reason?.message || 'Promise rejected';
+                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
+                        }
+                    }
+                    resultIndex++;
+                }
+            }
+        }
+        logger.info("Seventh Batch (Review Request Sender) Ends");
 
         // Process listing items if scheduled (simplified version)
         if (scheduledFunctions['GetListingItem'] && AccessToken) {
@@ -1933,6 +2031,368 @@ class ScheduledIntegration {
                 region
             });
             throw error; // Re-throw so caller can handle
+        }
+    }
+
+    // =========================================================================
+    // PHASED EXECUTION METHODS
+    // These methods break getScheduledApiData into independent BullMQ jobs.
+    // Each phase re-fetches tokens (resilient to worker restarts) and passes
+    // minimal data forward via phaseData.
+    // The existing getScheduledApiData() is preserved as legacy fallback.
+    // =========================================================================
+
+    /**
+     * Phase 1: INIT
+     * Validate user, generate tokens, fetch merchant listings, start tracking.
+     */
+    static async executeScheduledInitPhase(userId, Region, Country) {
+        logger.info(`[ScheduledIntegration:InitPhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        let loggingHelper = null;
+        let sessionId = null;
+        try {
+            loggingHelper = new LoggingHelper(userId, Region, Country);
+            await loggingHelper.initSession();
+            sessionId = loggingHelper.sessionId;
+            loggingHelper.logFunctionStart('ScheduledIntegration.InitPhase', { userId, region: Region, country: Country });
+        } catch (e) {
+            logger.warn(`[ScheduledIntegration:InitPhase] Failed to create logging session: ${e.message}`);
+        }
+
+        try {
+            const validationResult = await this.validateInputs(userId, Region, Country);
+            if (!validationResult.success) return { success: false, error: validationResult.error, statusCode: validationResult.statusCode };
+
+            const config = this.getConfiguration(Region, Country);
+            if (!config.success) return { success: false, error: config.error, statusCode: config.statusCode };
+            const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+            const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+            if (!sellerDataResult.success) return { success: false, error: sellerDataResult.error, statusCode: sellerDataResult.statusCode };
+            const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+            const credentialsResult = await this.generateCredentials(regionConfig, loggingHelper);
+            if (!credentialsResult.success) return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
+
+            const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, loggingHelper);
+            if (!tokenResult.success) return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
+            const { AccessToken, AdsAccessToken } = tokenResult;
+
+            tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+            const dayOfWeek = new Date().getDay();
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            logger.info(`[ScheduledIntegration:InitPhase] Processing for ${dayNames[dayOfWeek]} (day ${dayOfWeek})`, { userId, Region, Country });
+
+            let trackingEntryId = null;
+            const isCalendarAffectingDay = dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5;
+            if (isCalendarAffectingDay) {
+                const endDate = new Date(); endDate.setDate(endDate.getDate() - 1);
+                const startDate = new Date(endDate); startDate.setDate(startDate.getDate() - 30);
+                const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                try {
+                    const entry = await DataFetchTrackingService.startTracking(userId, Country, Region, { startDate: fmt(startDate), endDate: fmt(endDate) }, sessionId);
+                    trackingEntryId = entry._id.toString();
+                    logger.info('[ScheduledIntegration:InitPhase] Calendar tracking started', { trackingId: trackingEntryId, dayName: dayNames[dayOfWeek] });
+                } catch (te) {
+                    logger.warn('[ScheduledIntegration:InitPhase] Failed to start calendar tracking', { error: te.message });
+                }
+            }
+
+            const merchantListingsData = await this.fetchMerchantListings(AccessToken, marketplaceIds, userId, Country, Region, Base_URI, RefreshToken, AdsRefreshToken, loggingHelper);
+            const productData = this.extractProductData(merchantListingsData, Country, Region);
+            const inactiveProductData = this.extractInactiveProductData(merchantListingsData, Country, Region);
+
+            logger.info(`[ScheduledIntegration:InitPhase] Completed for user ${userId}`, {
+                asinCount: productData.asinArray?.length || 0,
+                inactiveCount: inactiveProductData.inactiveSkuArray?.length || 0
+            });
+
+            if (loggingHelper) {
+                loggingHelper.logFunctionSuccess('ScheduledIntegration.InitPhase', null, { recordsProcessed: productData.asinArray?.length || 0 });
+                await loggingHelper.saveSession();
+            }
+
+            return {
+                success: true,
+                dataForNextPhase: {
+                    asinArray: productData.asinArray,
+                    skuArray: productData.skuArray,
+                    inactiveSkuArray: inactiveProductData.inactiveSkuArray,
+                    inactiveAsinArray: inactiveProductData.inactiveAsinArray,
+                    sellerId,
+                    hasAdsAccount: !!AdsRefreshToken,
+                    sessionId,
+                    dayOfWeek,
+                    trackingEntryId,
+                    apiResults: {}
+                }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:InitPhase] Failed for user ${userId}:`, error);
+            if (loggingHelper) { loggingHelper.logFunctionError('ScheduledIntegration.InitPhase', error); await loggingHelper.endSession('failed'); }
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Shared helper: re-fetch tokens and config for a batch phase.
+     * Each batch phase calls this so it survives worker restarts.
+     */
+    static async _prepareForBatchPhase(userId, Region, Country, phaseData) {
+        const config = this.getConfiguration(Region, Country);
+        if (!config.success) throw new Error(config.error);
+        const { Base_URI, Marketplace_Id, regionConfig, marketplaceIds } = config;
+
+        const sellerDataResult = await this.getSellerDataAndTokens(userId, Region, Country);
+        if (!sellerDataResult.success) throw new Error(sellerDataResult.error);
+        const { RefreshToken, AdsRefreshToken, ProfileId, sellerId } = sellerDataResult;
+
+        const credentialsResult = await this.generateCredentials(regionConfig, null);
+        if (!credentialsResult.success) throw new Error(credentialsResult.error);
+        const credentials = credentialsResult.credentials;
+
+        const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, null);
+        if (!tokenResult.success) throw new Error(tokenResult.error);
+        const { AccessToken, AdsAccessToken } = tokenResult;
+
+        tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
+
+        const asinArray = phaseData.asinArray || [];
+        const dataToSend = this.prepareDataToSend(Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId);
+
+        return { AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken, ProfileId, sellerId, marketplaceIds, Base_URI, credentials, dataToSend };
+    }
+
+    /**
+     * Phase 2: BATCH_1_2
+     * Runs original batches 1 and 2 (reports, PPC, inventory).
+     */
+    static async executeScheduledBatch1And2Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:Batch1And2Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [1, 2]
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            logger.info(`[ScheduledIntegration:Batch1And2Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:Batch1And2Phase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase 3: BATCH_3_4
+     * Runs original batches 3 and 4 (shipments, economics, keywords).
+     */
+    static async executeScheduledBatch3And4Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:Batch3And4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [3, 4]
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            logger.info(`[ScheduledIntegration:Batch3And4Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:Batch3And4Phase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase 4: CALC_REVIEW
+     * Runs original batches 5, 6, 7 (calculations, review ingestion, review sender).
+     * Also processes inactive listing items.
+     */
+    static async executeScheduledCalcReviewPhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:CalcReviewPhase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [5, 6, 7]
+            });
+
+            // Process inactive listing items
+            const inactiveSkuArray = phaseData.inactiveSkuArray || [];
+            const inactiveAsinArray = phaseData.inactiveAsinArray || [];
+            if (inactiveSkuArray.length > 0) {
+                logger.info('[ScheduledIntegration:CalcReviewPhase] Processing inactive SKUs', { count: inactiveSkuArray.length });
+                await this.processInactiveListingItems(
+                    ctx.AccessToken, inactiveSkuArray, inactiveAsinArray,
+                    ctx.dataToSend, userId, ctx.Base_URI, Country, Region,
+                    ctx.RefreshToken, ctx.AdsRefreshToken, null
+                );
+            }
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            logger.info(`[ScheduledIntegration:CalcReviewPhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:CalcReviewPhase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase 5: FINALIZE
+     * Run Analyse, update cache, add account history, complete tracking,
+     * mark daily update complete.
+     */
+    static async executeScheduledFinalizePhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
+
+        const trackingEntryId = phaseData.trackingEntryId;
+        const apiResults = phaseData.apiResults || {};
+
+        try {
+            // Build a summary from accumulated apiResults across all phases
+            const successful = [];
+            const failed = [];
+            for (const [key, result] of Object.entries(apiResults)) {
+                if (result.success) { successful.push(key); }
+                else { failed.push({ service: key, error: result.error || 'Unknown error' }); }
+            }
+            const totalServices = successful.length + failed.length;
+            const overallSuccess = successful.length > 0;
+            const successPercentage = totalServices > 0 ? Math.round((successful.length / totalServices) * 100) : 0;
+
+            logger.info(`[ScheduledIntegration:FinalizePhase] Service summary`, {
+                totalServices, successful: successful.length, failed: failed.length, successPercentage: `${successPercentage}%`
+            });
+
+            // Complete DataFetchTracking
+            if (trackingEntryId) {
+                try {
+                    if (failed.length === 0 && successful.length > 0) {
+                        await DataFetchTrackingService.completeTracking(trackingEntryId);
+                    } else if (failed.length > 0 && successful.length > 0) {
+                        const DataFetchTracking = require('../../models/system/DataFetchTrackingModel');
+                        const entry = await DataFetchTracking.findById(trackingEntryId);
+                        if (entry) { entry.status = 'partial'; entry.errorMessage = `Partial: ${failed.length}/${totalServices} failed`; await entry.save(); }
+                    } else {
+                        await DataFetchTrackingService.failTracking(trackingEntryId, 'All services failed');
+                    }
+                } catch (te) { logger.warn('[ScheduledIntegration:FinalizePhase] Tracking completion error', { error: te.message }); }
+            }
+
+            if (overallSuccess) {
+                await this.handleSuccess(userId, Country, Region);
+            }
+
+            // Run Analyse once (used for both account history and Redis cache)
+            const { AnalyseService } = require('../main/Analyse.js');
+            const analysisResult = await AnalyseService.Analyse(userId, Country, Region);
+            if (analysisResult.status !== 200) {
+                logger.warn(`[ScheduledIntegration:FinalizePhase] Analysis returned non-200`, { status: analysisResult.status, userId });
+            }
+
+            // Add account history using the already-computed analysis data
+            try {
+                const { addAccountHistory } = require('../History/addAccountHistory.js');
+                const { analyseData } = require('../Calculations/DashboardCalculation.js');
+                if (analysisResult.status === 200 && analysisResult.message) {
+                    const calcResult = await analyseData(analysisResult.message, userId);
+                    if (calcResult?.dashboardData) {
+                        const dd = calcResult.dashboardData;
+                        const totalIssues = (dd.TotalRankingerrors || 0) + (dd.totalErrorInConversion || 0) +
+                            (dd.totalErrorInAccount || 0) + (dd.totalProfitabilityErrors || 0) +
+                            (dd.totalSponsoredAdsErrors || 0) + (dd.totalInventoryErrors || 0);
+                        const healthScore = analysisResult.message.AccountData?.getAccountHealthPercentge?.Percentage || 0;
+                        await addAccountHistory(userId, Country, Region, healthScore,
+                            dd.TotalProduct?.length || 0, dd.productWiseError?.length || 0, totalIssues);
+                    }
+                }
+            } catch (historyError) {
+                logger.error('[ScheduledIntegration:FinalizePhase] Account history error', { error: historyError.message, userId });
+            }
+
+            // Update Redis cache with analysis result
+            const { getRedisClient } = require('../../config/redisConn.js');
+            try {
+                const redisClient = getRedisClient();
+                const cacheKey = `analyse_data:${userId}:${Country}:${Region}:null`;
+                await redisClient.setEx(cacheKey, 3600, JSON.stringify(analysisResult.message));
+                logger.info(`[ScheduledIntegration:FinalizePhase] Updated Redis cache for ${cacheKey}`);
+            } catch (cacheError) {
+                logger.error('[ScheduledIntegration:FinalizePhase] Cache update error', { error: cacheError.message });
+            }
+
+            // Mark daily update complete
+            const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
+            await UserSchedulingService.markDailyUpdateComplete(userId, Country, Region);
+
+            // End logging session
+            if (phaseData.sessionId) {
+                try {
+                    const LoggingHelperClass = require('../../utils/LoggingHelper.js');
+                    await LoggingHelperClass.endSessionById(phaseData.sessionId, 'completed');
+                } catch (le) { logger.warn('[ScheduledIntegration:FinalizePhase] Session end error', { error: le.message }); }
+            }
+
+            logger.info(`[ScheduledIntegration:FinalizePhase] Completed for user ${userId}, ${Country}-${Region}`);
+            return {
+                success: true,
+                summary: { overallSuccess, successPercentage, totalServices, successful: successful.length, failed: failed.length }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:FinalizePhase] Failed for user ${userId}:`, error);
+            if (trackingEntryId) {
+                try { await DataFetchTrackingService.failTracking(trackingEntryId, error.message); } catch (_) {}
+            }
+            if (phaseData.sessionId) {
+                try { const LH = require('../../utils/LoggingHelper.js'); await LH.endSessionById(phaseData.sessionId, 'failed'); } catch (_) {}
+            }
+            return { success: false, error: error.message, statusCode: 500 };
         }
     }
 }

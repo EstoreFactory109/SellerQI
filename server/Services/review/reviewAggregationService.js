@@ -91,31 +91,55 @@ async function fetchAndStoreReviewOrders({
         [];
       const canRequestReview = Array.isArray(actions) && actions.length > 0;
 
-      // 2d) Upsert ReviewOrder document
+      // 2d) Upsert ReviewOrder document — protect already-processed orders
+      const existingOrder = await ReviewOrder.findOne({
+        marketplaceId,
+        amazonOrderId: orderId,
+      })
+        .select({ reviewRequestStatus: 1 })
+        .lean();
+
+      const alreadyActedOn =
+        existingOrder &&
+        (existingOrder.reviewRequestStatus === "sent" ||
+          existingOrder.reviewRequestStatus === "failed");
+
+      const updateFields = {
+        User: userId,
+        country,
+        region,
+        marketplaceId,
+        amazonOrderId: orderId,
+        purchaseDate: order.PurchaseDate
+          ? new Date(order.PurchaseDate)
+          : undefined,
+        orderStatus: order.OrderStatus,
+        buyerEmail: order.BuyerInfo?.BuyerEmail,
+        buyerName: order.BuyerInfo?.BuyerName,
+        orderTotalAmount: order.OrderTotal?.Amount
+          ? Number(order.OrderTotal.Amount)
+          : undefined,
+        orderTotalCurrencyCode: order.OrderTotal?.CurrencyCode,
+        itemCount,
+        rawOrder: order,
+        fetchBatchId,
+      };
+
+      if (!alreadyActedOn) {
+        updateFields.eligibilityLastCheckedAt = new Date();
+        updateFields.eligibilityResponse = eligibilityResponse;
+        updateFields.canRequestReview = canRequestReview;
+      }
+
+      const setOnInsert = !existingOrder
+        ? { reviewRequestStatus: "not_requested" }
+        : {};
+
       const reviewOrderDoc = await ReviewOrder.findOneAndUpdate(
         { marketplaceId, amazonOrderId: orderId },
         {
-          User: userId,
-          country,
-          region,
-          marketplaceId,
-          amazonOrderId: orderId,
-          purchaseDate: order.PurchaseDate
-            ? new Date(order.PurchaseDate)
-            : undefined,
-          orderStatus: order.OrderStatus,
-          buyerEmail: order.BuyerInfo?.BuyerEmail,
-          buyerName: order.BuyerInfo?.BuyerName,
-          orderTotalAmount: order.OrderTotal?.Amount
-            ? Number(order.OrderTotal.Amount)
-            : undefined,
-          orderTotalCurrencyCode: order.OrderTotal?.CurrencyCode,
-          itemCount,
-          rawOrder: order,
-          eligibilityLastCheckedAt: new Date(),
-          eligibilityResponse,
-          canRequestReview,
-          fetchBatchId,
+          $set: updateFields,
+          $setOnInsert: setOnInsert,
         },
         {
           new: true,

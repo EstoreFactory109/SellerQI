@@ -854,6 +854,7 @@ class StripeWebhookService {
             const updateData = {
                 packageType: planType,
                 subscriptionStatus: subscriptionStatus,
+                reviewRequestAuthStatus: true,
             };
 
             // Handle trial status
@@ -891,6 +892,7 @@ class StripeWebhookService {
                 subscriptionStatus: 'cancelled',
                 accessType: 'user', // Reset accessType to regular user when downgrading
                 isInTrialPeriod: false, // Reset trial status
+                reviewRequestAuthStatus: false,
                 // Note: We keep servedTrial=true so user can't get another trial
                 // trialEndsDate is left as-is for historical reference
             });

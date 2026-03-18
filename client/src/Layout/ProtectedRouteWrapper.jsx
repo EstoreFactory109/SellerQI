@@ -12,6 +12,7 @@ import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
 import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
+import { devLog, devWarn } from '../utils/devLogger.js';
 
 // Map country codes to currency symbols
 const amazonMarketplaceCurrencies = {
@@ -75,29 +76,22 @@ const ProtectedRouteWrapper = ({ children }) => {
           const isSuperAdminSession = userData?.isSuperAdminSession === true;
           const currentPath = window.location.pathname;
           const isDashboardRoute = currentPath.includes('/dashboard') || currentPath.includes('/seller-central-checker');
-          
-          console.log('ProtectedRouteWrapper: hasPremium:', hasPremium, 'spApiConnected:', spApiConnected, 'adsAccountConnected:', adsAccountConnected, 'isSuperAdmin:', isSuperAdmin, 'isSuperAdminSession:', isSuperAdminSession);
+          devLog('ProtectedRouteWrapper:', { hasPremium, spApiConnected, adsAccountConnected, isSuperAdmin, isSuperAdminSession });
           
           // Flow: Super admins (or super admin sessions) always have access. For regular users, check both SP-API and Ads account
           // Only apply redirects if user is trying to access dashboard routes
           if (isDashboardRoute) {
             if (isSuperAdmin || isSuperAdminSession) {
               // Super admin or super admin session → always allow dashboard access
-              console.log('ProtectedRouteWrapper: Super admin/session - allowing dashboard access');
+              devLog('ProtectedRouteWrapper: Super admin/session - allowing dashboard access');
               // Continue with normal flow
             } else if (spApiConnected && adsAccountConnected) {
               // Both SP-API and Ads account are connected → allow dashboard access
-              console.log('ProtectedRouteWrapper: Both SP-API and Ads account connected - allowing dashboard access');
+              devLog('ProtectedRouteWrapper: Both SP-API and Ads account connected - allowing dashboard access');
               // Continue with normal flow
             } else {
               // Either SP-API or Ads account is missing → redirect to connect-to-amazon
-              if (!spApiConnected && !adsAccountConnected) {
-                console.log('ProtectedRouteWrapper: Both SP-API and Ads account missing - redirecting to connect-to-amazon');
-              } else if (!spApiConnected) {
-                console.log('ProtectedRouteWrapper: SP-API missing - redirecting to connect-to-amazon');
-              } else {
-                console.log('ProtectedRouteWrapper: Ads account missing - redirecting to connect-to-amazon');
-              }
+              devLog('ProtectedRouteWrapper: Missing required integrations - redirecting to connect-to-amazon');
               localStorage.setItem("isAuth", "true"); // Keep them logged in
               navigate("/connect-to-amazon", { replace: true });
               return;
@@ -146,8 +140,7 @@ const ProtectedRouteWrapper = ({ children }) => {
         // Check if component is still mounted
         if (!isMountedRef.current) return;
 
-        console.log("=== ProtectedRouteWrapper: Navbar data fetch response ===");
-        console.log("Response status:", response?.status);
+        devLog("ProtectedRouteWrapper: Navbar data fetch status:", response?.status);
 
         if (response?.status === 200 && response.data?.data) {
           const navbarData = response.data.data;
@@ -173,13 +166,13 @@ const ProtectedRouteWrapper = ({ children }) => {
           if (navbarData.AllSellerAccounts && navbarData.AllSellerAccounts.length > 0) {
             dispatch(setAllAccounts(navbarData.AllSellerAccounts));
           }
-          
-          console.log("✅ Navbar data loaded successfully", navbarData);
+
+          devLog("✅ Navbar data loaded successfully");
           setNavbarDataLoaded(true);
         } else {
           // Even if navbar data fails, allow user to proceed
           // Pages will fetch their own data
-          console.warn("⚠️ Navbar data not available, proceeding anyway");
+          devWarn("⚠️ Navbar data not available, proceeding anyway");
           setNavbarDataLoaded(true);
         }
 

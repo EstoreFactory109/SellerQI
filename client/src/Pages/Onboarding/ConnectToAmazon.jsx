@@ -5,6 +5,7 @@ import { Globe, ChevronDown, ArrowRight, Loader2, Package, ShoppingCart, Zap, Se
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
+import { devLog } from '../../utils/devLogger.js';
 
 // Complete list of Amazon marketplaces with region mapping
 const COUNTRY_DATA = [
@@ -63,14 +64,14 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
     const checkAuth = async () => {
       // If not authenticated, redirect to login
       if (!isAuthenticated) {
-        console.log('ConnectToAmazon: Not authenticated - redirecting to login');
+        devLog('ConnectToAmazon: Not authenticated - redirecting to login');
         navigate('/', { replace: true });
         return;
       }
 
       // Allow all authenticated users to proceed (skip pricing check)
       // New signups with LITE package can connect Amazon first, then pay later
-      console.log('ConnectToAmazon: User authenticated - allowing access');
+      devLog('ConnectToAmazon: User authenticated - allowing access');
       setCheckingSubscription(false);
     };
 
@@ -99,15 +100,14 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
       setRegion(country.region);
       setIsDropdownOpen(false);
       setSearchQuery("");
-      
-      // Debug logging for region detection
-      console.log("=== Country Selection Debug ===");
-      console.log("Selected Country:", country.name);
-      console.log("Country Code:", countryCode);
-      console.log("Auto-detected Region:", country.region);
-      console.log("Region Name:", REGION_NAMES[country.region]);
-      console.log("Marketplace ID:", country.marketplaceId);
-      console.log("===============================");
+
+      devLog("ConnectToAmazon country select:", {
+        countryName: country.name,
+        countryCode,
+        region: country.region,
+        regionName: REGION_NAMES[country.region],
+        marketplaceId: country.marketplaceId,
+      });
     }
   };
 
@@ -122,7 +122,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
     
     setLoading(true);
     try {
-      console.log("Submitting with region:", region, "and country:", marketPlace);
+      devLog("ConnectToAmazon submit:", { region, country: marketPlace });
       
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/token/SaveAllDetails`, {
         region: region,

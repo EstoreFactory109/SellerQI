@@ -9,7 +9,6 @@ const AllAccountsSlice = createSlice({
   initialState,
   reducers: {
     setAllAccounts(state, action) {
-      console.log(action.payload)
       state.AllAccounts = action.payload;
     },
   }
