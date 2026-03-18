@@ -59,6 +59,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '15', // 15 jobs per worker (optimized for 10k users/day)
+                WORKER_SHUTDOWN_GRACE_MS: process.env.WORKER_SHUTDOWN_GRACE_MS || '120000',
                 // WORKER_NAME: If set via env var, use it; otherwise worker.js will use `worker-${process.pid}`
                 // This ensures each worker instance has a unique identifier in merged logs
                 // For multi-instance deployments, set WORKER_NAME env var with INSTANCE_ID
@@ -72,9 +73,8 @@ module.exports = {
             autorestart: true,
             max_restarts: 10,
             min_uptime: '10s',
-            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in worker.js
-            // This gives long-running jobs time to complete before PM2 force-kills
-            kill_timeout: 30 * 60 * 1000, // 30 minutes
+            // Graceful shutdown timeout - should be slightly above worker grace period
+            kill_timeout: parseInt(process.env.WORKER_KILL_TIMEOUT_MS || '150000', 10), // default 2.5 minutes
             // Memory limits (increased for 15 concurrent jobs per worker)
             max_memory_restart: '4G',
             // Watch mode (disable in production)

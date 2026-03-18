@@ -23,6 +23,13 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeEndpoint(endpoint) {
+  if (!endpoint || typeof endpoint !== "string") return endpoint;
+  const trimmed = endpoint.trim().replace(/\/+$/, "");
+  if (!trimmed) return trimmed;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 function getDateRange() {
   const today = new Date();
 
@@ -116,6 +123,11 @@ async function fetchOrders(
   accessToken,
   { marketplaceId, endpoint, awsAccessKeyId, awsSecretAccessKey, awsRegion, awsSessionToken }
 ) {
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+  if (!normalizedEndpoint) {
+    throw new Error("endpoint is required");
+  }
+
   const { createdAfter, createdBefore } = getDateRange();
   console.log(`\n📦 Fetching Shipped orders from ${createdAfter} to ${createdBefore}...\n`);
 
@@ -134,7 +146,7 @@ async function fetchOrders(
 
     if (nextToken) params.set("NextToken", nextToken);
 
-    const url     = `${endpoint}/orders/v0/orders?${params.toString()}`;
+    const url     = `${normalizedEndpoint}/orders/v0/orders?${params.toString()}`;
     const headers = signRequest({
       method: "GET",
       url,
@@ -166,6 +178,7 @@ async function fetchOrders(
 module.exports = {
   ORDER_CONFIG,
   sleep,
+  normalizeEndpoint,
   getDateRange,
   isEligibleForReview,
   hmac,

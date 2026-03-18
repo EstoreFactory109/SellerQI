@@ -1,4 +1,4 @@
-const { signRequest } = require("./orders");
+const { signRequest, normalizeEndpoint } = require("./orders");
 
 /**
  * Sends a review solicitation request for a specific order.
@@ -31,7 +31,10 @@ async function sendReviewRequest(
   if (!endpoint) throw new Error("endpoint is required");
   if (!marketplaceId) throw new Error("marketplaceId is required");
 
-  const url = `${endpoint}/solicitations/v1/orders/${orderId}/solicitations/productReviewAndSellerFeedback?marketplaceIds=${marketplaceId}`
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+  if (!normalizedEndpoint) throw new Error("endpoint is required");
+
+  const url = `${normalizedEndpoint}/solicitations/v1/orders/${orderId}/solicitations/productReviewAndSellerFeedback?marketplaceIds=${marketplaceId}`
 
   const headers = signRequest({
     method: "POST",

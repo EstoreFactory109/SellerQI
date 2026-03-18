@@ -256,6 +256,29 @@ async function executePhase(phase, userId, region, country, phaseData) {
 }
 
 /**
+ * Decide session end status after a phase-level failure.
+ * If some functions succeeded and some failed, keep the session as partial
+ * instead of fully failed.
+ */
+async function resolveSessionStatusOnFailure(sessionId) {
+    try {
+        const session = await LoggingHelper.getSessionById(sessionId);
+        if (!session) return 'failed';
+
+        const successful = session.overallSummary?.successfulFunctions || 0;
+        const failed = session.overallSummary?.failedFunctions || 0;
+
+        if (successful > 0 && failed > 0) return 'partial';
+        if (failed > 0) return 'failed';
+        if (successful > 0) return 'completed';
+        return 'failed';
+    } catch (error) {
+        logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not resolve session status for ${sessionId}: ${error.message}`);
+        return 'failed';
+    }
+}
+
+/**
  * Process an integration job (supports both legacy and phased modes)
  * 
  * @param {Object} job - BullMQ job object
@@ -430,8 +453,9 @@ async function processIntegrationJob(job) {
         const sessionId = phaseData?.sessionId;
         if (sessionId) {
             try {
-                await LoggingHelper.endSessionById(sessionId, 'failed');
-                logger.info(`[IntegrationWorker:${WORKER_NAME}] Session ended as failed: ${sessionId}`);
+                const finalSessionStatus = await resolveSessionStatusOnFailure(sessionId);
+                await LoggingHelper.endSessionById(sessionId, finalSessionStatus);
+                logger.info(`[IntegrationWorker:${WORKER_NAME}] Session ended as ${finalSessionStatus}: ${sessionId}`);
             } catch (sessionError) {
                 logger.warn(`[IntegrationWorker:${WORKER_NAME}] Failed to end session: ${sessionError.message}`);
             }
@@ -542,11 +566,14 @@ async function startIntegrationWorker() {
     });
 
     // Graceful shutdown with timeout
-    // Give current job time to finish, but don't wait forever
-    // Increased to 30 minutes to allow long-running phases to complete
-    // This matches worker.js and the PM2 kill_timeout in ecosystem.config.js
-    const SHUTDOWN_GRACE_MS = 30 * 60 * 1000; // 30 minutes
+    // Keep this shorter to avoid PM2 kill-retry loops during restarts.
+    // Override via INTEGRATION_WORKER_SHUTDOWN_GRACE_MS when needed.
+    const SHUTDOWN_GRACE_MS = parseInt(
+        process.env.INTEGRATION_WORKER_SHUTDOWN_GRACE_MS || '120000',
+        10
+    ); // 2 minutes
     let isShuttingDown = false;
+    let queueStatusInterval = null;
 
     const gracefulShutdown = (signal) => {
         if (isShuttingDown) {
@@ -556,6 +583,10 @@ async function startIntegrationWorker() {
         isShuttingDown = true;
 
         logger.info(`[IntegrationWorker:${WORKER_NAME}] Received ${signal}, closing worker gracefully (max ${SHUTDOWN_GRACE_MS / 60000} min)...`);
+        if (queueStatusInterval) {
+            clearInterval(queueStatusInterval);
+            queueStatusInterval = null;
+        }
 
         let hasExited = false;
         const forceExit = () => {
@@ -601,7 +632,7 @@ async function startIntegrationWorker() {
 
     // Queue status monitoring
     let statusCheckCount = 0;
-    setInterval(async () => {
+    queueStatusInterval = setInterval(async () => {
         try {
             const queue = getIntegrationQueue();
             const waiting = await queue.getWaitingCount();
@@ -617,6 +648,7 @@ async function startIntegrationWorker() {
             logger.error(`[IntegrationWorker:${WORKER_NAME}] Error checking queue status:`, error.message);
         }
     }, 10000);
+    queueStatusInterval.unref();
 
     return worker;
 }

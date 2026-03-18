@@ -71,6 +71,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '3', // Jobs per worker
+                WORKER_SHUTDOWN_GRACE_MS: process.env.WORKER_SHUTDOWN_GRACE_MS || '120000',
                 // WORKER_NAME is not set here - worker.js will use `worker-${process.pid}` as fallback
                 // This ensures each worker instance has a unique identifier in merged logs
             },
@@ -85,9 +86,8 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (workers may use more memory)
             max_memory_restart: '2G',
-            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in worker.js
-            // Increased to 30 minutes to allow long-running jobs to complete
-            kill_timeout: 30 * 60 * 1000, // 30 minutes
+            // Graceful shutdown timeout - should be slightly above worker grace period
+            kill_timeout: parseInt(process.env.WORKER_KILL_TIMEOUT_MS || '150000', 10), // default 2.5 minutes
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -109,6 +109,8 @@ module.exports = {
             env: {
                 NODE_ENV: 'production',
                 INTEGRATION_WORKER_CONCURRENCY: process.env.INTEGRATION_WORKER_CONCURRENCY || '2', // Jobs per worker
+                INTEGRATION_WORKER_SHUTDOWN_GRACE_MS:
+                    process.env.INTEGRATION_WORKER_SHUTDOWN_GRACE_MS || '120000',
             },
             // Logging - separate log files
             error_file: './logs/pm2-integration-worker-error.log',
@@ -121,9 +123,8 @@ module.exports = {
             min_uptime: '10s',
             // Memory limits (integration jobs are heavier)
             max_memory_restart: '3G',
-            // Graceful shutdown timeout - must match SHUTDOWN_GRACE_MS in integrationWorker.js
-            // Integration jobs can run for hours, so we need a long timeout
-            kill_timeout: 30 * 60 * 1000, // 30 minutes
+            // Graceful shutdown timeout - should be slightly above worker grace period
+            kill_timeout: parseInt(process.env.INTEGRATION_WORKER_KILL_TIMEOUT_MS || '150000', 10), // default 2.5 minutes
             // Watch mode (disable in production)
             watch: false,
             // Environment variables

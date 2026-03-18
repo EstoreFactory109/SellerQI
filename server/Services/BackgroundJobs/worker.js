@@ -395,9 +395,9 @@ async function startWorker() {
     });
 
     // Graceful shutdown with timeout
-    // Give current job time to finish, but don't wait forever
-    // Increased to 30 minutes to allow long-running jobs to complete
-    const SHUTDOWN_GRACE_MS = 30 * 60 * 1000; // 30 minutes
+    // Keep this shorter to avoid PM2 kill-retry loops during restarts.
+    // Override via WORKER_SHUTDOWN_GRACE_MS when longer drain is required.
+    const SHUTDOWN_GRACE_MS = parseInt(process.env.WORKER_SHUTDOWN_GRACE_MS || '120000', 10); // 2 minutes
     let isShuttingDown = false;
 
     const gracefulShutdown = (signal) => {
