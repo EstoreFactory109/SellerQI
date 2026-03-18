@@ -793,6 +793,70 @@ class Integration {
     }
 
     /**
+     * Fetch active product ASINs, SKUs, and prices directly from the Seller model in MongoDB.
+     * This is the authoritative source for product data in all batch phases,
+     * avoiding reliance on serialised phaseData passed through Redis/BullMQ.
+     *
+     * @param {string} userId - Our internal User _id
+     * @param {string} country - Country code (e.g. 'AU', 'US')
+     * @param {string} region - Region (NA, EU, FE)
+     * @returns {Promise<{ asinArray: string[], skuArray: string[], inactiveAsinArray: string[], inactiveSkuArray: string[], ProductDetails: Array }>}
+     */
+    static async fetchProductArraysFromDB(userId, country, region) {
+        const asinArray = [];
+        const skuArray = [];
+        const inactiveAsinArray = [];
+        const inactiveSkuArray = [];
+        const ProductDetails = [];
+
+        const seller = await Seller.findOne({ User: userId }).lean();
+        if (!seller || !Array.isArray(seller.sellerAccount)) {
+            logger.warn('[Integration:fetchProductArraysFromDB] Seller not found or no accounts', { userId, country, region });
+            return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray, ProductDetails };
+        }
+
+        const account = seller.sellerAccount.find(
+            acc => acc && acc.country === country && acc.region === region
+        );
+
+        if (!account || !Array.isArray(account.products)) {
+            logger.warn('[Integration:fetchProductArraysFromDB] No matching seller account or products', { userId, country, region });
+            return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray, ProductDetails };
+        }
+
+        for (const product of account.products) {
+            if (!product || typeof product !== 'object') continue;
+            const asin = typeof product.asin === 'string' ? product.asin.trim() : '';
+            const sku = typeof product.sku === 'string' ? product.sku.trim() : '';
+            if (!asin || !sku) continue;
+
+            if (product.status === 'Active') {
+                asinArray.push(asin);
+                skuArray.push(sku);
+
+                let price = product.price;
+                if (typeof price === 'string') {
+                    price = parseFloat(price.replace(/[^0-9.]/g, '')) || 0;
+                } else if (typeof price !== 'number' || isNaN(price)) {
+                    price = 0;
+                }
+                ProductDetails.push({ asin, price });
+            } else if (product.status === 'Inactive' || product.status === 'Incomplete') {
+                inactiveAsinArray.push(asin);
+                inactiveSkuArray.push(sku);
+            }
+        }
+
+        logger.info('[Integration:fetchProductArraysFromDB] Fetched product arrays from DB', {
+            userId, country, region,
+            active: asinArray.length,
+            inactive: inactiveAsinArray.length
+        });
+
+        return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray, ProductDetails };
+    }
+
+    /**
      * Extract product data from merchant listings
      * Uses chunked processing with yields to prevent blocking the event loop
      */
@@ -2323,10 +2387,6 @@ class Integration {
             return {
                 success: true,
                 dataForNextPhase: {
-                    asinArray: productData.asinArray,
-                    skuArray: productData.skuArray,
-                    inactiveSkuArray: inactiveProductData.inactiveSkuArray,
-                    inactiveAsinArray: inactiveProductData.inactiveAsinArray,
                     sellerId,
                     hasAdsAccount: !!AdsRefreshToken,
                     sessionId // Pass sessionId to next phases
@@ -2515,9 +2575,8 @@ class Integration {
             const { AccessToken, AdsAccessToken } = tokenResult;
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-            // Use asinArray from phaseData or re-fetch from DB
-            const asinArray = phaseData.asinArray || [];
-            const skuArray = phaseData.skuArray || [];
+            // Fetch active product arrays directly from DB (authoritative source)
+            const { asinArray, skuArray } = await this.fetchProductArraysFromDB(userId, Country, Region);
 
             const credentials = credentialsResult.credentials;
             const dataToSend = this.prepareDataToSend(
@@ -2744,7 +2803,8 @@ class Integration {
             const { AccessToken, AdsAccessToken } = tokenResult;
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-            const asinArray = phaseData.asinArray || [];
+            // Fetch active product arrays directly from DB
+            const { asinArray } = await this.fetchProductArraysFromDB(userId, Country, Region);
             const credentials = credentialsResult.credentials;
             const dataToSend = this.prepareDataToSend(
                 Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId
@@ -3069,10 +3129,9 @@ class Integration {
             const { AccessToken, AdsAccessToken } = tokenResult;
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-            const asinArray = phaseData.asinArray || [];
-            const skuArray = phaseData.skuArray || [];
-            const inactiveSkuArray = phaseData.inactiveSkuArray || [];
-            const inactiveAsinArray = phaseData.inactiveAsinArray || [];
+            // Fetch active + inactive product arrays directly from DB
+            const { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray } =
+                await this.fetchProductArraysFromDB(userId, Country, Region);
 
             const credentials = credentialsResult.credentials;
             const dataToSend = this.prepareDataToSend(

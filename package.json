@@ -63,6 +63,9 @@
   },
   "overrides": {
     "minimatch": "^10.2.1",
+    "nodemon": {
+      "minimatch": "^5.1.6"
+    },
     "fast-xml-parser": "5.5.6"
   }
 }

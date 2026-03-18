@@ -2159,10 +2159,60 @@ class ScheduledIntegration {
 
         tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
-        const asinArray = phaseData.asinArray || [];
-        const dataToSend = this.prepareDataToSend(Marketplace_Id, AccessToken, credentials, asinArray, Country, sellerId);
+        // Fetch active product arrays directly from DB instead of phaseData
+        const productArrays = await this._fetchProductArraysFromDB(userId, Country, Region);
+        const dataToSend = this.prepareDataToSend(Marketplace_Id, AccessToken, credentials, productArrays.asinArray, Country, sellerId);
 
-        return { AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken, ProfileId, sellerId, marketplaceIds, Base_URI, credentials, dataToSend };
+        return {
+            AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken, ProfileId, sellerId,
+            marketplaceIds, Base_URI, credentials, dataToSend, productArrays
+        };
+    }
+
+    /**
+     * Fetch active/inactive product arrays directly from the Seller model.
+     */
+    static async _fetchProductArraysFromDB(userId, country, region) {
+        const asinArray = [];
+        const skuArray = [];
+        const inactiveAsinArray = [];
+        const inactiveSkuArray = [];
+
+        const seller = await Seller.findOne({ User: userId }).lean();
+        if (!seller || !Array.isArray(seller.sellerAccount)) {
+            logger.warn('[ScheduledIntegration:_fetchProductArraysFromDB] Seller not found or no accounts', { userId, country, region });
+            return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray };
+        }
+
+        const account = seller.sellerAccount.find(
+            acc => acc && acc.country === country && acc.region === region
+        );
+
+        if (!account || !Array.isArray(account.products)) {
+            logger.warn('[ScheduledIntegration:_fetchProductArraysFromDB] No matching account or products', { userId, country, region });
+            return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray };
+        }
+
+        for (const product of account.products) {
+            if (!product || typeof product !== 'object') continue;
+            const asin = typeof product.asin === 'string' ? product.asin.trim() : '';
+            const sku = typeof product.sku === 'string' ? product.sku.trim() : '';
+            if (!asin || !sku) continue;
+
+            if (product.status === 'Active') {
+                asinArray.push(asin);
+                skuArray.push(sku);
+            } else if (product.status === 'Inactive' || product.status === 'Incomplete') {
+                inactiveAsinArray.push(asin);
+                inactiveSkuArray.push(sku);
+            }
+        }
+
+        logger.info('[ScheduledIntegration:_fetchProductArraysFromDB] Fetched product arrays from DB', {
+            userId, country, region, active: asinArray.length, inactive: inactiveAsinArray.length
+        });
+
+        return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray };
     }
 
     /**
@@ -2177,7 +2227,7 @@ class ScheduledIntegration {
 
             const apiData = await this.fetchScheduledApiData({
                 ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
-                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
                 dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
                 _batchFilter: [1, 2]
             });
@@ -2212,7 +2262,7 @@ class ScheduledIntegration {
 
             const apiData = await this.fetchScheduledApiData({
                 ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
-                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
                 dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
                 _batchFilter: [3, 4]
             });
@@ -2248,14 +2298,14 @@ class ScheduledIntegration {
 
             const apiData = await this.fetchScheduledApiData({
                 ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
-                productData: { asinArray: phaseData.asinArray || [], skuArray: phaseData.skuArray || [], ProductDetails: [] },
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
                 dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
                 _batchFilter: [5, 6, 7]
             });
 
-            // Process inactive listing items
-            const inactiveSkuArray = phaseData.inactiveSkuArray || [];
-            const inactiveAsinArray = phaseData.inactiveAsinArray || [];
+            // Process inactive listing items (fetched from DB, not phaseData)
+            const inactiveSkuArray = ctx.productArrays.inactiveSkuArray;
+            const inactiveAsinArray = ctx.productArrays.inactiveAsinArray;
             if (inactiveSkuArray.length > 0) {
                 logger.info('[ScheduledIntegration:CalcReviewPhase] Processing inactive SKUs', { count: inactiveSkuArray.length });
                 await this.processInactiveListingItems(

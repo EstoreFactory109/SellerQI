@@ -101,4 +101,13 @@ const verifyLocationToken=async(token)=>{
     }
 }
 
-module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken};
+const createDemoAccessToken = async (userId) => {
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is missing"));
+        return false;
+    }
+    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    return token;
+};
+
+module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken};

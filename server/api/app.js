@@ -48,6 +48,7 @@ const alertsRoute=require('../routes/alerts.routes.js')
 const qmateRoute=require('../routes/qmate.routes.js')
 const reviewRoute=require('../routes/review.routes.js')
 const rankingContentAIRoute=require('../routes/rankingContentAI.routes.js')
+const demoRoute=require('../routes/demo.routes.js')
 const dbConnect=require('../config/dbConn.js')
 const logger=require('../utils/Logger.js')
 const {connectRedis} = require('../config/redisConn.js')
@@ -130,6 +131,7 @@ app.use(express.urlencoded({extended:true,limit:"16kb",}))
 // app.use(globalRateLimiter);
 
 
+app.use('/app/demo',demoRoute)
 app.use('/app',userRoute)
 app.use('/app/token',tokenRoute)
 app.use('/app/info',spapiroute)

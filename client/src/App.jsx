@@ -1,5 +1,5 @@
-import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 
 import Signup from './Pages/Auth/SignUp.jsx';
 import Login from './Pages/Auth/Login.jsx';
@@ -77,8 +77,42 @@ import NotificationsPage from './Pages/Notifications/NotificationsPage.jsx';
 import NotificationDetailsPage from './Pages/Notifications/NotificationDetailsPage.jsx';
 import AuthError from './Pages/Auth/AuthError.jsx';
 import UnsubscribeAlerts from './Pages/Notifications/UnsubscribeAlerts.jsx';
+import DemoMainLayout from './Pages/DemoSellerCentralChecker/DemoMainLayout.jsx';
+import DemoDashboard from './Pages/DemoSellerCentralChecker/DemoDashboard.jsx';
+import DemoRecentOrders from './Pages/DemoSellerCentralChecker/DemoRecentOrders.jsx';
+import DemoQMate from './Pages/DemoSellerCentralChecker/DemoQMate.jsx';
+import DemoProfitibilityDashboard from './Pages/DemoSellerCentralChecker/DemoProfitibilityDashboard.jsx';
+import DemoPPCDashboard from './Pages/DemoSellerCentralChecker/DemoPPCDashboard.jsx';
+import DemoKeywordAnalysisDashboard from './Pages/DemoSellerCentralChecker/DemoKeywordAnalysisDashboard.jsx';
+import DemoIssues from './Pages/DemoSellerCentralChecker/DemoIssues.jsx';
+import DemoIssuesByProduct from './Pages/DemoSellerCentralChecker/DemoIssuesByProduct.jsx';
+import DemoYourProducts from './Pages/DemoSellerCentralChecker/DemoYourProducts.jsx';
+import DemoProductDetails from './Pages/DemoSellerCentralChecker/DemoProductDetails.jsx';
+import DemoSettings from './Pages/DemoSellerCentralChecker/DemoSettings.jsx';
+import DemoReimbursementDashboard from './Pages/DemoSellerCentralChecker/DemoReimbursementDashboard.jsx';
+import DemoNotifications from './Pages/DemoSellerCentralChecker/DemoNotifications.jsx';
+import DemoNotificationDetails from './Pages/DemoSellerCentralChecker/DemoNotificationDetails.jsx';
+import DemoTasks from './Pages/DemoSellerCentralChecker/DemoTasks.jsx';
+import DemoUserLogging from './Pages/DemoSellerCentralChecker/DemoUserLogging.jsx';
+import DemoPreAnalysis from './Pages/DemoSellerCentralChecker/DemoPreAnalysis.jsx';
+import DemoEcommerceCalendar from './Pages/DemoSellerCentralChecker/DemoEcommerceCalendar.jsx';
+import DemoAccountHistory from './Pages/DemoSellerCentralChecker/DemoAccountHistory.jsx';
+import DemoAutoLogin from './Pages/DemoSellerCentralChecker/DemoAutoLogin.jsx';
+import ProtectedDemoRouteWrapper from './Layout/ProtectedDemoRouteWrapper.jsx';
 
 const App = () => {
+  const location = useLocation();
+  const { pathname } = location;
+
+  // Keep demo-mode flag in sync: set it while browsing demo pages,
+  // clear it when leaving demo pages so main routes stay unaffected.
+  useEffect(() => {
+    if (pathname.startsWith('/seller-central-checker-demo')) {
+      localStorage.setItem('sellerqi_demo_mode', 'true');
+    } else {
+      localStorage.removeItem('sellerqi_demo_mode');
+    }
+  }, [pathname]);
 
   return (
     <>
@@ -181,6 +215,35 @@ const App = () => {
             {/* Product detail (ASIN) - must be last so fixed paths are matched first */}
             <Route path=':asin' element={<ProductDetails />} />
           </Route>
+        </Route>
+        <Route path='/demo' element={<DemoAutoLogin />} />
+        <Route path='/seller-central-checker-demo' element={
+          <ProtectedDemoRouteWrapper>
+            <DemoMainLayout />
+          </ProtectedDemoRouteWrapper>
+        }>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path='dashboard' element={<DemoDashboard />} />
+          <Route path='recent-orders' element={<DemoRecentOrders />} />
+          <Route path='qmate' element={<DemoQMate />} />
+          <Route path='profitibility-dashboard' element={<DemoProfitibilityDashboard />} />
+          <Route path='ppc-dashboard' element={<DemoPPCDashboard />} />
+          <Route path='keyword-analysis' element={<DemoKeywordAnalysisDashboard />} />
+          <Route path='issues' element={<DemoIssues />} />
+          <Route path='issues-by-product' element={<DemoIssuesByProduct />} />
+          <Route path='account-history' element={<DemoAccountHistory />} />
+          <Route path='settings' element={<DemoSettings />} />
+          <Route path='reimbursement-dashboard' element={<DemoReimbursementDashboard />} />
+          <Route path='your-products' element={<DemoYourProducts />} />
+          <Route path='pre-analysis' element={<DemoPreAnalysis />} />
+          <Route path='tasks' element={<DemoTasks />} />
+          <Route path='ecommerce-calendar' element={<DemoEcommerceCalendar />} />
+          <Route path='notifications' element={<DemoNotifications />} />
+          <Route path='notification-details/:id' element={<DemoNotificationDetails />} />
+          <Route path='user-logging' element={<DemoUserLogging />} />
+          <Route path='consultation' element={<CalendlyWidget />} />
+          {/* Product detail (ASIN) - must be last so fixed paths are matched first */}
+          <Route path=':asin' element={<DemoProductDetails />} />
         </Route>
         <Route path='/error/:status' element={<Error />} />
         <Route path='*' element={<Navigate to="/error/404" />} />

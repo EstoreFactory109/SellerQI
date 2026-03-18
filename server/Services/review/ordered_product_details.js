@@ -1,4 +1,4 @@
-const { signRequest } = require("./orders");
+const { signRequest, normalizeEndpoint } = require("./orders");
 
 /**
  * Fetches product details for a given Amazon order ID.
@@ -34,7 +34,10 @@ async function getProductDetailsByOrderId(
   if (!orderId) throw new Error("orderId is required");
   if (!accessToken) throw new Error("accessToken is required");
 
-  const url = `${endpoint}/orders/v0/orders/${orderId}/orderItems`;
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+  if (!normalizedEndpoint) throw new Error("endpoint is required");
+
+  const url = `${normalizedEndpoint}/orders/v0/orders/${orderId}/orderItems`;
 
   const headers = signRequest({
     method: "GET",

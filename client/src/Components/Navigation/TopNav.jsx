@@ -226,6 +226,7 @@ const TopNav = () => {
 
     // -------- Breadcrumbs: full path (every segment) --------
     const pathname = location.pathname || ''
+    const isDemoSellerCentralChecker = pathname.startsWith('/seller-central-checker-demo/')
     const staticSellerCheckerSegments = new Set([
         'dashboard',
         'qmate',
@@ -317,6 +318,21 @@ const TopNav = () => {
             )}
 
             <div className='flex items-center justify-end lg:gap-7 gap-2 h-full'>
+                {/* Demo CTA: show only on /seller-central-checker-demo/* */}
+                {isDemoSellerCentralChecker && (
+                    <div className="relative mr-3">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/sign-up')}
+                            className="group flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black hover:shadow-lg hover:shadow-orange-500/25 hover:scale-[1.02] transform"
+                            title="Start your free trial"
+                        >
+                            <span className="hidden lg:block">Start free trial</span>
+                            <span className="lg:hidden">Free trial</span>
+                        </button>
+                    </div>
+                )}
+
                 {/* Switch Client Button - First for Agency Admin viewing client */}
                 {isAgencyAdminViewingClient && (
                     <div className="relative mr-3">

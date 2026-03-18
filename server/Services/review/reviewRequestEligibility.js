@@ -1,4 +1,4 @@
-const { signRequest } = require("./orders");
+const { signRequest, normalizeEndpoint } = require("./orders");
 
 /**
  * Checks if an order is eligible for a review solicitation.
@@ -35,7 +35,10 @@ async function checkReviewEligibility(
   if (!endpoint) throw new Error("endpoint is required");
   if (!marketplaceId) throw new Error("marketplaceId is required");
 
-  const url = `${endpoint}/solicitations/v1/orders/${orderId}?marketplaceIds=${marketplaceId}`;
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+  if (!normalizedEndpoint) throw new Error("endpoint is required");
+
+  const url = `${normalizedEndpoint}/solicitations/v1/orders/${orderId}?marketplaceIds=${marketplaceId}`;
 
   const headers = signRequest({
     method: "GET",
