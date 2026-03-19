@@ -394,7 +394,7 @@ const LeftNavSection = () => {
                         {/* Review Requests (hidden via SHOW_RECENT_ORDERS_NAV) */}
                         {SHOW_RECENT_ORDERS_NAV && (!isLiteUser || isPremiumLocked) && (
                             <NavLink
-                                to="/seller-central-checker-demo/recent-orders"
+                                to="/seller-central-checker-demo/review-request"
                                 className={({ isActive }) =>
                                     `${menuItemClass} ${isActive ? activeMenuItemClass : inactiveMenuItemClass}`
                                 }

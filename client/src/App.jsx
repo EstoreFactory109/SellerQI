@@ -194,7 +194,7 @@ const App = () => {
           }>
 
             <Route path='dashboard' element={<DashBoard />} />
-            <Route path='recent-orders' element={<RecentOrders />} />
+            <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
@@ -224,7 +224,7 @@ const App = () => {
         }>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path='dashboard' element={<DemoDashboard />} />
-          <Route path='recent-orders' element={<DemoRecentOrders />} />
+          <Route path='review-request' element={<DemoRecentOrders />} />
           <Route path='qmate' element={<DemoQMate />} />
           <Route path='profitibility-dashboard' element={<DemoProfitibilityDashboard />} />
           <Route path='ppc-dashboard' element={<DemoPPCDashboard />} />

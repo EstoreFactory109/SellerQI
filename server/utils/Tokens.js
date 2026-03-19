@@ -106,7 +106,7 @@ const createDemoAccessToken = async (userId) => {
         logger.error(new ApiError(400, "User ID is missing"));
         return false;
     }
-    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
     return token;
 };
 

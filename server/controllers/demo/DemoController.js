@@ -6,7 +6,7 @@ const { getUserById } = require('../../Services/User/userServices');
 const UserModel = require('../../models/user-auth/userModel');
 
 const DEMO_EMAIL = 'demo@sellerqi.com';
-const DEMO_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 minutes
+const DEMO_TOKEN_MAX_AGE = 60 * 60 * 1000; // 1 hour
 
 const demoLogin = asyncHandler(async (req, res) => {
     const demoUser = await UserModel.findOne({ email: DEMO_EMAIL });
