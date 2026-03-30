@@ -6,6 +6,7 @@ const {testReport,getTotalSales,testAmazonAds,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
     testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
+const { testExpenseReport } = require('../controllers/test/ExpenseReportTestController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
@@ -70,5 +71,8 @@ router.post('/testStoreIssueSummary', testStoreIssueSummary)  // Body: { userId,
 
 // Issue Summary + Chunks - Store issues in BOTH IssueSummary and IssuesDataChunks (same as integration finalize)
 router.post('/testStoreIssuesSummaryAndChunks', testStoreIssuesSummaryAndChunks)  // Body: { userId, country, region }
+
+// Expense report (Settlement reports -> expense analysis)
+router.post('/testExpenseReport', testExpenseReport)  // Body: { userId, country, region, daysBack? }
 
 module.exports=router

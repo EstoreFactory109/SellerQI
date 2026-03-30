@@ -662,10 +662,29 @@ class StripeService {
                 throw new Error(`Invoice not found for paymentIntentId: ${paymentIntentId}`);
             }
 
-            // Verify invoice belongs to user's subscription
-            if (subscription.stripeSubscriptionId && invoice.subscription !== subscription.stripeSubscriptionId) {
-                logger.warn(`Invoice ${invoice.id} does not match user's subscription ${subscription.stripeSubscriptionId}`);
+            // Verify invoice ownership.
+            // Some valid Stripe invoices can have no subscription reference; in that case
+            // we fall back to customer ownership to avoid blocking legitimate downloads.
+            const invoiceSubscriptionId = invoice?.subscription?.id || invoice.subscription || null;
+            const invoiceCustomerId = invoice?.customer?.id || invoice.customer || null;
+            const dbSubscriptionId = subscription.stripeSubscriptionId || null;
+            const dbCustomerId = subscription.stripeCustomerId || null;
+
+            if (dbSubscriptionId && invoiceSubscriptionId && invoiceSubscriptionId !== dbSubscriptionId) {
+                logger.warn(
+                    `Invoice ${invoice.id} subscription mismatch: invoice=${invoiceSubscriptionId}, db=${dbSubscriptionId}, customerMatch=${invoiceCustomerId && dbCustomerId ? invoiceCustomerId === dbCustomerId : false}`
+                );
                 throw new Error('Invoice does not belong to user');
+            }
+
+            if (dbSubscriptionId && !invoiceSubscriptionId) {
+                if (!dbCustomerId || !invoiceCustomerId || invoiceCustomerId !== dbCustomerId) {
+                    logger.warn(
+                        `Invoice ${invoice.id} has no subscription and customer mismatch: invoiceCustomer=${invoiceCustomerId || 'N/A'}, dbCustomer=${dbCustomerId || 'N/A'}`
+                    );
+                    throw new Error('Invoice does not belong to user');
+                }
+                logger.info(`Invoice ${invoice.id} has no subscription; ownership verified by customer ${invoiceCustomerId}`);
             }
 
             // Check if invoice PDF is available
