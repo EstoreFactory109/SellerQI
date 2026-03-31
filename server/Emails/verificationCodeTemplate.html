@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Verify your email</title>
   <style>
     /* Base resets */
@@ -35,12 +36,17 @@
     .rounded-lg { border-radius: 0.5rem; }
     .tracking-wider { letter-spacing: 6px; }
     h1 { margin: 0; font-size: 1.875rem; font-weight: bold; }
-    p { margin: 0; }
+    p { margin: 0; line-height: 1.6; }
     hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
     .code-block {
       font-size: 2rem;
       font-weight: 600;
       margin: 0;
+    }
+    .small-text {
+      font-size: 0.85rem;
+      color: #718096;
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -48,9 +54,10 @@
   <div class="email-container">
     <!-- Header -->
     <div class="text-center mb-10">
-      <!-- Logo (optional) -->
-      <img src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png" alt="logo" width="120" class="mb-2" loading="eager"/>
       <h1 class="text-gray-800">Verify your email</h1>
+      <p class="text-gray-600" style="margin-top: 0.5rem;">
+        Complete your SellerQI account setup
+      </p>
     </div>
 
     <!-- Greeting -->
@@ -58,27 +65,41 @@
       Hi <strong>{{userName}}</strong>,
     </p>
     <p class="text-gray-600 my-4">
-      Thanks for signing up with <strong>SellerQI</strong>. Please use the verification code below to complete your registration. The code will expire in 10 minutes.
+      Thanks for signing up with <strong>SellerQI</strong>. To complete your registration and verify your email address, please enter the one-time verification code below in the app. This code is unique to your account and will expire in <strong>10 minutes</strong>.
     </p>
 
     <!-- Code Block -->
     <div class="bg-blue-50 padding-6 rounded-lg text-center my-8">
+      <p class="text-gray-600" style="margin-bottom: 0.5rem; font-size: 0.9rem;">Your verification code</p>
       <p class="code-block text-blue-700 tracking-wider">{{verificationCode}}</p>
     </div>
 
-    <!-- Note -->
+    <!-- Security Note -->
     <p class="text-gray-600 my-4">
-      Didn’t request this code? You can safely ignore this email.
+      For your security, please do not share this code with anyone. Our team will never ask you for your verification code. If you did not create a SellerQI account or request this code, you can safely ignore this email and no action will be taken on your account.
+    </p>
+
+    <p class="text-gray-600 my-4">
+      If you are having trouble verifying your account, please reach out to our support team and we will be happy to assist you.
+    </p>
+
+    <p class="text-gray-600 my-4">
+      Welcome aboard,<br />
+      <strong>The SellerQI Team</strong>
     </p>
 
     <hr />
 
     <!-- Footer -->
-    <p class="text-gray-500 text-center">
-      Need help? Contact us at <a href="mailto:{{supportEmail}}">support@sellerqi.com</a>
+    <p class="small-text text-center">
+      Need help? Contact us at <a href="mailto:support@sellerqi.com">support@sellerqi.com</a>
     </p>
-    <p class="text-gray-500 text-center">
-      © 2025 SellerQI. All rights reserved.
+    <p class="small-text text-center" style="margin-top: 0.5rem;">
+      You are receiving this email because an account was created with this email address on SellerQI.
+      If this was not you, please ignore this email.
+    </p>
+    <p class="small-text text-center" style="margin-top: 0.5rem;">
+      &copy; 2025 SellerQI. All rights reserved.
     </p>
   </div>
 </body>

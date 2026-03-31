@@ -5,21 +5,57 @@ const { resolveRecipientEmail } = require('./resolveRecipientEmail.js');
 const fs = require('fs');
 const path = require('path');
 
-let VerificationEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..', 'Emails', 'verificationCodeTemplate.html'), 'utf8');
+let VerificationEmailTemplate = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'Emails', 'verificationCodeTemplate.html'),
+    'utf8'
+);
 
+// Validate template loaded correctly
+if (!VerificationEmailTemplate || VerificationEmailTemplate.trim().length === 0) {
+    logger.error('Email template is empty or failed to load');
+}
 
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
 };
 
+// Create transporter once and reuse (connection pooling)
+const transporter = nodemailer.createTransport({
+    host: "email-smtp.us-west-2.amazonaws.com",
+    port: 587,
+    secure: false,
+    auth: {
+        user: process.env.ADMIN_USERNAME,
+        pass: process.env.APP_PASSWORD,
+    },
+    pool: true,           // reuse connections
+    maxConnections: 5,     // limit concurrent connections
+    maxMessages: 100,      // messages per connection before reconnecting
+});
+
+// Verify SMTP connection on startup
+transporter.verify((err) => {
+    if (err) {
+        logger.error('SMTP connection verification failed:', err);
+    } else {
+        logger.info('SMTP server is ready to send emails');
+    }
+});
+
 const sendEmail = async (email, firstName, otp, userId = null) => {
+    const originalEmail = email;
     email = await resolveRecipientEmail(email, userId);
 
+    // Log if email was changed by resolver
+    if (originalEmail !== email) {
+        logger.info(`Email resolved: ${originalEmail} -> ${email}`);
+    }
+
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
-    const adminEmail = process.env.ADMIN_EMAIL_ID 
+    const adminEmail = process.env.ADMIN_EMAIL_ID
         ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()
-        : 'support@sellerqi.com'; // fallback
+        : 'support@sellerqi.com';
 
     // Use SELF_MAIL_ID or first admin email as sender
     const senderEmail = process.env.SELF_MAIL_ID || adminEmail;
@@ -35,10 +71,11 @@ const sendEmail = async (email, firstName, otp, userId = null) => {
         emailProvider: 'AWS_SES'
     });
 
+    // Use replaceAll to catch all occurrences, with fallbacks for safety
     let template = VerificationEmailTemplate
-    .replace('{{userName}}',firstName)
-    .replace('{{verificationCode}}', otp);
-    
+        .replaceAll('{{userName}}', firstName || 'User')
+        .replaceAll('{{verificationCode}}', otp || '');
+
     try {
         // Save initial log
         await emailLog.save();
@@ -46,54 +83,31 @@ const sendEmail = async (email, firstName, otp, userId = null) => {
         if (!isValidEmail(email)) {
             logger.error(`Invalid email address: ${email}`);
             await emailLog.markAsFailed('Invalid email address');
-            return false
+            return false;
         }
 
-        const transporter = nodemailer.createTransport({
-            host: "email-smtp.us-west-2.amazonaws.com",
-            port: 587, // Use 587 for STARTTLS
-            secure: false, // Set to false for STARTTLS
-            auth: {
-                user: process.env.ADMIN_USERNAME, // Your Gmail address
-                pass: process.env.APP_PASSWORD, // Your Gmail password or App Password
-            },
-        });
-
         const subject = "Your One-Time Password (OTP) for Verification";
-        const text = `
-            Dear ${firstName},
-
-            Your One-Time Password (OTP) for verification is: ${otp}
-
-            This OTP is valid for the next 10 minutes. Please do not share it with anyone.
-
-            If you did not request this, please ignore this email.
-
-            Best regards,  
-            IBEX Team
-            
-            `;
-        const body = template;
+        const text = `Hi ${firstName || 'User'},\n\nThanks for signing up with SellerQI. Your one-time verification code is: ${otp}\n\nThis code is valid for 10 minutes. Please do not share it with anyone. Our team will never ask you for your verification code.\n\nIf you did not request this code, please ignore this email.\n\nWelcome aboard,\nThe SellerQI Team\n\nNeed help? Contact us at support@sellerqi.com`;
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: senderEmail, // Sender address (single email)
-            to: email, // List of receivers
-            subject: subject, // Subject line
-            text: text, // Plain text body
-            html: body, // HTML body
+            from: `SellerQI <${senderEmail}>`,    // Display name + email
+            replyTo: 'support@sellerqi.com',       // Reply-to header
+            to: email,
+            subject: subject,
+            text: text,
+            html: template,
         });
 
         // Mark email as sent
         await emailLog.markAsSent();
         logger.info(`OTP email sent successfully to ${email}. Message ID: ${info.messageId}`);
-        
-        return info.messageId; // Return the message ID on success
+
+        return info.messageId;
     } catch (error) {
         logger.error(`Failed to send email to ${email}:`, error);
         await emailLog.markAsFailed(error.message);
         return false;
-
     }
 };
 
