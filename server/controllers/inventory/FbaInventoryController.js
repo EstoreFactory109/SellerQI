@@ -1,7 +1,7 @@
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
-const FbaInventoryReadService = require('../../Services/Inventory/FbaInventoryReadService.js');
+const FbaInventoryReadService = require('../../Services/inventory/FbaInventoryReadService.js');
 
 /**
  * GET .../asin/:asin — full stored FBA inventory rows for that ASIN (all MSKUs) for the location in IBEXLocationToken.
