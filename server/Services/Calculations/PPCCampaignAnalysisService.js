@@ -21,6 +21,64 @@ const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
 const logger = require('../../utils/Logger');
 
 /**
+ * Parse YYYY-MM-DD-like input as a local date range.
+ * Returns inclusive [startOfDay, endOfDay] Date objects.
+ */
+const buildInclusiveDateRange = (startDate, endDate) => {
+    if (!startDate || !endDate) return null;
+
+    const parseDateInput = (value) => {
+        if (value instanceof Date) return new Date(value.getTime());
+        if (typeof value !== 'string') return null;
+
+        // Prefer local parsing for date-only strings to avoid UTC drift.
+        const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+        if (dateOnly) {
+            const [, y, m, d] = dateOnly;
+            return new Date(Number(y), Number(m) - 1, Number(d));
+        }
+
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const start = parseDateInput(startDate);
+    const end = parseDateInput(endDate);
+    if (!start || !end) return null;
+
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+};
+
+const isInInclusiveRange = (value, range) => {
+    if (!range) return true;
+    if (!value) return true;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return true;
+    return parsed >= range.start && parsed <= range.end;
+};
+
+/**
+ * ProductWiseSponsoredAdsItem stores `date` as String (YYYY-MM-DD).
+ * MongoDB must filter with string bounds — comparing that field to BSON Date matches nothing.
+ */
+const toYyyyMmDd = (value) => {
+    if (value == null || value === '') return null;
+    if (typeof value === 'string') {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        const y = value.getFullYear();
+        const mo = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${mo}-${d}`;
+    }
+    return null;
+};
+
+/**
  * Helper to create pagination metadata
  */
 const createPaginationMeta = (page, limit, totalItems) => {
@@ -104,7 +162,11 @@ const getHighAcosCampaigns = async (userId, country, region, page = 1, limit = 1
         // Build match stage with optional date filter
         const matchStage = { batchId: latestItem.batchId };
         if (startDate && endDate) {
-            matchStage.date = { $gte: startDate, $lte: endDate };
+            const startStr = toYyyyMmDd(startDate);
+            const endStr = toYyyyMmDd(endDate);
+            if (startStr && endStr) {
+                matchStage.date = { $gte: startStr, $lte: endStr };
+            }
         }
 
         // Aggregate by campaign to get total spend and sales
@@ -216,10 +278,10 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
         let keywordsData = keywordsDoc.keywordsData;
 
         // Filter by date if provided
-        if (startDate && endDate) {
+        const dateRange = buildInclusiveDateRange(startDate, endDate);
+        if (dateRange) {
             keywordsData = keywordsData.filter(k => {
-                if (!k.date) return true;
-                return k.date >= startDate && k.date <= endDate;
+                return isInInclusiveRange(k.date, dateRange);
             });
         }
 
@@ -388,10 +450,10 @@ const getTopPerformingKeywords = async (userId, country, region, page = 1, limit
         let keywordsData = keywordsDoc.keywordsData;
 
         // Filter by date if provided
-        if (startDate && endDate) {
+        const dateRange = buildInclusiveDateRange(startDate, endDate);
+        if (dateRange) {
             keywordsData = keywordsData.filter(k => {
-                if (!k.date) return true;
-                return k.date >= startDate && k.date <= endDate;
+                return isInInclusiveRange(k.date, dateRange);
             });
         }
 
@@ -483,10 +545,10 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
         let searchTermData = searchTermsDoc.searchTermData;
 
         // Filter by date if provided
-        if (startDate && endDate) {
+        const dateRange = buildInclusiveDateRange(startDate, endDate);
+        if (dateRange) {
             searchTermData = searchTermData.filter(st => {
-                if (!st.date) return true;
-                return st.date >= startDate && st.date <= endDate;
+                return isInInclusiveRange(st.date, dateRange);
             });
         }
 
@@ -576,10 +638,10 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
         let searchTermData = searchTermsDoc.searchTermData;
 
         // Filter by date if provided
-        if (startDate && endDate) {
+        const dateRange = buildInclusiveDateRange(startDate, endDate);
+        if (dateRange) {
             searchTermData = searchTermData.filter(st => {
-                if (!st.date) return true;
-                return st.date >= startDate && st.date <= endDate;
+                return isInInclusiveRange(st.date, dateRange);
             });
         }
 

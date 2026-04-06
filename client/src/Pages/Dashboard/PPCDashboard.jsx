@@ -72,6 +72,35 @@ const getActualEndDate = () => {
   return yesterday;
 };
 
+/**
+ * Calendar day in local time for a metric `date` value.
+ * Fixes `new Date("YYYY-MM-DD")` UTC parsing so the last day of a range is not dropped
+ * in timezones ahead of UTC (e.g. IST).
+ */
+const localDayFromMetricDate = (value) => {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+    if (ymd) {
+      return parseLocalDate(`${ymd[1]}-${ymd[2]}-${ymd[3]}`);
+    }
+  }
+  const dt = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+};
+
+const isMetricDateInInclusiveRange = (value, rangeStartStr, rangeEndStr) => {
+  const day = localDayFromMetricDate(value);
+  if (!day) return false;
+  const start = parseLocalDate(rangeStartStr);
+  start.setHours(0, 0, 0, 0);
+  const end = parseLocalDate(rangeEndStr);
+  end.setHours(23, 59, 59, 999);
+  return day >= start && day <= end;
+};
+
 // Create empty chart data with zero values when no data is available
 const createEmptyChartData = () => {
   const yesterday = getActualEndDate();
@@ -602,24 +631,25 @@ const PPCDashboard = () => {
   useEffect(() => {
     if (!tabFetchAttempted.current.highAcos && !highAcosLoading) {
       tabFetchAttempted.current.highAcos = true;
-      dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage }));
+      dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
     }
   }, [dispatch, highAcosLoading]);
   
   // Fetch data when tab changes
   useEffect(() => {
+    const dateParams = { startDate: info?.startDate || undefined, endDate: info?.endDate || undefined };
     const fetchTabData = () => {
       switch (selectedTab) {
         case 0:
           if (!tabFetchAttempted.current.highAcos && highAcosCampaignsData.length === 0) {
             tabFetchAttempted.current.highAcos = true;
-            dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage }));
+            dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage, ...dateParams }));
           }
           break;
         case 1:
           if (!tabFetchAttempted.current.wastedSpend && wastedSpendData.length === 0) {
             tabFetchAttempted.current.wastedSpend = true;
-            dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage }));
+            dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage, ...dateParams }));
           }
           break;
         case 2:
@@ -631,29 +661,99 @@ const PPCDashboard = () => {
         case 3:
           if (!tabFetchAttempted.current.topKeywords && topKeywordsData.length === 0) {
             tabFetchAttempted.current.topKeywords = true;
-            dispatch(fetchTopPerformingKeywords({ page: 1, limit: itemsPerPage }));
+            dispatch(fetchTopPerformingKeywords({ page: 1, limit: itemsPerPage, ...dateParams }));
           }
           break;
         case 4:
           if (!tabFetchAttempted.current.zeroSales && zeroSalesData.length === 0) {
             tabFetchAttempted.current.zeroSales = true;
-            dispatch(fetchSearchTermsZeroSales({ page: 1, limit: itemsPerPage }));
+            dispatch(fetchSearchTermsZeroSales({ page: 1, limit: itemsPerPage, ...dateParams }));
           }
           break;
         case 5:
           if (!tabFetchAttempted.current.autoInsights && autoInsightsData.length === 0) {
             tabFetchAttempted.current.autoInsights = true;
-            dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage }));
+            dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage, ...dateParams }));
           }
           break;
       }
     };
-    
+
     fetchTabData();
   }, [selectedTab, dispatch, highAcosCampaignsData.length, wastedSpendData.length, noNegativesData.length, topKeywordsData.length, zeroSalesData.length, autoInsightsData.length]);
 
+  // Track previous date range to detect changes
+  const prevDateRange = useRef({ startDate: info?.startDate, endDate: info?.endDate });
+
+  // Refetch campaign audit tab data when the date range changes
+  useEffect(() => {
+    const prev = prevDateRange.current;
+    const curStart = info?.startDate;
+    const curEnd = info?.endDate;
+
+    // Skip on initial mount or if dates haven't actually changed
+    if (!curStart || !curEnd || (prev.startDate === curStart && prev.endDate === curEnd)) {
+      prevDateRange.current = { startDate: curStart, endDate: curEnd };
+      return;
+    }
+
+    prevDateRange.current = { startDate: curStart, endDate: curEnd };
+    const dateParams = { startDate: curStart, endDate: curEnd };
+
+    // Reset all tab data and pagination, then refetch the currently active tab
+    const tabKeys = ['highAcos', 'wastedSpend', 'noNegatives', 'topKeywords', 'zeroSales', 'autoInsights'];
+    tabKeys.forEach(tab => dispatch(resetTabPagination(tab)));
+
+    // Reset local page counters
+    setHighAcosPage(1);
+    setWastedSpendPage(1);
+    setCampaignsWithoutNegativePage(1);
+    setTopPerformingPage(1);
+    setSearchTermsPage(1);
+    setAutoCampaignPage(1);
+
+    // Mark all tabs as not yet fetched so they refetch on switch
+    tabFetchAttempted.current = {
+      highAcos: false,
+      wastedSpend: false,
+      noNegatives: false,
+      topKeywords: false,
+      zeroSales: false,
+      autoInsights: false
+    };
+
+    // Immediately fetch the currently active tab with new dates
+    switch (selectedTab) {
+      case 0:
+        tabFetchAttempted.current.highAcos = true;
+        dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage, ...dateParams }));
+        break;
+      case 1:
+        tabFetchAttempted.current.wastedSpend = true;
+        dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage, ...dateParams }));
+        break;
+      case 2:
+        tabFetchAttempted.current.noNegatives = true;
+        dispatch(fetchCampaignsWithoutNegatives({ page: 1, limit: itemsPerPage }));
+        break;
+      case 3:
+        tabFetchAttempted.current.topKeywords = true;
+        dispatch(fetchTopPerformingKeywords({ page: 1, limit: itemsPerPage, ...dateParams }));
+        break;
+      case 4:
+        tabFetchAttempted.current.zeroSales = true;
+        dispatch(fetchSearchTermsZeroSales({ page: 1, limit: itemsPerPage, ...dateParams }));
+        break;
+      case 5:
+        tabFetchAttempted.current.autoInsights = true;
+        dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage, ...dateParams }));
+        break;
+    }
+  }, [info?.startDate, info?.endDate, dispatch, selectedTab]);
+
   // Infinite scroll: observe the sentinel for the active tab only
   useEffect(() => {
+    const dateParams = { startDate: info?.startDate || undefined, endDate: info?.endDate || undefined };
     const getActiveConfig = () => {
       switch (selectedTab) {
         case 0:
@@ -665,7 +765,7 @@ const PPCDashboard = () => {
               const current = Number(highAcosPagination?.page || highAcosPage || 1);
               const nextPage = current + 1;
               setHighAcosPage(nextPage);
-              dispatch(fetchHighAcosCampaigns({ page: nextPage, limit: itemsPerPage, append: true }));
+              dispatch(fetchHighAcosCampaigns({ page: nextPage, limit: itemsPerPage, append: true, ...dateParams }));
             }
           };
         case 1:
@@ -677,7 +777,7 @@ const PPCDashboard = () => {
               const current = Number(wastedSpendPagination?.page || wastedSpendPage || 1);
               const nextPage = current + 1;
               setWastedSpendPage(nextPage);
-              dispatch(fetchWastedSpendKeywords({ page: nextPage, limit: itemsPerPage, append: true }));
+              dispatch(fetchWastedSpendKeywords({ page: nextPage, limit: itemsPerPage, append: true, ...dateParams }));
             }
           };
         case 2:
@@ -701,7 +801,7 @@ const PPCDashboard = () => {
               const current = Number(topKeywordsPagination?.page || topPerformingPage || 1);
               const nextPage = current + 1;
               setTopPerformingPage(nextPage);
-              dispatch(fetchTopPerformingKeywords({ page: nextPage, limit: itemsPerPage, append: true }));
+              dispatch(fetchTopPerformingKeywords({ page: nextPage, limit: itemsPerPage, append: true, ...dateParams }));
             }
           };
         case 4:
@@ -713,7 +813,7 @@ const PPCDashboard = () => {
               const current = Number(zeroSalesPagination?.page || searchTermsPage || 1);
               const nextPage = current + 1;
               setSearchTermsPage(nextPage);
-              dispatch(fetchSearchTermsZeroSales({ page: nextPage, limit: itemsPerPage, append: true }));
+              dispatch(fetchSearchTermsZeroSales({ page: nextPage, limit: itemsPerPage, append: true, ...dateParams }));
             }
           };
         case 5:
@@ -725,7 +825,7 @@ const PPCDashboard = () => {
               const current = Number(autoInsightsPagination?.page || autoCampaignPage || 1);
               const nextPage = current + 1;
               setAutoCampaignPage(nextPage);
-              dispatch(fetchAutoCampaignInsights({ page: nextPage, limit: itemsPerPage, append: true }));
+              dispatch(fetchAutoCampaignInsights({ page: nextPage, limit: itemsPerPage, append: true, ...dateParams }));
             }
           };
         default:
@@ -824,12 +924,7 @@ const PPCDashboard = () => {
     // Filter data based on selected date range
     const filtered = dateWiseTotalCosts.filter(item => {
       if (!item.date) return false;
-      
-      const itemDate = new Date(item.date);
-      const start = parseLocalDate(startDate);
-      const end = parseLocalDate(endDate);
-      
-      return itemDate >= start && itemDate <= end;
+      return isMetricDateInInclusiveRange(item.date, startDate, endDate);
     });
 
   
@@ -1129,13 +1224,9 @@ const PPCDashboard = () => {
     // Filter PPCMetrics dateWiseMetrics based on selected date range
     let filteredPPCMetricsData = ppcDateWiseMetrics;
     if (isDateRangeSelected && ppcDateWiseMetrics.length > 0) {
-      const startDate = parseLocalDate(info.startDate);
-      const endDate = parseLocalDate(info.endDate);
-      
-      filteredPPCMetricsData = ppcDateWiseMetrics.filter(item => {
-        const itemDate = new Date(item.date);
-        return itemDate >= startDate && itemDate <= endDate;
-      });
+      filteredPPCMetricsData = ppcDateWiseMetrics.filter(item =>
+        isMetricDateInInclusiveRange(item.date, info.startDate, info.endDate)
+      );
     }
     
     // PRIMARY: Use PPCMetrics model dateWiseMetrics
@@ -1146,7 +1237,7 @@ const PPCDashboard = () => {
       const chartData = filteredPPCMetricsData.map((item, index) => {
         if (!item || !item.date) return null;
         
-        const date = new Date(item.date);
+        const date = localDayFromMetricDate(item.date) ?? new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
         // Get spend and sales from PPCMetrics dateWiseMetrics
@@ -1164,8 +1255,11 @@ const PPCDashboard = () => {
         };
       }).filter(Boolean);
       
-      // Sort by raw date
-      chartData.sort((a, b) => new Date(a.rawDate) - new Date(b.rawDate));
+      chartData.sort((a, b) => {
+        const da = localDayFromMetricDate(a.rawDate)?.getTime() ?? new Date(a.rawDate).getTime();
+        const db = localDayFromMetricDate(b.rawDate)?.getTime() ?? new Date(b.rawDate).getTime();
+        return da - db;
+      });
       
       console.log('=== PPCMetrics Chart Data ===');
       console.log('chartData length:', chartData.length);
@@ -1184,7 +1278,7 @@ const PPCDashboard = () => {
       const chartData = costsDataToUse.map((item, index) => {
         if (!item || !item.date) return null;
         
-        const date = new Date(item.date);
+        const date = localDayFromMetricDate(item.date) ?? new Date(item.date);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
         const spend = parseFloat(item.totalCost) || 0;
@@ -1198,7 +1292,11 @@ const PPCDashboard = () => {
         };
       }).filter(Boolean);
       
-      chartData.sort((a, b) => new Date(a.rawDate) - new Date(b.rawDate));
+      chartData.sort((a, b) => {
+        const da = localDayFromMetricDate(a.rawDate)?.getTime() ?? new Date(a.rawDate).getTime();
+        const db = localDayFromMetricDate(b.rawDate)?.getTime() ?? new Date(b.rawDate).getTime();
+        return da - db;
+      });
       
       return chartData;
     }
@@ -1635,6 +1733,8 @@ const PPCDashboard = () => {
     
     const startDate = parseLocalDate(info.startDate);
     const endDate = parseLocalDate(info.endDate);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
     
     return ppcDateWiseMetrics.filter(item => {
       const itemDate = new Date(item.date);
@@ -1671,7 +1771,6 @@ const PPCDashboard = () => {
       if (ppcKPISummary?.spend > 0 || ppcKPISummary?.sales > 0) {
         spend = ppcKPISummary.spend || 0;
         ppcSales = ppcKPISummary.sales || 0;
-        acos = ppcKPISummary.acos || 0;
         console.log('=== KPI Calculation (Optimized ppcKPISummary) ===');
         console.log('ppcKPISummary spend:', spend);
         console.log('ppcKPISummary sales:', ppcSales);
@@ -1680,7 +1779,6 @@ const PPCDashboard = () => {
         // FALLBACK: Use PPCMetrics model summary
         spend = ppcSummary.totalSpend || 0;
         ppcSales = ppcSummary.totalSales || 0;
-        acos = ppcSummary.overallAcos || 0;
         console.log('=== KPI Calculation (PPCMetrics Model) ===');
         console.log('PPCMetrics totalSpend:', spend);
         console.log('PPCMetrics totalSales:', ppcSales);
@@ -1696,8 +1794,7 @@ const PPCDashboard = () => {
       }
     }
     
-    // Calculate ACOS if not already set
-    if (!acos && ppcSales > 0) {
+    if (ppcSales > 0) {
       acos = (spend / ppcSales) * 100;
     }
     

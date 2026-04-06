@@ -13,6 +13,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { formatCurrency, formatCurrencyWithLocale } from '../../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
+import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCCampaignAnalysisSlice.js'
 import { parseLocalDate } from '../../utils/dateUtils.js'
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
@@ -157,6 +158,7 @@ const Dashboard = () => {
   
   // Get PPC metrics from PPCMetrics model (NEW - primary source for PPC data)
   const ppcSummaryLatest = useSelector(selectPPCSummary)
+  const ppcKPISummary = useSelector(selectPPCKPISummary)
   const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics)
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading)
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
@@ -323,6 +325,7 @@ const Dashboard = () => {
     // Defer PPC fetch until Phase 1 is complete (don't block initial load)
     if (shouldFetch && !ppcMetricsLoading && isPhase1Complete) {
       dispatch(fetchLatestPPCMetrics());
+      dispatch(fetchPPCKPISummary());
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading, isPhase1Complete])
 
@@ -341,7 +344,15 @@ const Dashboard = () => {
 
   // Calculate PPC sales using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSales = () => {
-    // PRIMARY: Use data from PPCMetrics model
+    // Same priority as PPC Dashboard KPIs when not using a custom calendar range
+    if (
+      !isDateRangeSelected &&
+      ppcKPISummary &&
+      ((ppcKPISummary.spend ?? 0) > 0 || (ppcKPISummary.sales ?? 0) > 0)
+    ) {
+      return ppcKPISummary.sales || 0;
+    }
+    // PRIMARY: Use data from PPCMetrics model (or filtered range summary)
     if (ppcSummary?.totalSales && ppcSummary.totalSales > 0) {
       return ppcSummary.totalSales;
     }
@@ -357,7 +368,14 @@ const Dashboard = () => {
 
   // Calculate PPC Spend using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSpend = () => {
-    // PRIMARY: Use data from PPCMetrics model
+    if (
+      !isDateRangeSelected &&
+      ppcKPISummary &&
+      ((ppcKPISummary.spend ?? 0) > 0 || (ppcKPISummary.sales ?? 0) > 0)
+    ) {
+      return ppcKPISummary.spend || 0;
+    }
+    // PRIMARY: Use data from PPCMetrics model (or filtered range summary)
     if (ppcSummary?.totalSpend && ppcSummary.totalSpend > 0) {
       return ppcSummary.totalSpend;
     }
@@ -398,10 +416,9 @@ const Dashboard = () => {
   const ppcSales = calculatePPCSales();
   const ppcSpend = calculatePPCSpend();
   
-  // Calculate ACOS - use PPCMetrics model value (PRIMARY) or calculate from spend/sales
-  const acos = ppcSummary?.overallAcos 
-    ? ppcSummary.overallAcos.toFixed(2) 
-    : (ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00');
+  // ACoS must match the spend & sales shown above (same rule as PPC / profitability)
+  const acos =
+    ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
 
   // Format sales value
   const formatCurrencyLocal = (value) => {

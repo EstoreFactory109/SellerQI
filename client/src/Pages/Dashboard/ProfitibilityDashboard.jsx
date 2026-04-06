@@ -15,6 +15,7 @@ import { pickSnapshotFeeTotalsForCalendar } from '../../utils/expenseSnapshotCal
 import { devLog, devWarn } from '../../utils/devLogger.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../redux/slices/PPCMetricsSlice.js';
+import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCCampaignAnalysisSlice.js';
 import { usePhasedProfitabilityData } from '../../hooks/usePageData.js';
 import { fetchDashboardPhase1 } from '../../redux/slices/PageDataSlice.js';
 import { PageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
@@ -76,6 +77,7 @@ const ProfitabilityDashboard = () => {
   
   // PPCMetrics model data (PRIMARY source for PPC spend)
   const ppcSummary = useSelector(selectPPCSummary);
+  const ppcKPISummary = useSelector(selectPPCKPISummary);
   const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
@@ -88,6 +90,7 @@ const ProfitabilityDashboard = () => {
     
     if (shouldFetch && !ppcMetricsLoading) {
       dispatch(fetchLatestPPCMetrics());
+      dispatch(fetchPPCKPISummary());
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
 
@@ -603,15 +606,18 @@ const ProfitabilityDashboard = () => {
     let adSpend = 0;
     const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
     
-    // Filter PPCMetrics dateWiseMetrics based on date range
-    const getFilteredPPCSpend = () => {
-      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
-      
-      if (!isDateRangeSelected) return 0;
-      
+    const getFilteredPPCDateBounds = () => {
       const start = parseLocalDate(info.startDate);
       const end = parseLocalDate(info.endDate);
-      
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    };
+
+    const getFilteredPPCSpend = () => {
+      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
+      if (!isDateRangeSelected) return 0;
+      const { start, end } = getFilteredPPCDateBounds();
       return ppcDateWiseMetrics
         .filter(item => {
           const itemDate = new Date(item.date);
@@ -619,15 +625,11 @@ const ProfitabilityDashboard = () => {
         })
         .reduce((sum, item) => sum + (item.spend || 0), 0);
     };
-    
+
     const getFilteredPPCSales = () => {
       if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
-      
       if (!isDateRangeSelected) return 0;
-      
-      const start = parseLocalDate(info.startDate);
-      const end = parseLocalDate(info.endDate);
-      
+      const { start, end } = getFilteredPPCDateBounds();
       return ppcDateWiseMetrics
         .filter(item => {
           const itemDate = new Date(item.date);
@@ -635,12 +637,11 @@ const ProfitabilityDashboard = () => {
         })
         .reduce((sum, item) => sum + (item.sales || 0), 0);
     };
-    
+
     if (isDateRangeSelected) {
-      const filteredPPCSpend = getFilteredPPCSpend();
-      if (filteredPPCSpend > 0) {
-        adSpend = filteredPPCSpend;
-      }
+      adSpend = getFilteredPPCSpend();
+    } else if ((ppcKPISummary?.spend ?? 0) > 0 || (ppcKPISummary?.sales ?? 0) > 0) {
+      adSpend = ppcKPISummary.spend || 0;
     } else if (ppcSummary?.totalSpend > 0) {
       adSpend = ppcSummary.totalSpend;
     }
@@ -659,15 +660,13 @@ const ProfitabilityDashboard = () => {
     let ppcSales = 0;
     let acos = 0;
     if (isDateRangeSelected) {
-      const filteredPPCSales = getFilteredPPCSales();
-      if (filteredPPCSales > 0) ppcSales = filteredPPCSales;
+      ppcSales = getFilteredPPCSales();
+    } else if ((ppcKPISummary?.spend ?? 0) > 0 || (ppcKPISummary?.sales ?? 0) > 0) {
+      ppcSales = ppcKPISummary.sales || 0;
     } else if (ppcSummary?.totalSales > 0 || ppcSummary?.totalSpend > 0) {
       ppcSales = ppcSummary.totalSales || 0;
-      acos = ppcSummary.overallAcos || 0;
     }
-    if (!acos && ppcSales > 0 && adSpend > 0) {
-      acos = (adSpend / ppcSales) * 100;
-    }
+    acos = ppcSales > 0 ? (adSpend / ppcSales) * 100 : 0;
 
     // Amazon Fees + Total Expenses: DB snapshot — last7/last14 precalc; custom = sum date-wise series; else run totals
     const snapshotFeeTotals = pickSnapshotFeeTotalsForCalendar(
@@ -720,7 +719,7 @@ const ProfitabilityDashboard = () => {
     ] : [];
 
     return { row1, row2 };
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency, metricsData, profitSummary, profitChartData, expenseDatewise, ppcGraphData, expenseReportSnapshot]);
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, metricsData, profitSummary, profitChartData, expenseDatewise, ppcGraphData, expenseReportSnapshot]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {

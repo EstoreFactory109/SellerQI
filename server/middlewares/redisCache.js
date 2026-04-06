@@ -87,10 +87,12 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
             if (ppcPaginatedTypes.includes(pageType)) {
                 const page = parseInt(req.query.page) || 1;
                 const limit = parseInt(req.query.limit) || 10;
-                
+                const startDate = req.query.startDate || 'all';
+                const endDate = req.query.endDate || 'all';
+
                 // Only cache page 1 - page > 1 bypasses cache
                 if (page === 1) {
-                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}`;
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}:sd${startDate}:ed${endDate}`;
                 } else {
                     logger.info(`[PPC] Skipping cache for ${pageType} page ${page}`);
                     return next();
